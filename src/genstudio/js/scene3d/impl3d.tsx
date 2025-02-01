@@ -634,6 +634,8 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
+    console.log("ellipsoid alphas", alphas)
+
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii && elem.radii.length >= count * 3 ? elem.radii : null;
 
