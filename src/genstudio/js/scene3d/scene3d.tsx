@@ -13,6 +13,20 @@ import { useContainerWidth } from '../utils';
 import { FPSCounter, useFPSCounter } from './fps';
 
 /**
+ * Helper function to coerce specified fields to Float32Array if they exist and are arrays
+ */
+function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
+  const result = { ...obj };
+  for (const field of fields) {
+    const value = obj[field];
+    if (Array.isArray(value)) {
+      (result[field] as any) = new Float32Array(value);
+    }
+  }
+  return result;
+}
+
+/**
  * @interface Decoration
  * @description Defines visual modifications that can be applied to specific instances of a primitive.
  */
@@ -52,7 +66,7 @@ export function deco(
  */
 export function PointCloud(props: PointCloudComponentConfig): PointCloudComponentConfig {
   return {
-    ...props,
+    ...coerceFloat32Fields(props, ['positions', 'colors', 'sizes']),
     type: 'PointCloud',
   };
 }
@@ -68,7 +82,7 @@ export function Ellipsoid(props: EllipsoidComponentConfig): EllipsoidComponentCo
     props.radius;
 
   return {
-    ...props,
+    ...coerceFloat32Fields(props, ['centers', 'radii', 'colors', 'alphas']),
     radius,
     type: 'Ellipsoid'
   };
@@ -85,7 +99,7 @@ export function EllipsoidAxes(props: EllipsoidAxesComponentConfig): EllipsoidAxe
     props.radius;
 
   return {
-    ...props,
+    ...coerceFloat32Fields(props, ['centers', 'radii', 'colors', 'alphas']),
     radius,
     type: 'EllipsoidAxes'
   };
@@ -102,7 +116,7 @@ export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
     props.size;
 
   return {
-    ...props,
+    ...coerceFloat32Fields(props, ['centers', 'sizes', 'colors', 'alphas']),
     size,
     type: 'Cuboid'
   };
@@ -115,7 +129,7 @@ export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
  */
 export function LineBeams(props: LineBeamsComponentConfig): LineBeamsComponentConfig {
   return {
-    ...props,
+    ...coerceFloat32Fields(props, ['positions', 'colors']),
     type: 'LineBeams'
   };
 }
