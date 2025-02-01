@@ -2186,88 +2186,121 @@ export function SceneInner({
     if(!gpuRef.current) return [];
     const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
 
-      // Calculate required buffer sizes
-    const { renderSize, pickingSize } = calculateBufferSize(components);
+    // Pre-allocate arrays for each primitive type
+    const typeArrays = new Map<ComponentConfig['type'], {
+      totalCount: number,
+      totalSize: number,
+      components: ComponentConfig[],
+      indices: number[],
+      offsets: number[],
+      counts: number[]
+    }>();
+
+    // Single pass through components to collect all information
+    components.forEach((comp, idx) => {
+      const type = comp.type;
+      const spec = primitiveRegistry[type];
+      if (!spec) return;
+
+      const count = spec.getCount(comp);
+      if (count === 0) return;
+
+      const renderData = spec.buildRenderData(comp);
+      if (!renderData) return;
+
+      const stride = Math.ceil(renderData.length / count) * 4;
+      const size = stride * count;
+
+      let typeInfo = typeArrays.get(type);
+      if (!typeInfo) {
+        typeInfo = {
+          totalCount: 0,
+          totalSize: 0,
+          components: [],
+          indices: [],
+          offsets: [],
+          counts: []
+        };
+        typeArrays.set(type, typeInfo);
+      }
+
+      typeInfo.components.push(comp);
+      typeInfo.indices.push(idx);
+      typeInfo.offsets.push(typeInfo.totalSize);
+      typeInfo.counts.push(count);
+      typeInfo.totalCount += count;
+      typeInfo.totalSize += size;
+    });
+
+    // Calculate total buffer size needed
+    let totalRenderSize = 0;
+    typeArrays.forEach(info => {
+      totalRenderSize += info.totalSize;
+    });
 
     // Create or recreate dynamic buffers if needed
     if (!gpuRef.current.dynamicBuffers ||
-        gpuRef.current.dynamicBuffers.renderBuffer.size < renderSize ||
-        gpuRef.current.dynamicBuffers.pickingBuffer.size < pickingSize) {
-
-      // Cleanup old buffers if they exist
+        gpuRef.current.dynamicBuffers.renderBuffer.size < totalRenderSize) {
       if (gpuRef.current.dynamicBuffers) {
         gpuRef.current.dynamicBuffers.renderBuffer.destroy();
         gpuRef.current.dynamicBuffers.pickingBuffer.destroy();
       }
-
-      gpuRef.current.dynamicBuffers = createDynamicBuffers(device, renderSize, pickingSize);
+      gpuRef.current.dynamicBuffers = createDynamicBuffers(
+        device,
+        totalRenderSize,
+        totalRenderSize  // Use same size for picking buffer for simplicity
+      );
     }
     const dynamicBuffers = gpuRef.current.dynamicBuffers!;
 
-      // Reset buffer offsets
-      dynamicBuffers.renderOffset = 0;
-      dynamicBuffers.pickingOffset = 0;
+    // Reset buffer offsets
+    dynamicBuffers.renderOffset = 0;
+    dynamicBuffers.pickingOffset = 0;
 
-      // Initialize componentBaseId array
-      gpuRef.current.componentBaseId = [];
-
-      // Build ID mapping
-      buildComponentIdMapping(components);
+    // Initialize componentBaseId array and build ID mapping
+    gpuRef.current.componentBaseId = new Array(components.length).fill(0);
+    buildComponentIdMapping(components);
 
     const validRenderObjects: RenderObject[] = [];
 
-      components.forEach((elem, i) => {
-      const spec = primitiveRegistry[elem.type];
-      if(!spec) {
-        console.warn(`Unknown primitive type: ${elem.type}`);
-        return;
-      }
+    // Create render objects and write buffer data in a single pass
+    typeArrays.forEach((typeInfo, type) => {
+      const spec = primitiveRegistry[type];
+      if (!spec) return;
 
       try {
-        const count = spec.getCount(elem);
-        if (count === 0) {
-          console.warn(`Component ${i} (${elem.type}) has no instances`);
-          return;
-        }
+        const renderOffset = Math.ceil(dynamicBuffers.renderOffset / 4) * 4;
 
-        const renderData = spec.buildRenderData(elem);
-        if (!renderData) {
-          console.warn(`Failed to build render data for component ${i} (${elem.type})`);
-          return;
-        }
-
-        let renderOffset = 0;
-        let stride = 0;
-        if(renderData.length > 0) {
-          renderOffset = Math.ceil(dynamicBuffers.renderOffset / 4) * 4;
-          // Calculate stride based on float count (4 bytes per float)
-          const floatsPerInstance = renderData.length / count;
-          stride = Math.ceil(floatsPerInstance) * 4;
+        // Write each component's data directly to final position
+        typeInfo.components.forEach((comp, i) => {
+          const renderData = spec.buildRenderData(comp);
+          if (!renderData) return;
 
           device.queue.writeBuffer(
             dynamicBuffers.renderBuffer,
-            renderOffset,
+            renderOffset + typeInfo.offsets[i],
             renderData.buffer,
             renderData.byteOffset,
             renderData.byteLength
           );
-          dynamicBuffers.renderOffset = renderOffset + (stride * count);
-        }
+        });
 
+        // Create pipeline once for this type
         const pipeline = spec.getRenderPipeline(device, bindGroupLayout, pipelineCache);
-        if (!pipeline) {
-          console.warn(`Failed to create pipeline for component ${i} (${elem.type})`);
-          return;
-        }
+        if (!pipeline) return;
 
-        // Create render object directly instead of using createRenderObject
-        const geometryResource = getGeometryResource(resources, elem.type);
+        // Create single render object for all instances of this type
+        const geometryResource = getGeometryResource(resources, type);
+        const stride = Math.ceil(
+          spec.buildRenderData(typeInfo.components[0])!.length / typeInfo.counts[0]
+        ) * 4;
+
         const renderObject: RenderObject = {
           pipeline,
           pickingPipeline: undefined,
           vertexBuffers: [
             geometryResource.vb,
-            {  // Pass buffer info for instances
+            {
               buffer: dynamicBuffers.renderBuffer,
               offset: renderOffset,
               stride: stride
@@ -2275,22 +2308,19 @@ export function SceneInner({
           ],
           indexBuffer: geometryResource.ib,
           indexCount: geometryResource.indexCount,
-          instanceCount: count,
+          instanceCount: typeInfo.totalCount,
           pickingVertexBuffers: [undefined, undefined] as [GPUBuffer | undefined, BufferInfo | undefined],
           pickingDataStale: true,
-          componentIndex: i
+          componentIndex: typeInfo.indices[0]
         };
 
-        if (!renderObject.vertexBuffers || renderObject.vertexBuffers.length !== 2) {
-          console.warn(`Invalid vertex buffers for component ${i} (${elem.type})`);
-          return;
-        }
-
         validRenderObjects.push(renderObject);
+        dynamicBuffers.renderOffset = renderOffset + typeInfo.totalSize;
+
       } catch (error) {
-        console.error(`Error creating render object for component ${i} (${elem.type}):`, error);
+        console.error(`Error creating render object for type ${type}:`, error);
       }
-      });
+    });
 
     return validRenderObjects;
   }
@@ -2797,55 +2827,77 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 
     const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
 
-    // Calculate sizes before creating buffers
-    const { renderSize, pickingSize } = calculateBufferSize(components);
+    // Find all components of the same type
+    const type = component.type;
+    const sameTypeComponents = components.filter(c => c.type === type);
+    const startIndex = components.findIndex(c => c.type === type);
 
-    // Ensure dynamic buffers exist
-    if (!gpuRef.current.dynamicBuffers) {
-      gpuRef.current.dynamicBuffers = createDynamicBuffers(device, renderSize, pickingSize);
-    }
-    const dynamicBuffers = gpuRef.current.dynamicBuffers!;
+    // Calculate total instance count and collect picking data
+    let totalCount = 0;
+    const pickingDatas: Float32Array[] = [];
+    const instanceCounts: number[] = [];
 
-    const spec = primitiveRegistry[component.type];
-    if (!spec) return;
+    sameTypeComponents.forEach((comp, idx) => {
+      const spec = primitiveRegistry[comp.type];
+      if (!spec) return;
 
-    // Build picking data
-    const pickData = spec.buildPickingData(component, gpuRef.current.componentBaseId[renderObject.componentIndex]);
-    if (pickData && pickData.length > 0) {
-    const pickingOffset = Math.ceil(dynamicBuffers.pickingOffset / 4) * 4;
-      // Calculate stride based on float count (4 bytes per float)
-      const floatsPerInstance = pickData.length / renderObject.instanceCount!;
-      const stride = Math.ceil(floatsPerInstance) * 4; // Align to 4 bytes
+      const count = spec.getCount(comp);
+      if (count === 0) return;
 
-    device.queue.writeBuffer(
-      dynamicBuffers.pickingBuffer,
-      pickingOffset,
+      const pickData = spec.buildPickingData(comp, gpuRef.current!.componentBaseId[startIndex + idx]);
+      if (!pickData) return;
+
+      pickingDatas.push(pickData);
+      instanceCounts.push(count);
+      totalCount += count;
+    });
+
+    if (totalCount === 0) return;
+
+    // Calculate stride based on first component
+    const floatsPerInstance = pickingDatas[0].length / instanceCounts[0];
+    const stride = Math.ceil(floatsPerInstance) * 4;
+
+    // Allocate space in buffer
+    const pickingOffset = Math.ceil(gpuRef.current.dynamicBuffers!.pickingOffset / 4) * 4;
+
+    // Copy all picking data into single buffer
+    let currentOffset = pickingOffset;
+    pickingDatas.forEach((pickData, idx) => {
+      device.queue.writeBuffer(
+        gpuRef.current!.dynamicBuffers!.pickingBuffer,
+        currentOffset,
         pickData.buffer,
         pickData.byteOffset,
         pickData.byteLength
-    );
+      );
+      currentOffset += stride * instanceCounts[idx];
+    });
 
-      // Set picking buffers with offset info
-      const geometryVB = renderObject.vertexBuffers[0];
+    // Update picking offset
+    gpuRef.current.dynamicBuffers!.pickingOffset = currentOffset;
+
+    // Set picking buffers with offset info
+    const geometryVB = renderObject.vertexBuffers[0];
     renderObject.pickingVertexBuffers = [
-        geometryVB,
+      geometryVB,
       {
-        buffer: dynamicBuffers.pickingBuffer,
+        buffer: gpuRef.current.dynamicBuffers!.pickingBuffer,
         offset: pickingOffset,
-          stride: stride
+        stride: stride
       }
     ];
 
-      dynamicBuffers.pickingOffset = pickingOffset + (stride * renderObject.instanceCount!);
+    // Get picking pipeline
+    const spec = primitiveRegistry[type];
+    if (spec) {
+      renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
     }
 
-    // Get picking pipeline
-    renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
-
-    // Copy over index buffer and counts from render object
+    // Copy over index buffer and counts
     renderObject.pickingIndexBuffer = renderObject.indexBuffer;
     renderObject.pickingIndexCount = renderObject.indexCount;
-    renderObject.pickingInstanceCount = renderObject.instanceCount;
+    renderObject.pickingInstanceCount = totalCount;
 
     renderObject.pickingDataStale = false;
   }, [components, buildComponentIdMapping]);

@@ -7,7 +7,7 @@ from genstudio.scene3d import PointCloud, Ellipsoid, deco
 
 
 # ----------------- 1) Ripple Grid (Point Cloud) -----------------
-def create_ripple_grid(n_x=200, n_y=200, n_frames=60):
+def create_ripple_grid(n_x=250, n_y=250, n_frames=60):
     """Create frames of a 2D grid of points in the XY plane with sinusoidal ripple over time.
 
     Returns:
