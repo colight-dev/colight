@@ -2120,46 +2120,63 @@ export function SceneInner({
     });
   }, []);
 
-  // Fix the calculateBufferSize function
-  function calculateBufferSize(components: ComponentConfig[]): { renderSize: number, pickingSize: number } {
-    let renderSize = 0;
-    let pickingSize = 0;
+  // Helper to collect and organize component data by type
+  function collectTypeData<T>(
+    components: ComponentConfig[],
+    getData: (comp: ComponentConfig, spec: PrimitiveSpec<any>) => T | null,
+    getSize: (data: T, count: number) => number
+  ) {
+    const typeArrays = new Map<ComponentConfig['type'], {
+      totalCount: number,
+      totalSize: number,
+      components: ComponentConfig[],
+      indices: number[],
+      offsets: number[],
+      counts: number[],
+      datas: T[]
+    }>();
 
-    components.forEach(elem => {
-      const spec = primitiveRegistry[elem.type];
+    // Single pass through components
+    components.forEach((comp, idx) => {
+      const type = comp.type;
+      const spec = primitiveRegistry[type];
       if (!spec) return;
 
-      const count = spec.getCount(elem);
-      const renderData = spec.buildRenderData(elem);
-      const pickData = spec.buildPickingData(elem, 0);
+      const count = spec.getCount(comp);
+      if (count === 0) return;
 
-      if (renderData) {
-        // Calculate stride and ensure it's aligned to 4 bytes
-        const floatsPerInstance = renderData.length / count;
-        const renderStride = Math.ceil(floatsPerInstance) * 4;
-        // Add to total size (not max)
-        const alignedSize = renderStride * count;
-        renderSize += alignedSize;
+      const data = getData(comp, spec);
+      if (!data) return;
+
+      const size = getSize(data, count);
+
+      let typeInfo = typeArrays.get(type);
+      if (!typeInfo) {
+        typeInfo = {
+          totalCount: 0,
+          totalSize: 0,
+          components: [],
+          indices: [],
+          offsets: [],
+          counts: [],
+          datas: []
+        };
+        typeArrays.set(type, typeInfo);
       }
 
-      if (pickData) {
-        // Calculate stride and ensure it's aligned to 4 bytes
-        const floatsPerInstance = pickData.length / count;
-        const pickStride = Math.ceil(floatsPerInstance) * 4;
-        // Add to total size (not max)
-        const alignedSize = pickStride * count;
-        pickingSize += alignedSize;
-      }
+      typeInfo.components.push(comp);
+      typeInfo.indices.push(idx);
+      typeInfo.offsets.push(typeInfo.totalSize);
+      typeInfo.counts.push(count);
+      typeInfo.datas.push(data);
+      typeInfo.totalCount += count;
+      typeInfo.totalSize += size;
     });
 
-    // Add generous padding (100%) and align to 4 bytes
-    renderSize = Math.ceil((renderSize * 2) / 4) * 4;
-    pickingSize = Math.ceil((pickingSize * 2) / 4) * 4;
-
-    return { renderSize, pickingSize };
+    return typeArrays;
   }
 
-  // Modify createDynamicBuffers to take specific sizes
+  // Create dynamic buffers helper
   function createDynamicBuffers(device: GPUDevice, renderSize: number, pickingSize: number) {
     const renderBuffer = device.createBuffer({
       size: renderSize,
@@ -2181,56 +2198,20 @@ export function SceneInner({
     };
   }
 
-  // Update buildRenderObjects to use correct stride calculation
+  // Update buildRenderObjects to use the helper
   function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
     if(!gpuRef.current) return [];
     const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
 
-    // Pre-allocate arrays for each primitive type
-    const typeArrays = new Map<ComponentConfig['type'], {
-      totalCount: number,
-      totalSize: number,
-      components: ComponentConfig[],
-      indices: number[],
-      offsets: number[],
-      counts: number[]
-    }>();
-
-    // Single pass through components to collect all information
-    components.forEach((comp, idx) => {
-      const type = comp.type;
-      const spec = primitiveRegistry[type];
-      if (!spec) return;
-
-      const count = spec.getCount(comp);
-      if (count === 0) return;
-
-      const renderData = spec.buildRenderData(comp);
-      if (!renderData) return;
-
-      const stride = Math.ceil(renderData.length / count) * 4;
-      const size = stride * count;
-
-      let typeInfo = typeArrays.get(type);
-      if (!typeInfo) {
-        typeInfo = {
-          totalCount: 0,
-          totalSize: 0,
-          components: [],
-          indices: [],
-          offsets: [],
-          counts: []
-        };
-        typeArrays.set(type, typeInfo);
+    // Collect render data using helper
+    const typeArrays = collectTypeData(
+      components,
+      (comp, spec) => spec.buildRenderData(comp),
+      (data, count) => {
+        const stride = Math.ceil(data.length / count) * 4;
+        return stride * count;
       }
-
-      typeInfo.components.push(comp);
-      typeInfo.indices.push(idx);
-      typeInfo.offsets.push(typeInfo.totalSize);
-      typeInfo.counts.push(count);
-      typeInfo.totalCount += count;
-      typeInfo.totalSize += size;
-    });
+    );
 
     // Calculate total buffer size needed
     let totalRenderSize = 0;
@@ -2248,7 +2229,7 @@ export function SceneInner({
       gpuRef.current.dynamicBuffers = createDynamicBuffers(
         device,
         totalRenderSize,
-        totalRenderSize  // Use same size for picking buffer for simplicity
+        totalRenderSize
       );
     }
     const dynamicBuffers = gpuRef.current.dynamicBuffers!;
@@ -2263,7 +2244,7 @@ export function SceneInner({
 
     const validRenderObjects: RenderObject[] = [];
 
-    // Create render objects and write buffer data in a single pass
+    // Create render objects and write buffer data
     typeArrays.forEach((typeInfo, type) => {
       const spec = primitiveRegistry[type];
       if (!spec) return;
@@ -2272,16 +2253,13 @@ export function SceneInner({
         const renderOffset = Math.ceil(dynamicBuffers.renderOffset / 4) * 4;
 
         // Write each component's data directly to final position
-        typeInfo.components.forEach((comp, i) => {
-          const renderData = spec.buildRenderData(comp);
-          if (!renderData) return;
-
+        typeInfo.datas.forEach((data, i) => {
           device.queue.writeBuffer(
             dynamicBuffers.renderBuffer,
             renderOffset + typeInfo.offsets[i],
-            renderData.buffer,
-            renderData.byteOffset,
-            renderData.byteLength
+            data.buffer,
+            data.byteOffset,
+            data.byteLength
           );
         });
 
@@ -2292,7 +2270,7 @@ export function SceneInner({
         // Create single render object for all instances of this type
         const geometryResource = getGeometryResource(resources, type);
         const stride = Math.ceil(
-          spec.buildRenderData(typeInfo.components[0])!.length / typeInfo.counts[0]
+          typeInfo.datas[0].length / typeInfo.counts[0]
         ) * 4;
 
         const renderObject: RenderObject = {
@@ -2825,81 +2803,66 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     if (!renderObject.pickingDataStale) return;
     if (!gpuRef.current) return;
 
-    const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
+    const { device, bindGroupLayout, pipelineCache } = gpuRef.current;
 
-    // Find all components of the same type
-    const type = component.type;
-    const sameTypeComponents = components.filter(c => c.type === type);
-    const startIndex = components.findIndex(c => c.type === type);
-
-    // Calculate total instance count and collect picking data
-    let totalCount = 0;
-    const pickingDatas: Float32Array[] = [];
-    const instanceCounts: number[] = [];
-
-    sameTypeComponents.forEach((comp, idx) => {
-      const spec = primitiveRegistry[comp.type];
-      if (!spec) return;
-
-      const count = spec.getCount(comp);
-      if (count === 0) return;
-
-      const pickData = spec.buildPickingData(comp, gpuRef.current!.componentBaseId[startIndex + idx]);
-      if (!pickData) return;
-
-      pickingDatas.push(pickData);
-      instanceCounts.push(count);
-      totalCount += count;
-    });
-
-    if (totalCount === 0) return;
-
-    // Calculate stride based on first component
-    const floatsPerInstance = pickingDatas[0].length / instanceCounts[0];
-    const stride = Math.ceil(floatsPerInstance) * 4;
-
-    // Allocate space in buffer
-    const pickingOffset = Math.ceil(gpuRef.current.dynamicBuffers!.pickingOffset / 4) * 4;
-
-    // Copy all picking data into single buffer
-    let currentOffset = pickingOffset;
-    pickingDatas.forEach((pickData, idx) => {
-      device.queue.writeBuffer(
-        gpuRef.current!.dynamicBuffers!.pickingBuffer,
-        currentOffset,
-        pickData.buffer,
-        pickData.byteOffset,
-        pickData.byteLength
-      );
-      currentOffset += stride * instanceCounts[idx];
-    });
-
-    // Update picking offset
-    gpuRef.current.dynamicBuffers!.pickingOffset = currentOffset;
-
-    // Set picking buffers with offset info
-    const geometryVB = renderObject.vertexBuffers[0];
-    renderObject.pickingVertexBuffers = [
-      geometryVB,
-      {
-        buffer: gpuRef.current.dynamicBuffers!.pickingBuffer,
-        offset: pickingOffset,
-        stride: stride
+    // Collect picking data using helper
+    const typeArrays = collectTypeData(
+      components,
+      (comp, spec) => {
+        const idx = components.indexOf(comp);
+        return spec.buildPickingData(comp, gpuRef.current!.componentBaseId[idx]);
+      },
+      (data, count) => {
+        const stride = Math.ceil(data.length / count) * 4;
+        return stride * count;
       }
-    ];
+    );
 
-    // Get picking pipeline
-    const spec = primitiveRegistry[type];
-    if (spec) {
+    // Get data for this component's type
+    const typeInfo = typeArrays.get(component.type);
+    if (!typeInfo) return;
+
+    const spec = primitiveRegistry[component.type];
+    if (!spec) return;
+
+    try {
+      const pickingOffset = Math.ceil(gpuRef.current.dynamicBuffers!.pickingOffset / 4) * 4;
+
+      // Write all picking data for this type
+      typeInfo.datas.forEach((data, i) => {
+        device.queue.writeBuffer(
+          gpuRef.current!.dynamicBuffers!.pickingBuffer,
+          pickingOffset + typeInfo.offsets[i],
+          data.buffer,
+          data.byteOffset,
+          data.byteLength
+        );
+      });
+
+      // Update picking offset
+      gpuRef.current.dynamicBuffers!.pickingOffset = pickingOffset + typeInfo.totalSize;
+
+      // Set picking buffers with offset info
+      const stride = Math.ceil(typeInfo.datas[0].length / typeInfo.counts[0]) * 4;
+      renderObject.pickingVertexBuffers = [
+        renderObject.vertexBuffers[0],
+        {
+          buffer: gpuRef.current.dynamicBuffers!.pickingBuffer,
+          offset: pickingOffset,
+          stride: stride
+        }
+      ];
+
+      // Set up picking pipeline and other properties
       renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
+      renderObject.pickingIndexBuffer = renderObject.indexBuffer;
+      renderObject.pickingIndexCount = renderObject.indexCount;
+      renderObject.pickingInstanceCount = typeInfo.totalCount;
+      renderObject.pickingDataStale = false;
+
+    } catch (error) {
+      console.error(`Error ensuring picking data for type ${component.type}:`, error);
     }
-
-    // Copy over index buffer and counts
-    renderObject.pickingIndexBuffer = renderObject.indexBuffer;
-    renderObject.pickingIndexCount = renderObject.indexCount;
-    renderObject.pickingInstanceCount = totalCount;
-
-    renderObject.pickingDataStale = false;
   }, [components, buildComponentIdMapping]);
 
   return (
