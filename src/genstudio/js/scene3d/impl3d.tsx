@@ -91,16 +91,27 @@ function getBaseDefaults(config: Partial<BaseComponentConfig>): Required<Omit<Ba
   };
 }
 
-function getColumnarParams(elem: BaseComponentConfig, count: number) {
+function getColumnarParams(elem: BaseComponentConfig, count: number): {colors: Float32Array|null, alphas: Float32Array|null, scales: Float32Array|null} {
+
+  // Check for Float64Arrays and throw if found
+  if (elem.colors instanceof Float64Array) {
+    throw new Error('Float64Array not supported for colors - please use Float32Array');
+  }
+  if (elem.alphas instanceof Float64Array) {
+    throw new Error('Float64Array not supported for alphas - please use Float32Array');
+  }
+  if (elem.scales instanceof Float64Array) {
+    throw new Error('Float64Array not supported for scales - please use Float32Array');
+  }
 
   const hasValidColors = elem.colors instanceof Float32Array && elem.colors.length >= count * 3;
   const hasValidAlphas = elem.alphas instanceof Float32Array && elem.alphas.length >= count;
   const hasValidScales = elem.scales instanceof Float32Array && elem.scales.length >= count;
 
   return {
-    colors: hasValidColors ? elem.colors : null,
-    alphas: hasValidAlphas ? elem.alphas : null,
-    scales: hasValidScales ? elem.scales : null
+    colors: hasValidColors ? (elem.colors as Float32Array) : null,
+    alphas: hasValidAlphas ? (elem.alphas as Float32Array) : null,
+    scales: hasValidScales ? (elem.scales as Float32Array) : null
   };
 }
 
@@ -247,8 +258,10 @@ interface PrimitiveSpec<E> {
    * Builds vertex buffer data for rendering.
    * Returns a Float32Array containing interleaved vertex attributes,
    * or null if the component has no renderable data.
+   * @param component The component to build render data for
+   * @param cameraPosition The current camera position [x,y,z]
    */
-  buildRenderData(component: E): Float32Array | null;
+  buildRenderData(component: E, cameraPosition: [number, number, number]): Float32Array | null;
 
   /**
    * Builds vertex buffer data for GPU-based picking.
@@ -404,7 +417,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return elem.positions.length / 3;
   },
 
-  buildRenderData(elem) {
+  buildRenderData(elem, cameraPosition: [number, number, number]) {
     const count = elem.positions.length / 3;
     if(count === 0) return null;
 
@@ -627,50 +640,63 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return elem.centers.length / 3;
   },
 
-  buildRenderData(elem) {
+  buildRenderData(elem, cameraPosition: [number, number, number]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    console.log("ellipsoid alphas", alphas)
+    // Use helper to check for transparency
+    const needsSorting = hasTransparency(alphas, defaults.alpha, elem.decorations);
+
+    // Get indices (sorted if transparent)
+    let indices;
+    if (needsSorting) {
+      const sortStart = performance.now();
+      indices = getSortedIndices(elem.centers, cameraPosition);
+      const sortEnd = performance.now();
+      // console.log(`Depth sorting ${count} ellipsoids took ${sortEnd - sortStart}ms`);
+    } else {
+      indices = Array.from({length: count}, (_, i) => i);
+    }
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii && elem.radii.length >= count * 3 ? elem.radii : null;
 
     const arr = new Float32Array(count * 10);
-    for(let i = 0; i < count; i++) {
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
 
       // Centers
-      arr[i*10+0] = elem.centers[i*3+0];
-      arr[i*10+1] = elem.centers[i*3+1];
-      arr[i*10+2] = elem.centers[i*3+2];
+      arr[j*10+0] = elem.centers[i*3+0];
+      arr[j*10+1] = elem.centers[i*3+1];
+      arr[j*10+2] = elem.centers[i*3+2];
 
       // Radii (with scale)
       const scale = scales ? scales[i] : defaults.scale;
 
       if(radii) {
-        arr[i*10+3] = radii[i*3+0] * scale;
-        arr[i*10+4] = radii[i*3+1] * scale;
-        arr[i*10+5] = radii[i*3+2] * scale;
+        arr[j*10+3] = radii[i*3+0] * scale;
+        arr[j*10+4] = radii[i*3+1] * scale;
+        arr[j*10+5] = radii[i*3+2] * scale;
       } else {
-        arr[i*10+3] = defaultRadius[0] * scale;
-        arr[i*10+4] = defaultRadius[1] * scale;
-        arr[i*10+5] = defaultRadius[2] * scale;
+        arr[j*10+3] = defaultRadius[0] * scale;
+        arr[j*10+4] = defaultRadius[1] * scale;
+        arr[j*10+5] = defaultRadius[2] * scale;
       }
 
       if(colors) {
-        arr[i*10+6] = colors[i*3+0];
-        arr[i*10+7] = colors[i*3+1];
-        arr[i*10+8] = colors[i*3+2];
+        arr[j*10+6] = colors[i*3+0];
+        arr[j*10+7] = colors[i*3+1];
+        arr[j*10+8] = colors[i*3+2];
       } else {
-        arr[i*10+6] = defaults.color[0];
-        arr[i*10+7] = defaults.color[1];
-        arr[i*10+8] = defaults.color[2];
+        arr[j*10+6] = defaults.color[0];
+        arr[j*10+7] = defaults.color[1];
+        arr[j*10+8] = defaults.color[2];
       }
 
-      arr[i*10+9] = alphas ? alphas[i] : defaults.alpha;
+      arr[j*10+9] = alphas ? alphas[i] : defaults.alpha;
     }
 
     applyDecorations(elem.decorations, count, (idx, dec) => {
@@ -866,7 +892,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return (elem.centers.length / 3) * 3;
   },
 
-  buildRenderData(elem) {
+  buildRenderData(elem, cameraPosition: [number, number, number]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -1102,7 +1128,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getCount(elem){
     return elem.centers.length / 3;
   },
-  buildRenderData(elem) {
+  buildRenderData(elem, cameraPosition: [number, number, number]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -1390,7 +1416,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return countSegments(elem.positions);
   },
 
-  buildRenderData(elem) {
+  buildRenderData(elem, cameraPosition: [number, number, number]) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return null;
 
@@ -2208,7 +2234,7 @@ export function SceneInner({
     // Collect render data using helper
     const typeArrays = collectTypeData(
       components,
-      (comp, spec) => spec.buildRenderData(comp),
+      (comp, spec) => spec.buildRenderData(comp, activeCamera),
       (data, count) => {
         const stride = Math.ceil(data.length / count) * 4;
         return stride * count;
@@ -2875,4 +2901,28 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         />
     </div>
   );
+}
+
+// Add this helper function at the top of the file
+function getSortedIndices(positions: Float32Array, cameraPosition: [number, number, number], stride = 3): number[] {
+    const count = positions.length / stride;
+    const indices = Array.from({length: count}, (_, i) => i);
+
+    // Calculate depths and sort back-to-front
+    const depths = indices.map(i => {
+        const x = positions[i*stride + 0];
+        const y = positions[i*stride + 1];
+        const z = positions[i*stride + 2];
+        return (x - cameraPosition[0])**2 +
+               (y - cameraPosition[1])**2 +
+               (z - cameraPosition[2])**2;
+    });
+
+    return indices.sort((a, b) => depths[b] - depths[a]);
+}
+
+function hasTransparency(alphas: Float32Array | null, defaultAlpha: number, decorations?: Decoration[]): boolean {
+    return alphas !== null ||
+           defaultAlpha !== 1.0 ||
+           (decorations?.some(d => d.alpha !== undefined) ?? false);
 }

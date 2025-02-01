@@ -203,6 +203,8 @@ def PointCloud(
     color: Optional[ArrayLike] = None,  # Default RGB color for all points
     sizes: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,  # Default size for all points
+    alphas: Optional[ArrayLike] = None,
+    alpha: Optional[NumberLike] = None,  # Default alpha for all points
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a point cloud element.
@@ -213,6 +215,8 @@ def PointCloud(
         color: Default RGB color [r,g,b] for all points if colors not provided
         sizes: N array of point sizes or flattened array (optional)
         size: Default size for all points if sizes not provided
+        alphas: Array of alpha values per point (optional)
+        alpha: Default alpha value for all points if alphas not provided
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     positions = flatten_array(positions, dtype=np.float32)
@@ -228,6 +232,11 @@ def PointCloud(
     if size is not None:
         data["size"] = size
 
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    if alpha is not None:
+        data["alpha"] = alpha
+
     return SceneComponent("PointCloud", data, **kwargs)
 
 
@@ -237,6 +246,8 @@ def Ellipsoid(
     radius: Optional[Union[NumberLike, ArrayLike]] = None,  # Single value or [x,y,z]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
+    alphas: Optional[ArrayLike] = None,
+    alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     **kwargs: Any,
 ) -> SceneComponent:
     """Create an ellipsoid element.
@@ -247,6 +258,8 @@ def Ellipsoid(
         radius: Default radius (sphere) or [x,y,z] radii (ellipsoid) if radii not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
+        alphas: Array of alpha values per ellipsoid (optional)
+        alpha: Default alpha value for all ellipsoids if alphas not provided
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -261,6 +274,11 @@ def Ellipsoid(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
 
     return SceneComponent("Ellipsoid", data, **kwargs)
 
@@ -271,6 +289,8 @@ def EllipsoidAxes(
     radius: Optional[Union[NumberLike, ArrayLike]] = None,  # Single value or [x,y,z]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
+    alphas: Optional[ArrayLike] = None,  # Per-ellipsoid alpha values
+    alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     **kwargs: Any,
 ) -> SceneComponent:
     """Create an ellipsoid bounds (wireframe) element.
@@ -281,6 +301,8 @@ def EllipsoidAxes(
         radius: Default radius (sphere) or [x,y,z] radii (ellipsoid) if radii not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
+        alphas: Array of alpha values per ellipsoid (optional)
+        alpha: Default alpha value for all ellipsoids if alphas not provided
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -295,6 +317,11 @@ def EllipsoidAxes(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
 
     return SceneComponent("EllipsoidAxes", data, **kwargs)
 
@@ -307,6 +334,8 @@ def Cuboid(
     ] = None,  # Default size [w,h,d] for all cuboids
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
+    alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
+    alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a cuboid element.
@@ -317,6 +346,8 @@ def Cuboid(
         size: Default size [w,h,d] for all cuboids if sizes not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all cuboids if colors not provided
+        alphas: Array of alpha values per cuboid (optional)
+        alpha: Default alpha value for all cuboids if alphas not provided
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -332,6 +363,11 @@ def Cuboid(
     elif color is not None:
         data["color"] = color
 
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
+
     return SceneComponent("Cuboid", data, **kwargs)
 
 
@@ -339,18 +375,22 @@ def LineBeams(
     positions: ArrayLike,  # Array of quadruples [x,y,z,i, x,y,z,i, ...]
     color: Optional[ArrayLike] = None,  # Default RGB color for all beams
     size: Optional[NumberLike] = None,  # Default size for all beams
-    colors: Optional[ArrayLike] = None,  # Per-segment colors
-    sizes: Optional[ArrayLike] = None,  # Per-segment sizes
+    colors: Optional[ArrayLike] = None,  # Per-line colors
+    sizes: Optional[ArrayLike] = None,  # Per-line sizes
+    alpha: Optional[NumberLike] = None,  # Default alpha for all beams
+    alphas: Optional[ArrayLike] = None,  # Per-line alpha values
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a line beams element.
 
     Args:
         positions: Array of quadruples [x,y,z,i, x,y,z,i, ...] where points sharing the same i value are connected in sequence
-        color: Default RGB color [r,g,b] for all beams if segment_colors not provided
-        radius: Default radius for all beams if segment_radii not provided
-        segment_colors: Array of RGB colors per beam segment (optional)
-        segment_radii: Array of radii per beam segment (optional)
+        color: Default RGB color [r,g,b] for all beams if colors not provided
+        size: Default size for all beams if sizes not provided
+        colors: Array of RGB colors per line (optional)
+        sizes: Array of sizes per line (optional)
+        alpha: Default alpha value for all beams if alphas not provided
+        alphas: Array of alpha values per line (optional)
         **kwargs: Additional arguments like onHover, onClick
 
     Returns:
@@ -367,6 +407,10 @@ def LineBeams(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
 
     return SceneComponent("LineBeams", data, **kwargs)
 
