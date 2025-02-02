@@ -261,7 +261,7 @@ interface PrimitiveSpec<E> {
    * @param component The component to build render data for
    * @param cameraPosition The current camera position [x,y,z]
    */
-  buildRenderData(component: E, cameraPosition: [number, number, number]): Float32Array | null;
+  buildRenderData(component: E, cameraPosition: [number, number, number], sortedIndices?: number[]): Float32Array | null;
 
   /**
    * Builds vertex buffer data for GPU-based picking.
@@ -417,36 +417,40 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return elem.positions.length / 3;
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number]) {
+  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
     const count = elem.positions.length / 3;
     if(count === 0) return null;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
     const size = elem.size ?? 0.02;
     const sizes = elem.sizes instanceof Float32Array && elem.sizes.length >= count ? elem.sizes : null;
 
     const arr = new Float32Array(count * 8);
-    for(let i=0; i<count; i++) {
-      arr[i*8+0] = elem.positions[i*3+0];
-      arr[i*8+1] = elem.positions[i*3+1];
-      arr[i*8+2] = elem.positions[i*3+2];
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
+      arr[j*8+0] = elem.positions[i*3+0];
+      arr[j*8+1] = elem.positions[i*3+1];
+      arr[j*8+2] = elem.positions[i*3+2];
 
       if(colors) {
-        arr[i*8+3] = colors[i*3+0];
-        arr[i*8+4] = colors[i*3+1];
-        arr[i*8+5] = colors[i*3+2];
+        arr[j*8+3] = colors[i*3+0];
+        arr[j*8+4] = colors[i*3+1];
+        arr[j*8+5] = colors[i*3+2];
       } else {
-        arr[i*8+3] = defaults.color[0];
-        arr[i*8+4] = defaults.color[1];
-        arr[i*8+5] = defaults.color[2];
+        arr[j*8+3] = defaults.color[0];
+        arr[j*8+4] = defaults.color[1];
+        arr[j*8+5] = defaults.color[2];
       }
 
-      arr[i*8+6] = alphas ? alphas[i] : defaults.alpha;
-      const pointSize = sizes  ? sizes[i] : size;
+      arr[j*8+6] = alphas ? alphas[i] : defaults.alpha;
+      const pointSize = sizes ? sizes[i] : size;
       const scale = scales ? scales[i] : defaults.scale;
-      arr[i*8+7] = pointSize * scale;
+      arr[j*8+7] = pointSize * scale;
     }
 
     // Apply decorations last
@@ -892,20 +896,24 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return (elem.centers.length / 3) * 3;
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number]) {
+  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
-
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    const defaultRadius = elem.radius ?? [1, 1, 1];
-    const radii = elem.radii;
-    const ringCount = count * 3;
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
 
+    const defaultRadius = elem.radius ?? [1, 1, 1];
+    const radii = elem.radii instanceof Float32Array && elem.radii.length >= count * 3 ? elem.radii : null;
+
+    const ringCount = count * 3;
     const arr = new Float32Array(ringCount * 10);
-    for(let i = 0; i < count; i++) {
+
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
       const cx = elem.centers[i*3+0];
       const cy = elem.centers[i*3+1];
       const cz = elem.centers[i*3+2];
@@ -941,21 +949,21 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
 
       // Fill 3 rings
       for(let ring = 0; ring < 3; ring++) {
-        const idx = i*3 + ring;
-        arr[idx*10+0] = cx;
-        arr[idx*10+1] = cy;
-        arr[idx*10+2] = cz;
-        arr[idx*10+3] = rx;
-        arr[idx*10+4] = ry;
-        arr[idx*10+5] = rz;
-        arr[idx*10+6] = cr;
-        arr[idx*10+7] = cg;
-        arr[idx*10+8] = cb;
-        arr[idx*10+9] = alpha;
+        const arrIdx = j*3 + ring;
+        arr[arrIdx*10+0] = cx;
+        arr[arrIdx*10+1] = cy;
+        arr[arrIdx*10+2] = cz;
+        arr[arrIdx*10+3] = rx;
+        arr[arrIdx*10+4] = ry;
+        arr[arrIdx*10+5] = rz;
+        arr[arrIdx*10+6] = cr;
+        arr[arrIdx*10+7] = cg;
+        arr[arrIdx*10+8] = cb;
+        arr[arrIdx*10+9] = alpha;
       }
     }
 
-    // Apply decorations after the main loop, accounting for ring structure
+    // Apply decorations last
     applyDecorations(elem.decorations, count, (idx, dec) => {
       // For each decorated ellipsoid, update all 3 of its rings
       for(let ring = 0; ring < 3; ring++) {
@@ -975,6 +983,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
         }
       }
     });
+
     return arr;
   },
 
@@ -1128,18 +1137,22 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getCount(elem){
     return elem.centers.length / 3;
   },
-  buildRenderData(elem, cameraPosition: [number, number, number]) {
+  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
 
     const arr = new Float32Array(count * 10);
-    for(let i = 0; i < count; i++) {
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
       const cx = elem.centers[i*3+0];
       const cy = elem.centers[i*3+1];
       const cz = elem.centers[i*3+2];
@@ -1164,7 +1177,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
       const alpha = alphas ? alphas[i] : defaults.alpha;
 
       // Fill array
-      const idx = i * 10;
+      const idx = j * 10;
       arr[idx+0] = cx;
       arr[idx+1] = cy;
       arr[idx+2] = cz;
@@ -1416,17 +1429,15 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return countSegments(elem.positions);
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number]) {
+  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return null;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, segCount);
 
-    const defaultSize = elem.size ?? 0.02;
-    const sizes = elem.sizes instanceof Float32Array && elem.sizes.length >= segCount ? elem.sizes : null;
-
-    const arr = new Float32Array(segCount * 11);
+    // First pass: build segment mapping
+    const segmentMap = new Array(segCount);
     let segIndex = 0;
 
     const pointCount = elem.positions.length / 4;
@@ -1435,36 +1446,49 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       const iNext = elem.positions[(p+1) * 4 + 3];
       if(iCurr !== iNext) continue;
 
-      const lineIndex = Math.floor(iCurr);
+      // Store mapping from segment index to point index
+      segmentMap[segIndex] = p;
+      segIndex++;
+    }
+
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: segCount}, (_, i) => i);
+
+    const defaultSize = elem.size ?? 0.02;
+    const sizes = elem.sizes instanceof Float32Array && elem.sizes.length >= segCount ? elem.sizes : null;
+
+    const arr = new Float32Array(segCount * 11);
+    for(let j = 0; j < segCount; j++) {
+      const i = indices[j];
+      const p = segmentMap[i];
+      const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
 
       // Start point
-      arr[segIndex*11+0] = elem.positions[p * 4 + 0];
-      arr[segIndex*11+1] = elem.positions[p * 4 + 1];
-      arr[segIndex*11+2] = elem.positions[p * 4 + 2];
+      arr[j*11+0] = elem.positions[p * 4 + 0];
+      arr[j*11+1] = elem.positions[p * 4 + 1];
+      arr[j*11+2] = elem.positions[p * 4 + 2];
 
       // End point
-      arr[segIndex*11+3] = elem.positions[(p+1) * 4 + 0];
-      arr[segIndex*11+4] = elem.positions[(p+1) * 4 + 1];
-      arr[segIndex*11+5] = elem.positions[(p+1) * 4 + 2];
+      arr[j*11+3] = elem.positions[(p+1) * 4 + 0];
+      arr[j*11+4] = elem.positions[(p+1) * 4 + 1];
+      arr[j*11+5] = elem.positions[(p+1) * 4 + 2];
 
       // Size with scale
       const scale = scales ? scales[lineIndex] : defaults.scale;
-      arr[segIndex*11+6] = (sizes ? sizes[lineIndex] : defaultSize) * scale;
+      arr[j*11+6] = (sizes ? sizes[lineIndex] : defaultSize) * scale;
 
       // Colors
       if(colors) {
-        arr[segIndex*11+7] = colors[lineIndex*3+0];
-        arr[segIndex*11+8] = colors[lineIndex*3+1];
-        arr[segIndex*11+9] = colors[lineIndex*3+2];
+        arr[j*11+7] = colors[lineIndex*3+0];
+        arr[j*11+8] = colors[lineIndex*3+1];
+        arr[j*11+9] = colors[lineIndex*3+2];
       } else {
-        arr[segIndex*11+7] = defaults.color[0];
-        arr[segIndex*11+8] = defaults.color[1];
-        arr[segIndex*11+9] = defaults.color[2];
+        arr[j*11+7] = defaults.color[0];
+        arr[j*11+8] = defaults.color[1];
+        arr[j*11+9] = defaults.color[2];
       }
 
-      arr[segIndex*11+10] = alphas ? alphas[lineIndex] : defaults.alpha;
-
-      segIndex++;
+      arr[j*11+10] = alphas ? alphas[lineIndex] : defaults.alpha;
     }
 
     // Apply decorations last
@@ -2226,15 +2250,158 @@ export function SceneInner({
     };
   }
 
-  // Update buildRenderObjects to use the helper
+  // Add these interfaces near the top with other interfaces
+  interface TransparencyInfo {
+    needsSort: boolean;
+    centers: Float32Array;
+    stride: number;
+    offset: number;
+  }
+
+  // Add this before buildRenderObjects
+  function getTransparencyInfo(component: ComponentConfig, spec: PrimitiveSpec<any>): TransparencyInfo | null {
+    const count = spec.getCount(component);
+    if (count === 0) return null;
+
+    const defaults = getBaseDefaults(component);
+    const { alphas } = getColumnarParams(component, count);
+    const needsSort = hasTransparency(alphas, defaults.alpha, component.decorations);
+    if (!needsSort) return null;
+
+    // Extract centers based on component type
+    switch (component.type) {
+      case 'PointCloud':
+        return {
+          needsSort: true,
+          centers: component.positions,
+          stride: 3,
+          offset: 0
+        };
+      case 'Ellipsoid':
+      case 'Cuboid':
+        return {
+          needsSort: true,
+          centers: component.centers,
+          stride: 3,
+          offset: 0
+        };
+      case 'LineBeams': {
+        // Compute centers for line segments
+        const segCount = spec.getCount(component);
+        const centers = new Float32Array(segCount * 3);
+        let segIndex = 0;
+        const pointCount = component.positions.length / 4;
+
+        for(let p = 0; p < pointCount - 1; p++) {
+          const iCurr = component.positions[p * 4 + 3];
+          const iNext = component.positions[(p+1) * 4 + 3];
+          if(iCurr !== iNext) continue;
+
+          centers[segIndex*3+0] = (component.positions[p*4+0] + component.positions[(p+1)*4+0]) * 0.5;
+          centers[segIndex*3+1] = (component.positions[p*4+1] + component.positions[(p+1)*4+1]) * 0.5;
+          centers[segIndex*3+2] = (component.positions[p*4+2] + component.positions[(p+1)*4+2]) * 0.5;
+          segIndex++;
+        }
+        return {
+          needsSort: true,
+          centers,
+          stride: 3,
+          offset: 0
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  // Update buildRenderObjects to handle global sorting
   function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
     if(!gpuRef.current) return [];
     const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
 
-    // Collect render data using helper
+    // First collect all transparent objects that need sorting
+    const transparentObjects: {
+      componentIndex: number;
+      info: TransparencyInfo;
+    }[] = [];
+
+    components.forEach((comp, idx) => {
+      const spec = primitiveRegistry[comp.type];
+      if (!spec) return;
+
+      const info = getTransparencyInfo(comp, spec);
+      if (info) {
+        transparentObjects.push({ componentIndex: idx, info });
+      }
+    });
+
+    // If we have transparent objects, sort them globally
+    let globalSortedIndices: Map<number, number[]> | null = null;
+    if (transparentObjects.length > 0) {
+      // Combine all centers into one array
+      const totalCount = transparentObjects.reduce((sum, obj) =>
+        sum + obj.info.centers.length / obj.info.stride, 0);
+      const allCenters = new Float32Array(totalCount * 3);
+      const componentRanges: { start: number; count: number; componentIndex: number }[] = [];
+
+      let offset = 0;
+      transparentObjects.forEach(({ componentIndex, info }) => {
+        const count = info.centers.length / info.stride;
+        const start = offset / 3;
+
+        // Copy centers to combined array
+        for (let i = 0; i < count; i++) {
+          const srcIdx = i * info.stride + info.offset;
+          allCenters[offset + i*3 + 0] = info.centers[srcIdx + 0];
+          allCenters[offset + i*3 + 1] = info.centers[srcIdx + 1];
+          allCenters[offset + i*3 + 2] = info.centers[srcIdx + 2];
+        }
+
+        componentRanges.push({ start, count, componentIndex });
+        offset += count * 3;
+      });
+
+      // Sort all centers together
+      const cameraPos: [number, number, number] = [
+        activeCamera.position[0],
+        activeCamera.position[1],
+        activeCamera.position[2]
+      ];
+      const sortedIndices = getSortedIndices(allCenters, cameraPos);
+
+      // Map global sorted indices back to per-component indices
+      globalSortedIndices = new Map();
+      sortedIndices.forEach((globalIdx, sortedIdx) => {
+        // Find which component this index belongs to
+        for (const range of componentRanges) {
+          if (globalIdx >= range.start && globalIdx < range.start + range.count) {
+            const componentIdx = range.componentIndex;
+            const localIdx = globalIdx - range.start;
+
+            let indices = globalSortedIndices!.get(componentIdx);
+            if (!indices) {
+              indices = [];
+              globalSortedIndices!.set(componentIdx, indices);
+            }
+            indices.push(localIdx);
+            break;
+          }
+        }
+      });
+    }
+
+    // Collect render data using helper, now with global sorting
     const typeArrays = collectTypeData(
       components,
-      (comp, spec) => spec.buildRenderData(comp, activeCamera),
+      (comp, spec) => {
+        const idx = components.indexOf(comp);
+        const sortedIndices = globalSortedIndices?.get(idx);
+        return spec.buildRenderData(comp, [
+          activeCamera.position[0],
+          activeCamera.position[1],
+          activeCamera.position[2]
+        ], sortedIndices);
+      },
       (data, count) => {
         const stride = Math.ceil(data.length / count) * 4;
         return stride * count;
@@ -2904,21 +3071,21 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 }
 
 // Add this helper function at the top of the file
-function getSortedIndices(positions: Float32Array, cameraPosition: [number, number, number], stride = 3): number[] {
-    const count = positions.length / stride;
-    const indices = Array.from({length: count}, (_, i) => i);
+function getSortedIndices(centers: Float32Array, cameraPosition: [number, number, number]): number[] {
+  const count = centers.length / 3;
+  const indices = Array.from({length: count}, (_, i) => i);
 
-    // Calculate depths and sort back-to-front
-    const depths = indices.map(i => {
-        const x = positions[i*stride + 0];
-        const y = positions[i*stride + 1];
-        const z = positions[i*stride + 2];
-        return (x - cameraPosition[0])**2 +
-               (y - cameraPosition[1])**2 +
-               (z - cameraPosition[2])**2;
-    });
+  // Calculate depths and sort back-to-front
+  const depths = indices.map(i => {
+    const x = centers[i*3 + 0];
+    const y = centers[i*3 + 1];
+    const z = centers[i*3 + 2];
+    return (x - cameraPosition[0])**2 +
+           (y - cameraPosition[1])**2 +
+           (z - cameraPosition[2])**2;
+  });
 
-    return indices.sort((a, b) => depths[b] - depths[a]);
+  return indices.sort((a, b) => depths[b] - depths[a]);
 }
 
 function hasTransparency(alphas: Float32Array | null, defaultAlpha: number, decorations?: Decoration[]): boolean {

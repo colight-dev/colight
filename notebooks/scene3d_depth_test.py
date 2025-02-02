@@ -1,5 +1,5 @@
 import numpy as np
-from genstudio.scene3d import Ellipsoid, PointCloud, LineBeams, Cuboid
+from genstudio.scene3d import Ellipsoid, EllipsoidAxes, PointCloud, LineBeams, Cuboid
 import genstudio.plot as Plot
 import math
 
@@ -65,12 +65,12 @@ def create_depth_test_scene():
         )
         +
         # Second set - identical ellipsoids in separate components
-        Ellipsoid(
+        EllipsoidAxes(
             centers=np.array([[0, 0, 0]]),
             colors=np.array([[1, 0, 0]]),  # Red alpha=1.0
             radius=[0.2, 0.2, 0.2],
         )
-        + Ellipsoid(
+        + EllipsoidAxes(
             centers=np.array([[0, 0, 0.5]]),
             colors=np.array([[0, 1, 0]]),  # Green alpha=0.5
             alphas=np.array([0.5]),
