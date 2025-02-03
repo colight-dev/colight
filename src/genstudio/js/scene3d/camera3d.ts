@@ -31,28 +31,20 @@ export const DEFAULT_CAMERA: CameraParams = {
     far: 100.0
 };
 
-/** Helper to convert array-like to tuple */
-function toArray(value: [number, number, number] | TypedArray): [number, number, number] {
-    if (value instanceof BigInt64Array || value instanceof BigUint64Array) {
-        return [Number(value[0]), Number(value[1]), Number(value[2])];
-    }
-    return Array.from(value) as [number, number, number];
-}
-
 export function createCameraState(params: CameraParams | null | undefined): CameraState {
 
     const p = {
-        position: toArray(params?.position ?? DEFAULT_CAMERA.position),
-        target: toArray(params?.target ?? DEFAULT_CAMERA.target),
-        up: toArray(params?.up ?? DEFAULT_CAMERA.up),
+        position: params?.position ?? DEFAULT_CAMERA.position,
+        target: params?.target ?? DEFAULT_CAMERA.target,
+        up: params?.up ?? DEFAULT_CAMERA.up,
         fov: params?.fov ?? DEFAULT_CAMERA.fov,
         near: params?.near ?? DEFAULT_CAMERA.near,
         far: params?.far ?? DEFAULT_CAMERA.far
     };
 
-    const position = glMatrix.vec3.fromValues(...p.position);
-    const target = glMatrix.vec3.fromValues(...p.target);
-    const up = glMatrix.vec3.fromValues(...p.up);
+    const position = glMatrix.vec3.fromValues(p.position[0], p.position[1], p.position[2]);
+    const target = glMatrix.vec3.fromValues(p.target[0], p.target[1], p.target[2]);
+    const up = glMatrix.vec3.fromValues(p.up[0], p.up[1], p.up[2]);
     glMatrix.vec3.normalize(up, up);
 
     // The direction from target to position

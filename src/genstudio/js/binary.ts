@@ -1,4 +1,28 @@
-export type TypedArray = Int8Array | Int16Array | Int32Array | BigInt64Array | Uint8Array | Uint16Array | Uint32Array | BigUint64Array | Uint8ClampedArray | Float32Array | Float64Array;
+export type TypedArray = Int8Array | Int16Array | Int32Array | Uint8Array | Uint16Array | Uint32Array | Uint8ClampedArray | Float32Array | Float64Array;
+
+/** Type representing arrays that contain BigInt values */
+export type BigIntArray = BigInt64Array | BigUint64Array;
+
+/**
+ * Type guard to check if a value is a BigInt array type
+ * @param value - Value to check
+ * @returns True if the value is a BigInt array type (BigInt64Array or BigUint64Array)
+ */
+export function isBigIntArray(value: unknown): value is BigIntArray {
+  return value instanceof BigInt64Array || value instanceof BigUint64Array;
+}
+
+/**
+ * Converts a BigInt array (BigInt64Array/BigUint64Array) to a regular number array.
+ * @param value - The array to convert
+ * @returns A regular Array of numbers if input is a BigInt array, otherwise returns the input unchanged
+ */
+function convertBigIntArray(value: unknown): number[] | unknown {
+  if (value instanceof BigInt64Array || value instanceof BigUint64Array) {
+    return Array.from(value, Number);
+  }
+  return value;
+}
 
 /**
  * Reshapes a flat array into a nested array structure based on the provided dimensions.
@@ -90,12 +114,16 @@ export function evaluateNdarray(node) {
     data.byteOffset,
     data.byteLength / ArrayConstructor.BYTES_PER_ELEMENT
   );
-  // If 1D, return the typed array directly
+
+  // Convert BigInt arrays to regular number arrays
+  const convertedArray = convertBigIntArray(flatArray);
+
+  // If 1D, return the array directly
   if (shape.length <= 1) {
-    return flatArray;
+    return convertedArray;
   }
 
-  return reshapeArray(flatArray, shape);
+  return reshapeArray(convertedArray, shape);
 }
 
 /**
