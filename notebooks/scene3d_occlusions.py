@@ -34,12 +34,12 @@ def create_demo_scene():
             positions,
             colors,
             scales,
-            onHover=Plot.js("(i) => $state.update({hover_point: i})"),
+            onHover=Plot.js(
+                "(i) => $state.update({hover_point: typeof i === 'number' ? [i] : null})"
+            ),
             decorations=[
                 {
-                    "indexes": Plot.js(
-                        "$state.hover_point ? [$state.hover_point] : []"
-                    ),
+                    "indexes": Plot.js("$state.hover_point"),
                     "color": [1, 1, 0],
                     "scale": 1.5,
                 }
