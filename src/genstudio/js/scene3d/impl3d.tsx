@@ -267,9 +267,11 @@ interface PrimitiveSpec<E> {
    * Builds vertex buffer data for GPU-based picking.
    * Returns a Float32Array containing picking IDs and instance data,
    * or null if the component doesn't support picking.
+   * @param component The component to build picking data for
    * @param baseID Starting ID for this component's instances
+   * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildPickingData(component: E, baseID: number): Float32Array | null;
+  buildPickingData(component: E, baseID: number, sortedIndices?: number[]): Float32Array | null;
 
   /**
    * Default WebGPU rendering configuration for this primitive type.
@@ -472,7 +474,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return arr;
   },
 
-  buildPickingData(elem, baseID) {
+  buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const count = elem.positions.length / 3;
     if(count === 0) return null;
 
@@ -483,12 +485,16 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     const hasValidSizes = elem.sizes && elem.sizes.length >= count;
     const sizes = hasValidSizes ? elem.sizes : null;
 
-    for(let i=0; i<count; i++) {
-      arr[i*5+0] = elem.positions[i*3+0];
-      arr[i*5+1] = elem.positions[i*3+1];
-      arr[i*5+2] = elem.positions[i*3+2];
-      arr[i*5+3] = baseID + i;
-      arr[i*5+4] = sizes?.[i] ?? size;
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
+      arr[j*5+0] = elem.positions[i*3+0];
+      arr[j*5+1] = elem.positions[i*3+1];
+      arr[j*5+2] = elem.positions[i*3+2];
+      arr[j*5+3] = baseID + i;  // Keep original index for picking ID
+      arr[j*5+4] = sizes?.[i] ?? size;
     }
     return arr;
   },
@@ -717,7 +723,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return arr;
   },
 
-  buildPickingData(elem, baseID) {
+  buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -728,21 +734,25 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     const hasValidRadii = elem.radii && elem.radii.length >= count * 3;
     const radii = hasValidRadii ? elem.radii : null;
 
-    for(let i = 0; i < count; i++) {
-      arr[i*7+0] = elem.centers[i*3+0];
-      arr[i*7+1] = elem.centers[i*3+1];
-      arr[i*7+2] = elem.centers[i*3+2];
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
+      arr[j*7+0] = elem.centers[i*3+0];
+      arr[j*7+1] = elem.centers[i*3+1];
+      arr[j*7+2] = elem.centers[i*3+2];
 
       if(radii) {
-        arr[i*7+3] = radii[i*3+0];
-        arr[i*7+4] = radii[i*3+1];
-        arr[i*7+5] = radii[i*3+2];
+        arr[j*7+3] = radii[i*3+0];
+        arr[j*7+4] = radii[i*3+1];
+        arr[j*7+5] = radii[i*3+2];
       } else {
-        arr[i*7+3] = defaultRadius[0];
-        arr[i*7+4] = defaultRadius[1];
-        arr[i*7+5] = defaultRadius[2];
+        arr[j*7+3] = defaultRadius[0];
+        arr[j*7+4] = defaultRadius[1];
+        arr[j*7+5] = defaultRadius[2];
       }
-      arr[i*7+6] = baseID + i;
+      arr[j*7+6] = baseID + i;  // Keep original index for picking ID
     }
     return arr;
   },
@@ -989,7 +999,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return arr;
   },
 
-  buildPickingData(elem, baseID) {
+  buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -997,17 +1007,21 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     const ringCount = count * 3;
     const arr = new Float32Array(ringCount * 7);
 
-    for(let i = 0; i < count; i++) {
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
       const cx = elem.centers[i*3+0];
       const cy = elem.centers[i*3+1];
       const cz = elem.centers[i*3+2];
       const rx = elem.radii?.[i*3+0] ?? defaultRadius[0];
       const ry = elem.radii?.[i*3+1] ?? defaultRadius[1];
       const rz = elem.radii?.[i*3+2] ?? defaultRadius[2];
-      const thisID = baseID + i;
+      const thisID = baseID + i;  // Keep original index for picking ID
 
       for(let ring = 0; ring < 3; ring++) {
-        const idx = i*3 + ring;
+        const idx = j*3 + ring;
         arr[idx*7+0] = cx;
         arr[idx*7+1] = cy;
         arr[idx*7+2] = cz;
@@ -1218,35 +1232,41 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     return arr;
   },
-  buildPickingData(elem, baseID){
+  buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
-
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
     const { scales } = getColumnarParams(elem, count);
 
     const arr = new Float32Array(count * 7);
-    for(let i = 0; i < count; i++) {
+
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    for(let j = 0; j < count; j++) {
+      const i = indices[j];
       const scale = scales ? scales[i] : 1;
       // Position
-      arr[i*7+0] = elem.centers[i*3+0];
-      arr[i*7+1] = elem.centers[i*3+1];
-      arr[i*7+2] = elem.centers[i*3+2];
+      arr[j*7+0] = elem.centers[i*3+0];
+      arr[j*7+1] = elem.centers[i*3+1];
+      arr[j*7+2] = elem.centers[i*3+2];
       // Size
-      arr[i*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
-      arr[i*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
-      arr[i*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+      arr[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
+      arr[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
+      arr[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
       // Picking ID
-      arr[i*7+6] = baseID + i;
+      arr[j*7+6] = baseID + i;  // Keep original index for picking ID
     }
 
     // Apply scale decorations
     applyDecorations(elem.decorations, count, (idx, dec) => {
-      if(dec.scale !== undefined) {
-        arr[idx*7+3] *= dec.scale;
-        arr[idx*7+4] *= dec.scale;
-        arr[idx*7+5] *= dec.scale;
+      // Find the position of this index in the sorted array
+      const j = indices.indexOf(idx);
+      if (j !== -1 && dec.scale !== undefined) {
+        arr[j*7+3] *= dec.scale;
+        arr[j*7+4] *= dec.scale;
+        arr[j*7+5] *= dec.scale;
       }
     });
 
@@ -1522,7 +1542,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return arr;
   },
 
-  buildPickingData(elem, baseID) {
+  buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return null;
 
@@ -1530,15 +1550,28 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     const floatsPerSeg = 8;
     const arr = new Float32Array(segCount * floatsPerSeg);
 
-    const pointCount = elem.positions.length / 4;
+    // First pass: build segment mapping
+    const segmentMap = new Array(segCount);
     let segIndex = 0;
 
+    const pointCount = elem.positions.length / 4;
     for(let p = 0; p < pointCount - 1; p++) {
       const iCurr = elem.positions[p * 4 + 3];
       const iNext = elem.positions[(p+1) * 4 + 3];
       if(iCurr !== iNext) continue;
 
-      const lineIndex = Math.floor(iCurr);
+      // Store mapping from segment index to point index
+      segmentMap[segIndex] = p;
+      segIndex++;
+    }
+
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: segCount}, (_, i) => i);
+
+    for(let j = 0; j < segCount; j++) {
+      const i = indices[j];
+      const p = segmentMap[i];
+      const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
       let size = elem.sizes?.[lineIndex] ?? defaultSize;
       const scale = elem.scales?.[lineIndex] ?? 1.0;
 
@@ -1551,7 +1584,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
         }
       });
 
-      const base = segIndex * floatsPerSeg;
+      const base = j * floatsPerSeg;
       arr[base + 0] = elem.positions[p * 4 + 0];     // start.x
       arr[base + 1] = elem.positions[p * 4 + 1];     // start.y
       arr[base + 2] = elem.positions[p * 4 + 2];     // start.z
@@ -1559,9 +1592,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       arr[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
       arr[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
       arr[base + 6] = size;                        // size
-      arr[base + 7] = baseID + segIndex;            // pickID
-
-      segIndex++;
+      arr[base + 7] = baseID + i;                  // Keep original index for picking ID
     }
     return arr;
   },
@@ -3102,14 +3133,20 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     if (!renderObject.pickingDataStale) return;
     if (!gpuRef.current) return;
 
-    const { device, bindGroupLayout, pipelineCache } = gpuRef.current;
+    const { device, bindGroupLayout, pipelineCache, transparencyState } = gpuRef.current;
+
+    // Get sorted indices if we have transparent objects
+    let sortedIndices: number[] | undefined;
+    if (transparencyState?.lastSortedIndices) {
+      sortedIndices = transparencyState.lastSortedIndices.get(components.indexOf(component));
+    }
 
     // Collect picking data using helper
     const typeArrays = collectTypeData(
       components,
       (comp, spec) => {
         const idx = components.indexOf(comp);
-        return spec.buildPickingData(comp, gpuRef.current!.componentBaseId[idx]);
+        return spec.buildPickingData(comp, gpuRef.current!.componentBaseId[idx], sortedIndices);
       },
       (data, count) => {
         const stride = Math.ceil(data.length / count) * 4;
@@ -3162,7 +3199,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     } catch (error) {
       console.error(`Error ensuring picking data for type ${component.type}:`, error);
     }
-  }, [components, buildComponentIdMapping]);
+  }, [components]);
 
   return (
     <div style={{ width: '100%', border: '1px solid #ccc' }}>
