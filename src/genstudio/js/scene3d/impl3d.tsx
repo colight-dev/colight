@@ -415,6 +415,43 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
   size?: number;           // Default size, defaults to 0.02
 }
 
+/** Helper function to handle sorted indices and position mapping */
+function getIndicesAndMapping(count: number, sortedIndices?: number[]): {
+  useSequential: boolean,
+  indices: number[] | null,  // Change to null instead of undefined
+  indexToPosition: number[] | null
+} {
+  if (!sortedIndices) {
+    return {
+      useSequential: true,
+      indices: null,
+      indexToPosition: null
+    };
+  }
+
+  // Only create mapping if we have sorted indices
+  const indexToPosition = new Array(count);
+  for(let j = 0; j < count; j++) {
+    indexToPosition[sortedIndices[j]] = j;
+  }
+
+  return {
+    useSequential: false,
+    indices: sortedIndices,
+    indexToPosition
+  };
+}
+
+/** Helper to get index for accessing data */
+function getDataIndex(j: number, info: ReturnType<typeof getIndicesAndMapping>): number {
+  return info.useSequential ? j : info.indices![j];
+}
+
+/** Helper to get decoration target index based on sorting */
+function getDecorationIndex(idx: number, indexToPosition: number[] | null): number {
+  return indexToPosition ? indexToPosition[idx] : idx;
+}
+
 const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
   getCount(elem) {
     return elem.positions.length / 3;
@@ -427,15 +464,14 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
     const size = elem.size ?? 0.02;
     const sizes = elem.sizes instanceof Float32Array && elem.sizes.length >= count ? elem.sizes : null;
 
+    const indexInfo = getIndicesAndMapping(count, sortedIndices);
+
     const arr = new Float32Array(count * 8);
     for(let j = 0; j < count; j++) {
-      const i = indices[j];
+      const i = getDataIndex(j, indexInfo);
       arr[j*8+0] = elem.positions[i*3+0];
       arr[j*8+1] = elem.positions[i*3+1];
       arr[j*8+2] = elem.positions[i*3+2];
@@ -456,18 +492,19 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       arr[j*8+7] = pointSize * scale;
     }
 
-    // Apply decorations last
+    // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
+      const j = getDecorationIndex(idx, indexInfo.indexToPosition);
       if(dec.color) {
-        arr[idx*8+3] = dec.color[0];
-        arr[idx*8+4] = dec.color[1];
-        arr[idx*8+5] = dec.color[2];
+        arr[j*8+3] = dec.color[0];
+        arr[j*8+4] = dec.color[1];
+        arr[j*8+5] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[idx*8+6] = dec.alpha;
+        arr[j*8+6] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[idx*8+7] *= dec.scale;
+        arr[j*8+7] *= dec.scale;
       }
     });
 
@@ -485,16 +522,25 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     const hasValidSizes = elem.sizes && elem.sizes.length >= count;
     const sizes = hasValidSizes ? elem.sizes : null;
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
-    for(let j = 0; j < count; j++) {
-      const i = indices[j];
-      arr[j*5+0] = elem.positions[i*3+0];
-      arr[j*5+1] = elem.positions[i*3+1];
-      arr[j*5+2] = elem.positions[i*3+2];
-      arr[j*5+3] = baseID + i;  // Keep original index for picking ID
-      arr[j*5+4] = sizes?.[i] ?? size;
+    if (sortedIndices) {
+      // Use sorted indices when available
+      for(let j = 0; j < count; j++) {
+        const i = sortedIndices[j];
+        arr[j*5+0] = elem.positions[i*3+0];
+        arr[j*5+1] = elem.positions[i*3+1];
+        arr[j*5+2] = elem.positions[i*3+2];
+        arr[j*5+3] = baseID + i;  // Keep original index for picking ID
+        arr[j*5+4] = sizes?.[i] ?? size;
+      }
+    } else {
+      // When no sorting, just use sequential access
+      for(let i = 0; i < count; i++) {
+        arr[i*5+0] = elem.positions[i*3+0];
+        arr[i*5+1] = elem.positions[i*3+1];
+        arr[i*5+2] = elem.positions[i*3+2];
+        arr[i*5+3] = baseID + i;
+        arr[i*5+4] = sizes?.[i] ?? size;
+      }
     }
     return arr;
   },
@@ -658,20 +704,14 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
-    // Create mapping from original index to sorted position
-    const indexToPosition = new Array(count);
-
-
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii && elem.radii.length >= count * 3 ? elem.radii : null;
 
+    const indexInfo = getIndicesAndMapping(count, sortedIndices);
+
     const arr = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
-      indexToPosition[indices[j]] = j
-      const i = indices[j];  // i is the original index, j is where it goes in sorted order
+      const i = getDataIndex(j, indexInfo);
       arr[j*10+0] = elem.centers[i*3+0];
       arr[j*10+1] = elem.centers[i*3+1];
       arr[j*10+2] = elem.centers[i*3+2];
@@ -704,7 +744,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
-      const j = indexToPosition[idx];  // Get the position where this index ended up
+      const j = getDecorationIndex(idx, indexInfo.indexToPosition);
       if(dec.color) {
         arr[j*10+6] = dec.color[0];
         arr[j*10+7] = dec.color[1];
@@ -734,25 +774,43 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     const hasValidRadii = elem.radii && elem.radii.length >= count * 3;
     const radii = hasValidRadii ? elem.radii : null;
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+    if (sortedIndices) {
+      // Use sorted indices when available
+      for(let j = 0; j < count; j++) {
+        const i = sortedIndices[j];
+        arr[j*7+0] = elem.centers[i*3+0];
+        arr[j*7+1] = elem.centers[i*3+1];
+        arr[j*7+2] = elem.centers[i*3+2];
 
-    for(let j = 0; j < count; j++) {
-      const i = indices[j];
-      arr[j*7+0] = elem.centers[i*3+0];
-      arr[j*7+1] = elem.centers[i*3+1];
-      arr[j*7+2] = elem.centers[i*3+2];
-
-      if(radii) {
-        arr[j*7+3] = radii[i*3+0];
-        arr[j*7+4] = radii[i*3+1];
-        arr[j*7+5] = radii[i*3+2];
-      } else {
-        arr[j*7+3] = defaultRadius[0];
-        arr[j*7+4] = defaultRadius[1];
-        arr[j*7+5] = defaultRadius[2];
+        if(radii) {
+          arr[j*7+3] = radii[i*3+0];
+          arr[j*7+4] = radii[i*3+1];
+          arr[j*7+5] = radii[i*3+2];
+        } else {
+          arr[j*7+3] = defaultRadius[0];
+          arr[j*7+4] = defaultRadius[1];
+          arr[j*7+5] = defaultRadius[2];
+        }
+        arr[j*7+6] = baseID + i;  // Keep original index for picking ID
       }
-      arr[j*7+6] = baseID + i;  // Keep original index for picking ID
+    } else {
+      // When no sorting, just use sequential access
+      for(let i = 0; i < count; i++) {
+        arr[i*7+0] = elem.centers[i*3+0];
+        arr[i*7+1] = elem.centers[i*3+1];
+        arr[i*7+2] = elem.centers[i*3+2];
+
+        if(radii) {
+          arr[i*7+3] = radii[i*3+0];
+          arr[i*7+4] = radii[i*3+1];
+          arr[i*7+5] = radii[i*3+2];
+        } else {
+          arr[i*7+3] = defaultRadius[0];
+          arr[i*7+4] = defaultRadius[1];
+          arr[i*7+5] = defaultRadius[2];
+        }
+        arr[i*7+6] = baseID + i;
+      }
     }
     return arr;
   },
@@ -908,23 +966,16 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
-    // Create mapping from original index to sorted position
-    const indexToPosition = new Array(count);
-    for(let j = 0; j < count; j++) {
-      indexToPosition[indices[j]] = j;
-    }
-
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii instanceof Float32Array && elem.radii.length >= count * 3 ? elem.radii : null;
+
+    const indexInfo = getIndicesAndMapping(count, sortedIndices);
 
     const ringCount = count * 3;
     const arr = new Float32Array(ringCount * 10);
 
     for(let j = 0; j < count; j++) {
-      const i = indices[j];
+      const i = getDataIndex(j, indexInfo);
       const cx = elem.centers[i*3+0];
       const cy = elem.centers[i*3+1];
       const cz = elem.centers[i*3+2];
@@ -976,7 +1027,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
-      const j = indexToPosition[idx];  // Get the position where this index ended up
+      const j = getDecorationIndex(idx, indexInfo.indexToPosition);
       // For each decorated ellipsoid, update all 3 of its rings
       for(let ring = 0; ring < 3; ring++) {
         const arrIdx = j*3 + ring;
@@ -1007,28 +1058,50 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     const ringCount = count * 3;
     const arr = new Float32Array(ringCount * 7);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+    if (sortedIndices) {
+      // Use sorted indices when available
+      for(let j = 0; j < count; j++) {
+        const i = sortedIndices[j];
+        const cx = elem.centers[i*3+0];
+        const cy = elem.centers[i*3+1];
+        const cz = elem.centers[i*3+2];
+        const rx = elem.radii?.[i*3+0] ?? defaultRadius[0];
+        const ry = elem.radii?.[i*3+1] ?? defaultRadius[1];
+        const rz = elem.radii?.[i*3+2] ?? defaultRadius[2];
+        const thisID = baseID + i;  // Keep original index for picking ID
 
-    for(let j = 0; j < count; j++) {
-      const i = indices[j];
-      const cx = elem.centers[i*3+0];
-      const cy = elem.centers[i*3+1];
-      const cz = elem.centers[i*3+2];
-      const rx = elem.radii?.[i*3+0] ?? defaultRadius[0];
-      const ry = elem.radii?.[i*3+1] ?? defaultRadius[1];
-      const rz = elem.radii?.[i*3+2] ?? defaultRadius[2];
-      const thisID = baseID + i;  // Keep original index for picking ID
+        for(let ring = 0; ring < 3; ring++) {
+          const idx = j*3 + ring;
+          arr[idx*7+0] = cx;
+          arr[idx*7+1] = cy;
+          arr[idx*7+2] = cz;
+          arr[idx*7+3] = rx;
+          arr[idx*7+4] = ry;
+          arr[idx*7+5] = rz;
+          arr[idx*7+6] = thisID;
+        }
+      }
+    } else {
+      // When no sorting, just use sequential access
+      for(let i = 0; i < count; i++) {
+        const cx = elem.centers[i*3+0];
+        const cy = elem.centers[i*3+1];
+        const cz = elem.centers[i*3+2];
+        const rx = elem.radii?.[i*3+0] ?? defaultRadius[0];
+        const ry = elem.radii?.[i*3+1] ?? defaultRadius[1];
+        const rz = elem.radii?.[i*3+2] ?? defaultRadius[2];
+        const thisID = baseID + i;
 
-      for(let ring = 0; ring < 3; ring++) {
-        const idx = j*3 + ring;
-        arr[idx*7+0] = cx;
-        arr[idx*7+1] = cy;
-        arr[idx*7+2] = cz;
-        arr[idx*7+3] = rx;
-        arr[idx*7+4] = ry;
-        arr[idx*7+5] = rz;
-        arr[idx*7+6] = thisID;
+        for(let ring = 0; ring < 3; ring++) {
+          const idx = i*3 + ring;
+          arr[idx*7+0] = cx;
+          arr[idx*7+1] = cy;
+          arr[idx*7+2] = cz;
+          arr[idx*7+3] = rx;
+          arr[idx*7+4] = ry;
+          arr[idx*7+5] = rz;
+          arr[idx*7+6] = thisID;
+        }
       }
     }
     return arr;
@@ -1160,21 +1233,16 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
-    // Create mapping from original index to sorted position
-    const indexToPosition = new Array(count);
-    for(let j = 0; j < count; j++) {
-      indexToPosition[indices[j]] = j;
-    }
-
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
 
+    // Create mapping from original index to sorted position if needed
+    const indexToPosition = sortedIndices ? new Array(count) : null;
+
     const arr = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
-      const i = indices[j];
+      const i = sortedIndices ? sortedIndices[j] : j;
+      if (indexToPosition) indexToPosition[i] = j;
       const cx = elem.centers[i*3+0];
       const cy = elem.centers[i*3+1];
       const cz = elem.centers[i*3+2];
@@ -1214,7 +1282,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
-      const j = indexToPosition[idx];  // Get the position where this index ended up
+      const j = indexToPosition ? indexToPosition[idx] : idx;  // Get the position where this index ended up
       if(dec.color) {
         arr[j*10+6] = dec.color[0];
         arr[j*10+7] = dec.color[1];
@@ -1241,35 +1309,58 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     const arr = new Float32Array(count * 7);
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
-
-    for(let j = 0; j < count; j++) {
-      const i = indices[j];
-      const scale = scales ? scales[i] : 1;
-      // Position
-      arr[j*7+0] = elem.centers[i*3+0];
-      arr[j*7+1] = elem.centers[i*3+1];
-      arr[j*7+2] = elem.centers[i*3+2];
-      // Size
-      arr[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
-      arr[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
-      arr[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
-      // Picking ID
-      arr[j*7+6] = baseID + i;  // Keep original index for picking ID
-    }
-
-    // Apply scale decorations
-    applyDecorations(elem.decorations, count, (idx, dec) => {
-      // Find the position of this index in the sorted array
-      const j = indices.indexOf(idx);
-      if (j !== -1 && dec.scale !== undefined) {
-        arr[j*7+3] *= dec.scale;
-        arr[j*7+4] *= dec.scale;
-        arr[j*7+5] *= dec.scale;
+    if (sortedIndices) {
+      // Use sorted indices when available
+      for(let j = 0; j < count; j++) {
+        const i = sortedIndices[j];
+        const scale = scales ? scales[i] : 1;
+        // Position
+        arr[j*7+0] = elem.centers[i*3+0];
+        arr[j*7+1] = elem.centers[i*3+1];
+        arr[j*7+2] = elem.centers[i*3+2];
+        // Size
+        arr[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
+        arr[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
+        arr[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+        // Picking ID
+        arr[j*7+6] = baseID + i;  // Keep original index for picking ID
       }
-    });
 
+      // Apply scale decorations for sorted case
+      applyDecorations(elem.decorations, count, (idx, dec) => {
+        // Find the position of this index in the sorted array
+        const j = sortedIndices.indexOf(idx);
+        if (j !== -1 && dec.scale !== undefined) {
+          arr[j*7+3] *= dec.scale;
+          arr[j*7+4] *= dec.scale;
+          arr[j*7+5] *= dec.scale;
+        }
+      });
+    } else {
+      // When no sorting, just use sequential access
+      for(let i = 0; i < count; i++) {
+        const scale = scales ? scales[i] : 1;
+        // Position
+        arr[i*7+0] = elem.centers[i*3+0];
+        arr[i*7+1] = elem.centers[i*3+1];
+        arr[i*7+2] = elem.centers[i*3+2];
+        // Size
+        arr[i*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
+        arr[i*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
+        arr[i*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+        // Picking ID
+        arr[i*7+6] = baseID + i;
+      }
+
+      // Apply scale decorations for unsorted case
+      applyDecorations(elem.decorations, count, (idx, dec) => {
+        if (dec.scale !== undefined) {
+          arr[idx*7+3] *= dec.scale;
+          arr[idx*7+4] *= dec.scale;
+          arr[idx*7+5] *= dec.scale;
+        }
+      });
+    }
     return arr;
   },
   renderConfig: {
@@ -1484,15 +1575,14 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       segIndex++;
     }
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: segCount}, (_, i) => i);
-
     const defaultSize = elem.size ?? 0.02;
     const sizes = elem.sizes instanceof Float32Array && elem.sizes.length >= segCount ? elem.sizes : null;
 
+    const indexInfo = getIndicesAndMapping(segCount, sortedIndices);
+
     const arr = new Float32Array(segCount * 11);
     for(let j = 0; j < segCount; j++) {
-      const i = indices[j];
+      const i = getDataIndex(j, indexInfo);
       const p = segmentMap[i];
       const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
 
@@ -1524,18 +1614,19 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       arr[j*11+10] = alphas ? alphas[lineIndex] : defaults.alpha;
     }
 
-    // Apply decorations last
+    // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, segCount, (idx, dec) => {
+      const j = getDecorationIndex(idx, indexInfo.indexToPosition);
       if(dec.color) {
-        arr[idx*11+7] = dec.color[0];
-        arr[idx*11+8] = dec.color[1];
-        arr[idx*11+9] = dec.color[2];
+        arr[j*11+7] = dec.color[0];
+        arr[j*11+8] = dec.color[1];
+        arr[j*11+9] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[idx*11+10] = dec.alpha;
+        arr[j*11+10] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[idx*11+6] *= dec.scale;
+        arr[j*11+6] *= dec.scale;
       }
     });
 
@@ -1565,34 +1656,61 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       segIndex++;
     }
 
-    // Use provided sorted indices if available, otherwise create sequential indices
-    const indices = sortedIndices || Array.from({length: segCount}, (_, i) => i);
+    if (sortedIndices) {
+      // Use sorted indices when available
+      for(let j = 0; j < segCount; j++) {
+        const i = sortedIndices[j];
+        const p = segmentMap[i];
+        const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
+        let size = elem.sizes?.[lineIndex] ?? defaultSize;
+        const scale = elem.scales?.[lineIndex] ?? 1.0;
 
-    for(let j = 0; j < segCount; j++) {
-      const i = indices[j];
-      const p = segmentMap[i];
-      const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
-      let size = elem.sizes?.[lineIndex] ?? defaultSize;
-      const scale = elem.scales?.[lineIndex] ?? 1.0;
+        size *= scale;
 
-      size *= scale;
+        // Apply decorations that affect size
+        applyDecorations(elem.decorations, lineIndex + 1, (idx, dec) => {
+          if(idx === lineIndex && dec.scale !== undefined) {
+            size *= dec.scale;
+          }
+        });
 
-      // Apply decorations that affect size
-      applyDecorations(elem.decorations, lineIndex + 1, (idx, dec) => {
-        if(idx === lineIndex && dec.scale !== undefined) {
-          size *= dec.scale;
-        }
-      });
+        const base = j * floatsPerSeg;
+        arr[base + 0] = elem.positions[p * 4 + 0];     // start.x
+        arr[base + 1] = elem.positions[p * 4 + 1];     // start.y
+        arr[base + 2] = elem.positions[p * 4 + 2];     // start.z
+        arr[base + 3] = elem.positions[(p+1) * 4 + 0]; // end.x
+        arr[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
+        arr[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
+        arr[base + 6] = size;                        // size
+        arr[base + 7] = baseID + i;                  // Keep original index for picking ID
+      }
+    } else {
+      // When no sorting, just use sequential access
+      for(let i = 0; i < segCount; i++) {
+        const p = segmentMap[i];
+        const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
+        let size = elem.sizes?.[lineIndex] ?? defaultSize;
+        const scale = elem.scales?.[lineIndex] ?? 1.0;
 
-      const base = j * floatsPerSeg;
-      arr[base + 0] = elem.positions[p * 4 + 0];     // start.x
-      arr[base + 1] = elem.positions[p * 4 + 1];     // start.y
-      arr[base + 2] = elem.positions[p * 4 + 2];     // start.z
-      arr[base + 3] = elem.positions[(p+1) * 4 + 0]; // end.x
-      arr[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
-      arr[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
-      arr[base + 6] = size;                        // size
-      arr[base + 7] = baseID + i;                  // Keep original index for picking ID
+        size *= scale;
+
+        // Apply decorations that affect size
+        applyDecorations(elem.decorations, lineIndex + 1, (idx, dec) => {
+          if(idx === lineIndex && dec.scale !== undefined) {
+            size *= dec.scale;
+          }
+        });
+
+        const base = i * floatsPerSeg;
+        arr[base + 0] = elem.positions[p * 4 + 0];     // start.x
+        arr[base + 1] = elem.positions[p * 4 + 1];     // start.y
+        arr[base + 2] = elem.positions[p * 4 + 2];     // start.z
+        arr[base + 3] = elem.positions[(p+1) * 4 + 0]; // end.x
+        arr[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
+        arr[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
+        arr[base + 6] = size;                        // size
+        arr[base + 7] = baseID + i;                  // Keep original index for picking ID
+      }
     }
     return arr;
   },

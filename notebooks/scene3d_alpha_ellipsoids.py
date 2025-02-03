@@ -27,7 +27,7 @@ def generate_cluster_colors(n_items, base_color=None, variation=0.1):
 
 
 def calculate_distance_based_values(
-    positions, center, alpha_range=(0.1, 0.8), scale_range=(0.3, 1.0)
+    positions, center, alpha_range=(0.01, 0.8), scale_range=(0.3, 1.0)
 ):
     """Calculate alpha and scale values based on distance from center."""
     distances = np.linalg.norm(positions - center, axis=1)
@@ -231,3 +231,38 @@ def create_animated_clusters_scene(
 # Display animated clusters scene
 animated_scene = create_animated_clusters_scene()
 animated_scene
+
+# %% Test transparency sorting with overlapping ellipsoids
+print("Testing transparency sorting with overlapping ellipsoids...")
+
+test_scene = Ellipsoid(
+    centers=np.array(
+        [
+            [0, 0, 0],  # Back ellipsoid
+            [0, 0, 0.5],  # Middle ellipsoid
+            [0, 0, 1.0],  # Front ellipsoid
+        ]
+    ),
+    colors=np.array(
+        [
+            [0, 1, 0],  # Green for all
+            [0, 1, 0],
+            [0, 1, 0],
+        ]
+    ),
+    alphas=np.array([0.9, 0.5, 0.2]),  # High to low alpha from back to front
+    radius=[0.5, 0.5, 0.5],  # Same size for all
+) + (
+    {
+        "defaultCamera": {
+            "position": [2, 2, 2],
+            "target": [0, 0, 0.5],  # Center the view on middle of ellipsoids
+            "up": [0, 0, 1],
+            "fov": 45,
+            "near": 0.1,
+            "far": 100,
+        }
+    }
+)
+
+test_scene

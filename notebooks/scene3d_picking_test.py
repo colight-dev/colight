@@ -13,6 +13,7 @@ scene_points = PointCloud(
     positions=np.array([[-2, 0, 0], [-2, 0, 1], [-2, 1, 0], [-2, 1, 1]]),
     colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1]]),
     size=0.2,
+    alpha=0.7,
     onHover=js("(i) => $state.update({hover_point: typeof i === 'number' ? [i] : []})"),
     decorations=[
         deco(
@@ -117,6 +118,7 @@ scene_beams = LineBeams(
     ).reshape(-1),
     colors=np.array([[1, 0, 0], [0, 1, 0]]),
     size=0.1,
+    alpha=0.7,
     onHover=js("(i) => $state.update({hover_beam: typeof i === 'number' ? [i] : []})"),
     decorations=[
         deco(
@@ -208,6 +210,7 @@ scene_grid_cuboids = Cuboid(
     centers=positions,
     colors=colors,
     size=0.3,
+    alpha=0.85,
     onHover=js(
         "(i) => $state.update({hover_grid_cuboid: typeof i === 'number' ? [i] : []})"
     ),
