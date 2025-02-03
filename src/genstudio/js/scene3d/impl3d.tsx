@@ -259,9 +259,9 @@ interface PrimitiveSpec<E> {
    * Returns a Float32Array containing interleaved vertex attributes,
    * or null if the component has no renderable data.
    * @param component The component to build render data for
-   * @param cameraPosition The current camera position [x,y,z]
+   * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildRenderData(component: E, cameraPosition: [number, number, number], sortedIndices?: number[]): Float32Array | null;
+  buildRenderData(component: E, sortedIndices?: number[]): Float32Array | null;
 
   /**
    * Builds vertex buffer data for GPU-based picking.
@@ -417,7 +417,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return elem.positions.length / 3;
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
+  buildRenderData(elem, sortedIndices?: number[]) {
     const count = elem.positions.length / 3;
     if(count === 0) return null;
 
@@ -644,35 +644,27 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return elem.centers.length / 3;
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number]) {
+  buildRenderData(elem, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
 
-    // Use helper to check for transparency
-    const needsSorting = hasTransparency(alphas, defaults.alpha, elem.decorations);
+    // Use provided sorted indices if available, otherwise create sequential indices
+    const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
 
-    // Get indices (sorted if transparent)
-    let indices;
-    if (needsSorting) {
-      const sortStart = performance.now();
-      indices = getSortedIndices(elem.centers, cameraPosition);
-      const sortEnd = performance.now();
-      // console.log(`Depth sorting ${count} ellipsoids took ${sortEnd - sortStart}ms`);
-    } else {
-      indices = Array.from({length: count}, (_, i) => i);
-    }
+    // Create mapping from original index to sorted position
+    const indexToPosition = new Array(count);
+
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii && elem.radii.length >= count * 3 ? elem.radii : null;
 
     const arr = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
-      const i = indices[j];
-
-      // Centers
+      indexToPosition[indices[j]] = j
+      const i = indices[j];  // i is the original index, j is where it goes in sorted order
       arr[j*10+0] = elem.centers[i*3+0];
       arr[j*10+1] = elem.centers[i*3+1];
       arr[j*10+2] = elem.centers[i*3+2];
@@ -703,19 +695,21 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
       arr[j*10+9] = alphas ? alphas[i] : defaults.alpha;
     }
 
+    // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
+      const j = indexToPosition[idx];  // Get the position where this index ended up
       if(dec.color) {
-        arr[idx*10+6] = dec.color[0];
-        arr[idx*10+7] = dec.color[1];
-        arr[idx*10+8] = dec.color[2];
+        arr[j*10+6] = dec.color[0];
+        arr[j*10+7] = dec.color[1];
+        arr[j*10+8] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[idx*10+9] = dec.alpha;
+        arr[j*10+9] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[idx*10+3] *= dec.scale;
-        arr[idx*10+4] *= dec.scale;
-        arr[idx*10+5] *= dec.scale;
+        arr[j*10+3] *= dec.scale;
+        arr[j*10+4] *= dec.scale;
+        arr[j*10+5] *= dec.scale;
       }
     });
 
@@ -896,7 +890,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return (elem.centers.length / 3) * 3;
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
+  buildRenderData(elem, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -905,6 +899,12 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
 
     // Use provided sorted indices if available, otherwise create sequential indices
     const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    // Create mapping from original index to sorted position
+    const indexToPosition = new Array(count);
+    for(let j = 0; j < count; j++) {
+      indexToPosition[indices[j]] = j;
+    }
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const radii = elem.radii instanceof Float32Array && elem.radii.length >= count * 3 ? elem.radii : null;
@@ -963,11 +963,12 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       }
     }
 
-    // Apply decorations last
+    // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
+      const j = indexToPosition[idx];  // Get the position where this index ended up
       // For each decorated ellipsoid, update all 3 of its rings
       for(let ring = 0; ring < 3; ring++) {
-        const arrIdx = idx*3 + ring;
+        const arrIdx = j*3 + ring;
         if(dec.color) {
           arr[arrIdx*10+6] = dec.color[0];
           arr[arrIdx*10+7] = dec.color[1];
@@ -1137,7 +1138,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getCount(elem){
     return elem.centers.length / 3;
   },
-  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
+  buildRenderData(elem, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -1146,6 +1147,12 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     // Use provided sorted indices if available, otherwise create sequential indices
     const indices = sortedIndices || Array.from({length: count}, (_, i) => i);
+
+    // Create mapping from original index to sorted position
+    const indexToPosition = new Array(count);
+    for(let j = 0; j < count; j++) {
+      indexToPosition[indices[j]] = j;
+    }
 
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
@@ -1190,19 +1197,21 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
       arr[idx+9] = alpha;
     }
 
+    // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
+      const j = indexToPosition[idx];  // Get the position where this index ended up
       if(dec.color) {
-        arr[idx*10+6] = dec.color[0];
-        arr[idx*10+7] = dec.color[1];
-        arr[idx*10+8] = dec.color[2];
+        arr[j*10+6] = dec.color[0];
+        arr[j*10+7] = dec.color[1];
+        arr[j*10+8] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[idx*10+9] = dec.alpha;
+        arr[j*10+9] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[idx*10+3] *= dec.scale;
-        arr[idx*10+4] *= dec.scale;
-        arr[idx*10+5] *= dec.scale;
+        arr[j*10+3] *= dec.scale;
+        arr[j*10+4] *= dec.scale;
+        arr[j*10+5] *= dec.scale;
       }
     });
 
@@ -1429,7 +1438,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return countSegments(elem.positions);
   },
 
-  buildRenderData(elem, cameraPosition: [number, number, number], sortedIndices?: number[]) {
+  buildRenderData(elem, sortedIndices?: number[]) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return null;
 
@@ -2389,11 +2398,7 @@ export function SceneInner({
       (comp, spec) => {
         const idx = components.indexOf(comp);
         const sortedIndices = globalSortedIndices?.get(idx);
-        return spec.buildRenderData(comp, [
-          activeCamera.position[0],
-          activeCamera.position[1],
-          activeCamera.position[2]
-        ], sortedIndices);
+        return spec.buildRenderData(comp, sortedIndices);
       },
       (data, count) => {
         const stride = Math.ceil(data.length / count) * 4;
