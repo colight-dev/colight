@@ -1,3 +1,5 @@
+export type TypedArray = Int8Array | Int16Array | Int32Array | BigInt64Array | Uint8Array | Uint16Array | Uint32Array | BigUint64Array | Uint8ClampedArray | Float32Array | Float64Array;
+
 /**
  * Reshapes a flat array into a nested array structure based on the provided dimensions.
  * The input array can be either a TypedArray (like Float32Array) or regular JavaScript Array.
@@ -42,9 +44,14 @@ const dtypeMap = {
   'int8': Int8Array,
   'int16': Int16Array,
   'int32': Int32Array,
+  'int64': BigInt64Array,
   'uint8': Uint8Array,
   'uint16': Uint16Array,
   'uint32': Uint32Array,
+  'uint64': BigUint64Array,
+  'uint8clamped': Uint8ClampedArray,
+  'bigint64': BigInt64Array,
+  'biguint64': BigUint64Array,
 };
 
 /**
