@@ -323,6 +323,7 @@ function applyDecorations(
 ) {
   if (!decorations) return;
   for (const dec of decorations) {
+    if (!dec.indexes) continue;
     for (const idx of dec.indexes) {
       if (idx < 0 || idx >= instanceCount) continue;
       setter(idx, dec);
@@ -1104,9 +1105,9 @@ fn vs_cuboid(
   @location(3) size: vec3<f32>,
   @location(4) pickID: f32
 )-> VSOut {
-  let wp = center + (inPos * size);
+  let worldPos = center + (inPos * size);
   var out: VSOut;
-  out.pos = camera.mvp*vec4<f32>(wp,1.0);
+  out.pos = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
   return out;
 }`;
@@ -1228,12 +1229,15 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
     const arr = new Float32Array(count * 7);
     for(let i = 0; i < count; i++) {
       const scale = scales ? scales[i] : 1;
+      // Position
       arr[i*7+0] = elem.centers[i*3+0];
       arr[i*7+1] = elem.centers[i*3+1];
       arr[i*7+2] = elem.centers[i*3+2];
+      // Size
       arr[i*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
       arr[i*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
       arr[i*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+      // Picking ID
       arr[i*7+6] = baseID + i;
     }
 
@@ -1881,12 +1885,12 @@ const ELLIPSOID_INSTANCE_LAYOUT: VertexBufferLayout = {
 };
 
 const MESH_PICKING_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 7*4,
+  arrayStride: 7*4,  // 7 floats: position(3) + size(3) + pickID(1)
   stepMode: 'instance',
   attributes: [
-    {shaderLocation: 2, offset: 0,   format: 'float32x3'},
-    {shaderLocation: 3, offset: 3*4, format: 'float32x3'},
-    {shaderLocation: 4, offset: 6*4, format: 'float32'}
+    {shaderLocation: 2, offset: 0,   format: 'float32x3'},  // center
+    {shaderLocation: 3, offset: 3*4, format: 'float32x3'},  // size
+    {shaderLocation: 4, offset: 6*4, format: 'float32'}     // pickID
   ]
 };
 
@@ -1975,9 +1979,10 @@ export function SceneInner({
     renderObjects: RenderObject[];
     componentBaseId: number[];
     idToComponent: ({componentIdx: number, instanceIdx: number} | null)[];
-    pipelineCache: Map<string, PipelineCacheEntry>;  // Add this
+    pipelineCache: Map<string, PipelineCacheEntry>;
     dynamicBuffers: DynamicBuffers | null;
-    resources: GeometryResources;  // Add this
+    resources: GeometryResources;
+    transparencyState: TransparencyState | null;  // Add this field
   } | null>(null);
 
   const [isReady, setIsReady] = useState(false);
@@ -2082,7 +2087,8 @@ export function SceneInner({
           EllipsoidAxes: null,
           Cuboid: null,
           LineBeams: null
-        }
+        },
+        transparencyState: null
       };
 
       // Now initialize geometry resources
@@ -2260,7 +2266,26 @@ export function SceneInner({
     offset: number;
   }
 
-  // Add this before buildRenderObjects
+  interface TransparentObject {
+    componentIndex: number;
+    info: TransparencyInfo;
+  }
+
+  interface ComponentRange {
+    start: number;
+    count: number;
+    componentIndex: number;
+  }
+
+  interface TransparencyState {
+    objects: TransparentObject[];
+    allCenters: Float32Array;
+    componentRanges: ComponentRange[];
+    lastCameraPosition?: [number, number, number];
+    lastSortedIndices?: Map<number, number[]>;
+  }
+
+   // Add this before buildRenderObjects
   function getTransparencyInfo(component: ComponentConfig, spec: PrimitiveSpec<any>): TransparencyInfo | null {
     const count = spec.getCount(component);
     if (count === 0) return null;
@@ -2316,16 +2341,10 @@ export function SceneInner({
     }
   }
 
-  // Update buildRenderObjects to handle global sorting
-  function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
-    if(!gpuRef.current) return [];
-    const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
-
+  // Add this before buildRenderObjects
+  function initTransparencyState(components: ComponentConfig[]): TransparencyState | null {
     // First collect all transparent objects that need sorting
-    const transparentObjects: {
-      componentIndex: number;
-      info: TransparencyInfo;
-    }[] = [];
+    const objects: TransparentObject[] = [];
 
     components.forEach((comp, idx) => {
       const spec = primitiveRegistry[comp.type];
@@ -2333,63 +2352,110 @@ export function SceneInner({
 
       const info = getTransparencyInfo(comp, spec);
       if (info) {
-        transparentObjects.push({ componentIndex: idx, info });
+        objects.push({ componentIndex: idx, info });
       }
     });
 
-    // If we have transparent objects, sort them globally
-    let globalSortedIndices: Map<number, number[]> | null = null;
-    if (transparentObjects.length > 0) {
-      // Combine all centers into one array
-      const totalCount = transparentObjects.reduce((sum, obj) =>
-        sum + obj.info.centers.length / obj.info.stride, 0);
-      const allCenters = new Float32Array(totalCount * 3);
-      const componentRanges: { start: number; count: number; componentIndex: number }[] = [];
+    if (objects.length === 0) return null;
 
-      let offset = 0;
-      transparentObjects.forEach(({ componentIndex, info }) => {
-        const count = info.centers.length / info.stride;
-        const start = offset / 3;
+    // Combine all centers into one array
+    const totalCount = objects.reduce((sum, obj) =>
+      sum + obj.info.centers.length / obj.info.stride, 0);
+    const allCenters = new Float32Array(totalCount * 3);
+    const componentRanges: ComponentRange[] = [];
 
-        // Copy centers to combined array
-        for (let i = 0; i < count; i++) {
-          const srcIdx = i * info.stride + info.offset;
-          allCenters[offset + i*3 + 0] = info.centers[srcIdx + 0];
-          allCenters[offset + i*3 + 1] = info.centers[srcIdx + 1];
-          allCenters[offset + i*3 + 2] = info.centers[srcIdx + 2];
+    let offset = 0;
+    objects.forEach(({ componentIndex, info }) => {
+      const count = info.centers.length / info.stride;
+      const start = offset / 3;
+
+      // Copy centers to combined array
+      for (let i = 0; i < count; i++) {
+        const srcIdx = i * info.stride + info.offset;
+        allCenters[offset + i*3 + 0] = info.centers[srcIdx + 0];
+        allCenters[offset + i*3 + 1] = info.centers[srcIdx + 1];
+        allCenters[offset + i*3 + 2] = info.centers[srcIdx + 2];
+      }
+
+      componentRanges.push({ start, count, componentIndex });
+      offset += count * 3;
+    });
+
+    return {
+      objects,
+      allCenters,
+      componentRanges,
+      lastCameraPosition: undefined
+    };
+  }
+
+  function updateTransparencySorting(
+    state: TransparencyState,
+    cameraPosition: [number, number, number]
+  ): Map<number, number[]> {
+    // If camera hasn't moved significantly, reuse existing sort
+    if (state.lastCameraPosition) {
+      const dx = cameraPosition[0] - state.lastCameraPosition[0];
+      const dy = cameraPosition[1] - state.lastCameraPosition[1];
+      const dz = cameraPosition[2] - state.lastCameraPosition[2];
+      const moveDistSq = dx*dx + dy*dy + dz*dz;
+      if (moveDistSq < 0.0001) { // Small threshold to avoid unnecessary resorting
+        return state.lastSortedIndices!;
+      }
+    }
+
+    // Sort all centers together
+    const sortedIndices = getSortedIndices(state.allCenters, cameraPosition);
+
+    // Map global sorted indices back to per-component indices
+    const globalSortedIndices = new Map<number, number[]>();
+    sortedIndices.forEach((globalIdx, sortedIdx) => {
+      // Find which component this index belongs to
+      for (const range of state.componentRanges) {
+        if (globalIdx >= range.start && globalIdx < range.start + range.count) {
+          const componentIdx = range.componentIndex;
+          const localIdx = globalIdx - range.start;
+
+          let indices = globalSortedIndices.get(componentIdx);
+          if (!indices) {
+            indices = [];
+            globalSortedIndices.set(componentIdx, indices);
+          }
+          indices.push(localIdx);
+          break;
         }
+      }
+    });
 
-        componentRanges.push({ start, count, componentIndex });
-        offset += count * 3;
-      });
+    // Update camera position
+    state.lastCameraPosition = cameraPosition;
+    state.lastSortedIndices = globalSortedIndices;
 
-      // Sort all centers together
+    return globalSortedIndices;
+  }
+
+  // Update buildRenderObjects to use the new transparency state
+  function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
+    if(!gpuRef.current) return [];
+    const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
+
+    // Initialize or update transparency state
+    if (!gpuRef.current.transparencyState) {
+      gpuRef.current.transparencyState = initTransparencyState(components);
+    }
+
+    // Get sorted indices if we have transparent objects
+    let globalSortedIndices: Map<number, number[]> | null = null;
+    if (gpuRef.current.transparencyState) {
       const cameraPos: [number, number, number] = [
         activeCamera.position[0],
         activeCamera.position[1],
         activeCamera.position[2]
       ];
-      const sortedIndices = getSortedIndices(allCenters, cameraPos);
-
-      // Map global sorted indices back to per-component indices
-      globalSortedIndices = new Map();
-      sortedIndices.forEach((globalIdx, sortedIdx) => {
-        // Find which component this index belongs to
-        for (const range of componentRanges) {
-          if (globalIdx >= range.start && globalIdx < range.start + range.count) {
-            const componentIdx = range.componentIndex;
-            const localIdx = globalIdx - range.start;
-
-            let indices = globalSortedIndices!.get(componentIdx);
-            if (!indices) {
-              indices = [];
-              globalSortedIndices!.set(componentIdx, indices);
-            }
-            indices.push(localIdx);
-            break;
-          }
-        }
-      });
+      globalSortedIndices = updateTransparencySorting(
+        gpuRef.current.transparencyState,
+        cameraPos
+      );
     }
 
     // Collect render data using helper, now with global sorting
@@ -2518,14 +2584,59 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
   );
 }
 
+  // Add this function to update sorted data in buffers
+  function updateSortedBuffers(
+    renderObjects: RenderObject[],
+    components: ComponentConfig[],
+    globalSortedIndices: Map<number, number[]>
+  ) {
+    if (!gpuRef.current?.device || !gpuRef.current.dynamicBuffers) return;
+    const { device } = gpuRef.current;
+
+    // For each render object that needs sorting
+    renderObjects.forEach(ro => {
+      const component = components[ro.componentIndex];
+      const spec = primitiveRegistry[component.type];
+      if (!spec) return;
+
+      const sortedIndices = globalSortedIndices.get(ro.componentIndex);
+      if (!sortedIndices) return;
+
+      // Rebuild render data with new sorting
+      const data = spec.buildRenderData(component, sortedIndices);
+      if (!data) return;
+
+      // Update buffer with new sorted data
+      const vertexInfo = ro.vertexBuffers[1] as BufferInfo;
+      device.queue.writeBuffer(
+        vertexInfo.buffer,
+        vertexInfo.offset,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength
+      );
+    });
+  }
+
   const renderFrame = useCallback((camState: CameraState) => {
     if(!gpuRef.current) return;
     const {
       device, context, uniformBuffer, uniformBindGroup,
-      renderObjects, depthTexture
+      renderObjects, depthTexture, transparencyState
     } = gpuRef.current;
 
-    const startTime = performance.now();  // Add timing measurement
+    const startTime = performance.now();
+
+    // Check if we need to update transparency sorting
+    if (transparencyState) {
+      const cameraPos: [number, number, number] = [
+        camState.position[0],
+        camState.position[1],
+        camState.position[2]
+      ];
+      const sortedIndices = updateTransparencySorting(transparencyState, cameraPos);
+      updateSortedBuffers(renderObjects, components, sortedIndices);
+    }
 
     // Update camera uniforms
     const aspect = containerWidth / containerHeight;
@@ -2600,14 +2711,11 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         continue;
       }
 
-      // Now TypeScript knows ro.pipeline is defined
       pass.setPipeline(ro.pipeline);
       pass.setBindGroup(0, uniformBindGroup);
 
-      // And ro.vertexBuffers[0] is defined
       pass.setVertexBuffer(0, ro.vertexBuffers[0]);
 
-      // And ro.vertexBuffers[1] is defined
       const instanceInfo = ro.vertexBuffers[1];
       pass.setVertexBuffer(1, instanceInfo.buffer, instanceInfo.offset);
 
@@ -2626,7 +2734,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     const endTime = performance.now();
     const frameTime = endTime - startTime;
     onFrameRendered?.(frameTime);
-  }, [containerWidth, containerHeight, onFrameRendered]);  // Add onFrameRendered to deps
+  }, [containerWidth, containerHeight, onFrameRendered, components]);
 
   /******************************************************
    * E) Pick pass (on hover/click)
@@ -2646,11 +2754,12 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       if (currentPickingId !== pickingId) return;
 
       // Ensure picking data is ready for all objects
-      renderObjects.forEach((ro, i) => {
+      for (let i = 0; i < renderObjects.length; i++) {
+        const ro = renderObjects[i];
         if (ro.pickingDataStale) {
           ensurePickingData(ro, components[i]);
         }
-      });
+      }
 
       // Convert screen coordinates to device pixels
       const dpr = window.devicePixelRatio || 1;
@@ -2683,21 +2792,18 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       pass.setBindGroup(0, uniformBindGroup);
 
       for(const ro of renderObjects) {
-        if (!ro.pickingPipeline || !ro.pickingVertexBuffers || ro.pickingVertexBuffers.length !== 2) {
+        if (!ro.pickingPipeline || !ro.pickingVertexBuffers[0] || !ro.pickingVertexBuffers[1]) {
           continue;
         }
 
         pass.setPipeline(ro.pickingPipeline);
 
-        // Set geometry buffer (always first)
-        const geometryBuffer = ro.pickingVertexBuffers[0];
-        pass.setVertexBuffer(0, geometryBuffer);
+        // Set geometry buffer
+        pass.setVertexBuffer(0, ro.pickingVertexBuffers[0]);
 
-        // Set instance buffer (always second)
-        const instanceInfo = ro.pickingVertexBuffers[1];
-        if (instanceInfo) {
-          pass.setVertexBuffer(1, instanceInfo.buffer, instanceInfo.offset);
-        }
+        // Set instance buffer
+        const instanceInfo = ro.pickingVertexBuffers[1] as BufferInfo;
+        pass.setVertexBuffer(1, instanceInfo.buffer, instanceInfo.offset);
 
         if(ro.pickingIndexBuffer) {
           pass.setIndexBuffer(ro.pickingIndexBuffer, 'uint16');
