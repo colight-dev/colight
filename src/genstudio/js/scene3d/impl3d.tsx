@@ -161,6 +161,7 @@ export interface RenderObject {
     stride: number;
     offset: number;
     lastCameraPosition?: [number, number, number];
+    sortedIndices?: number[];  // Store the most recent sorting
   };
 }
 
@@ -2188,8 +2189,9 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         if (moveDistSq < 0.0001) return; // Skip if camera hasn't moved much
       }
 
-      // Get sorted indices
+      // Get sorted indices and store them
       const sortedIndices = getSortedIndices(ro.transparencyInfo.centers, cameraPos);
+      ro.transparencyInfo.sortedIndices = sortedIndices;  // Save for picking
 
       // Update buffer with sorted data
       const component = components[ro.componentIndex];
@@ -2677,72 +2679,46 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 
     const { device, bindGroupLayout, pipelineCache } = gpuRef.current;
 
-    // Get sorted indices if we have transparency
-    let sortedIndices: number[] | undefined;
-    if (renderObject.transparencyInfo?.needsSort) {
-      sortedIndices = getSortedIndices(
-        renderObject.transparencyInfo.centers,
-        renderObject.transparencyInfo.lastCameraPosition ?? [0, 0, 0]
-      );
-    }
+    // Just use the stored indices - no need to recalculate!
+    const sortedIndices = renderObject.transparencyInfo?.sortedIndices;
 
-    // Collect picking data using helper
-    const typeArrays = collectTypeData(
-      components,
-      (comp, spec) => {
-        const idx = components.indexOf(comp);
-        return spec.buildPickingData(comp, gpuRef.current!.componentBaseId[idx], sortedIndices);
-      },
-      (data, count) => {
-        const stride = Math.ceil(data.length / count) * 4;
-        return stride * count;
-      }
+    // Build picking data with same sorting as render
+    const spec = primitiveRegistry[component.type];
+    const pickingData = spec.buildPickingData(
+      component,
+      gpuRef.current.componentBaseId[renderObject.componentIndex],
+      sortedIndices  // Use stored indices
     );
 
-    // Get data for this component's type
-    const typeInfo = typeArrays.get(component.type);
-    if (!typeInfo) return;
-
-    const spec = primitiveRegistry[component.type];
-    if (!spec) return;
-
-    try {
+    if (pickingData) {
       const pickingOffset = Math.ceil(gpuRef.current.dynamicBuffers!.pickingOffset / 4) * 4;
 
-      // Write all picking data for this type
-      typeInfo.datas.forEach((data, i) => {
-        device.queue.writeBuffer(
-          gpuRef.current!.dynamicBuffers!.pickingBuffer,
-          pickingOffset + typeInfo.offsets[i],
-          data.buffer,
-          data.byteOffset,
-          data.byteLength
-        );
-      });
+      // Write picking data to buffer
+      device.queue.writeBuffer(
+        gpuRef.current.dynamicBuffers!.pickingBuffer,
+        pickingOffset,
+        pickingData.buffer,
+        pickingData.byteOffset,
+        pickingData.byteLength
+      );
 
-      // Update picking offset
-      gpuRef.current.dynamicBuffers!.pickingOffset = pickingOffset + typeInfo.totalSize;
-
-      // Set picking buffers with offset info
-      const stride = Math.ceil(typeInfo.datas[0].length / typeInfo.counts[0]) * 4;
+      // Set up picking pipeline and buffers
+      renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
       renderObject.pickingVertexBuffers = [
         renderObject.vertexBuffers[0],
         {
           buffer: gpuRef.current.dynamicBuffers!.pickingBuffer,
           offset: pickingOffset,
-          stride: stride
+          stride: Math.ceil(pickingData.length / (renderObject.instanceCount || 1)) * 4
         }
       ];
-
-      // Set up picking pipeline and other properties
-      renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
       renderObject.pickingIndexBuffer = renderObject.indexBuffer;
       renderObject.pickingIndexCount = renderObject.indexCount;
-      renderObject.pickingInstanceCount = typeInfo.totalCount;
+      renderObject.pickingInstanceCount = renderObject.instanceCount;
       renderObject.pickingDataStale = false;
 
-    } catch (error) {
-      console.error(`Error ensuring picking data for type ${component.type}:`, error);
+      // Update picking offset
+      gpuRef.current.dynamicBuffers!.pickingOffset = pickingOffset + pickingData.byteLength;
     }
   }, [components]);
 
