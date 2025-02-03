@@ -70,7 +70,7 @@ scene_cuboids = Cuboid(
     alphas=np.array([0.5, 0.7, 0.9]),
     size=0.8,
     onHover=js(
-        "(i) => $state.update({hover_cuboid: typeof i === 'number' ? [i+1] : []})"
+        "(i) => $state.update({hover_cuboid: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
         deco(
@@ -180,4 +180,57 @@ mixed_scene = (
 )
 
 (scene_points & scene_beams | scene_cuboids & scene_ellipsoids | mixed_scene)
+
+# %% 6) Generated Cuboid Grid Picking
+print(
+    "Test 6: Generated Cuboid Grid.\nHover over cuboids in a programmatically generated grid pattern."
+)
+
+# Generate a 4x4x2 grid of cuboids with systematic colors
+x, y, z = np.meshgrid(
+    np.linspace(4, 5.5, 4), np.linspace(-2, -0.5, 4), np.linspace(0, 1, 2)
+)
+positions = np.column_stack((x.ravel(), y.ravel(), z.ravel()))
+
+# Generate colors based on position
+colors = np.zeros((len(positions), 3))
+colors[:, 0] = (positions[:, 0] - positions[:, 0].min()) / (
+    positions[:, 0].max() - positions[:, 0].min()
+)
+colors[:, 1] = (positions[:, 1] - positions[:, 1].min()) / (
+    positions[:, 1].max() - positions[:, 1].min()
+)
+colors[:, 2] = (positions[:, 2] - positions[:, 2].min()) / (
+    positions[:, 2].max() - positions[:, 2].min()
+)
+
+scene_grid_cuboids = Cuboid(
+    centers=positions,
+    colors=colors,
+    size=0.3,
+    onHover=js(
+        "(i) => $state.update({hover_grid_cuboid: typeof i === 'number' ? [i] : []})"
+    ),
+    decorations=[
+        deco(
+            js("$state.hover_grid_cuboid"),
+            color=[1, 1, 0],
+            scale=1.2,
+        ),
+    ],
+) + (
+    {
+        "defaultCamera": {
+            **DEFAULT_CAMERA,
+            "position": [6, -4, 2],
+            "target": [4.75, -1.25, 0.5],
+        }
+    }
+)
+
+(
+    scene_points & scene_beams
+    | scene_cuboids & scene_ellipsoids
+    | mixed_scene & scene_grid_cuboids
+)
 # %%
