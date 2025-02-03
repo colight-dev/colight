@@ -68,13 +68,13 @@ print(
 cuboid_component = Cuboid(
     centers=np.array([[-4, 0, 0.5]]),
     colors=np.array([[1, 0.5, 0]]),
-    alphas=np.array([1.0]),
+    alphas=np.array([0.5]),
     size=[1, 1, 1],
 )
 pointcloud_component = PointCloud(
     positions=np.array([[-4, 0, 0]]),
     colors=np.array([[0, 1, 1]]),
-    alphas=np.array([1.0]),
+    alphas=np.array([0.8]),
     size=0.2,
 )
 scene_order = (
@@ -93,6 +93,7 @@ scene_order = (
 scene_order
 
 # %% 4) Per-Instance Alpha Overrides (Point Cloud)
+# ISSUE - blending only visible from one direction?
 print(
     "Test 4: Per-Instance Alpha Overrides.\n"
     "Four vertical points with alternating opaque/semi-transparent alphas."
@@ -129,7 +130,7 @@ scene_deco = Cuboid(
     size=[0.8, 0.8, 0.8],
     decorations=[
         # Override instance index 1: change color to red, set alpha to 0.5, and scale up by 1.2.
-        deco(1, color=[1, 0, 0], alpha=0.5, scale=1.2)
+        deco(1, color=[1.0, 0.0, 0.0], alpha=0.5, scale=1.2)
     ],
 ) + (
     {
@@ -143,6 +144,7 @@ scene_deco = Cuboid(
 scene_deco
 
 # %% 6) Extreme Alpha Values (Ellipsoids)
+# ISSUE: nearly invisible shows background color (occluding) rather than showing the other item
 print(
     "Test 6: Extreme Alpha Values.\n"
     "Two ellipsoids: one nearly invisible (α=0.01), one almost opaque (α=0.99)."
@@ -151,7 +153,7 @@ print(
 scene_extreme = Ellipsoid(
     centers=np.array([[-6, -2, 0], [-6, -2, 0.5]]),
     colors=np.array([[0.2, 0.2, 0.2], [0.9, 0.9, 0.9]]),
-    alphas=np.array([0.01, 0.99]),
+    alphas=np.array([0.1, 0.99]),
     radius=[0.4, 0.4, 0.4],
 ) + (
     {
@@ -217,11 +219,13 @@ pointcloud_component1 = PointCloud(
     positions=np.array([[-2, 2, 0.2]]),
     colors=np.array([[0, 0.5, 0]]),
     size=0.15,
+    alpha=0.5,
 )
 pointcloud_component2 = PointCloud(
     positions=np.array([[-2, 2, 0]]),
     colors=np.array([[0.5, 0, 0.5]]),
     size=0.15,
+    alpha=0.5,
 )
 
 scene_insertion = (pointcloud_component1 + pointcloud_component2) + (

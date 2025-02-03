@@ -21,6 +21,8 @@ function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
     const value = obj[field];
     if (Array.isArray(value)) {
       (result[field] as any) = new Float32Array(value);
+    } else if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
+      (result[field] as any) = new Float32Array(value);
     }
   }
   return result;
