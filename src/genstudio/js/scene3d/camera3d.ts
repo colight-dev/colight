@@ -1,9 +1,10 @@
 import * as glMatrix from 'gl-matrix';
+import type { TypedArray } from '../binary';
 
 export interface CameraParams {
-    position: [number, number, number];
-    target: [number, number, number];
-    up: [number, number, number];
+    position: [number, number, number] | TypedArray;
+    target: [number, number, number] | TypedArray;
+    up: [number, number, number] | TypedArray;
     fov: number;
     near: number;
     far: number;
@@ -22,23 +23,36 @@ export interface CameraState {
 }
 
 export const DEFAULT_CAMERA: CameraParams = {
-    position: [
-        1.5 * Math.sin(0.2) * Math.sin(1.0),
-        1.5 * Math.cos(1.0),
-        1.5 * Math.sin(0.2) * Math.cos(1.0)
-    ],
+    position: [2, 2, 2],  // Simple diagonal view
     target: [0, 0, 0],
     up: [0, 1, 0],
-    fov: 60,
+    fov: 45,  // Slightly narrower FOV for better perspective
     near: 0.01,
     far: 100.0
 };
 
-export function createCameraState(params: CameraParams): CameraState {
-    params = {...DEFAULT_CAMERA, ...params}
-    const position = glMatrix.vec3.fromValues(...params.position);
-    const target = glMatrix.vec3.fromValues(...params.target);
-    const up = glMatrix.vec3.fromValues(...params.up);
+/** Helper to convert array-like to tuple */
+function toArray(value: [number, number, number] | TypedArray): [number, number, number] {
+    if (value instanceof BigInt64Array || value instanceof BigUint64Array) {
+        return [Number(value[0]), Number(value[1]), Number(value[2])];
+    }
+    return Array.from(value) as [number, number, number];
+}
+
+export function createCameraState(params: CameraParams | null | undefined): CameraState {
+
+    const p = {
+        position: toArray(params?.position ?? DEFAULT_CAMERA.position),
+        target: toArray(params?.target ?? DEFAULT_CAMERA.target),
+        up: toArray(params?.up ?? DEFAULT_CAMERA.up),
+        fov: params?.fov ?? DEFAULT_CAMERA.fov,
+        near: params?.near ?? DEFAULT_CAMERA.near,
+        far: params?.far ?? DEFAULT_CAMERA.far
+    };
+
+    const position = glMatrix.vec3.fromValues(...p.position);
+    const target = glMatrix.vec3.fromValues(...p.target);
+    const up = glMatrix.vec3.fromValues(...p.up);
     glMatrix.vec3.normalize(up, up);
 
     // The direction from target to position
@@ -71,9 +85,9 @@ export function createCameraState(params: CameraParams): CameraState {
         radius,
         phi,
         theta,
-        fov: params.fov,
-        near: params.near,
-        far: params.far
+        fov: p.fov,
+        near: p.near,
+        far: p.far
     };
 }
 
@@ -102,7 +116,7 @@ export function orbit(camera: CameraState, deltaX: number, deltaY: number): Came
     theta -= deltaX * 0.01;
     phi   -= deltaY * 0.01;
 
-    // Clamp phi so we don't flip over the top or bottom
+    // Clamp phi to avoid gimbal lock at poles
     phi = Math.max(0.001, Math.min(Math.PI - 0.001, phi));
 
     // Build local reference frame from up

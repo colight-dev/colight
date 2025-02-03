@@ -1973,16 +1973,9 @@ export function SceneInner({
 
   const [isReady, setIsReady] = useState(false);
 
-  // Helper function to safely convert to array
-  function toArray(value: [number, number, number] | Float32Array | undefined): [number, number, number] {
-      if (!value) return [0, 0, 0];
-      return Array.from(value) as [number, number, number];
-  }
-
   // Update the camera initialization
   const [internalCamera, setInternalCamera] = useState<CameraState>(() => {
-      const initial = defaultCamera || DEFAULT_CAMERA;
-      return createCameraState(initial);
+      return createCameraState(defaultCamera);
   });
 
   // Use the appropriate camera state based on whether we're controlled or not
