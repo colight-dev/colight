@@ -41,7 +41,7 @@
     "tailwindcss": "^3.4.14"
   },
   "scripts": {
-    "release": "poetry run python scripts/release.py",
+    "release": "poetry run python scripts/release.py $*",
     "alpha": "poetry run python scripts/release.py --alpha",
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
