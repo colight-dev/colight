@@ -24,17 +24,23 @@ import {
 
 import {
   LIGHTING,
+  cameraStruct,
   billboardVertCode,
   billboardFragCode,
+  billboardPickingVertCode,
   ellipsoidVertCode,
   ellipsoidFragCode,
+  ellipsoidPickingVertCode,
   ringVertCode,
   ringFragCode,
+  ringPickingVertCode,
   cuboidVertCode,
   cuboidFragCode,
+  cuboidPickingVertCode,
   lineBeamVertCode,
   lineBeamFragCode,
-  pickingVertCode
+  lineBeamPickingVertCode,
+  pickingFragCode
 } from './shaders';
 
 
@@ -364,39 +370,44 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     const arr = new Float32Array(count * 8);
     for(let j = 0; j < count; j++) {
       const i = getDataIndex(j, indexInfo);
+      // Position
       arr[j*8+0] = elem.positions[i*3+0];
       arr[j*8+1] = elem.positions[i*3+1];
       arr[j*8+2] = elem.positions[i*3+2];
 
-      if(colors) {
-        arr[j*8+3] = colors[i*3+0];
-        arr[j*8+4] = colors[i*3+1];
-        arr[j*8+5] = colors[i*3+2];
-      } else {
-        arr[j*8+3] = defaults.color[0];
-        arr[j*8+4] = defaults.color[1];
-        arr[j*8+5] = defaults.color[2];
-      }
-
-      arr[j*8+6] = alphas ? alphas[i] : defaults.alpha;
+      // Size
       const pointSize = sizes ? sizes[i] : size;
       const scale = scales ? scales[i] : defaults.scale;
-      arr[j*8+7] = pointSize * scale;
+      arr[j*8+3] = pointSize * scale;
+
+      // Color
+      if(colors) {
+        arr[j*8+4] = colors[i*3+0];
+        arr[j*8+5] = colors[i*3+1];
+        arr[j*8+6] = colors[i*3+2];
+      } else {
+        arr[j*8+4] = defaults.color[0];
+        arr[j*8+5] = defaults.color[1];
+        arr[j*8+6] = defaults.color[2];
+      }
+
+      // Alpha
+      arr[j*8+7] = alphas ? alphas[i] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = getDecorationIndex(idx, indexInfo.indexToPosition);
       if(dec.color) {
-        arr[j*8+3] = dec.color[0];
-        arr[j*8+4] = dec.color[1];
-        arr[j*8+5] = dec.color[2];
+        arr[j*8+4] = dec.color[0];
+        arr[j*8+5] = dec.color[1];
+        arr[j*8+6] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[j*8+6] = dec.alpha;
+        arr[j*8+7] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[j*8+7] *= dec.scale;
+        arr[j*8+3] *= dec.scale;  // Scale affects size
       }
     });
 
@@ -413,27 +424,49 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     // Check array validities once before the loop
     const hasValidSizes = elem.sizes && elem.sizes.length >= count;
     const sizes = hasValidSizes ? elem.sizes : null;
+    const { scales } = getColumnarParams(elem, count);
 
     if (sortedIndices) {
       // Use sorted indices when available
       for(let j = 0; j < count; j++) {
         const i = sortedIndices[j];
+        // Position
         arr[j*5+0] = elem.positions[i*3+0];
         arr[j*5+1] = elem.positions[i*3+1];
         arr[j*5+2] = elem.positions[i*3+2];
-        arr[j*5+3] = baseID + i;  // Keep original index for picking ID
-        arr[j*5+4] = sizes?.[i] ?? size;
+        // Size
+        const pointSize = sizes?.[i] ?? size;
+        const scale = scales ? scales[i] : 1.0;
+        arr[j*5+3] = pointSize * scale;
+        // PickID
+        arr[j*5+4] = baseID + i;
       }
     } else {
       // When no sorting, just use sequential access
       for(let i = 0; i < count; i++) {
+        // Position
         arr[i*5+0] = elem.positions[i*3+0];
         arr[i*5+1] = elem.positions[i*3+1];
         arr[i*5+2] = elem.positions[i*3+2];
-        arr[i*5+3] = baseID + i;
-        arr[i*5+4] = sizes?.[i] ?? size;
+        // Size
+        const pointSize = sizes?.[i] ?? size;
+        const scale = scales ? scales[i] : 1.0;
+        arr[i*5+3] = pointSize * scale;
+        // PickID
+        arr[i*5+4] = baseID + i;
       }
     }
+
+    // Apply scale decorations
+    applyDecorations(elem.decorations, count, (idx, dec) => {
+      if(dec.scale !== undefined) {
+        const j = sortedIndices ? sortedIndices.indexOf(idx) : idx;
+        if(j !== -1) {
+          arr[j*5+3] *= dec.scale;  // Scale affects size
+        }
+      }
+    });
+
     return arr;
   },
 
@@ -483,8 +516,8 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       device,
       "PointCloudPicking",
       () => createRenderPipeline(device, bindGroupLayout, {
-        vertexShader: pickingVertCode,
-        fragmentShader: pickingVertCode,
+        vertexShader: billboardPickingVertCode,
+        fragmentShader: pickingFragCode,
         vertexEntryPoint: 'vs_pointcloud',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [POINT_CLOUD_GEOMETRY_LAYOUT, POINT_CLOUD_PICKING_INSTANCE_LAYOUT]
@@ -533,58 +566,68 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
 
     const indexInfo = getIndicesAndMapping(count, sortedIndices);
 
-    const arr = new Float32Array(count * 10);
+    // Build instance data in standardized layout order:
+    // [2]: position (xyz)
+    // [3]: size (xyz)
+    // [4]: color (rgb)
+    // [5]: alpha
+    const instanceData = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
       const i = getDataIndex(j, indexInfo);
-      arr[j*10+0] = elem.centers[i*3+0];
-      arr[j*10+1] = elem.centers[i*3+1];
-      arr[j*10+2] = elem.centers[i*3+2];
+      const offset = j * 10;
 
-      // Radii (with scale)
+      // Position (location 2)
+      instanceData[offset+0] = elem.centers[i*3+0];
+      instanceData[offset+1] = elem.centers[i*3+1];
+      instanceData[offset+2] = elem.centers[i*3+2];
+
+      // Size/radii (location 3)
       const scale = scales ? scales[i] : defaults.scale;
-
       if(radii) {
-        arr[j*10+3] = radii[i*3+0] * scale;
-        arr[j*10+4] = radii[i*3+1] * scale;
-        arr[j*10+5] = radii[i*3+2] * scale;
+        instanceData[offset+3] = radii[i*3+0] * scale;
+        instanceData[offset+4] = radii[i*3+1] * scale;
+        instanceData[offset+5] = radii[i*3+2] * scale;
       } else {
-        arr[j*10+3] = defaultRadius[0] * scale;
-        arr[j*10+4] = defaultRadius[1] * scale;
-        arr[j*10+5] = defaultRadius[2] * scale;
+        instanceData[offset+3] = defaultRadius[0] * scale;
+        instanceData[offset+4] = defaultRadius[1] * scale;
+        instanceData[offset+5] = defaultRadius[2] * scale;
       }
 
+      // Color (location 4)
       if(colors) {
-        arr[j*10+6] = colors[i*3+0];
-        arr[j*10+7] = colors[i*3+1];
-        arr[j*10+8] = colors[i*3+2];
+        instanceData[offset+6] = colors[i*3+0];
+        instanceData[offset+7] = colors[i*3+1];
+        instanceData[offset+8] = colors[i*3+2];
       } else {
-        arr[j*10+6] = defaults.color[0];
-        arr[j*10+7] = defaults.color[1];
-        arr[j*10+8] = defaults.color[2];
+        instanceData[offset+6] = defaults.color[0];
+        instanceData[offset+7] = defaults.color[1];
+        instanceData[offset+8] = defaults.color[2];
       }
 
-      arr[j*10+9] = alphas ? alphas[i] : defaults.alpha;
+      // Alpha (location 5)
+      instanceData[offset+9] = alphas ? alphas[i] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = getDecorationIndex(idx, indexInfo.indexToPosition);
+      const offset = j * 10;
       if(dec.color) {
-        arr[j*10+6] = dec.color[0];
-        arr[j*10+7] = dec.color[1];
-        arr[j*10+8] = dec.color[2];
+        instanceData[offset+6] = dec.color[0];
+        instanceData[offset+7] = dec.color[1];
+        instanceData[offset+8] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[j*10+9] = dec.alpha;
+        instanceData[offset+9] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[j*10+3] *= dec.scale;
-        arr[j*10+4] *= dec.scale;
-        arr[j*10+5] *= dec.scale;
+        instanceData[offset+3] *= dec.scale;
+        instanceData[offset+4] *= dec.scale;
+        instanceData[offset+5] *= dec.scale;
       }
     });
 
-    return arr;
+    return instanceData;
   },
 
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
@@ -592,51 +635,46 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     if(count === 0) return null;
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
-    const arr = new Float32Array(count * 7);
+    const { scales } = getColumnarParams(elem, count);
+
+    // Build instance data in standardized picking layout order:
+    // [2]: position (xyz)
+    // [3]: size (xyz)
+    // [4]: pickID
+    const instanceData = new Float32Array(count * 7);
 
     // Check if we have valid radii array once before the loop
     const hasValidRadii = elem.radii && elem.radii.length >= count * 3;
     const radii = hasValidRadii ? elem.radii : null;
 
-    if (sortedIndices) {
-      // Use sorted indices when available
-      for(let j = 0; j < count; j++) {
-        const i = sortedIndices[j];
-        arr[j*7+0] = elem.centers[i*3+0];
-        arr[j*7+1] = elem.centers[i*3+1];
-        arr[j*7+2] = elem.centers[i*3+2];
+    const indexInfo = getIndicesAndMapping(count, sortedIndices);
 
-        if(radii) {
-          arr[j*7+3] = radii[i*3+0];
-          arr[j*7+4] = radii[i*3+1];
-          arr[j*7+5] = radii[i*3+2];
-        } else {
-          arr[j*7+3] = defaultRadius[0];
-          arr[j*7+4] = defaultRadius[1];
-          arr[j*7+5] = defaultRadius[2];
-        }
-        arr[j*7+6] = baseID + i;  // Keep original index for picking ID
-      }
-    } else {
-      // When no sorting, just use sequential access
-      for(let i = 0; i < count; i++) {
-        arr[i*7+0] = elem.centers[i*3+0];
-        arr[i*7+1] = elem.centers[i*3+1];
-        arr[i*7+2] = elem.centers[i*3+2];
+    for(let j = 0; j < count; j++) {
+      const i = getDataIndex(j, indexInfo);
+      const offset = j * 7;
 
-        if(radii) {
-          arr[i*7+3] = radii[i*3+0];
-          arr[i*7+4] = radii[i*3+1];
-          arr[i*7+5] = radii[i*3+2];
-        } else {
-          arr[i*7+3] = defaultRadius[0];
-          arr[i*7+4] = defaultRadius[1];
-          arr[i*7+5] = defaultRadius[2];
-        }
-        arr[i*7+6] = baseID + i;
+      // Position (location 2)
+      instanceData[offset+0] = elem.centers[i*3+0];
+      instanceData[offset+1] = elem.centers[i*3+1];
+      instanceData[offset+2] = elem.centers[i*3+2];
+
+      // Size/radii (location 3)
+      const scale = scales ? scales[i] : 1.0;
+      if(radii) {
+        instanceData[offset+3] = radii[i*3+0] * scale;
+        instanceData[offset+4] = radii[i*3+1] * scale;
+        instanceData[offset+5] = radii[i*3+2] * scale;
+      } else {
+        instanceData[offset+3] = defaultRadius[0] * scale;
+        instanceData[offset+4] = defaultRadius[1] * scale;
+        instanceData[offset+5] = defaultRadius[2] * scale;
       }
+
+      // PickID (location 4)
+      instanceData[offset+6] = baseID + i;
     }
-    return arr;
+
+    return instanceData;
   },
 
   renderConfig: {
@@ -665,11 +703,11 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
       device,
       "EllipsoidPicking",
       () => createRenderPipeline(device, bindGroupLayout, {
-        vertexShader: pickingVertCode,
-        fragmentShader: pickingVertCode,
+        vertexShader: ellipsoidPickingVertCode,
+        fragmentShader: pickingFragCode,
         vertexEntryPoint: 'vs_ellipsoid',
         fragmentEntryPoint: 'fs_pick',
-        bufferLayouts: [MESH_GEOMETRY_LAYOUT, MESH_PICKING_INSTANCE_LAYOUT]
+        bufferLayouts: [MESH_GEOMETRY_LAYOUT, ELLIPSOID_PICKING_INSTANCE_LAYOUT]
       }, 'rgba8unorm'),
       cache
     );
@@ -860,7 +898,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
         fragmentShader: ringFragCode,
         vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_main',
-        bufferLayouts: [MESH_GEOMETRY_LAYOUT, ELLIPSOID_INSTANCE_LAYOUT],
+        bufferLayouts: [MESH_GEOMETRY_LAYOUT, RING_INSTANCE_LAYOUT],
         blend: {} // Use defaults
       }, format, ellipsoidAxesSpec),
       cache
@@ -872,11 +910,11 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       device,
       "EllipsoidAxesPicking",
       () => createRenderPipeline(device, bindGroupLayout, {
-        vertexShader: pickingVertCode,
-        fragmentShader: pickingVertCode,
+        vertexShader: ringPickingVertCode,
+        fragmentShader: pickingFragCode,
         vertexEntryPoint: 'vs_rings',
         fragmentEntryPoint: 'fs_pick',
-        bufferLayouts: [MESH_GEOMETRY_LAYOUT, MESH_PICKING_INSTANCE_LAYOUT]
+        bufferLayouts: [MESH_GEOMETRY_LAYOUT, RING_PICKING_INSTANCE_LAYOUT]
       }, 'rgba8unorm'),
       cache
     );
@@ -1052,7 +1090,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
         fragmentShader: cuboidFragCode,
         vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_main',
-        bufferLayouts: [MESH_GEOMETRY_LAYOUT, ELLIPSOID_INSTANCE_LAYOUT]
+        bufferLayouts: [MESH_GEOMETRY_LAYOUT, CUBOID_INSTANCE_LAYOUT]
       }, format, cuboidSpec),
       cache
     );
@@ -1063,11 +1101,11 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
       device,
       "CuboidPicking",
       () => createRenderPipeline(device, bindGroupLayout, {
-        vertexShader: pickingVertCode,
-        fragmentShader: pickingVertCode,
+        vertexShader: cuboidPickingVertCode,
+        fragmentShader: pickingFragCode,
         vertexEntryPoint: 'vs_cuboid',
         fragmentEntryPoint: 'fs_pick',
-        bufferLayouts: [MESH_GEOMETRY_LAYOUT, MESH_PICKING_INSTANCE_LAYOUT],
+        bufferLayouts: [MESH_GEOMETRY_LAYOUT, CUBOID_PICKING_INSTANCE_LAYOUT],
         primitive: this.renderConfig
       }, 'rgba8unorm'),
       cache
@@ -1299,8 +1337,8 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       device,
       "LineBeamsPicking",
       () => createRenderPipeline(device, bindGroupLayout, {
-        vertexShader: pickingVertCode, // We'll add a vs_lineCyl entry
-        fragmentShader: pickingVertCode,
+        vertexShader: lineBeamPickingVertCode,
+        fragmentShader: pickingFragCode,
         vertexEntryPoint: 'vs_lineBeam',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [ MESH_GEOMETRY_LAYOUT, LINE_BEAM_PICKING_INSTANCE_LAYOUT ],
@@ -1507,108 +1545,113 @@ function createTranslucentGeometryPipeline(
   }, format);
 }
 
+// Helper function to create vertex buffer layouts
+function createVertexBufferLayout(
+  attributes: Array<[number, GPUVertexFormat]>,
+  stepMode: GPUVertexStepMode = 'vertex'
+): VertexBufferLayout {
+  let offset = 0;
+  const formattedAttrs = attributes.map(([location, format]) => {
+    const attr = {
+      shaderLocation: location,
+      offset,
+      format
+    };
+    // Add to offset based on format size
+    offset += format.includes('x3') ? 12 : format.includes('x2') ? 8 : 4;
+    return attr;
+  });
+
+  return {
+    arrayStride: offset,
+    stepMode,
+    attributes: formattedAttrs
+  };
+}
 
 // Common vertex buffer layouts
-const POINT_CLOUD_GEOMETRY_LAYOUT: VertexBufferLayout = {
-  arrayStride: 24,  // 6 floats * 4 bytes
-  attributes: [
-    {  // position xyz
-      shaderLocation: 0,
-      offset: 0,
-      format: 'float32x3'
-    },
-    {  // normal xyz
-      shaderLocation: 1,
-      offset: 12,
-      format: 'float32x3'
-    }
-  ]
-};
+const POINT_CLOUD_GEOMETRY_LAYOUT = createVertexBufferLayout([
+  [0, 'float32x3'], // position
+  [1, 'float32x3']  // normal
+]);
 
-const POINT_CLOUD_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 32,  // 8 floats * 4 bytes
-  stepMode: 'instance',
-  attributes: [
-    {shaderLocation: 2, offset: 0,  format: 'float32x3'},  // instancePos
-    {shaderLocation: 3, offset: 12, format: 'float32x3'},  // color
-    {shaderLocation: 4, offset: 24, format: 'float32'},    // alpha
-    {shaderLocation: 5, offset: 28, format: 'float32'}     // size
-  ]
-};
+const POINT_CLOUD_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32'],   // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
 
-const POINT_CLOUD_PICKING_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 20,  // 5 floats * 4 bytes
-  stepMode: 'instance',
-  attributes: [
-    {shaderLocation: 2, offset: 0,   format: 'float32x3'},  // instancePos
-    {shaderLocation: 3, offset: 12,  format: 'float32'},    // pickID
-    {shaderLocation: 4, offset: 16,  format: 'float32'}     // size
-  ]
-};
+const POINT_CLOUD_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32'],   // size
+  [4, 'float32']    // pickID
+], 'instance');
 
-const MESH_GEOMETRY_LAYOUT: VertexBufferLayout = {
-  arrayStride: 6*4,
-  attributes: [
-    {shaderLocation: 0, offset: 0,   format: 'float32x3'},
-    {shaderLocation: 1, offset: 3*4, format: 'float32x3'}
-  ]
-};
+const MESH_GEOMETRY_LAYOUT = createVertexBufferLayout([
+  [0, 'float32x3'], // position
+  [1, 'float32x3']  // normal
+]);
 
-const ELLIPSOID_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 10*4,
-  stepMode: 'instance',
-  attributes: [
-    {shaderLocation: 2, offset: 0,     format: 'float32x3'},
-    {shaderLocation: 3, offset: 3*4,   format: 'float32x3'},
-    {shaderLocation: 4, offset: 6*4,   format: 'float32x3'},
-    {shaderLocation: 5, offset: 9*4,   format: 'float32'}
-  ]
-};
+const ELLIPSOID_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
 
-const MESH_PICKING_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 7*4,  // 7 floats: position(3) + size(3) + pickID(1)
-  stepMode: 'instance',
-  attributes: [
-    {shaderLocation: 2, offset: 0,   format: 'float32x3'},  // center
-    {shaderLocation: 3, offset: 3*4, format: 'float32x3'},  // size
-    {shaderLocation: 4, offset: 6*4, format: 'float32'}     // pickID
-  ]
-};
+const ELLIPSOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
 
-const CYL_GEOMETRY_LAYOUT: VertexBufferLayout = {
-  arrayStride: 6 * 4, // (pos.x, pos.y, pos.z, norm.x, norm.y, norm.z)
-  attributes: [
-    { shaderLocation: 0, offset: 0,  format: 'float32x3' }, // position
-    { shaderLocation: 1, offset: 12, format: 'float32x3' } // normal
-  ]
-};
+const MESH_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
 
-// For rendering: 11 floats
-// (start.xyz, end.xyz, size, color.rgb, alpha)
-const LINE_BEAM_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 11 * 4,
-  stepMode: 'instance',
-  attributes: [
-    { shaderLocation: 2, offset:  0,  format: 'float32x3' }, // startPos
-    { shaderLocation: 3, offset: 12,  format: 'float32x3' }, // endPos
-    { shaderLocation: 4, offset: 24,  format: 'float32'   }, // size
-    { shaderLocation: 5, offset: 28,  format: 'float32x3' }, // color
-    { shaderLocation: 6, offset: 40,  format: 'float32'   }, // alpha
-  ]
-};
+const LINE_BEAM_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // startPos (position1)
+  [3, 'float32x3'], // endPos (position2)
+  [4, 'float32'],   // size
+  [5, 'float32x3'], // color
+  [6, 'float32']    // alpha
+], 'instance');
 
-// For picking: 8 floats
-// (start.xyz, end.xyz, size, pickID)
-const LINE_BEAM_PICKING_INSTANCE_LAYOUT: VertexBufferLayout = {
-  arrayStride: 8 * 4,
-  stepMode: 'instance',
-  attributes: [
-    { shaderLocation: 2, offset:  0,  format: 'float32x3' },
-    { shaderLocation: 3, offset: 12,  format: 'float32x3' },
-    { shaderLocation: 4, offset: 24,  format: 'float32'   }, // size
-    { shaderLocation: 5, offset: 28,  format: 'float32'   },
-  ]
-};
+const LINE_BEAM_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // startPos (position1)
+  [3, 'float32x3'], // endPos (position2)
+  [4, 'float32'],   // size
+  [5, 'float32']    // pickID
+], 'instance');
+
+const CUBOID_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+const CUBOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
+
+const RING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
 
 /******************************************************
  * 7) Primitive Registry

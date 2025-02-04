@@ -1,6 +1,13 @@
 # %% Common imports and configuration
 import numpy as np
-from genstudio.scene3d import Ellipsoid, Cuboid, LineBeams, PointCloud, deco
+from genstudio.scene3d import (
+    Ellipsoid,
+    Cuboid,
+    LineBeams,
+    PointCloud,
+    deco,
+    EllipsoidAxes,
+)
 from genstudio.plot import js
 
 # Common camera parameters
@@ -33,31 +40,56 @@ scene_points = PointCloud(
 )
 
 # 2) Ellipsoid Picking
-print("Test 2: Ellipsoid Picking.\nHover over ellipsoids to highlight them.")
+print(
+    "Test 2: Ellipsoid and Axes Picking.\nHover over ellipsoids or their axes to highlight them independently."
+)
 
-scene_ellipsoids = Ellipsoid(
-    centers=np.array([[0, 0, 0], [0, 1, 0], [0, 0.5, 1]]),
-    colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
-    radius=[0.4, 0.4, 0.4],
-    alpha=0.7,
-    onHover=js(
-        "(i) => $state.update({hover_ellipsoid: typeof i === 'number' ? [i] : []})"
-    ),
-    decorations=[
-        deco(
-            js("$state.hover_ellipsoid"),
-            color=[1, 1, 0],
-            scale=1.2,
+scene_ellipsoids = (
+    Ellipsoid(
+        centers=np.array([[0, 0, 0], [0, 1, 0], [0, 0.5, 1]]),
+        colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        radius=[0.4, 0.4, 0.4],
+        alpha=0.7,
+        onHover=js(
+            "(i) => $state.update({hover_ellipsoid: typeof i === 'number' ? [i] : []})"
         ),
-    ],
-) + (
-    {
-        "defaultCamera": {
-            **DEFAULT_CAMERA,
-            "position": [2, 2, 2],
-            "target": [0, 0.5, 0.5],
+        decorations=[
+            deco(
+                js("$state.hover_ellipsoid"),
+                color=[1, 1, 0],
+                scale=1.2,
+            ),
+        ],
+    )
+    + EllipsoidAxes(
+        centers=np.array(
+            [[1, 0, 0], [1, 1, 0], [1, 0.5, 1]]
+        ),  # Offset by 1 in x direction
+        radius=[0.4, 0.4, 0.4],
+        alpha=0.8,
+        onHover=js(
+            "(i) => $state.update({hover_axes: typeof i === 'number' ? [i] : []})"
+        ),
+        decorations=[
+            deco(
+                js("$state.hover_axes"),
+                color=[1, 1, 0],
+            ),
+        ],
+    )
+    + (
+        {
+            "defaultCamera": {
+                **DEFAULT_CAMERA,
+                "position": [2, 2, 2],
+                "target": [
+                    0.5,
+                    0.5,
+                    0.5,
+                ],  # Adjusted target to center between ellipsoids and axes
+            }
         }
-    }
+    )
 )
 
 # 3) Cuboid Picking with Transparency

@@ -3,7 +3,6 @@ import React, {useRef, useCallback} from "react"
 interface FPSCounterProps {
     fpsRef: React.RefObject<HTMLDivElement>;
 }
-
 export function FPSCounter({ fpsRef }: FPSCounterProps) {
     return (
         <div
@@ -28,12 +27,15 @@ export function useFPSCounter() {
     const fpsDisplayRef = useRef<HTMLDivElement>(null);
     const frameTimesRef = useRef<number[]>([]);
     const lastFrameTimeRef = useRef<number>(0);
+    const lastDisplayUpdateRef = useRef<number>(0);
     const MAX_SAMPLES = 8;
+    const DISPLAY_UPDATE_INTERVAL = 500; // Update display every 1000ms (1 second)
 
     const updateDisplay = useCallback((timestamp: number) => {
         // Initialize on first frame
         if (lastFrameTimeRef.current === 0) {
             lastFrameTimeRef.current = timestamp;
+            lastDisplayUpdateRef.current = timestamp;
             return;
         }
 
@@ -52,9 +54,12 @@ export function useFPSCounter() {
             frameTimesRef.current.length;
         const fps = 1000 / avgFrameTime;
 
-        // Update display
-        if (fpsDisplayRef.current) {
-            fpsDisplayRef.current.textContent = `${Math.round(fps)} FPS`;
+        // Update display at most once per second
+        if (timestamp - lastDisplayUpdateRef.current >= DISPLAY_UPDATE_INTERVAL) {
+            if (fpsDisplayRef.current) {
+                fpsDisplayRef.current.textContent = `${Math.round(fps)} FPS`;
+            }
+            lastDisplayUpdateRef.current = timestamp;
         }
     }, []);
 
