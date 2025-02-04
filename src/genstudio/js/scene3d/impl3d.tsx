@@ -2166,8 +2166,6 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       renderObjects, depthTexture
     } = gpuRef.current;
 
-    const startTime = performance.now();
-
     // Update transparency sorting if needed
     const cameraPos: [number, number, number] = [
       camState.position[0],
@@ -2304,11 +2302,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 
     pass.end();
     device.queue.submit([cmd.finish()]);
-
-    // Measure frame time and report it
-    const endTime = performance.now();
-    const frameTime = endTime - startTime;
-    onFrameRendered?.(frameTime);
+    onFrameRendered?.(performance.now());
   }, [containerWidth, containerHeight, onFrameRendered, components]);
 
   /******************************************************
@@ -2612,13 +2606,6 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     }
   },[isReady, containerWidth, containerHeight, createOrUpdateDepthTexture, createOrUpdatePickTextures]);
 
-  // Update the render-triggering effects
-  useEffect(() => {
-    if (isReady) {
-      renderFrame(activeCamera);  // Always render with current camera (controlled or internal)
-    }
-  }, [isReady, activeCamera, renderFrame]); // Watch the camera value
-
   // Update canvas size effect
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -2638,7 +2625,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         createOrUpdatePickTextures();
         renderFrame(activeCamera);
     }
-}, [containerWidth, containerHeight, createOrUpdateDepthTexture, createOrUpdatePickTextures, renderFrame, activeCamera]);
+}, [containerWidth, containerHeight, createOrUpdateDepthTexture, createOrUpdatePickTextures, renderFrame]);
 
   // Update components effect
   useEffect(() => {
@@ -2647,14 +2634,14 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       gpuRef.current.renderObjects = ros;
       renderFrame(activeCamera);
     }
-  }, [isReady, components]); // Remove activeCamera dependency
+  }, [isReady, components]);
 
   // Add separate effect just for camera updates
   useEffect(() => {
     if (isReady && gpuRef.current) {
       renderFrame(activeCamera);
     }
-  }, [isReady, activeCamera, renderFrame]);
+  }, [isReady, activeCamera]);
 
   // Wheel handling
   useEffect(() => {

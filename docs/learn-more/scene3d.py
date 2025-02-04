@@ -146,9 +146,9 @@ cuboid = Scene3D.Cuboid(
 # Define centers and colors for three cuboids.
 cuboid_centers = np.array(
     [
-        [2, -1, 0],
-        [2, -1, 0.5],
-        [2, -1, 1.0],
+        [0, 0, 0],
+        [0, 0, 0.5],
+        [0, 0, 1.0],
     ],
     dtype=np.float32,
 )
@@ -163,7 +163,7 @@ cuboid_colors = np.array(
 )
 
 # Create a cuboid component with a decoration on the second instance.
-cuboid_with_deco = Scene3D.Cuboid(
+Scene3D.Cuboid(
     centers=cuboid_centers,
     colors=cuboid_colors,
     size=[0.8, 0.8, 0.8],
@@ -172,8 +172,6 @@ cuboid_with_deco = Scene3D.Cuboid(
         Scene3D.deco(1, color=[1.0, 0.0, 0.0], alpha=0.5, scale=1.2)
     ],
 )
-
-scene_deco = cuboid_with_deco
 
 # %% [markdown]
 # ## 5. Advanced Scene Composition

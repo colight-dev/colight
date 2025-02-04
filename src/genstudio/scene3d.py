@@ -126,6 +126,7 @@ class Scene(Plot.LayoutItem):
     - Zoom control (mouse wheel)
     - Component hover highlighting
     - Component click selection
+    - Optional FPS display (set controls=['fps'])
     """
 
     def __init__(
@@ -136,6 +137,8 @@ class Scene(Plot.LayoutItem):
 
         Args:
             *components_and_props: Scene components and optional properties.
+                Properties can include:
+                - controls: List of controls to show. Currently supports ['fps']
         """
         components = []
         scene_props = {}

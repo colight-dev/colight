@@ -22,7 +22,7 @@ function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
     if (Array.isArray(value)) {
       (result[field] as any) = new Float32Array(value);
     } else if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
-      (result[field] as any) = new Float32Array(value);
+      (result[field] as any) = new Float32Array(value.buffer);
     }
   }
   return result;
@@ -179,6 +179,10 @@ interface SceneProps {
   defaultCamera?: CameraParams;
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
+  /** Optional array of controls to show. Currently supports: ['fps'] */
+  controls?: string[];
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 /**
@@ -201,35 +205,48 @@ interface SceneProps {
  *   width={800}
  *   height={600}
  *   onCameraChange={handleCameraChange}
+ *   controls={['fps']}  // Show FPS counter
  * />
  * ```
  */
-export function Scene({ components, width, height, aspectRatio = 1, camera, defaultCamera, onCameraChange }: SceneProps) {
-  const [containerRef, measuredWidth] = useContainerWidth(1);
-  const dimensions = useMemo(
-    () => computeCanvasDimensions(measuredWidth, width, height, aspectRatio),
-    [measuredWidth, width, height, aspectRatio]
-  );
+export function Scene({
+    components,
+    width,
+    height,
+    aspectRatio = 1,
+    camera,
+    defaultCamera,
+    onCameraChange,
+    className,
+    style,
+    controls = [],
+}: SceneProps) {
+    const [containerRef, measuredWidth] = useContainerWidth(1);
+    const dimensions = useMemo(
+        () => computeCanvasDimensions(measuredWidth, width, height, aspectRatio),
+        [measuredWidth, width, height, aspectRatio]
+    );
 
-  const { fpsDisplayRef, updateDisplay } = useFPSCounter();
+    const { fpsDisplayRef, updateDisplay } = useFPSCounter();
+    const showFps = controls.includes('fps');
 
-  return (
-    <div ref={containerRef} style={{ width: '100%', position: 'relative' }}>
-      {dimensions && (
-        <>
-          <SceneInner
-            containerWidth={dimensions.width}
-            containerHeight={dimensions.height}
-            style={dimensions.style}
-            components={components}
-            camera={camera}
-            defaultCamera={defaultCamera}
-            onCameraChange={onCameraChange}
-            onFrameRendered={updateDisplay}
-          />
-          <FPSCounter fpsRef={fpsDisplayRef} />
-        </>
-      )}
-    </div>
-  );
+    return (
+        <div ref={containerRef as React.RefObject<HTMLDivElement | null>} className={className} style={{ width: '100%', position: 'relative', ...style }}>
+            {dimensions && (
+                <>
+                    <SceneInner
+                        components={components}
+                        containerWidth={dimensions.width}
+                        containerHeight={dimensions.height}
+                        style={dimensions.style}
+                        camera={camera}
+                        defaultCamera={defaultCamera}
+                        onCameraChange={onCameraChange}
+                        onFrameRendered={updateDisplay}
+                    />
+                    {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
+                </>
+            )}
+        </div>
+    );
 }
