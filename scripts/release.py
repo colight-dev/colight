@@ -16,41 +16,38 @@ def check_working_directory():
 
 
 def get_next_version(alpha_name=None):
-    if alpha_name:
-        # Get current version from pyproject.toml
-        with open("pyproject.toml", "r") as f:
-            data = toml.load(f)
-        base_version = data["tool"]["poetry"]["version"]
+    # Get the next regular version first
+    today = datetime.now()
+    year = today.year
+    month = today.month
+    year_month = f"{year}.{month}"
 
-        # Create alpha version with timestamp (YYYYMMDDHHMM)
-        timestamp = datetime.now().strftime("%Y%m%d%H%M")
-        return f"{base_version}.alpha{timestamp}"
-    else:
-        # Original version logic for regular releases
-        today = datetime.now()
-        year = today.year
-        month = today.month
-        year_month = f"{year}.{month}"
-
-        # Match both formats by providing both patterns
-        padded_month = f"{month:02d}"
-        tags = (
-            subprocess.check_output(
-                ["git", "tag", "-l", f"v{year}.{month}.*", f"v{year}.{padded_month}.*"]
-            )
-            .decode()
-            .strip()
-            .split("\n")
+    # Match both formats by providing both patterns
+    padded_month = f"{month:02d}"
+    tags = (
+        subprocess.check_output(
+            ["git", "tag", "-l", f"v{year}.{month}.*", f"v{year}.{padded_month}.*"]
         )
+        .decode()
+        .strip()
+        .split("\n")
+    )
 
-        release_tags = [tag[1:] for tag in tags if tag and not tag.endswith(".dev")]
+    release_tags = [tag[1:] for tag in tags if tag and not tag.endswith(".dev")]
 
-        if not release_tags:
-            return f"{year_month}.1"
-
+    if not release_tags:
+        next_version = f"{year_month}.1"
+    else:
         patch_numbers = [int(tag.split(".")[-1]) for tag in release_tags]
         next_patch = max(patch_numbers) + 1
-        return f"{year_month}.{next_patch}"
+        next_version = f"{year_month}.{next_patch}"
+
+    if alpha_name:
+        # Create alpha version with timestamp (YYYYMMDDHHMM)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M")
+        return f"{next_version}.alpha{timestamp}"
+    else:
+        return next_version
 
 
 def update_pyproject_toml(new_version):
