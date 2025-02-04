@@ -45,7 +45,8 @@ def get_next_version(alpha_name=None):
     if alpha_name:
         # Create alpha version with timestamp (YYYYMMDDHHMM)
         timestamp = datetime.now().strftime("%Y%m%d%H%M")
-        return f"{next_version}.alpha{timestamp}"
+        # Use hyphen format for alpha versions to be npm-compatible
+        return f"{next_version}-alpha.{timestamp}"
     else:
         return next_version
 
