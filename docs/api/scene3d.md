@@ -18,6 +18,7 @@ The visualization supports:
 - Zoom control (mouse wheel)
 - Component hover highlighting
 - Component click selection
+- Optional FPS display (set controls=['fps'])
 
 
 

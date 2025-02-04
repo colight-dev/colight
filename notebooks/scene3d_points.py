@@ -220,6 +220,7 @@ def scene(controlled, point_size, xyz, rgb, scale, select_region=False):
             highlightColor=[1.0, 1.0, 0.0],
         )
         + cameraProps
+        + {"controls": ["fps"]}
     )
 
 
@@ -295,7 +296,7 @@ wall_xyzs = rotate_points(wall_xyz, n_frames=NUM_FRAMES)
             "Show Alpha",
         ]
     )
-    | Plot.Slider("frame", range=NUM_FRAMES, fps=30)
+    | Plot.Slider("frame", range=NUM_FRAMES, fps="raf")
     | scene(
         True,
         0.05,

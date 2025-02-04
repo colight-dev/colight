@@ -7,7 +7,7 @@ from genstudio.scene3d import PointCloud, Ellipsoid, deco
 
 
 # ----------------- 1) Ripple Grid (Point Cloud) -----------------
-def create_ripple_grid(n_x=300, n_y=300, n_frames=30):
+def create_ripple_grid(n_x=200, n_y=200, n_frames=30):
     """Create frames of a 2D grid of points in the XY plane with sinusoidal ripple over time.
 
     Returns:
@@ -175,6 +175,7 @@ def create_ripple_and_morph_scene():
     ) + {
         "onCameraChange": js("(cam) => $state.update({camera: cam})"),
         "camera": js("$state.camera"),
+        "controls": ["fps"],
     }
 
     # Second scene: the morphing ellipsoids with opacity decorations
@@ -201,6 +202,7 @@ def create_ripple_and_morph_scene():
     ) + {
         "onCameraChange": js("(cam) => $state.update({camera: cam})"),
         "camera": js("$state.camera"),
+        "controls": ["fps"],
     }
 
     layout = (
@@ -220,7 +222,7 @@ def create_ripple_and_morph_scene():
                 "hover_point": None,
             }
         )
-        | Plot.Slider("frame", range=n_frames, fps="30")
+        | Plot.Slider("frame", range=n_frames, fps="raf")
         | (scene_grid & scene_ellipsoids)
     )
 

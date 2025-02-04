@@ -1,4 +1,4 @@
-import React, {useRef, useCallback, useEffect} from "react"
+import React, {useRef, useCallback} from "react"
 
 interface FPSCounterProps {
     fpsRef: React.RefObject<HTMLDivElement>;
@@ -27,34 +27,34 @@ export function FPSCounter({ fpsRef }: FPSCounterProps) {
 export function useFPSCounter() {
     const fpsDisplayRef = useRef<HTMLDivElement>(null);
     const frameTimesRef = useRef<number[]>([]);
-    const lastRenderTimeRef = useRef<number>(0);
-    const lastUpdateTimeRef = useRef<number>(0);
-    const MAX_SAMPLES = 4;
+    const lastFrameTimeRef = useRef<number>(0);
+    const MAX_SAMPLES = 8;
 
-    const updateDisplay = useCallback((renderTime: number) => {
-        const now = performance.now();
+    const updateDisplay = useCallback((timestamp: number) => {
+        // Initialize on first frame
+        if (lastFrameTimeRef.current === 0) {
+            lastFrameTimeRef.current = timestamp;
+            return;
+        }
 
-        // If this is a new frame (not just a re-render)
-        if (now - lastUpdateTimeRef.current > 1) {
-            // Calculate total frame time (render time + time since last frame)
-            const totalTime = renderTime + (now - lastRenderTimeRef.current);
-            frameTimesRef.current.push(totalTime);
+        // Calculate frame time in milliseconds
+        const frameTime = timestamp - lastFrameTimeRef.current;
+        lastFrameTimeRef.current = timestamp;
 
-            if (frameTimesRef.current.length > MAX_SAMPLES) {
-                frameTimesRef.current.shift();
-            }
+        // Add to rolling average
+        frameTimesRef.current.push(frameTime);
+        if (frameTimesRef.current.length > MAX_SAMPLES) {
+            frameTimesRef.current.shift();
+        }
 
-            // Calculate average FPS from frame times
-            const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) /
-                frameTimesRef.current.length;
-            const fps = 1000 / avgFrameTime;
+        // Calculate average FPS
+        const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) /
+            frameTimesRef.current.length;
+        const fps = 1000 / avgFrameTime;
 
-            if (fpsDisplayRef.current) {
-                fpsDisplayRef.current.textContent = `${Math.round(fps)} FPS`;
-            }
-
-            lastUpdateTimeRef.current = now;
-            lastRenderTimeRef.current = now;
+        // Update display
+        if (fpsDisplayRef.current) {
+            fpsDisplayRef.current.textContent = `${Math.round(fps)} FPS`;
         }
     }, []);
 
