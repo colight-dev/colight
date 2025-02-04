@@ -121,7 +121,7 @@ ${cameraStruct}
 ${pickingVSOut}
 
 @vertex
-fn vs_pointcloud(
+fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
   @location(2) position: vec3<f32>,
@@ -184,7 +184,7 @@ ${cameraStruct}
 ${pickingVSOut}
 
 @vertex
-fn vs_ellipsoid(
+fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
   @location(2) position: vec3<f32>,
@@ -297,7 +297,7 @@ ${cameraStruct}
 ${pickingVSOut}
 
 @vertex
-fn vs_cuboid(
+fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
   @location(2) position: vec3<f32>,
@@ -399,7 +399,7 @@ ${cameraStruct}
 ${pickingVSOut}
 
 @vertex
-fn vs_lineBeam(
+fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
   @location(2) startPos: vec3<f32>,
@@ -449,7 +449,7 @@ ${cameraStruct}
 ${pickingVSOut}
 
 @vertex
-fn vs_rings(
+fn vs_main(
   @builtin(instance_index) instID: u32,
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,

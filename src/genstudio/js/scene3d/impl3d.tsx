@@ -518,7 +518,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       () => createRenderPipeline(device, bindGroupLayout, {
         vertexShader: billboardPickingVertCode,
         fragmentShader: pickingFragCode,
-        vertexEntryPoint: 'vs_pointcloud',
+        vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [POINT_CLOUD_GEOMETRY_LAYOUT, POINT_CLOUD_PICKING_INSTANCE_LAYOUT]
       }, 'rgba8unorm'),
@@ -705,7 +705,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
       () => createRenderPipeline(device, bindGroupLayout, {
         vertexShader: ellipsoidPickingVertCode,
         fragmentShader: pickingFragCode,
-        vertexEntryPoint: 'vs_ellipsoid',
+        vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [MESH_GEOMETRY_LAYOUT, ELLIPSOID_PICKING_INSTANCE_LAYOUT]
       }, 'rgba8unorm'),
@@ -912,7 +912,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       () => createRenderPipeline(device, bindGroupLayout, {
         vertexShader: ringPickingVertCode,
         fragmentShader: pickingFragCode,
-        vertexEntryPoint: 'vs_rings',
+        vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [MESH_GEOMETRY_LAYOUT, RING_PICKING_INSTANCE_LAYOUT]
       }, 'rgba8unorm'),
@@ -1103,7 +1103,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
       () => createRenderPipeline(device, bindGroupLayout, {
         vertexShader: cuboidPickingVertCode,
         fragmentShader: pickingFragCode,
-        vertexEntryPoint: 'vs_cuboid',
+        vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [MESH_GEOMETRY_LAYOUT, CUBOID_PICKING_INSTANCE_LAYOUT],
         primitive: this.renderConfig
@@ -1339,7 +1339,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       () => createRenderPipeline(device, bindGroupLayout, {
         vertexShader: lineBeamPickingVertCode,
         fragmentShader: pickingFragCode,
-        vertexEntryPoint: 'vs_lineBeam',
+        vertexEntryPoint: 'vs_main',
         fragmentEntryPoint: 'fs_pick',
         bufferLayouts: [ MESH_GEOMETRY_LAYOUT, LINE_BEAM_PICKING_INSTANCE_LAYOUT ],
         primitive: this.renderConfig
