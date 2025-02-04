@@ -164,25 +164,37 @@ def main():
     alpha_name = None
     if len(sys.argv) > 2 and sys.argv[1] == "--alpha":
         alpha_name = sys.argv[2]
-        skip_changelog = True
-    else:
-        skip_changelog = False
 
     new_version = get_next_version(alpha_name)
     files_to_add = []
 
     # Print version prominently for easy copying
+    print("\n" + "=" * 50)
+    print(f"Version: {new_version}")
+    print("=" * 50 + "\n")
+
     if alpha_name:
-        print("\n" + "=" * 50)
-        print(f"Alpha version: {new_version}")
-        print("=" * 50 + "\n")
-        # Skip pyproject.toml and README updates for alpha releases
+        # For alpha releases, create a simpler changelog entry
+        with open("CHANGELOG.md", "r") as f:
+            original_content = f.read()
+
+        alpha_entry = (
+            f"### [{new_version}] - {datetime.now().strftime('%b %d, %Y')}\n\n"
+        )
+        alpha_entry += "Alpha release for testing.\n\n"
+
+        with open("CHANGELOG.md", "w") as f:
+            f.write(alpha_entry + original_content)
+
+        update_pyproject_toml(new_version)
+        files_to_add.extend(["pyproject.toml", "CHANGELOG.md"])
     else:
-        if not skip_changelog and not update_changelog(new_version):
+        if not update_changelog(new_version):
             print("Release process cancelled.")
             return
         update_pyproject_toml(new_version)
         files_to_add.extend(["pyproject.toml", "CHANGELOG.md"])
+
     # Add changes
     subprocess.run(["git", "add"] + files_to_add)
 
