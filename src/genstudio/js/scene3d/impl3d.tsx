@@ -159,7 +159,9 @@ export interface RenderObject {
   componentIndex: number;
   pickingDataStale: boolean;
 
-  // Add transparency info directly to RenderObject
+  cachedRenderData?: Float32Array;
+  lastRenderCount?: number;
+
   transparencyInfo?: {
     needsSort: boolean;
     centers: Float32Array;
@@ -168,6 +170,10 @@ export interface RenderObject {
     lastCameraPosition?: [number, number, number];
     sortedIndices?: number[];  // Store the most recent sorting
   };
+}
+
+export interface RenderObjectCache {
+  [key: string]: RenderObject;  // Key is componentType, value is the most recent render object
 }
 
 export interface DynamicBuffers {
@@ -216,13 +222,19 @@ interface PrimitiveSpec<E> {
   getCount(component: E): number;
 
   /**
+   * Returns the number of floats needed per instance for render data.
+   */
+  getFloatsPerInstance(): number;
+
+  /**
    * Builds vertex buffer data for rendering.
-   * Returns a Float32Array containing interleaved vertex attributes,
-   * or null if the component has no renderable data.
+   * Populates the provided Float32Array with interleaved vertex attributes.
+   * Returns true if data was populated, false if component has no renderable data.
    * @param component The component to build render data for
+   * @param target The Float32Array to populate with render data
    * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildRenderData(component: E, sortedIndices?: number[]): Float32Array | null;
+  buildRenderData(component: E, target: Float32Array, sortedIndices?: number[]): boolean;
 
   /**
    * Builds vertex buffer data for GPU-based picking.
@@ -341,9 +353,13 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return elem.positions.length / 3;
   },
 
-  buildRenderData(elem, sortedIndices?: number[]) {
+  getFloatsPerInstance() {
+    return 8;
+  },
+
+  buildRenderData(elem, target, sortedIndices?: number[]) {
     const count = elem.positions.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return false;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
@@ -353,51 +369,50 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
 
     const {indices, indexToPosition} = getIndicesAndMapping(count, sortedIndices);
 
-    const arr = new Float32Array(count * 8);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       // Position
-      arr[j*8+0] = elem.positions[i*3+0];
-      arr[j*8+1] = elem.positions[i*3+1];
-      arr[j*8+2] = elem.positions[i*3+2];
+      target[j*8+0] = elem.positions[i*3+0];
+      target[j*8+1] = elem.positions[i*3+1];
+      target[j*8+2] = elem.positions[i*3+2];
 
       // Size
       const pointSize = sizes ? sizes[i] : size;
       const scale = scales ? scales[i] : defaults.scale;
-      arr[j*8+3] = pointSize * scale;
+      target[j*8+3] = pointSize * scale;
 
       // Color
       if(colors) {
-        arr[j*8+4] = colors[i*3+0];
-        arr[j*8+5] = colors[i*3+1];
-        arr[j*8+6] = colors[i*3+2];
+        target[j*8+4] = colors[i*3+0];
+        target[j*8+5] = colors[i*3+1];
+        target[j*8+6] = colors[i*3+2];
       } else {
-        arr[j*8+4] = defaults.color[0];
-        arr[j*8+5] = defaults.color[1];
-        arr[j*8+6] = defaults.color[2];
+        target[j*8+4] = defaults.color[0];
+        target[j*8+5] = defaults.color[1];
+        target[j*8+6] = defaults.color[2];
       }
 
       // Alpha
-      arr[j*8+7] = alphas ? alphas[i] : defaults.alpha;
+      target[j*8+7] = alphas ? alphas[i] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = indexToPosition ? indexToPosition[idx] : idx;
       if(dec.color) {
-        arr[j*8+4] = dec.color[0];
-        arr[j*8+5] = dec.color[1];
-        arr[j*8+6] = dec.color[2];
+        target[j*8+4] = dec.color[0];
+        target[j*8+5] = dec.color[1];
+        target[j*8+6] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[j*8+7] = dec.alpha;
+        target[j*8+7] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[j*8+3] *= dec.scale;  // Scale affects size
+        target[j*8+3] *= dec.scale;  // Scale affects size
       }
     });
 
-    return arr;
+    return true;
   },
 
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
@@ -525,9 +540,13 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return elem.centers.length / 3;
   },
 
-  buildRenderData(elem, sortedIndices?: number[]) {
+  getFloatsPerInstance() {
+    return 10;
+  },
+
+  buildRenderData(elem, target, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return false;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
@@ -537,46 +556,40 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
 
     const {indices, indexToPosition} = getIndicesAndMapping(count, sortedIndices);
 
-    // Build instance data in standardized layout order:
-    // [2]: position (xyz)
-    // [3]: size (xyz)
-    // [4]: color (rgb)
-    // [5]: alpha
-    const instanceData = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       const offset = j * 10;
 
       // Position (location 2)
-      instanceData[offset+0] = elem.centers[i*3+0];
-      instanceData[offset+1] = elem.centers[i*3+1];
-      instanceData[offset+2] = elem.centers[i*3+2];
+      target[offset+0] = elem.centers[i*3+0];
+      target[offset+1] = elem.centers[i*3+1];
+      target[offset+2] = elem.centers[i*3+2];
 
       // Size/radii (location 3)
       const scale = scales ? scales[i] : defaults.scale;
       if(radii) {
-        instanceData[offset+3] = radii[i*3+0] * scale;
-        instanceData[offset+4] = radii[i*3+1] * scale;
-        instanceData[offset+5] = radii[i*3+2] * scale;
+        target[offset+3] = radii[i*3+0] * scale;
+        target[offset+4] = radii[i*3+1] * scale;
+        target[offset+5] = radii[i*3+2] * scale;
       } else {
-        instanceData[offset+3] = defaultRadius[0] * scale;
-        instanceData[offset+4] = defaultRadius[1] * scale;
-        instanceData[offset+5] = defaultRadius[2] * scale;
+        target[offset+3] = defaultRadius[0] * scale;
+        target[offset+4] = defaultRadius[1] * scale;
+        target[offset+5] = defaultRadius[2] * scale;
       }
 
       // Color (location 4)
       if(colors) {
-        instanceData[offset+6] = colors[i*3+0];
-        instanceData[offset+7] = colors[i*3+1];
-        instanceData[offset+8] = colors[i*3+2];
+        target[offset+6] = colors[i*3+0];
+        target[offset+7] = colors[i*3+1];
+        target[offset+8] = colors[i*3+2];
       } else {
-        instanceData[offset+6] = defaults.color[0];
-        instanceData[offset+7] = defaults.color[1];
-        instanceData[offset+8] = defaults.color[2];
+        target[offset+6] = defaults.color[0];
+        target[offset+7] = defaults.color[1];
+        target[offset+8] = defaults.color[2];
       }
 
       // Alpha (location 5)
-      instanceData[offset+9] = alphas ? alphas[i] : defaults.alpha;
+      target[offset+9] = alphas ? alphas[i] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
@@ -584,21 +597,21 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
       const j = indexToPosition ? indexToPosition[idx] : idx;
       const offset = j * 10;
       if(dec.color) {
-        instanceData[offset+6] = dec.color[0];
-        instanceData[offset+7] = dec.color[1];
-        instanceData[offset+8] = dec.color[2];
+        target[offset+6] = dec.color[0];
+        target[offset+7] = dec.color[1];
+        target[offset+8] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        instanceData[offset+9] = dec.alpha;
+        target[offset+9] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        instanceData[offset+3] *= dec.scale;
-        instanceData[offset+4] *= dec.scale;
-        instanceData[offset+5] *= dec.scale;
+        target[offset+3] *= dec.scale;
+        target[offset+4] *= dec.scale;
+        target[offset+5] *= dec.scale;
       }
     });
 
-    return instanceData;
+    return true;
   },
 
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
@@ -697,9 +710,13 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return (elem.centers.length / 3) * 3;
   },
 
-  buildRenderData(elem, sortedIndices?: number[]) {
+  getFloatsPerInstance() {
+    return 10;
+  },
+
+  buildRenderData(elem, target, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return false;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
@@ -710,57 +727,40 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     const {indices, indexToPosition} = getIndicesAndMapping(count, sortedIndices);
 
     const ringCount = count * 3;
-    const arr = new Float32Array(ringCount * 10);
+    for(let j = 0; j < ringCount; j++) {
+      const i = indices ? indices[Math.floor(j / 3)] : Math.floor(j / 3);
+      const offset = j * 10;
 
-    for(let j = 0; j < count; j++) {
-      const i = indices ? indices[j] : j;
-      const cx = elem.centers[i*3+0];
-      const cy = elem.centers[i*3+1];
-      const cz = elem.centers[i*3+2];
-      // Get radii with scale
+      // Position (location 2)
+      target[offset+0] = elem.centers[i*3+0];
+      target[offset+1] = elem.centers[i*3+1];
+      target[offset+2] = elem.centers[i*3+2];
+
+      // Size/radii (location 3)
       const scale = scales ? scales[i] : defaults.scale;
-
-      let rx: number, ry: number, rz: number;
-      if (radii) {
-        rx = radii[i*3+0];
-        ry = radii[i*3+1];
-        rz = radii[i*3+2];
+      if(radii) {
+        target[offset+3] = radii[i*3+0] * scale;
+        target[offset+4] = radii[i*3+1] * scale;
+        target[offset+5] = radii[i*3+2] * scale;
       } else {
-        rx = defaultRadius[0];
-        ry = defaultRadius[1];
-        rz = defaultRadius[2];
+        target[offset+3] = defaultRadius[0] * scale;
+        target[offset+4] = defaultRadius[1] * scale;
+        target[offset+5] = defaultRadius[2] * scale;
       }
-      rx *= scale;
-      ry *= scale;
-      rz *= scale;
 
-      // Get colors
-      let cr: number, cg: number, cb: number;
-      if (colors) {
-        cr = colors[i*3+0];
-        cg = colors[i*3+1];
-        cb = colors[i*3+2];
+      // Color (location 4)
+      if(colors) {
+        target[offset+6] = colors[i*3+0];
+        target[offset+7] = colors[i*3+1];
+        target[offset+8] = colors[i*3+2];
       } else {
-        cr = defaults.color[0];
-        cg = defaults.color[1];
-        cb = defaults.color[2];
+        target[offset+6] = defaults.color[0];
+        target[offset+7] = defaults.color[1];
+        target[offset+8] = defaults.color[2];
       }
-      let alpha = alphas ? alphas[i] : defaults.alpha;
 
-      // Fill 3 rings
-      for(let ring = 0; ring < 3; ring++) {
-        const arrIdx = j*3 + ring;
-        arr[arrIdx*10+0] = cx;
-        arr[arrIdx*10+1] = cy;
-        arr[arrIdx*10+2] = cz;
-        arr[arrIdx*10+3] = rx;
-        arr[arrIdx*10+4] = ry;
-        arr[arrIdx*10+5] = rz;
-        arr[arrIdx*10+6] = cr;
-        arr[arrIdx*10+7] = cg;
-        arr[arrIdx*10+8] = cb;
-        arr[arrIdx*10+9] = alpha;
-      }
+      // Alpha (location 5)
+      target[offset+9] = alphas ? alphas[i] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
@@ -770,22 +770,22 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       for(let ring = 0; ring < 3; ring++) {
         const arrIdx = j*3 + ring;
         if(dec.color) {
-          arr[arrIdx*10+6] = dec.color[0];
-          arr[arrIdx*10+7] = dec.color[1];
-          arr[arrIdx*10+8] = dec.color[2];
+          target[arrIdx*10+6] = dec.color[0];
+          target[arrIdx*10+7] = dec.color[1];
+          target[arrIdx*10+8] = dec.color[2];
         }
         if(dec.alpha !== undefined) {
-          arr[arrIdx*10+9] = dec.alpha;
+          target[arrIdx*10+9] = dec.alpha;
         }
         if(dec.scale !== undefined) {
-          arr[arrIdx*10+3] *= dec.scale;
-          arr[arrIdx*10+4] *= dec.scale;
-          arr[arrIdx*10+5] *= dec.scale;
+          target[arrIdx*10+3] *= dec.scale;
+          target[arrIdx*10+4] *= dec.scale;
+          target[arrIdx*10+5] *= dec.scale;
         }
       }
     });
 
-    return arr;
+    return true;
   },
 
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
@@ -892,9 +892,12 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getCount(elem){
     return elem.centers.length / 3;
   },
-  buildRenderData(elem, sortedIndices?: number[]) {
+  getFloatsPerInstance() {
+    return 10;
+  },
+  buildRenderData(elem, target, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return false;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, count);
@@ -903,7 +906,6 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
 
-    const arr = new Float32Array(count * 10);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       const cx = elem.centers[i*3+0];
@@ -931,37 +933,37 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
       // Fill array
       const idx = j * 10;
-      arr[idx+0] = cx;
-      arr[idx+1] = cy;
-      arr[idx+2] = cz;
-      arr[idx+3] = sx;
-      arr[idx+4] = sy;
-      arr[idx+5] = sz;
-      arr[idx+6] = cr;
-      arr[idx+7] = cg;
-      arr[idx+8] = cb;
-      arr[idx+9] = alpha;
+      target[idx+0] = cx;
+      target[idx+1] = cy;
+      target[idx+2] = cz;
+      target[idx+3] = sx;
+      target[idx+4] = sy;
+      target[idx+5] = sz;
+      target[idx+6] = cr;
+      target[idx+7] = cg;
+      target[idx+8] = cb;
+      target[idx+9] = alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = indexToPosition ? indexToPosition[idx] : idx;  // Get the position where this index ended up
       if(dec.color) {
-        arr[j*10+6] = dec.color[0];
-        arr[j*10+7] = dec.color[1];
-        arr[j*10+8] = dec.color[2];
+        target[j*10+6] = dec.color[0];
+        target[j*10+7] = dec.color[1];
+        target[j*10+8] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[j*10+9] = dec.alpha;
+        target[j*10+9] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[j*10+3] *= dec.scale;
-        arr[j*10+4] *= dec.scale;
-        arr[j*10+5] *= dec.scale;
+        target[j*10+3] *= dec.scale;
+        target[j*10+4] *= dec.scale;
+        target[j*10+5] *= dec.scale;
       }
     });
 
-    return arr;
+    return true;
   },
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
     const count = elem.centers.length / 3;
@@ -1072,9 +1074,13 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return countSegments(elem.positions);
   },
 
-  buildRenderData(elem, sortedIndices?: number[]) {
+  getFloatsPerInstance() {
+    return 11;
+  },
+
+  buildRenderData(elem, target, sortedIndices?: number[]) {
     const segCount = this.getCount(elem);
-    if(segCount === 0) return null;
+    if(segCount === 0) return false;
 
     const defaults = getBaseDefaults(elem);
     const { colors, alphas, scales } = getColumnarParams(elem, segCount);
@@ -1099,57 +1105,56 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
 
     const {indices, indexToPosition} = getIndicesAndMapping(segCount, sortedIndices);
 
-    const arr = new Float32Array(segCount * 11);
     for(let j = 0; j < segCount; j++) {
       const i = indices ? indices[j] : j;
       const p = segmentMap[i];
       const lineIndex = Math.floor(elem.positions[p * 4 + 3]);
 
       // Start point
-      arr[j*11+0] = elem.positions[p * 4 + 0];
-      arr[j*11+1] = elem.positions[p * 4 + 1];
-      arr[j*11+2] = elem.positions[p * 4 + 2];
+      target[j*11+0] = elem.positions[p * 4 + 0];
+      target[j*11+1] = elem.positions[p * 4 + 1];
+      target[j*11+2] = elem.positions[p * 4 + 2];
 
       // End point
-      arr[j*11+3] = elem.positions[(p+1) * 4 + 0];
-      arr[j*11+4] = elem.positions[(p+1) * 4 + 1];
-      arr[j*11+5] = elem.positions[(p+1) * 4 + 2];
+      target[j*11+3] = elem.positions[(p+1) * 4 + 0];
+      target[j*11+4] = elem.positions[(p+1) * 4 + 1];
+      target[j*11+5] = elem.positions[(p+1) * 4 + 2];
 
       // Size with scale
       const scale = scales ? scales[lineIndex] : defaults.scale;
-      arr[j*11+6] = (sizes ? sizes[lineIndex] : defaultSize) * scale;
+      target[j*11+6] = (sizes ? sizes[lineIndex] : defaultSize) * scale;
 
       // Colors
       if(colors) {
-        arr[j*11+7] = colors[lineIndex*3+0];
-        arr[j*11+8] = colors[lineIndex*3+1];
-        arr[j*11+9] = colors[lineIndex*3+2];
+        target[j*11+7] = colors[lineIndex*3+0];
+        target[j*11+8] = colors[lineIndex*3+1];
+        target[j*11+9] = colors[lineIndex*3+2];
       } else {
-        arr[j*11+7] = defaults.color[0];
-        arr[j*11+8] = defaults.color[1];
-        arr[j*11+9] = defaults.color[2];
+        target[j*11+7] = defaults.color[0];
+        target[j*11+8] = defaults.color[1];
+        target[j*11+9] = defaults.color[2];
       }
 
-      arr[j*11+10] = alphas ? alphas[lineIndex] : defaults.alpha;
+      target[j*11+10] = alphas ? alphas[lineIndex] : defaults.alpha;
     }
 
     // Apply decorations using the mapping from original index to sorted position
     applyDecorations(elem.decorations, segCount, (idx, dec) => {
       const j = indexToPosition ? indexToPosition[idx] : idx;
       if(dec.color) {
-        arr[j*11+7] = dec.color[0];
-        arr[j*11+8] = dec.color[1];
-        arr[j*11+9] = dec.color[2];
+        target[j*11+7] = dec.color[0];
+        target[j*11+8] = dec.color[1];
+        target[j*11+9] = dec.color[2];
       }
       if(dec.alpha !== undefined) {
-        arr[j*11+10] = dec.alpha;
+        target[j*11+10] = dec.alpha;
       }
       if(dec.scale !== undefined) {
-        arr[j*11+6] *= dec.scale;
+        target[j*11+6] *= dec.scale;
       }
     });
 
-    return arr;
+    return true;
   },
 
   buildPickingData(elem, baseID, sortedIndices?: number[]) {
@@ -1631,6 +1636,9 @@ export function SceneInner({
   // Add hover state tracking
   const lastHoverState = useRef<{componentIdx: number, instanceIdx: number} | null>(null);
 
+  // Add cache to store previous render objects
+  const renderObjectCache = useRef<RenderObjectCache>({});
+
   /******************************************************
    * A) initWebGPU
    ******************************************************/
@@ -1926,15 +1934,39 @@ export function SceneInner({
     }
   }
 
-  // Update buildRenderObjects to include transparency info
+  // Update buildRenderObjects to include caching
   function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
     if(!gpuRef.current) return [];
     const { device, bindGroupLayout, pipelineCache, resources } = gpuRef.current;
 
+    // Clear out unused cache entries
+    Object.keys(renderObjectCache.current).forEach(type => {
+      if (!components.some(c => c.type === type)) {
+        delete renderObjectCache.current[type];
+      }
+    });
+
     // Collect render data using helper
     const typeArrays = collectTypeData(
       components,
-      (comp, spec) => spec.buildRenderData(comp),  // No sorted indices yet - will be applied in render
+      (comp, spec) => {
+        // Try to reuse existing render object's array
+        const existingRO = renderObjectCache.current[comp.type];
+        const count = spec.getCount(comp);
+        const floatsPerInstance = spec.getFloatsPerInstance();
+
+        // Check if we can reuse the cached render object's array
+        if (existingRO?.lastRenderCount === count && existingRO?.cachedRenderData) {
+          // Reuse existing array but update the data
+          spec.buildRenderData(comp, existingRO.cachedRenderData);
+          return existingRO.cachedRenderData;
+        }
+
+        // Create new array if no matching cache found or count changed
+        const array = new Float32Array(count * floatsPerInstance);
+        spec.buildRenderData(comp, array);
+        return array;
+      },
       (data, count) => {
         const stride = Math.ceil(data.length / count) * 4;
         return stride * count;
@@ -1972,7 +2004,7 @@ export function SceneInner({
 
     const validRenderObjects: RenderObject[] = [];
 
-    // Create render objects and write buffer data
+    // Create or update render objects and write buffer data
     typeArrays.forEach((typeInfo, type) => {
       const spec = primitiveRegistry[type];
       if (!spec) return;
@@ -1991,36 +2023,55 @@ export function SceneInner({
           );
         });
 
-        // Create pipeline once for this type
+        // Get or create pipeline
         const pipeline = spec.getRenderPipeline(device, bindGroupLayout, pipelineCache);
         if (!pipeline) return;
 
-        // Create single render object for all instances of this type
-        const geometryResource = getGeometryResource(resources, type);
-        const stride = Math.ceil(
-          typeInfo.datas[0].length / typeInfo.counts[0]
-        ) * 4;
+        // Try to reuse existing render object
+        let renderObject = renderObjectCache.current[type];
+        const count = typeInfo.counts[0];
 
-        const renderObject: RenderObject = {
-          pipeline,
-          pickingPipeline: undefined,
-          vertexBuffers: [
-            geometryResource.vb,
-            {
-              buffer: dynamicBuffers.renderBuffer,
-              offset: renderOffset,
-              stride: stride
-            }
-          ],
-          indexBuffer: geometryResource.ib,
-          indexCount: geometryResource.indexCount,
-          instanceCount: typeInfo.totalCount,
-          pickingVertexBuffers: [undefined, undefined] as [GPUBuffer | undefined, BufferInfo | undefined],
-          pickingDataStale: true,
-          componentIndex: typeInfo.indices[0]
-        };
+        if (!renderObject || renderObject.lastRenderCount !== count) {
+          // Create new render object if none found or count changed
+          const geometryResource = getGeometryResource(resources, type);
+          const stride = Math.ceil(typeInfo.datas[0].length / count) * 4;
 
-        // Add transparency info if needed
+          renderObject = {
+            pipeline,
+            pickingPipeline: undefined,
+            vertexBuffers: [
+              geometryResource.vb,
+              {
+                buffer: dynamicBuffers.renderBuffer,
+                offset: renderOffset,
+                stride: stride
+              }
+            ],
+            indexBuffer: geometryResource.ib,
+            indexCount: geometryResource.indexCount,
+            instanceCount: typeInfo.totalCount,
+            pickingVertexBuffers: [undefined, undefined] as [GPUBuffer | undefined, BufferInfo | undefined],
+            pickingDataStale: true,
+            componentIndex: typeInfo.indices[0],
+            cachedRenderData: typeInfo.datas[0],
+            lastRenderCount: count
+          };
+
+          // Store in cache
+          renderObjectCache.current[type] = renderObject;
+        } else {
+          // Update existing render object
+          renderObject.vertexBuffers[1] = {
+            buffer: dynamicBuffers.renderBuffer,
+            offset: renderOffset,
+            stride: Math.ceil(typeInfo.datas[0].length / count) * 4
+          };
+          renderObject.instanceCount = typeInfo.totalCount;
+          renderObject.componentIndex = typeInfo.indices[0];
+          renderObject.cachedRenderData = typeInfo.datas[0];
+        }
+
+        // Update transparency info
         const component = components[typeInfo.indices[0]];
         renderObject.transparencyInfo = getTransparencyInfo(component, spec);
 
@@ -2093,18 +2144,25 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       // Update buffer with sorted data
       const component = components[ro.componentIndex];
       const spec = primitiveRegistry[component.type];
-      const data = spec.buildRenderData(component, sortedIndices);
 
-      if (data) {
-        const vertexInfo = ro.vertexBuffers[1] as BufferInfo;
-        device.queue.writeBuffer(
-          vertexInfo.buffer,
-          vertexInfo.offset,
-          data.buffer,
-          data.byteOffset,
-          data.byteLength
-        );
+      // Create or reuse array
+      const count = spec.getCount(component);
+      if (!ro.cachedRenderData || ro.lastRenderCount !== count) {
+        ro.cachedRenderData = new Float32Array(count * spec.getFloatsPerInstance());
+        ro.lastRenderCount = count;
       }
+
+      spec.buildRenderData(component, ro.cachedRenderData, sortedIndices);
+
+      // Write to GPU buffer
+      const vertexInfo = ro.vertexBuffers[1] as BufferInfo;
+      device.queue.writeBuffer(
+        vertexInfo.buffer,
+        vertexInfo.offset,
+        ro.cachedRenderData.buffer,
+        ro.cachedRenderData.byteOffset,
+        ro.cachedRenderData.byteLength
+      );
 
       // Update last camera position
       ro.transparencyInfo.lastCameraPosition = cameraPos;
