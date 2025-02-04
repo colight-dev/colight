@@ -159,8 +159,10 @@ export interface RenderObject {
   componentIndex: number;
   pickingDataStale: boolean;
 
-  cachedRenderData?: Float32Array;
-  lastRenderCount?: number;
+  // Arrays owned by this RenderObject, reallocated only when count changes
+  cachedRenderData: Float32Array;   // Make non-optional since all components must have render data
+  cachedPickingData: Float32Array;  // Make non-optional since all components must have picking data
+  lastRenderCount: number;          // Make non-optional since we always need to track this
 
   transparencyInfo?: {
     needsSort: boolean;
@@ -168,7 +170,7 @@ export interface RenderObject {
     stride: number;
     offset: number;
     lastCameraPosition?: [number, number, number];
-    sortedIndices?: Uint32Array;  // Change to Uint32Array
+    sortedIndices?: Uint32Array;  // Created/resized during sorting when needed
   };
 }
 
@@ -217,7 +219,6 @@ export interface SceneInnerProps {
 interface PrimitiveSpec<E> {
   /**
    * Returns the number of instances in this component.
-   * Used to allocate buffers and determine draw call parameters.
    */
   getCount(component: E): number;
 
@@ -225,6 +226,11 @@ interface PrimitiveSpec<E> {
    * Returns the number of floats needed per instance for render data.
    */
   getFloatsPerInstance(): number;
+
+  /**
+   * Returns the number of floats needed per instance for picking data.
+   */
+  getFloatsPerPicking(): number;
 
   /**
    * Builds vertex buffer data for rendering.
@@ -238,13 +244,13 @@ interface PrimitiveSpec<E> {
 
   /**
    * Builds vertex buffer data for GPU-based picking.
-   * Returns a Float32Array containing picking IDs and instance data,
-   * or null if the component doesn't support picking.
+   * Populates the provided Float32Array with picking data.
    * @param component The component to build picking data for
+   * @param target The Float32Array to populate with picking data
    * @param baseID Starting ID for this component's instances
    * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildPickingData(component: E, baseID: number, sortedIndices?: Uint32Array): Float32Array | null;
+  buildPickingData(component: E, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void;
 
   /**
    * Default WebGPU rendering configuration for this primitive type.
@@ -354,7 +360,11 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
   },
 
   getFloatsPerInstance() {
-    return 8;
+    return 8;  // position(3) + size(1) + color(3) + alpha(1)
+  },
+
+  getFloatsPerPicking() {
+    return 5;  // position(3) + size(1) + pickID(1)
   },
 
   buildRenderData(elem, target, sortedIndices?: Uint32Array) {
@@ -415,13 +425,11 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
+  buildPickingData(elem: PointCloudComponentConfig, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void {
     const count = elem.positions.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return;
 
     const size = elem.size ?? 0.02;
-    const arr = new Float32Array(count * 5);
-
     // Check array validities once before the loop
     const hasValidSizes = elem.sizes && elem.sizes.length >= count;
     const sizes = hasValidSizes ? elem.sizes : null;
@@ -431,15 +439,15 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       // Position
-      arr[j*5+0] = elem.positions[i*3+0];
-      arr[j*5+1] = elem.positions[i*3+1];
-      arr[j*5+2] = elem.positions[i*3+2];
+      target[j*5+0] = elem.positions[i*3+0];
+      target[j*5+1] = elem.positions[i*3+1];
+      target[j*5+2] = elem.positions[i*3+2];
       // Size
       const pointSize = sizes?.[i] ?? size;
       const scale = scales ? scales[i] : 1.0;
-      arr[j*5+3] = pointSize * scale;
+      target[j*5+3] = pointSize * scale;
       // PickID
-      arr[j*5+4] = baseID + i;
+      target[j*5+4] = baseID + i;
     }
 
     // Apply scale decorations
@@ -447,12 +455,10 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       if(dec.scale !== undefined) {
         const j = indexToPosition ? indexToPosition[idx] : idx;
         if(j !== -1) {
-          arr[j*5+3] *= dec.scale;  // Scale affects size
+          target[j*5+3] *= dec.scale;  // Scale affects size
         }
       }
     });
-
-    return arr;
   },
 
   // Rendering configuration
@@ -519,7 +525,8 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
         -0.5,  0.5, 0.0,     0.0, 0.0, 1.0,
          0.5,  0.5, 0.0,     0.0, 0.0, 1.0
       ]),
-      indexData: new Uint16Array([0,1,2, 2,1,3])
+      indexData: new Uint16Array([0,1,2, 2,1,3]),
+      vertexCount: 4  // Add explicit vertex count
     });
   }
 };
@@ -541,6 +548,10 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
 
   getFloatsPerInstance() {
     return 10;
+  },
+
+  getFloatsPerPicking() {
+    return 7;  // position(3) + size(3) + pickID(1)
   },
 
   buildRenderData(elem, target, sortedIndices?: Uint32Array) {
@@ -613,42 +624,39 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
+  buildPickingData(elem: EllipsoidComponentConfig, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return;
 
     const defaultSize = elem.radius || [0.1, 0.1, 0.1];
     const sizes = elem.radii && elem.radii.length >= count * 3 ? elem.radii : null;
     const { scales } = getColumnarParams(elem, count);
     const { indices, indexToPosition } = getIndicesAndMapping(count, sortedIndices);
 
-    const arr = new Float32Array(count * 7);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       const scale = scales ? scales[i] : 1;
       // Position
-      arr[j*7+0] = elem.centers[i*3+0];
-      arr[j*7+1] = elem.centers[i*3+1];
-      arr[j*7+2] = elem.centers[i*3+2];
+      target[j*7+0] = elem.centers[i*3+0];
+      target[j*7+1] = elem.centers[i*3+1];
+      target[j*7+2] = elem.centers[i*3+2];
       // Size
-      arr[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
-      arr[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
-      arr[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+      target[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
+      target[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
+      target[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
       // Picking ID
-      arr[j*7+6] = baseID + i;
+      target[j*7+6] = baseID + i;
     }
 
     // Apply scale decorations
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = indexToPosition ? indexToPosition[idx] : idx;
       if (dec.scale !== undefined) {
-        arr[j*7+3] *= dec.scale;
-        arr[j*7+4] *= dec.scale;
-        arr[j*7+5] *= dec.scale;
+        target[j*7+3] *= dec.scale;
+        target[j*7+4] *= dec.scale;
+        target[j*7+5] *= dec.scale;
       }
     });
-
-    return arr;
   },
 
   renderConfig: {
@@ -711,6 +719,10 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
 
   getFloatsPerInstance() {
     return 10;
+  },
+
+  getFloatsPerPicking() {
+    return 7;  // position(3) + size(3) + pickID(1)
   },
 
   buildRenderData(elem, target, sortedIndices?: Uint32Array) {
@@ -787,17 +799,15 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
+  buildPickingData(elem: EllipsoidAxesComponentConfig, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return;
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
     const ringCount = count * 3;
 
     const { indices, indexToPosition } = getIndicesAndMapping(count, sortedIndices);
 
-
-    const arr = new Float32Array(ringCount * 7);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       const cx = elem.centers[i*3+0];
@@ -810,13 +820,13 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
 
       for(let ring = 0; ring < 3; ring++) {
         const idx = j*3 + ring;
-        arr[idx*7+0] = cx;
-        arr[idx*7+1] = cy;
-        arr[idx*7+2] = cz;
-        arr[idx*7+3] = rx;
-        arr[idx*7+4] = ry;
-        arr[idx*7+5] = rz;
-        arr[idx*7+6] = thisID;
+        target[idx*7+0] = cx;
+        target[idx*7+1] = cy;
+        target[idx*7+2] = cz;
+        target[idx*7+3] = rx;
+        target[idx*7+4] = ry;
+        target[idx*7+5] = rz;
+        target[idx*7+6] = thisID;
       }
     }
 
@@ -826,13 +836,11 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       // For each decorated ellipsoid, update all 3 of its rings
       for(let ring = 0; ring < 3; ring++) {
         const arrIdx = j*3 + ring;
-        arr[arrIdx*10+3] *= dec.scale;
-        arr[arrIdx*10+4] *= dec.scale;
-        arr[arrIdx*10+5] *= dec.scale;
+        target[arrIdx*7+3] *= dec.scale;
+        target[arrIdx*7+4] *= dec.scale;
+        target[arrIdx*7+5] *= dec.scale;
       }
     });
-
-    return arr;
   },
 
   renderConfig: {
@@ -893,6 +901,9 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   },
   getFloatsPerInstance() {
     return 10;
+  },
+  getFloatsPerPicking() {
+    return 7;  // position(3) + size(3) + pickID(1)
   },
   buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
@@ -964,42 +975,39 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     return true;
   },
-  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
+  buildPickingData(elem: CuboidComponentConfig, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void {
     const count = elem.centers.length / 3;
-    if(count === 0) return null;
+    if(count === 0) return;
 
     const defaultSize = elem.size || [0.1, 0.1, 0.1];
     const sizes = elem.sizes && elem.sizes.length >= count * 3 ? elem.sizes : null;
     const { scales } = getColumnarParams(elem, count);
     const { indices, indexToPosition } = getIndicesAndMapping(count, sortedIndices);
 
-    const arr = new Float32Array(count * 7);
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
       const scale = scales ? scales[i] : 1;
       // Position
-      arr[j*7+0] = elem.centers[i*3+0];
-      arr[j*7+1] = elem.centers[i*3+1];
-      arr[j*7+2] = elem.centers[i*3+2];
+      target[j*7+0] = elem.centers[i*3+0];
+      target[j*7+1] = elem.centers[i*3+1];
+      target[j*7+2] = elem.centers[i*3+2];
       // Size
-      arr[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
-      arr[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
-      arr[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
+      target[j*7+3] = (sizes ? sizes[i*3+0] : defaultSize[0]) * scale;
+      target[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
+      target[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
       // Picking ID
-      arr[j*7+6] = baseID + i;
+      target[j*7+6] = baseID + i;
     }
 
     // Apply scale decorations
     applyDecorations(elem.decorations, count, (idx, dec) => {
       const j = indexToPosition ? indexToPosition[idx] : idx;
       if (dec.scale !== undefined) {
-        arr[j*7+3] *= dec.scale;
-        arr[j*7+4] *= dec.scale;
-        arr[j*7+5] *= dec.scale;
+        target[j*7+3] *= dec.scale;
+        target[j*7+4] *= dec.scale;
+        target[j*7+5] *= dec.scale;
       }
     });
-
-    return arr;
   },
   renderConfig: {
     cullMode: 'none',  // Cuboids need to be visible from both sides
@@ -1075,6 +1083,10 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
 
   getFloatsPerInstance() {
     return 11;
+  },
+
+  getFloatsPerPicking() {
+    return 8;  // startPos(3) + endPos(3) + size(1) + pickID(1)
   },
 
   buildRenderData(elem, target, sortedIndices?: Uint32Array) {
@@ -1156,13 +1168,11 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
+  buildPickingData(elem: LineBeamsComponentConfig, target: Float32Array, baseID: number, sortedIndices?: Uint32Array): void {
     const segCount = this.getCount(elem);
-    if(segCount === 0) return null;
+    if(segCount === 0) return;
 
     const defaultSize = elem.size ?? 0.02;
-    const floatsPerSeg = 8;
-    const arr = new Float32Array(segCount * floatsPerSeg);
 
     // First pass: build segment mapping
     const segmentMap = new Array(segCount);
@@ -1198,17 +1208,16 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
         }
       });
 
-      const base = j * floatsPerSeg;
-      arr[base + 0] = elem.positions[p * 4 + 0];     // start.x
-      arr[base + 1] = elem.positions[p * 4 + 1];     // start.y
-      arr[base + 2] = elem.positions[p * 4 + 2];     // start.z
-      arr[base + 3] = elem.positions[(p+1) * 4 + 0]; // end.x
-      arr[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
-      arr[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
-      arr[base + 6] = size;                        // size
-      arr[base + 7] = baseID + i;                  // Keep original index for picking ID
+      const base = j * 8;
+      target[base + 0] = elem.positions[p * 4 + 0];     // start.x
+      target[base + 1] = elem.positions[p * 4 + 1];     // start.y
+      target[base + 2] = elem.positions[p * 4 + 2];     // start.z
+      target[base + 3] = elem.positions[(p+1) * 4 + 0]; // end.x
+      target[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
+      target[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
+      target[base + 6] = size;                        // size
+      target[base + 7] = baseID + i;                  // Keep original index for picking ID
     }
-    return arr;
   },
 
   // Standard triangle-list, cull as you like
@@ -1287,7 +1296,8 @@ function getOrCreatePipeline(
 export interface GeometryResource {
   vb: GPUBuffer;
   ib: GPUBuffer;
-  indexCount?: number;
+  indexCount: number;
+  vertexCount: number;  // Add vertexCount
 }
 
 export type GeometryResources = {
@@ -1303,7 +1313,12 @@ function getGeometryResource(resources: GeometryResources, type: keyof GeometryR
 }
 
 
-const createBuffers = (device: GPUDevice, { vertexData, indexData }: { vertexData: Float32Array, indexData: Uint16Array | Uint32Array }) => {
+interface GeometryData {
+  vertexData: Float32Array;
+  indexData: Uint16Array | Uint32Array;
+}
+
+const createBuffers = (device: GPUDevice, { vertexData, indexData }: GeometryData): GeometryResource => {
   const vb = device.createBuffer({
     size: vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
@@ -1316,7 +1331,15 @@ const createBuffers = (device: GPUDevice, { vertexData, indexData }: { vertexDat
   });
   device.queue.writeBuffer(ib, 0, indexData);
 
-  return { vb, ib, indexCount: indexData.length };
+  // Each vertex has 6 floats (position + normal)
+  const vertexCount = vertexData.length / 6;
+
+  return {
+    vb,
+    ib,
+    indexCount: indexData.length,
+    vertexCount
+  };
 };
 
 function initGeometryResources(device: GPUDevice, resources: GeometryResources) {
@@ -1361,6 +1384,7 @@ interface PipelineConfig {
     depthWriteEnabled: boolean;
     depthCompare: GPUCompareFunction;
   };
+  colorWriteMask?: number;  // Use number instead of GPUColorWrite
 }
 
 function createRenderPipeline(
@@ -1799,37 +1823,41 @@ export function SceneInner({
     });
   }, []);
 
-  // Helper to collect and organize component data by type
-  function collectTypeData<T>(
+  // Add this type definition at the top of the file
+  type ComponentType = ComponentConfig['type'];
+
+  interface TypeInfo {
+    datas: Float32Array[];
+    offsets: number[];
+    counts: number[];
+    indices: number[];
+    totalSize: number;
+    totalCount: number;
+    components: ComponentConfig[];
+  }
+
+  // Update the collectTypeData function signature
+  function collectTypeData(
     components: ComponentConfig[],
-    getData: (comp: ComponentConfig, spec: PrimitiveSpec<any>) => T | null,
-    getSize: (data: T, count: number) => number
-  ) {
-    const typeArrays = new Map<ComponentConfig['type'], {
-      totalCount: number,
-      totalSize: number,
-      components: ComponentConfig[],
-      indices: number[],
-      offsets: number[],
-      counts: number[],
-      datas: T[]
-    }>();
+    buildData: (component: ComponentConfig, spec: PrimitiveSpec<any>) => Float32Array,
+    getSize: (data: Float32Array, count: number) => number
+  ): Map<ComponentType, TypeInfo> {
+    const typeArrays = new Map<ComponentType, TypeInfo>();
 
     // Single pass through components
     components.forEach((comp, idx) => {
-      const type = comp.type;
-      const spec = primitiveRegistry[type];
+      const spec = primitiveRegistry[comp.type];
       if (!spec) return;
 
       const count = spec.getCount(comp);
       if (count === 0) return;
 
-      const data = getData(comp, spec);
+      const data = buildData(comp, spec);
       if (!data) return;
 
       const size = getSize(data, count);
 
-      let typeInfo = typeArrays.get(type);
+      let typeInfo = typeArrays.get(comp.type);
       if (!typeInfo) {
         typeInfo = {
           totalCount: 0,
@@ -1840,7 +1868,7 @@ export function SceneInner({
           counts: [],
           datas: []
         };
-        typeArrays.set(type, typeInfo);
+        typeArrays.set(comp.type, typeInfo);
       }
 
       typeInfo.components.push(comp);
@@ -1945,6 +1973,10 @@ export function SceneInner({
       }
     });
 
+    // Initialize componentBaseId array and build ID mapping
+    gpuRef.current.componentBaseId = new Array(components.length).fill(0);
+    buildComponentIdMapping(components);
+
     // Collect render data using helper
     const typeArrays = collectTypeData(
       components,
@@ -1952,17 +1984,16 @@ export function SceneInner({
         // Try to reuse existing render object's array
         const existingRO = renderObjectCache.current[comp.type];
         const count = spec.getCount(comp);
-        const floatsPerInstance = spec.getFloatsPerInstance();
 
-        // Check if we can reuse the cached render object's array
-        if (existingRO?.lastRenderCount === count && existingRO?.cachedRenderData) {
+        // Check if we can reuse the cached render data array
+        if (existingRO?.lastRenderCount === count) {
           // Reuse existing array but update the data
           spec.buildRenderData(comp, existingRO.cachedRenderData);
           return existingRO.cachedRenderData;
         }
 
         // Create new array if no matching cache found or count changed
-        const array = new Float32Array(count * floatsPerInstance);
+        const array = new Float32Array(count * spec.getFloatsPerInstance());
         spec.buildRenderData(comp, array);
         return array;
       },
@@ -1972,15 +2003,22 @@ export function SceneInner({
       }
     );
 
-    // Calculate total buffer size needed
+    // Calculate total buffer sizes needed
     let totalRenderSize = 0;
-    typeArrays.forEach(info => {
+    let totalPickingSize = 0;
+    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
       totalRenderSize += info.totalSize;
+      const spec = primitiveRegistry[type];
+      if (spec) {
+        const count = info.counts[0];
+        totalPickingSize += count * spec.getFloatsPerPicking() * 4; // 4 bytes per float
+      }
     });
 
     // Create or recreate dynamic buffers if needed
     if (!gpuRef.current.dynamicBuffers ||
-        gpuRef.current.dynamicBuffers.renderBuffer.size < totalRenderSize) {
+        gpuRef.current.dynamicBuffers.renderBuffer.size < totalRenderSize ||
+        gpuRef.current.dynamicBuffers.pickingBuffer.size < totalPickingSize) {
       if (gpuRef.current.dynamicBuffers) {
         gpuRef.current.dynamicBuffers.renderBuffer.destroy();
         gpuRef.current.dynamicBuffers.pickingBuffer.destroy();
@@ -1988,7 +2026,7 @@ export function SceneInner({
       gpuRef.current.dynamicBuffers = createDynamicBuffers(
         device,
         totalRenderSize,
-        totalRenderSize
+        totalPickingSize
       );
     }
     const dynamicBuffers = gpuRef.current.dynamicBuffers!;
@@ -1997,25 +2035,23 @@ export function SceneInner({
     dynamicBuffers.renderOffset = 0;
     dynamicBuffers.pickingOffset = 0;
 
-    // Initialize componentBaseId array and build ID mapping
-    gpuRef.current.componentBaseId = new Array(components.length).fill(0);
-    buildComponentIdMapping(components);
-
     const validRenderObjects: RenderObject[] = [];
 
     // Create or update render objects and write buffer data
-    typeArrays.forEach((typeInfo, type) => {
+    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
       const spec = primitiveRegistry[type];
-      if (!spec) return;
+      if (!spec || !gpuRef.current) return;
 
       try {
         const renderOffset = Math.ceil(dynamicBuffers.renderOffset / 4) * 4;
+        const pickingOffset = Math.ceil(dynamicBuffers.pickingOffset / 4) * 4;
+        const count = info.counts[0];
 
-        // Write each component's data directly to final position
-        typeInfo.datas.forEach((data, i) => {
+        // Write render data to buffer
+        info.datas.forEach((data: Float32Array, i: number) => {
           device.queue.writeBuffer(
             dynamicBuffers.renderBuffer,
-            renderOffset + typeInfo.offsets[i],
+            renderOffset + info.offsets[i],
             data.buffer,
             data.byteOffset,
             data.byteLength
@@ -2026,18 +2062,29 @@ export function SceneInner({
         const pipeline = spec.getRenderPipeline(device, bindGroupLayout, pipelineCache);
         if (!pipeline) return;
 
+        // Get picking pipeline
+        const pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
+        if (!pickingPipeline) return;
+
         // Try to reuse existing render object
         let renderObject = renderObjectCache.current[type];
-        const count = typeInfo.counts[0];
 
         if (!renderObject || renderObject.lastRenderCount !== count) {
           // Create new render object if none found or count changed
           const geometryResource = getGeometryResource(resources, type);
-          const stride = Math.ceil(typeInfo.datas[0].length / count) * 4;
+          const stride = Math.ceil(info.datas[0].length / count) * 4;
+
+          // Create both render and picking arrays
+          const renderData = info.datas[0];
+          const pickingData = new Float32Array(count * spec.getFloatsPerPicking());
+
+          // Build picking data
+          const baseID = gpuRef.current.componentBaseId[info.indices[0]];
+          spec.buildPickingData(components[info.indices[0]], pickingData, baseID);
 
           renderObject = {
             pipeline,
-            pickingPipeline: undefined,
+            pickingPipeline,  // Set the picking pipeline
             vertexBuffers: [
               geometryResource.vb,
               {
@@ -2048,11 +2095,23 @@ export function SceneInner({
             ],
             indexBuffer: geometryResource.ib,
             indexCount: geometryResource.indexCount,
-            instanceCount: typeInfo.totalCount,
-            pickingVertexBuffers: [undefined, undefined] as [GPUBuffer | undefined, BufferInfo | undefined],
-            pickingDataStale: true,
-            componentIndex: typeInfo.indices[0],
-            cachedRenderData: typeInfo.datas[0],
+            instanceCount: info.totalCount,
+            pickingVertexBuffers: [
+              geometryResource.vb,
+              {
+                buffer: dynamicBuffers.pickingBuffer,
+                offset: pickingOffset,
+                stride: spec.getFloatsPerPicking() * 4
+              }
+            ],
+            pickingIndexBuffer: geometryResource.ib,
+            pickingIndexCount: geometryResource.indexCount,
+            pickingVertexCount: geometryResource.vertexCount ?? 0,  // Set picking vertex count
+            pickingInstanceCount: info.totalCount,
+            pickingDataStale: false,
+            componentIndex: info.indices[0],
+            cachedRenderData: renderData,
+            cachedPickingData: pickingData,
             lastRenderCount: count
           };
 
@@ -2063,19 +2122,41 @@ export function SceneInner({
           renderObject.vertexBuffers[1] = {
             buffer: dynamicBuffers.renderBuffer,
             offset: renderOffset,
-            stride: Math.ceil(typeInfo.datas[0].length / count) * 4
+            stride: Math.ceil(info.datas[0].length / count) * 4
           };
-          renderObject.instanceCount = typeInfo.totalCount;
-          renderObject.componentIndex = typeInfo.indices[0];
-          renderObject.cachedRenderData = typeInfo.datas[0];
+          renderObject.pickingVertexBuffers[1] = {
+            buffer: dynamicBuffers.pickingBuffer,
+            offset: pickingOffset,
+            stride: spec.getFloatsPerPicking() * 4
+          };
+          renderObject.instanceCount = info.totalCount;
+          renderObject.componentIndex = info.indices[0];
+          renderObject.cachedRenderData = info.datas[0];
+
+          // Update picking data if needed
+          if (renderObject.pickingDataStale) {
+            const baseID = gpuRef.current.componentBaseId[info.indices[0]];
+            spec.buildPickingData(components[info.indices[0]], renderObject.cachedPickingData, baseID);
+            renderObject.pickingDataStale = false;
+          }
         }
 
+        // Write picking data to buffer
+        device.queue.writeBuffer(
+          dynamicBuffers.pickingBuffer,
+          pickingOffset,
+          renderObject.cachedPickingData.buffer,
+          renderObject.cachedPickingData.byteOffset,
+          renderObject.cachedPickingData.byteLength
+        );
+
         // Update transparency info
-        const component = components[typeInfo.indices[0]];
+        const component = components[info.indices[0]];
         renderObject.transparencyInfo = getTransparencyInfo(component, spec);
 
         validRenderObjects.push(renderObject);
-        dynamicBuffers.renderOffset = renderOffset + typeInfo.totalSize;
+        dynamicBuffers.renderOffset = renderOffset + info.totalSize;
+        dynamicBuffers.pickingOffset = pickingOffset + (count * spec.getFloatsPerPicking() * 4);
 
       } catch (error) {
         console.error(`Error creating render object for type ${type}:`, error);
@@ -2137,7 +2218,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       }
 
       // Get or create sorted indices array
-      const count = ro.lastRenderCount || 0;
+      const count = ro.lastRenderCount;
       if (!ro.transparencyInfo.sortedIndices || ro.transparencyInfo.sortedIndices.length !== count) {
         ro.transparencyInfo.sortedIndices = new Uint32Array(count);
       }
@@ -2148,16 +2229,16 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
       // Update buffer with sorted data
       const component = components[ro.componentIndex];
       const spec = primitiveRegistry[component.type];
+      if (!spec || !gpuRef.current) return;
 
-      // Create or reuse array
-      if (!ro.cachedRenderData || ro.lastRenderCount !== count) {
-        ro.cachedRenderData = new Float32Array(count * spec.getFloatsPerInstance());
-        ro.lastRenderCount = count;
-      }
-
+      // Rebuild render data with new sorting
       spec.buildRenderData(component, ro.cachedRenderData, ro.transparencyInfo.sortedIndices);
 
-      // Write to GPU buffer
+      // Also update picking data with new sorting
+      const baseID = gpuRef.current.componentBaseId[ro.componentIndex];
+      spec.buildPickingData(component, ro.cachedPickingData, baseID, ro.transparencyInfo.sortedIndices);
+
+      // Write render data to GPU buffer
       const vertexInfo = ro.vertexBuffers[1] as BufferInfo;
       device.queue.writeBuffer(
         vertexInfo.buffer,
@@ -2165,6 +2246,16 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         ro.cachedRenderData.buffer,
         ro.cachedRenderData.byteOffset,
         ro.cachedRenderData.byteLength
+      );
+
+      // Write picking data to GPU buffer
+      const pickingInfo = ro.pickingVertexBuffers[1] as BufferInfo;
+      device.queue.writeBuffer(
+        pickingInfo.buffer,
+        pickingInfo.offset,
+        ro.cachedPickingData.buffer,
+        ro.cachedPickingData.byteOffset,
+        ro.cachedPickingData.byteLength
       );
 
       // Update last camera position
@@ -2326,6 +2417,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         }
 
         pass.setPipeline(ro.pickingPipeline);
+        pass.setBindGroup(0, uniformBindGroup);
 
         // Set geometry buffer
         pass.setVertexBuffer(0, ro.pickingVertexBuffers[0]);
@@ -2334,11 +2426,12 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         const instanceInfo = ro.pickingVertexBuffers[1] as BufferInfo;
         pass.setVertexBuffer(1, instanceInfo.buffer, instanceInfo.offset);
 
+        // Draw with indices if we have them, otherwise use vertex count
         if(ro.pickingIndexBuffer) {
           pass.setIndexBuffer(ro.pickingIndexBuffer, 'uint16');
-          pass.drawIndexed(ro.pickingIndexCount ?? 0, ro.pickingInstanceCount ?? 1);
-        } else {
-          pass.draw(ro.pickingVertexCount ?? 0, ro.pickingInstanceCount ?? 1);
+          pass.drawIndexed(ro.pickingIndexCount ?? 0, ro.instanceCount ?? 1);
+        } else if (ro.pickingVertexCount) {
+          pass.draw(ro.pickingVertexCount, ro.instanceCount ?? 1);
         }
       }
 
@@ -2625,49 +2718,28 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     if (!gpuRef.current) return;
 
     const { device, bindGroupLayout, pipelineCache } = gpuRef.current;
+    const spec = primitiveRegistry[component.type];
+    if (!spec) return;
 
     // Just use the stored indices - no need to recalculate!
     const sortedIndices = renderObject.transparencyInfo?.sortedIndices;
 
     // Build picking data with same sorting as render
-    const spec = primitiveRegistry[component.type];
-    const pickingData = spec.buildPickingData(
-      component,
-      gpuRef.current.componentBaseId[renderObject.componentIndex],
-      sortedIndices  // Use stored indices
+    const baseID = gpuRef.current.componentBaseId[renderObject.componentIndex];
+    spec.buildPickingData(component, renderObject.cachedPickingData, baseID, sortedIndices);
+
+    // Write picking data to buffer
+    const pickingInfo = renderObject.pickingVertexBuffers[1] as BufferInfo;
+    device.queue.writeBuffer(
+      pickingInfo.buffer,
+      pickingInfo.offset,
+      renderObject.cachedPickingData.buffer,
+      renderObject.cachedPickingData.byteOffset,
+      renderObject.cachedPickingData.byteLength
     );
 
-    if (pickingData) {
-      const pickingOffset = Math.ceil(gpuRef.current.dynamicBuffers!.pickingOffset / 4) * 4;
-
-      // Write picking data to buffer
-      device.queue.writeBuffer(
-        gpuRef.current.dynamicBuffers!.pickingBuffer,
-        pickingOffset,
-        pickingData.buffer,
-        pickingData.byteOffset,
-        pickingData.byteLength
-      );
-
-      // Set up picking pipeline and buffers
-      renderObject.pickingPipeline = spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
-      renderObject.pickingVertexBuffers = [
-        renderObject.vertexBuffers[0],
-        {
-          buffer: gpuRef.current.dynamicBuffers!.pickingBuffer,
-          offset: pickingOffset,
-          stride: Math.ceil(pickingData.length / (renderObject.instanceCount || 1)) * 4
-        }
-      ];
-      renderObject.pickingIndexBuffer = renderObject.indexBuffer;
-      renderObject.pickingIndexCount = renderObject.indexCount;
-      renderObject.pickingInstanceCount = renderObject.instanceCount;
-      renderObject.pickingDataStale = false;
-
-      // Update picking offset
-      gpuRef.current.dynamicBuffers!.pickingOffset = pickingOffset + pickingData.byteLength;
-    }
-  }, [components]);
+    renderObject.pickingDataStale = false;
+  }, []);
 
   return (
     <div style={{ width: '100%', border: '1px solid #ccc' }}>
