@@ -39,7 +39,19 @@ import {
   lineBeamVertCode,
   lineBeamFragCode,
   lineBeamPickingVertCode,
-  pickingFragCode
+  pickingFragCode,
+  POINT_CLOUD_GEOMETRY_LAYOUT,
+  POINT_CLOUD_INSTANCE_LAYOUT,
+  POINT_CLOUD_PICKING_INSTANCE_LAYOUT,
+  MESH_GEOMETRY_LAYOUT,
+  ELLIPSOID_INSTANCE_LAYOUT,
+  ELLIPSOID_PICKING_INSTANCE_LAYOUT,
+  LINE_BEAM_INSTANCE_LAYOUT,
+  LINE_BEAM_PICKING_INSTANCE_LAYOUT,
+  CUBOID_INSTANCE_LAYOUT,
+  CUBOID_PICKING_INSTANCE_LAYOUT,
+  RING_INSTANCE_LAYOUT,
+  RING_PICKING_INSTANCE_LAYOUT
 } from './shaders';
 
 
@@ -286,7 +298,7 @@ interface PrimitiveSpec<E> {
    * Creates the base geometry buffers needed for this primitive type.
    * These buffers are shared across all instances of the primitive.
    */
-  createGeometryResource(device: GPUDevice): { vb: GPUBuffer; ib: GPUBuffer; indexCount: number };
+  createGeometryResource(device: GPUDevice): { vb: GPUBuffer; ib: GPUBuffer; indexCount: number; vertexCount: number };
 }
 
 interface Decoration {
@@ -525,8 +537,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
         -0.5,  0.5, 0.0,     0.0, 0.0, 1.0,
          0.5,  0.5, 0.0,     0.0, 0.0, 1.0
       ]),
-      indexData: new Uint16Array([0,1,2, 2,1,3]),
-      vertexCount: 4  // Add explicit vertex count
+      indexData: new Uint16Array([0,1,2, 2,1,3])
     });
   }
 };
@@ -1098,17 +1109,17 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
 
     // First pass: build segment mapping
     const segmentMap = new Array(segCount);
-    let segIndex = 0;
+      let segIndex = 0;
 
-    const pointCount = elem.positions.length / 4;
-    for(let p = 0; p < pointCount - 1; p++) {
-      const iCurr = elem.positions[p * 4 + 3];
-      const iNext = elem.positions[(p+1) * 4 + 3];
-      if(iCurr !== iNext) continue;
+      const pointCount = elem.positions.length / 4;
+      for(let p = 0; p < pointCount - 1; p++) {
+        const iCurr = elem.positions[p * 4 + 3];
+        const iNext = elem.positions[(p+1) * 4 + 3];
+        if(iCurr !== iNext) continue;
 
-      // Store mapping from segment index to point index
+        // Store mapping from segment index to point index
       segmentMap[segIndex] = p;
-      segIndex++;
+        segIndex++;
     }
 
     const defaultSize = elem.size ?? 0.02;
@@ -1468,108 +1479,6 @@ function createTranslucentGeometryPipeline(
     }
   }, format);
 }
-
-// Helper function to create vertex buffer layouts
-function createVertexBufferLayout(
-  attributes: Array<[number, GPUVertexFormat]>,
-  stepMode: GPUVertexStepMode = 'vertex'
-): VertexBufferLayout {
-  let offset = 0;
-  const formattedAttrs = attributes.map(([location, format]) => {
-    const attr = {
-      shaderLocation: location,
-      offset,
-      format
-    };
-    // Add to offset based on format size
-    offset += format.includes('x3') ? 12 : format.includes('x2') ? 8 : 4;
-    return attr;
-  });
-
-  return {
-    arrayStride: offset,
-    stepMode,
-    attributes: formattedAttrs
-  };
-}
-
-// Common vertex buffer layouts
-const POINT_CLOUD_GEOMETRY_LAYOUT = createVertexBufferLayout([
-  [0, 'float32x3'], // position
-  [1, 'float32x3']  // normal
-]);
-
-const POINT_CLOUD_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32'],   // size
-  [4, 'float32x3'], // color
-  [5, 'float32']    // alpha
-], 'instance');
-
-const POINT_CLOUD_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32'],   // size
-  [4, 'float32']    // pickID
-], 'instance');
-
-const MESH_GEOMETRY_LAYOUT = createVertexBufferLayout([
-  [0, 'float32x3'], // position
-  [1, 'float32x3']  // normal
-]);
-
-const ELLIPSOID_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32x3'], // color
-  [5, 'float32']    // alpha
-], 'instance');
-
-const ELLIPSOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32']    // pickID
-], 'instance');
-
-const LINE_BEAM_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // startPos (position1)
-  [3, 'float32x3'], // endPos (position2)
-  [4, 'float32'],   // size
-  [5, 'float32x3'], // color
-  [6, 'float32']    // alpha
-], 'instance');
-
-const LINE_BEAM_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // startPos (position1)
-  [3, 'float32x3'], // endPos (position2)
-  [4, 'float32'],   // size
-  [5, 'float32']    // pickID
-], 'instance');
-
-const CUBOID_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32x3'], // color
-  [5, 'float32']    // alpha
-], 'instance');
-
-const CUBOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32']    // pickID
-], 'instance');
-
-const RING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32x3'], // color
-  [5, 'float32']    // alpha
-], 'instance');
-
-const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
-  [2, 'float32x3'], // position
-  [3, 'float32x3'], // size
-  [4, 'float32']    // pickID
-], 'instance');
 
 /******************************************************
  * 7) Primitive Registry

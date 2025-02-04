@@ -478,3 +478,107 @@ fn vs_main(
   out.pickID = pickID;
   return out;
 }`;
+
+
+
+// Helper function to create vertex buffer layouts
+function createVertexBufferLayout(
+  attributes: Array<[number, GPUVertexFormat]>,
+  stepMode: GPUVertexStepMode = 'vertex'
+): VertexBufferLayout {
+  let offset = 0;
+  const formattedAttrs = attributes.map(([location, format]) => {
+    const attr = {
+      shaderLocation: location,
+      offset,
+      format
+    };
+    // Add to offset based on format size
+    offset += format.includes('x3') ? 12 : format.includes('x2') ? 8 : 4;
+    return attr;
+  });
+
+  return {
+    arrayStride: offset,
+    stepMode,
+    attributes: formattedAttrs
+  };
+}
+
+// Common vertex buffer layouts
+export const POINT_CLOUD_GEOMETRY_LAYOUT = createVertexBufferLayout([
+  [0, 'float32x3'], // position
+  [1, 'float32x3']  // normal
+]);
+
+export const POINT_CLOUD_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32'],   // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+export const POINT_CLOUD_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32'],   // size
+  [4, 'float32']    // pickID
+], 'instance');
+
+export const MESH_GEOMETRY_LAYOUT = createVertexBufferLayout([
+  [0, 'float32x3'], // position
+  [1, 'float32x3']  // normal
+]);
+
+export const ELLIPSOID_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+export const ELLIPSOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
+
+export const LINE_BEAM_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // startPos (position1)
+  [3, 'float32x3'], // endPos (position2)
+  [4, 'float32'],   // size
+  [5, 'float32x3'], // color
+  [6, 'float32']    // alpha
+], 'instance');
+
+export const LINE_BEAM_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // startPos (position1)
+  [3, 'float32x3'], // endPos (position2)
+  [4, 'float32'],   // size
+  [5, 'float32']    // pickID
+], 'instance');
+
+export const CUBOID_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+export const CUBOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
+
+export const RING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32x3'], // color
+  [5, 'float32']    // alpha
+], 'instance');
+
+export const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout([
+  [2, 'float32x3'], // position
+  [3, 'float32x3'], // size
+  [4, 'float32']    // pickID
+], 'instance');
