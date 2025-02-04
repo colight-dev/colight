@@ -33,12 +33,16 @@ def get_next_version(alpha_name=None):
         .split("\n")
     )
 
+    # Filter out dev versions and empty strings, and remove the 'v' prefix
     release_tags = [tag[1:] for tag in tags if tag and not tag.endswith(".dev")]
 
-    if not release_tags:
+    # Further filter out alpha versions when determining the next patch number
+    regular_versions = [tag for tag in release_tags if "alpha" not in tag]
+
+    if not regular_versions:
         next_version = f"{year_month}.1"
     else:
-        patch_numbers = [int(tag.split(".")[-1]) for tag in release_tags]
+        patch_numbers = [int(tag.split(".")[-1]) for tag in regular_versions]
         next_patch = max(patch_numbers) + 1
         next_version = f"{year_month}.{next_patch}"
 
