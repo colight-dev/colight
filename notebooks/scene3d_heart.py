@@ -15,8 +15,8 @@ from genstudio.plot import js
 (
     Plot.initialState(
         {
-            "num_particles": 1000,
-            "alpha": 0.8,
+            "num_particles": 400000,
+            "alpha": 1.0,
             "frame": 0,
             # Pre-generate frames using JavaScript
             "frames": js("""(() => {

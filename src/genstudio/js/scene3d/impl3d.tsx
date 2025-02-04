@@ -168,7 +168,7 @@ export interface RenderObject {
     stride: number;
     offset: number;
     lastCameraPosition?: [number, number, number];
-    sortedIndices?: number[];  // Store the most recent sorting
+    sortedIndices?: Uint32Array;  // Change to Uint32Array
   };
 }
 
@@ -234,7 +234,7 @@ interface PrimitiveSpec<E> {
    * @param target The Float32Array to populate with render data
    * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildRenderData(component: E, target: Float32Array, sortedIndices?: number[]): boolean;
+  buildRenderData(component: E, target: Float32Array, sortedIndices?: Uint32Array): boolean;
 
   /**
    * Builds vertex buffer data for GPU-based picking.
@@ -244,7 +244,7 @@ interface PrimitiveSpec<E> {
    * @param baseID Starting ID for this component's instances
    * @param sortedIndices Optional array of indices for depth sorting
    */
-  buildPickingData(component: E, baseID: number, sortedIndices?: number[]): Float32Array | null;
+  buildPickingData(component: E, baseID: number, sortedIndices?: Uint32Array): Float32Array | null;
 
   /**
    * Default WebGPU rendering configuration for this primitive type.
@@ -325,8 +325,8 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
 }
 
 /** Helper function to handle sorted indices and position mapping */
-function getIndicesAndMapping(count: number, sortedIndices?: number[]): {
-  indices: number[] | null,  // Change to null instead of undefined
+function getIndicesAndMapping(count: number, sortedIndices?: Uint32Array): {
+  indices: Uint32Array | null,  // Change to Uint32Array
   indexToPosition: Uint32Array | null
 } {
   if (!sortedIndices) {
@@ -357,7 +357,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return 8;
   },
 
-  buildRenderData(elem, target, sortedIndices?: number[]) {
+  buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const count = elem.positions.length / 3;
     if(count === 0) return false;
 
@@ -415,7 +415,7 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: number[]) {
+  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
     const count = elem.positions.length / 3;
     if(count === 0) return null;
 
@@ -427,7 +427,6 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     const sizes = hasValidSizes ? elem.sizes : null;
     const { scales } = getColumnarParams(elem, count);
     const { indices, indexToPosition } = getIndicesAndMapping(count, sortedIndices);
-
 
     for(let j = 0; j < count; j++) {
       const i = indices ? indices[j] : j;
@@ -544,7 +543,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return 10;
   },
 
-  buildRenderData(elem, target, sortedIndices?: number[]) {
+  buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return false;
 
@@ -614,7 +613,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: number[]) {
+  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -714,7 +713,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return 10;
   },
 
-  buildRenderData(elem, target, sortedIndices?: number[]) {
+  buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return false;
 
@@ -788,7 +787,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: number[]) {
+  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -895,7 +894,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getFloatsPerInstance() {
     return 10;
   },
-  buildRenderData(elem, target, sortedIndices?: number[]) {
+  buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return false;
 
@@ -965,7 +964,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
 
     return true;
   },
-  buildPickingData(elem, baseID, sortedIndices?: number[]) {
+  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
     const count = elem.centers.length / 3;
     if(count === 0) return null;
 
@@ -1078,7 +1077,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return 11;
   },
 
-  buildRenderData(elem, target, sortedIndices?: number[]) {
+  buildRenderData(elem, target, sortedIndices?: Uint32Array) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return false;
 
@@ -1157,7 +1156,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     return true;
   },
 
-  buildPickingData(elem, baseID, sortedIndices?: number[]) {
+  buildPickingData(elem, baseID, sortedIndices?: Uint32Array) {
     const segCount = this.getCount(elem);
     if(segCount === 0) return null;
 
@@ -2137,22 +2136,26 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
         if (moveDistSq < 0.0001) return; // Skip if camera hasn't moved much
       }
 
+      // Get or create sorted indices array
+      const count = ro.lastRenderCount || 0;
+      if (!ro.transparencyInfo.sortedIndices || ro.transparencyInfo.sortedIndices.length !== count) {
+        ro.transparencyInfo.sortedIndices = new Uint32Array(count);
+      }
+
       // Get sorted indices and store them
-      const sortedIndices = getSortedIndices(ro.transparencyInfo.centers, cameraPos);
-      ro.transparencyInfo.sortedIndices = sortedIndices;  // Save for picking
+      getSortedIndices(ro.transparencyInfo.centers, cameraPos, ro.transparencyInfo.sortedIndices);
 
       // Update buffer with sorted data
       const component = components[ro.componentIndex];
       const spec = primitiveRegistry[component.type];
 
       // Create or reuse array
-      const count = spec.getCount(component);
       if (!ro.cachedRenderData || ro.lastRenderCount !== count) {
         ro.cachedRenderData = new Float32Array(count * spec.getFloatsPerInstance());
         ro.lastRenderCount = count;
       }
 
-      spec.buildRenderData(component, ro.cachedRenderData, sortedIndices);
+      spec.buildRenderData(component, ro.cachedRenderData, ro.transparencyInfo.sortedIndices);
 
       // Write to GPU buffer
       const vertexInfo = ro.vertexBuffers[1] as BufferInfo;
@@ -2677,21 +2680,25 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 }
 
 // Add this helper function at the top of the file
-function getSortedIndices(centers: Float32Array, cameraPosition: [number, number, number]): number[] {
+function getSortedIndices(centers: Float32Array, cameraPos: [number, number, number], target: Uint32Array): void {
   const count = centers.length / 3;
-  const indices = Array.from({length: count}, (_, i) => i);
 
-  // Calculate depths and sort back-to-front
-  const depths = indices.map(i => {
-    const x = centers[i*3 + 0];
-    const y = centers[i*3 + 1];
-    const z = centers[i*3 + 2];
-    return (x - cameraPosition[0])**2 +
-           (y - cameraPosition[1])**2 +
-           (z - cameraPosition[2])**2;
-  });
+  // Initialize indices
+  for (let i = 0; i < count; i++) {
+    target[i] = i;
+  }
 
-  return indices.sort((a, b) => depths[b] - depths[a]);
+  // Calculate distances
+  const distances = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const dx = centers[i*3+0] - cameraPos[0];
+    const dy = centers[i*3+1] - cameraPos[1];
+    const dz = centers[i*3+2] - cameraPos[2];
+    distances[i] = dx*dx + dy*dy + dz*dz;
+  }
+
+  // Sort indices based on distances (furthest to nearest)
+  target.sort((a, b) => distances[b] - distances[a]);
 }
 
 function hasTransparency(alphas: Float32Array | null, defaultAlpha: number, decorations?: Decoration[]): boolean {
