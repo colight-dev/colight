@@ -1,11 +1,11 @@
-# %% Common imports and configuration
+# Common imports and configuration
 import numpy as np
 from genstudio.scene3d import Ellipsoid, Cuboid, LineBeams, PointCloud, deco
 
 # Common camera parameters
 DEFAULT_CAMERA = {"up": [0, 0, 1], "fov": 45, "near": 0.1, "far": 100}
 
-# %% 1) Opaque Occlusion (Single Component)
+# 1) Opaque Occlusion (Single Component)
 print(
     "Test 1: Opaque Occlusion.\n"
     "Two overlapping ellipsoids: green (higher z) should occlude red."
@@ -30,9 +30,8 @@ scene_opaque = Ellipsoid(
         }
     }
 )
-scene_opaque
 
-# %% 2) Transparent Blending (Single Component)
+# 2) Transparent Blending (Single Component)
 print(
     "Test 2: Transparent Blending.\n"
     "Overlapping blue and semi-transparent yellow ellipsoids should blend."
@@ -57,9 +56,8 @@ scene_transparent = Ellipsoid(
         }
     }
 )
-scene_transparent
 
-# %% 3) Inter-Component Ordering
+# 3) Inter-Component Ordering
 print(
     "Test 3: Inter-Component Ordering.\n"
     "Cyan point cloud should appear on top of orange cuboid due to render order."
@@ -90,9 +88,8 @@ scene_order = (
         }
     )
 )
-scene_order
 
-# %% 4) Per-Instance Alpha Overrides (Point Cloud)
+# 4) Per-Instance Alpha Overrides (Point Cloud)
 # ISSUE - blending only visible from one direction?
 print(
     "Test 4: Per-Instance Alpha Overrides.\n"
@@ -113,9 +110,8 @@ scene_pc_alpha = PointCloud(
         }
     }
 )
-scene_pc_alpha
 
-# %% 5) Decoration Overrides (Cuboid)
+# 5) Decoration Overrides (Cuboid)
 print(
     "Test 5: Decoration Overrides.\n"
     "Three cuboids: middle one red, semi-transparent, and scaled up."
@@ -141,9 +137,8 @@ scene_deco = Cuboid(
         }
     }
 )
-scene_deco
 
-# %% 6) Extreme Alpha Values (Ellipsoids)
+# 6) Extreme Alpha Values (Ellipsoids)
 # ISSUE: nearly invisible shows background color (occluding) rather than showing the other item
 print(
     "Test 6: Extreme Alpha Values.\n"
@@ -164,9 +159,8 @@ scene_extreme = Ellipsoid(
         }
     }
 )
-scene_extreme
 
-# %% 7) Mixed Primitive Types Overlapping
+# 7) Mixed Primitive Types Overlapping
 print(
     "Test 7: Mixed Primitive Types.\n"
     "Overlapping red ellipsoid, green cuboid, yellow beam, and blue/magenta points."
@@ -207,9 +201,8 @@ scene_mixed = (
         }
     }
 )
-scene_mixed
 
-# %% 8) Insertion Order Conflict (Two PointClouds)
+# 8) Insertion Order Conflict (Two PointClouds)
 print(
     "Test 8: Insertion Order.\n"
     "Two overlapping point clouds: second one (purple) should appear on top of first (green)."
@@ -237,4 +230,10 @@ scene_insertion = (pointcloud_component1 + pointcloud_component2) + (
         }
     }
 )
-scene_insertion
+
+(
+    scene_deco & scene_extreme & scene_pc_alpha
+    | scene_insertion & scene_mixed & scene_transparent
+    | scene_opaque & scene_order
+)
+# %%

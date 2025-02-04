@@ -29,7 +29,7 @@ export function useFPSCounter() {
     const frameTimesRef = useRef<number[]>([]);
     const lastRenderTimeRef = useRef<number>(0);
     const lastUpdateTimeRef = useRef<number>(0);
-    const MAX_SAMPLES = 60;
+    const MAX_SAMPLES = 4;
 
     const updateDisplay = useCallback((renderTime: number) => {
         const now = performance.now();

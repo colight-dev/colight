@@ -134,8 +134,10 @@ def rotate_points(
     # Initialize output array with same dtype as input
     moved = np.zeros((n_frames, xyz.shape[0] * 3), dtype=input_dtype)
 
-    # Generate rotation angles for each frame (360 degrees = 2*pi radians)
-    angles = np.linspace(0, 2 * np.pi, n_frames, dtype=input_dtype)
+    # Generate rotation angles for each frame (up to but not including 360 degrees)
+    angles = np.linspace(
+        0, 2 * np.pi * (n_frames - 1) / n_frames, n_frames, dtype=input_dtype
+    )
 
     # Center points around origin
     centered = xyz - origin
@@ -195,6 +197,7 @@ def scene(controlled, point_size, xyz, rgb, scale, select_region=False):
             positions=xyz,
             colors=rgb,
             scales=scale,
+            alpha=Plot.js("$state.alpha ? 0.5 : null"),
             onHover=js("""(i) => {
                  $state.update({hovered: i})
                 }"""),
@@ -210,11 +213,8 @@ def scene(controlled, point_size, xyz, rgb, scale, select_region=False):
                 deco(
                     js("$state.hovered ? [$state.hovered] : []"),
                     color=[0.0, 1.0, 0.0],
-                ),
-                deco(
-                    js("$state.selected_region_indexes || []") if select_region else [],
-                    alpha=0.2,
-                    scale=0.5,
+                    scale=2.0,
+                    alpha=1.0,
                 ),
             ],
             highlightColor=[1.0, 1.0, 0.0],
@@ -274,8 +274,26 @@ wall_xyzs = rotate_points(wall_xyz, n_frames=NUM_FRAMES)
             "torus_xyz": torus_xyzs,
             "torus_rgb": torus_rgb,
             "frame": 0,
+            "alpha": False,
+            "checkbox": False,
         },
         sync={"selected_region_i", "cube_rgb"},
+    )
+    | Plot.html(
+        [
+            "label",
+            [
+                "input",
+                {
+                    "type": "checkbox",
+                    "checked": js("$state.alpha"),
+                    "onChange": Plot.js(
+                        "(e) => $state.update({alpha: e.target.checked})"
+                    ),
+                },
+            ],
+            "Show Alpha",
+        ]
     )
     | Plot.Slider("frame", range=NUM_FRAMES, fps=30)
     | scene(

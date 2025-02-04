@@ -108,16 +108,16 @@ function getBaseDefaults(config: Partial<BaseComponentConfig>): Required<Omit<Ba
 
 function getColumnarParams(elem: BaseComponentConfig, count: number): {colors: Float32Array|null, alphas: Float32Array|null, scales: Float32Array|null} {
 
-  // Check for Float64Arrays and throw if found
-  if (elem.colors instanceof Float64Array) {
-    throw new Error('Float64Array not supported for colors - please use Float32Array');
-  }
-  if (elem.alphas instanceof Float64Array) {
-    throw new Error('Float64Array not supported for alphas - please use Float32Array');
-  }
-  if (elem.scales instanceof Float64Array) {
-    throw new Error('Float64Array not supported for scales - please use Float32Array');
-  }
+  // // Check for Float64Arrays and throw if found
+  // if (elem.colors instanceof Float64Array) {
+  //   throw new Error('Float64Array not supported for colors - please use Float32Array');
+  // }
+  // if (elem.alphas instanceof Float64Array) {
+  //   throw new Error('Float64Array not supported for alphas - please use Float32Array');
+  // }
+  // if (elem.scales instanceof Float64Array) {
+  //   throw new Error('Float64Array not supported for scales - please use Float32Array');
+  // }
 
   const hasValidColors = elem.colors instanceof Float32Array && elem.colors.length >= count * 3;
   const hasValidAlphas = elem.alphas instanceof Float32Array && elem.alphas.length >= count;
@@ -2753,5 +2753,5 @@ function getSortedIndices(centers: Float32Array, cameraPosition: [number, number
 function hasTransparency(alphas: Float32Array | null, defaultAlpha: number, decorations?: Decoration[]): boolean {
     return alphas !== null ||
            defaultAlpha !== 1.0 ||
-           (decorations?.some(d => d.alpha !== undefined) ?? false);
+           (decorations?.some(d => d.alpha  !== undefined && d.alpha !== 1.0 && d.indexes?.length > 0) ?? false);
 }

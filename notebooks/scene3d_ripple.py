@@ -7,7 +7,7 @@ from genstudio.scene3d import PointCloud, Ellipsoid, deco
 
 
 # ----------------- 1) Ripple Grid (Point Cloud) -----------------
-def create_ripple_grid(n_x=250, n_y=250, n_frames=60):
+def create_ripple_grid(n_x=300, n_y=300, n_frames=30):
     """Create frames of a 2D grid of points in the XY plane with sinusoidal ripple over time.
 
     Returns:
@@ -220,7 +220,7 @@ def create_ripple_and_morph_scene():
                 "hover_point": None,
             }
         )
-        | Plot.Slider("frame", range=n_frames, fps="raf")
+        | Plot.Slider("frame", range=n_frames, fps="30")
         | (scene_grid & scene_ellipsoids)
     )
 
