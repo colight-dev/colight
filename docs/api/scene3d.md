@@ -39,6 +39,10 @@ Parameters
 
 - `size` (Optional[NumberLike]): Default size for all points if sizes not provided
 
+- `alphas` (Optional[ArrayLike]): Array of alpha values per point (optional)
+
+- `alpha` (Optional[NumberLike]): Default alpha value for all points if alphas not provided
+
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
 
@@ -60,6 +64,10 @@ Parameters
 - `colors` (Optional[ArrayLike]): Nx3 array of RGB colors or flattened array (optional)
 
 - `color` (Optional[ArrayLike]): Default RGB color [r,g,b] for all ellipsoids if colors not provided
+
+- `alphas` (Optional[ArrayLike]): Array of alpha values per ellipsoid (optional)
+
+- `alpha` (Optional[NumberLike]): Default alpha value for all ellipsoids if alphas not provided
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
@@ -83,6 +91,10 @@ Parameters
 
 - `color` (Optional[ArrayLike]): Default RGB color [r,g,b] for all ellipsoids if colors not provided
 
+- `alphas` (Optional[ArrayLike]): Array of alpha values per ellipsoid (optional)
+
+- `alpha` (Optional[NumberLike]): Default alpha value for all ellipsoids if alphas not provided
+
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
 
@@ -105,6 +117,10 @@ Parameters
 
 - `color` (Optional[ArrayLike]): Default RGB color [r,g,b] for all cuboids if colors not provided
 
+- `alphas` (Optional[ArrayLike]): Array of alpha values per cuboid (optional)
+
+- `alpha` (Optional[NumberLike]): Default alpha value for all cuboids if alphas not provided
+
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
 
@@ -119,13 +135,17 @@ Parameters
 
 - `positions` (ArrayLike): Array of quadruples [x,y,z,i, x,y,z,i, ...] where points sharing the same i value are connected in sequence
 
-- `color` (Optional[ArrayLike]): Default RGB color [r,g,b] for all beams if segment_colors not provided
+- `color` (Optional[ArrayLike]): Default RGB color [r,g,b] for all beams if colors not provided
 
-- `radius`: Default radius for all beams if segment_radii not provided
+- `size` (Optional[NumberLike]): Default size for all beams if sizes not provided
 
-- `segment_colors`: Array of RGB colors per beam segment (optional)
+- `colors` (Optional[ArrayLike]): Array of RGB colors per line (optional)
 
-- `segment_radii`: Array of radii per beam segment (optional)
+- `sizes` (Optional[ArrayLike]): Array of sizes per line (optional)
+
+- `alpha` (Optional[NumberLike]): Default alpha value for all beams if alphas not provided
+
+- `alphas` (Optional[ArrayLike]): Array of alpha values per line (optional)
 
 - `**kwargs` (Any): Additional arguments like onHover, onClick
 

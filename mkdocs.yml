@@ -34,6 +34,7 @@ nav:
     - Mouse events: interactivity/events.py
     - Conditional Rendering: learn-more/cond.py
     - Tailing data: interactivity/tail.py
+  - Scene3D: learn-more/scene3d.py
   - Learn More:
     - Working with Color: learn-more/color.py
     - Python Event Loops: learn-more/python-event-loop.py
