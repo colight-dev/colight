@@ -54,6 +54,21 @@ import {
   RING_PICKING_INSTANCE_LAYOUT
 } from './shaders';
 
+interface ComponentOffset {
+  componentIdx: number; // The index of the component in your overall component list.
+  start: number;        // The first instance index in the combined buffer for this component.
+  count: number;        // How many instances this component contributed.
+}
+
+function packID(instanceIdx: number): number {
+    return 1 + instanceIdx;
+}
+
+// Unpack a 32-bit integer back into component and instance indices
+function unpackID(id: number): number | null {
+    if (id === 0) return null;
+    return id - 1;
+}
 
 /******************************************************
  * 1) Types and Interfaces
@@ -184,6 +199,8 @@ export interface RenderObject {
     lastCameraPosition?: [number, number, number];
     sortedIndices?: Uint32Array;  // Created/resized during sorting when needed
   };
+
+  componentOffsets: ComponentOffset[];  // Add this field
 }
 
 export interface RenderObjectCache {
@@ -442,7 +459,6 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     if(count === 0) return;
 
     const size = elem.size ?? 0.02;
-    // Check array validities once before the loop
     const hasValidSizes = elem.sizes && elem.sizes.length >= count;
     const sizes = hasValidSizes ? elem.sizes : null;
     const { scales } = getColumnarParams(elem, count);
@@ -458,8 +474,8 @@ const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       const pointSize = sizes?.[i] ?? size;
       const scale = scales ? scales[i] : 1.0;
       target[j*5+3] = pointSize * scale;
-      // PickID
-      target[j*5+4] = baseID + i;
+      // PickID - use baseID + local index
+      target[j*5+4] = packID(baseID + i);
     }
 
     // Apply scale decorations
@@ -656,7 +672,7 @@ const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
       target[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
       target[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
       // Picking ID
-      target[j*7+6] = baseID + i;
+      target[j*7+6] = packID(baseID + i);
     }
 
     // Apply scale decorations
@@ -815,7 +831,6 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
     if(count === 0) return;
 
     const defaultRadius = elem.radius ?? [1, 1, 1];
-    const ringCount = count * 3;
 
     const { indices, indexToPosition } = getIndicesAndMapping(count, sortedIndices);
 
@@ -827,7 +842,7 @@ const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidAxesComponentConfig> = {
       const rx = elem.radii?.[i*3+0] ?? defaultRadius[0];
       const ry = elem.radii?.[i*3+1] ?? defaultRadius[1];
       const rz = elem.radii?.[i*3+2] ?? defaultRadius[2];
-      const thisID = baseID + i;  // Keep original index for picking ID
+      const thisID = packID(baseID + i);
 
       for(let ring = 0; ring < 3; ring++) {
         const idx = j*3 + ring;
@@ -1007,7 +1022,7 @@ const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
       target[j*7+4] = (sizes ? sizes[i*3+1] : defaultSize[1]) * scale;
       target[j*7+5] = (sizes ? sizes[i*3+2] : defaultSize[2]) * scale;
       // Picking ID
-      target[j*7+6] = baseID + i;
+      target[j*7+6] = packID(baseID + i);
     }
 
     // Apply scale decorations
@@ -1227,7 +1242,7 @@ const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
       target[base + 4] = elem.positions[(p+1) * 4 + 1]; // end.y
       target[base + 5] = elem.positions[(p+1) * 4 + 2]; // end.z
       target[base + 6] = size;                        // size
-      target[base + 7] = baseID + i;                  // Keep original index for picking ID
+      target[base + 7] = packID(baseID + i);
     }
   },
 
@@ -1529,7 +1544,6 @@ export function SceneInner({
 
     renderObjects: RenderObject[];
     componentBaseId: number[];
-    idToComponent: ({componentIdx: number, instanceIdx: number} | null)[];
     pipelineCache: Map<string, PipelineCacheEntry>;
     dynamicBuffers: DynamicBuffers | null;
     resources: GeometryResources;
@@ -1631,7 +1645,6 @@ export function SceneInner({
         readbackBuffer,
         renderObjects: [],
         componentBaseId: [],
-        idToComponent: [null],  // First ID (0) is reserved
         pipelineCache: new Map(),
         dynamicBuffers: null,
         resources: {
@@ -1703,14 +1716,10 @@ export function SceneInner({
    * C) Building the RenderObjects (no if/else)
    ******************************************************/
   // Move ID mapping logic to a separate function
-  const buildComponentIdMapping = useCallback((components: ComponentConfig[]) => {
+  function buildComponentIdMapping(components: ComponentConfig[]) {
     if (!gpuRef.current) return;
 
-    // Reset ID mapping
-    gpuRef.current.idToComponent = [null];  // First ID (0) is reserved
-    let currentID = 1;
-
-    // Build new mapping
+    // We only need componentBaseId for offset calculations now
     components.forEach((elem, componentIdx) => {
       const spec = primitiveRegistry[elem.type];
       if (!spec) {
@@ -1718,19 +1727,10 @@ export function SceneInner({
         return;
       }
 
-      const count = spec.getCount(elem);
-      gpuRef.current!.componentBaseId[componentIdx] = currentID;
-
-      // Expand global ID table
-      for (let j = 0; j < count; j++) {
-        gpuRef.current!.idToComponent[currentID + j] = {
-          componentIdx: componentIdx,
-          instanceIdx: j
-        };
-      }
-      currentID += count;
+      // Store the base ID for this component
+      gpuRef.current!.componentBaseId[componentIdx] = componentIdx;
     });
-  }, []);
+  }
 
   // Add this type definition at the top of the file
   type ComponentType = ComponentConfig['type'];
@@ -1884,15 +1884,27 @@ export function SceneInner({
 
     // Initialize componentBaseId array and build ID mapping
     gpuRef.current.componentBaseId = new Array(components.length).fill(0);
-    buildComponentIdMapping(components);
+
+    // Track component offsets
+    const componentOffsets: ComponentOffset[] = [];
+    let currentStart = 0;
 
     // Collect render data using helper
     const typeArrays = collectTypeData(
       components,
       (comp, spec) => {
+        const count = spec.getCount(comp);
+        if (count > 0) {
+            componentOffsets.push({
+                componentIdx: components.indexOf(comp),
+                start: currentStart,
+                count
+            });
+            currentStart += count;
+        }
+
         // Try to reuse existing render object's array
         const existingRO = renderObjectCache.current[comp.type];
-        const count = spec.getCount(comp);
 
         // Check if we can reuse the cached render data array
         if (existingRO?.lastRenderCount === count) {
@@ -1949,7 +1961,7 @@ export function SceneInner({
     // Create or update render objects and write buffer data
     typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
       const spec = primitiveRegistry[type];
-      if (!spec || !gpuRef.current) return;
+      if (!spec) return;
 
       try {
         const renderOffset = Math.ceil(dynamicBuffers.renderOffset / 4) * 4;
@@ -1978,6 +1990,10 @@ export function SceneInner({
         // Try to reuse existing render object
         let renderObject = renderObjectCache.current[type];
 
+        // Find the starting offset for this component's instances
+        const componentOffset = componentOffsets.find(offset => offset.componentIdx === info.indices[0]);
+        const baseID = componentOffset ? componentOffset.start : 0;
+
         if (!renderObject || renderObject.lastRenderCount !== count) {
           // Create new render object if none found or count changed
           const geometryResource = getGeometryResource(resources, type);
@@ -1987,13 +2003,12 @@ export function SceneInner({
           const renderData = info.datas[0];
           const pickingData = new Float32Array(count * spec.getFloatsPerPicking());
 
-          // Build picking data
-          const baseID = gpuRef.current.componentBaseId[info.indices[0]];
+          // Build picking data with correct baseID
           spec.buildPickingData(components[info.indices[0]], pickingData, baseID);
 
           renderObject = {
             pipeline,
-            pickingPipeline,  // Set the picking pipeline
+            pickingPipeline,
             vertexBuffers: [
               geometryResource.vb,
               {
@@ -2015,13 +2030,14 @@ export function SceneInner({
             ],
             pickingIndexBuffer: geometryResource.ib,
             pickingIndexCount: geometryResource.indexCount,
-            pickingVertexCount: geometryResource.vertexCount ?? 0,  // Set picking vertex count
+            pickingVertexCount: geometryResource.vertexCount ?? 0,
             pickingInstanceCount: info.totalCount,
             pickingDataStale: false,
             componentIndex: info.indices[0],
             cachedRenderData: renderData,
             cachedPickingData: pickingData,
-            lastRenderCount: count
+            lastRenderCount: count,
+            componentOffsets: componentOffsets
           };
 
           // Store in cache
@@ -2041,10 +2057,10 @@ export function SceneInner({
           renderObject.instanceCount = info.totalCount;
           renderObject.componentIndex = info.indices[0];
           renderObject.cachedRenderData = info.datas[0];
+          renderObject.componentOffsets = componentOffsets;
 
           // Update picking data if needed
           if (renderObject.pickingDataStale) {
-            const baseID = gpuRef.current.componentBaseId[info.indices[0]];
             spec.buildPickingData(components[info.indices[0]], renderObject.cachedPickingData, baseID);
             renderObject.pickingDataStale = false;
           }
@@ -2277,7 +2293,7 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
     try {
       const {
         device, pickTexture, pickDepthTexture, readbackBuffer,
-        uniformBindGroup, renderObjects, idToComponent
+        uniformBindGroup, renderObjects
       } = gpuRef.current;
       if(!pickTexture || !pickDepthTexture || !readbackBuffer) return;
       if (currentPickingId !== pickingId) return;
@@ -2376,45 +2392,81 @@ function isValidRenderObject(ro: RenderObject): ro is Required<Pick<RenderObject
 
   function handleHoverID(pickedID: number) {
     if (!gpuRef.current) return;
-    const { idToComponent } = gpuRef.current;
 
-    // Get new hover state
-    const newHoverState = idToComponent[pickedID] || null;
+    // Get combined instance index
+    const combinedIndex = unpackID(pickedID);
+    if (combinedIndex === null) {
+        // Clear previous hover if it exists
+        if (lastHoverState.current) {
+            const prevComponent = components[lastHoverState.current.componentIdx];
+            prevComponent?.onHover?.(null);
+            lastHoverState.current = null;
+        }
+        return;
+    }
+
+    // Find which component this instance belongs to
+    const ro = gpuRef.current.renderObjects[0];  // We combine into a single render object
+    if (!ro?.componentOffsets) return;
+
+    let newHoverState = null;
+    for (const offset of ro.componentOffsets) {
+        if (combinedIndex >= offset.start && combinedIndex < offset.start + offset.count) {
+            newHoverState = {
+                componentIdx: offset.componentIdx,
+                instanceIdx: combinedIndex - offset.start
+            };
+            break;
+        }
+    }
 
     // If hover state hasn't changed, do nothing
     if ((!lastHoverState.current && !newHoverState) ||
         (lastHoverState.current && newHoverState &&
          lastHoverState.current.componentIdx === newHoverState.componentIdx &&
          lastHoverState.current.instanceIdx === newHoverState.instanceIdx)) {
-      return;
+        return;
     }
 
     // Clear previous hover if it exists
     if (lastHoverState.current) {
-      const prevComponent = components[lastHoverState.current.componentIdx];
-      prevComponent?.onHover?.(null);
+        const prevComponent = components[lastHoverState.current.componentIdx];
+        prevComponent?.onHover?.(null);
     }
 
     // Set new hover if it exists
     if (newHoverState) {
-      const { componentIdx, instanceIdx } = newHoverState;
-      if (componentIdx >= 0 && componentIdx < components.length) {
-        components[componentIdx].onHover?.(instanceIdx);
-      }
+        const { componentIdx, instanceIdx } = newHoverState;
+        if (componentIdx >= 0 && componentIdx < components.length) {
+            components[componentIdx].onHover?.(instanceIdx);
+        }
     }
 
     // Update last hover state
     lastHoverState.current = newHoverState;
   }
 
-  function handleClickID(pickedID:number){
-    if(!gpuRef.current) return;
-    const {idToComponent} = gpuRef.current;
-    const rec = idToComponent[pickedID];
-    if(!rec) return;
-    const {componentIdx, instanceIdx} = rec;
-    if(componentIdx<0||componentIdx>=components.length) return;
-    components[componentIdx].onClick?.(instanceIdx);
+  function handleClickID(pickedID: number) {
+    if (!gpuRef.current) return;
+
+    // Get combined instance index
+    const combinedIndex = unpackID(pickedID);
+    if (combinedIndex === null) return;
+
+    // Find which component this instance belongs to
+    const ro = gpuRef.current.renderObjects[0];  // We combine into a single render object
+    if (!ro?.componentOffsets) return;
+
+    for (const offset of ro.componentOffsets) {
+        if (combinedIndex >= offset.start && combinedIndex < offset.start + offset.count) {
+            const componentIdx = offset.componentIdx;
+            const instanceIdx = combinedIndex - offset.start;
+            if (componentIdx >= 0 && componentIdx < components.length) {
+                components[componentIdx].onClick?.(instanceIdx);
+            }
+            break;
+        }
+    }
   }
 
   /******************************************************

@@ -19,44 +19,67 @@ from genstudio.plot import js
             "alpha": 1.0,
             "frame": 0,
             # Pre-generate frames using JavaScript
-            "frames": js("""(() => {
+            "frames": js(
+                """
                 const n = $state.num_particles;
                 const num_frames = 30;
                 const frames = [];  // Use regular array to store Float32Arrays
 
+                // Pre-compute some values to speed up generation
+                const uSteps = 50;
+                const vSteps = 25;
+                const uStep = (2 * Math.PI) / uSteps;
+                const vStep = Math.PI / vSteps;
+                const jitter = 0.1;
+                const scale = 0.04;
+
                 for (let frame = 0; frame < num_frames; frame++) {
                     const t = frame * 0.05;
                     const frameData = new Float32Array(n * 3);
+                    let idx = 0;
 
+                    // Generate points more uniformly through the volume
                     for (let i = 0; i < n; i++) {
-                        // Generate points in a heart shape using parametric equations
-                        const u = Math.random() * 2 * Math.PI;
-                        const v = Math.random() * Math.PI;
-                        const jitter = 0.1;
+                        // Use cube rejection method to fill the heart volume
+                        let x, y, z;
+                        do {
+                            // Generate points in parametric space with volume filling
+                            const u = Math.random() * 2 * Math.PI;
+                            const v = Math.random() * Math.PI;
+                            const r = Math.pow(Math.random(), 1/3); // Cube root for volume filling
 
-                        // Heart shape parametric equations
-                        const x = 16 * Math.pow(Math.sin(u), 3);
-                        const y = 13 * Math.cos(u) - 5 * Math.cos(2*u) - 2 * Math.cos(3*u) - Math.cos(4*u);
-                        const z = 8 * Math.sin(v);
+                            // Heart shape parametric equations with radial scaling
+                            x = 16 * Math.pow(Math.sin(u), 3) * r;
+                            y = (13 * Math.cos(u) - 5 * Math.cos(2*u) - 2 * Math.cos(3*u) - Math.cos(4*u)) * r;
+                            z = 8 * Math.sin(v) * r;
 
-                        // Add some random jitter and animation
-                        const rx = (Math.random() - 0.5) * jitter;
-                        const ry = (Math.random() - 0.5) * jitter;
-                        const rz = (Math.random() - 0.5) * jitter;
+                            // Add subtle jitter for more natural look
+                            const rx = (Math.random() - 0.5) * jitter * 0.5;
+                            const ry = (Math.random() - 0.5) * jitter * 0.5;
+                            const rz = (Math.random() - 0.5) * jitter * 0.5;
 
-                        // Scale down the heart and add animation
-                        frameData[i*3] = (x * 0.04 + rx) * (1 + 0.1 * Math.sin(t + u));
-                        frameData[i*3 + 1] = (y * 0.04 + ry) * (1 + 0.1 * Math.sin(t + v));
-                        frameData[i*3 + 2] = (z * 0.04 + rz) * (1 + 0.1 * Math.cos(t + u));
+                            // Scale and animate
+                            x = (x * scale + rx) * (1 + 0.1 * Math.sin(t + u));
+                            y = (y * scale + ry) * (1 + 0.1 * Math.sin(t + v));
+                            z = (z * scale + rz) * (1 + 0.1 * Math.cos(t + u));
+
+                        } while (Math.random() > 0.8); // Rejection sampling for denser core
+
+                        frameData[idx++] = x;
+                        frameData[idx++] = y;
+                        frameData[idx++] = z;
                     }
 
                     frames.push(frameData);
                 }
 
                 return frames;
-            })()"""),
+            """,
+                expression=False,
+            ),
             # Pre-generate colors (these don't change per frame)
-            "colors": js("""(() => {
+            "colors": js(
+                """
                 const n = $state.num_particles;
                 const colors = new Float32Array(n * 3);
 
@@ -69,7 +92,9 @@ from genstudio.plot import js
                 }
 
                 return colors;
-            })()"""),
+            """,
+                expression=False,
+            ),
         }
     )
     | [

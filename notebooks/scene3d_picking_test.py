@@ -28,6 +28,7 @@ scene_points = PointCloud(
             color=[1, 1, 0],
             scale=1.5,
         ),
+        deco([0], scale=4),
     ],
 ) + (
     {
