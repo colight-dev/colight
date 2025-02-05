@@ -15,7 +15,7 @@ from genstudio.plot import js
 (
     Plot.initialState(
         {
-            "num_particles": 400000,
+            "num_particles": 500000,
             "alpha": 1.0,
             "frame": 0,
             # Pre-generate frames using JavaScript
@@ -108,8 +108,8 @@ from genstudio.plot import js
                 {
                     "type": "range",
                     "min": 100,
-                    "max": 500000,
-                    "step": 100,
+                    "max": 1000000,
+                    "step": 10000,
                     "value": js("$state.num_particles"),
                     "onChange": js("""(e) => {
                         const n = parseInt(e.target.value);
