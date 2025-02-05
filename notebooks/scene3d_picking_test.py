@@ -268,5 +268,5 @@ scene_grid_cuboids = Cuboid(
     scene_points & scene_beams
     | scene_cuboids & scene_ellipsoids
     | mixed_scene & scene_grid_cuboids
-)
+).display_as("html")
 # %%

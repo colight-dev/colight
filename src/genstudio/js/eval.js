@@ -183,6 +183,9 @@ export function evaluate(node, $state, experimental, buffers) {
       if (node.data?.__type__ === "buffer") {
         node.data = buffers[node.data.index];
       }
+      if (node.__buffer_index__ !== undefined) {
+        node.data = buffers[node.__buffer_index__]
+      }
       node.array = evaluateNdarray(node)
       return node.array;
     default:
