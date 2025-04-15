@@ -530,7 +530,18 @@ function AnyWidgetApp() {
   return <Viewer {...data} experimental={experimental} model={model} />;
 }
 
-export const renderData = (element, data, buffers, id) => {
+/**
+ * Renders the GenStudio widget into a specified DOM element.
+ * Handles both inline base64 encoded buffers and URLs for large buffers.
+ *
+ * @param {string|HTMLElement} element - The target DOM element or its ID.
+ * @param {object} data - The widget data containing placeholders like {__buffer__: i}.
+ * @param {Array<string|object>} buffers_payload - Mixed list containing either:
+ *   - Base64 encoded strings for inline buffers.
+ *   - Objects like { type: 'url', url: string } for large buffers.
+ * @param {string} id - A unique identifier for the widget instance.
+ */
+export const renderData = async (element, data, buffers_payload, id) => {
   id = id || `widget-${Math.random().toString(36).substring(2, 15)}`;
 
   // If element is a string, treat it as an ID and find/create the element
@@ -560,14 +571,54 @@ export const renderData = (element, data, buffers, id) => {
     parsedData = data;
   }
 
-  // Convert buffers if they are base64 encoded strings
-  const decodedBuffers = Array.isArray(buffers) && typeof buffers[0] === 'string'
-    ? buffers.map(b => Uint8Array.from(atob(b), c => c.charCodeAt(0)))
-    : buffers;
+  // --- Buffer Resolution --- //
+  const resolved_buffers = new Array(buffers_payload.length);
+
+  // Prepare resolution promises (decoding or fetching)
+  const resolutionPromises = buffers_payload.map(async (payload, index) => {
+    if (typeof payload === 'string') {
+      // Decode inline base64 buffer
+      try {
+        resolved_buffers[index] = Uint8Array.from(atob(payload), c => c.charCodeAt(0));
+      } catch (e) {
+        console.error(`Error decoding inline base64 buffer at index ${index}:`, e);
+        resolved_buffers[index] = null; // Mark as failed
+      }
+    } else if (payload && payload.type === 'url') {
+      // Fetch URL buffer
+      try {
+        const response = await fetch(payload.url);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        resolved_buffers[index] = new Uint8Array(arrayBuffer);
+      } catch (e) {
+        console.error(`Error fetching buffer from URL ${payload.url}:`, e);
+        resolved_buffers[index] = null; // Mark as failed
+      }
+    } else {
+      // Handle unexpected payload format
+      console.warn(`Unknown buffer payload format at index ${index}:`, payload);
+      resolved_buffers[index] = null; // Mark as failed
+    }
+  });
+
+  // Wait for all buffers to be resolved (fetched or decoded)
+  try {
+    await Promise.all(resolutionPromises);
+    console.log('[widget.jsx] All buffers resolved.', resolved_buffers);
+  } catch (e) {
+    console.error('Error resolving buffers:', e);
+    // Handle error appropriately
+    return;
+  }
+  // --- End Buffer Resolution ---
 
   const root = ReactDOM.createRoot(el);
   el._ReactRoot = root;
-  root.render(<Viewer {...parsedData} id={id} buffers={decodedBuffers} />);
+  // Pass the original data (with placeholders) and the fully resolved buffers array
+  root.render(<Viewer {...parsedData} id={id} buffers={resolved_buffers} />);
 };
 
 export const renderFile = (element) => {

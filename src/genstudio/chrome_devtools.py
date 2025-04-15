@@ -21,6 +21,12 @@ from typing import Union
 DEBUG_WINDOW = False
 
 
+def format_bytes(bytes):
+    if bytes >= 1024 * 1024:
+        return f"{bytes/(1024*1024):.2f}MB"
+    return f"{bytes/1024:.2f}KB"
+
+
 def find_chrome():
     """Find Chrome executable on the system"""
     possible_paths = [
@@ -100,7 +106,12 @@ class DualDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         return "text/plain"
 
     def translate_path(self, path):
-        # First try served files
+        # Special handling for buffers served from memory
+        if path.lstrip("/").startswith("served_buffer_"):
+            # Keep the path as is, do_GET will handle it
+            return path.lstrip("/")
+
+        # First try other served files
         if path.lstrip("/") in self.chrome_context.files:
             if self.chrome_context.debug and path not in self._logged_paths:
                 print(f"[chrome_devtools.py] Serving {path} from memory")
@@ -116,6 +127,26 @@ class DualDirectoryHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.lstrip("/")
+        # Check if it's a request for a served buffer
+        if path.startswith("served_buffer_") and path in self.chrome_context.files:
+            # Serve buffer as raw bytes and clean up
+            content_bytes = self.chrome_context.files.pop(
+                path
+            )  # Use pop to get and remove
+            if self.chrome_context.debug:
+                print(
+                    f"[chrome_devtools.py] Serving & Deleting buffer {path} ({len(content_bytes)} bytes) from memory"
+                )
+            self.send_response(200)
+            self.send_header("Content-type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(content_bytes)))
+            # Add CORS header to allow fetching from JS
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(content_bytes)
+            return
+
+        # Handle index.html and other explicitly served files
         if path in self.chrome_context.files:
             content = self.chrome_context.files[path]
             self.send_response(200)
@@ -333,7 +364,14 @@ class ChromeContext:
         self.cmd_id += 1
         message = {"id": self.cmd_id, "method": method, "params": params or {}}
 
-        self.ws.send(json.dumps(message))
+        message_str = json.dumps(message)
+        if self.debug:
+            size_bytes = len(message_str.encode("utf-8"))
+            print(
+                f"[chrome_devtools.py] Sending message of size: {format_bytes(size_bytes)} via WebSocket"
+            )
+
+        self.ws.send(message_str)
 
         # Wait for response with matching id
         while True:

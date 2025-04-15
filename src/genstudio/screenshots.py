@@ -5,13 +5,14 @@ Screenshot utilities for GenStudio plots using a StudioContext which inherits fr
 import json
 import time
 import subprocess  # Added import for subprocess
+import base64
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import genstudio.widget as widget
 from genstudio.html import encode_buffers
 from genstudio.env import WIDGET_URL, CSS_URL
-from genstudio.chrome_devtools import ChromeContext
+from genstudio.chrome_devtools import ChromeContext, format_bytes
 from genstudio.util import read_file
 
 
@@ -91,13 +92,46 @@ class StudioContext(ChromeContext):
         self.load_studio_html()
         data, buffers = widget.to_json_with_initialState(plot, buffers=[])
 
+        # Define threshold for sending buffers via HTTP (e.g., 1MB)
+        BUFFER_HTTP_THRESHOLD = 1 * 1024 * 1024
+        buffers_payload = []  # Single list for payload
+        num_inline = 0
+        num_url = 0
+
         if self.debug:
-            print("[StudioContext] Rendering plot data")
-            print(f"Buffer count: {len(buffers)}")
+            print(f"[StudioContext] Processing {len(buffers)} buffers for transfer.")
+
+        for i, buffer_bytes in enumerate(buffers):
+            if len(buffer_bytes) < BUFFER_HTTP_THRESHOLD:
+                # Encode small buffers inline (Base64 string)
+                encoded_buffer = base64.b64encode(buffer_bytes).decode("utf-8")
+                buffers_payload.append(encoded_buffer)
+                num_inline += 1
+            else:
+                # Create URL object for large buffers
+                buffer_filename = f"served_buffer_{self.id}_{i}.bin"
+                self.files[buffer_filename] = buffer_bytes
+                buffer_url = f"http://localhost:{self.server_port}/{buffer_filename}"
+                buffers_payload.append({"type": "url", "url": buffer_url})
+                num_url += 1
+                if self.debug:
+                    print(
+                        f"[StudioContext] Serving buffer {i} ({format_bytes(len(buffer_bytes))}) via URL: {buffer_url}"
+                    )
+
+        if self.debug:
+            print(
+                f"[StudioContext] Transfer summary: {num_inline} inline buffers, {num_url} URL buffers."
+            )
+            print(f"Total items in buffers payload: {len(buffers_payload)}")
 
         render_js = f"""
          (async () => {{
-           window.genstudio.renderData('studio', {json.dumps(data)}, {encode_buffers(buffers)}, '{self.id}');
+           console.log('[StudioContext] Received renderData call for ID: {self.id}');
+           const data = {json.dumps(data)};
+           // Pass the mixed payload list (base64 strings or URL objects)
+           const buffers_payload = {json.dumps(buffers_payload)};
+           await window.genstudio.renderData('studio', data, buffers_payload, '{self.id}');
            await window.genstudio.whenReady('{self.id}');
          }})()
          """
