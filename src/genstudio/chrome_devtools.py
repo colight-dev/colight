@@ -365,11 +365,11 @@ class ChromeContext:
         message = {"id": self.cmd_id, "method": method, "params": params or {}}
 
         message_str = json.dumps(message)
-        if self.debug:
-            size_bytes = len(message_str.encode("utf-8"))
-            print(
-                f"[chrome_devtools.py] Sending message of size: {format_bytes(size_bytes)} via WebSocket"
-            )
+        # if self.debug:
+        #     size_bytes = len(message_str.encode("utf-8"))
+        #     print(
+        #         f"[chrome_devtools.py] Sending message of size: {format_bytes(size_bytes)} via WebSocket"
+        #     )
 
         self.ws.send(message_str)
 

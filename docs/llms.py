@@ -1,6 +1,28 @@
 # %% [markdown]
 # # GenStudio LLM Interaction Guide
 #
+# ## Contents
+# - Library Context
+# - Examples
+#   - Clickable Box Counter: demonstrates `initialState`, basic HTML/Tailwind, `Plot.js` state update.
+#   - Click and Drag Scatter Plot: demonstrates `initialState`, `Plot.dot`, `Plot.events`, `Plot.js` array updates, `renderChildEvents`, drag handling, layered plots (`+`), complex state object.
+#   - Scatter Plot with LaTeX: demonstrates `Plot.dot`, `Plot.md` (LaTeX), layout operators (`&`), background styling.
+#   - Composable Plot with Legend: demonstrates `Plot.rect`, `Plot.ellipse`, `Plot.line`, `Plot.constantly`, `Plot.colorMap`, `Plot.colorLegend`, `Plot.aspectRatio`.
+#   - Animated Pixel Display: demonstrates `initialState`, `Plot.pixels`, `Plot.Slider` (animation), NumPy data, `Plot.js` state access.
+#   - Alphabet Slideshow: demonstrates `initialState`, HTML layout, complex `Plot.js` state updates, hover effects.
+#   - Live Python Code Editor: demonstrates `initialState`, `Plot.onChange` (Python callback), HTML forms, `Plot.js` state linkage, stdout capture.
+#   - Civilizations Timeline: demonstrates `Plot.barX`, `Plot.text`, data mapping, sorting, `Plot.colorLegend`.
+#   - Plot Type Examples: demonstrates `Plot.Grid`, various plot types, `Plot.md` documentation.
+#   - Discoveries Timeline with Tooltips: `initialState`, `Plot.rect`, `Plot.dot`, `Plot.text`, `Plot.tip`, `Plot.pointer`, `Plot.js` options.
+#   - Animated Spring Motion: demonstrates `initialState`, `Plot.dot`, `Plot.Slider` (animation), NumPy data source, `Plot.js` state access.
+#   - Isotype Chart: demonstrates `initialState`, `Plot.text`, `Plot.js` emoji generation, faceting (`fy`), dynamic layout.
+#   - Pulsar Plot ("Unknown Pleasures"): demonstrates `initialState`, `Plot.line`, faceting (`fy`), dynamic layout, styling, domain manipulation.
+#   - Interactive Shape Playground: demonstrates `initialState`, `Plot.onChange`, `Plot.line`, `Plot.Slider` controls, NumPy data generation.
+#   - Tabbed View: demonstrates Custom components, `initialState`, HTML/Tailwind layout, `Plot.js` tab logic.
+#   - 3D Spiral Point Cloud: demonstrates `Scene`, `PointCloud`, `initialState`, NumPy 3D data, `Plot.js` hover interactions.
+#   - 3D Animated Spheres: demonstrates `Scene`, `Ellipsoid`, `initialState`, NumPy frame generation, `Plot.Slider` animation, synchronized camera state.
+#   - Bitmap Component Examples: demonstrates `bitmap` component, NumPy pixel data formats (2D/3D), `Plot.Grid`.
+#
 # ## Library Context
 # GenStudio is a visualization library built for interactive data visualization in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
 #
@@ -11,7 +33,7 @@
 # The `Plot.Slider` component not only shows a slider but can also cycle a state variable through a range of values at a specified fps, eg. `Plot.Slider(key, init, [0, 10], fps=3)` will cycle `key` from 0-10 inclusive starting at `init`. `fps="ref"` is also valid and uses requestAnimationFrame instead of a numeric interval. Range can be list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n). Thus if one wants to show a series of 'frames' one can do `Plot.Slider("frame", range=len(frames))` to cycle through all the valid indexes of `frames`.
 # <examples>
 # %%
-# <example>
+# <example title="Clickable Box Counter">
 # User: Make a clickable yellow box that shows how many times it has been clicked.
 # Assistant:
 import genstudio.plot as Plot
@@ -30,7 +52,7 @@ from genstudio.plot import js
 )
 # </example>
 # %%
-# <example>
+# <example title="Click and Drag Scatter Plot">
 # User: Show an empty scatter plot. Let the user add points by clicking.
 # Assistant:
 import genstudio.plot as Plot
@@ -52,7 +74,7 @@ from genstudio.plot import js
 (
     Plot.initialState({"points": []})
     | Plot.dot(
-        (Plot.js("$state.points")),
+        (js("$state.points")),
         r=10,  # larger, easier to drag
         render=Plot.renderChildEvents(
             {
@@ -70,6 +92,7 @@ from genstudio.plot import js
     + Plot.domain([0, 1])
 )
 # User: Nice work. Can we add a direction line to each point, and shift-drag to rotate each point?
+# Demonstrates: Complex state object, Plot.js logic (drag/rotate), layered plots (+).
 (
     Plot.initialState({"points": []})
     | Plot.events(
@@ -126,6 +149,7 @@ from genstudio.plot import js
     | Plot.md("**instructions**: drag to move, shift-drag to rotate")
 )
 # User: Nice work. Can we add a direction line to each point, and shift-drag to rotate each point?
+# Demonstrates: Complex state object, Plot.js logic (drag/rotate), layered plots (+).
 (
     Plot.initialState({"points": []})
     | Plot.events(
@@ -183,7 +207,7 @@ from genstudio.plot import js
 )
 # </example>
 # %%
-# <example>
+# <example title="Scatter Plot with LaTeX">
 # User: Show a scatter plot of points in a stair-like pattern next to Gauss's law in LaTeX. Add pastel background colors.
 # Assistant:
 import genstudio.plot as Plot
@@ -205,7 +229,7 @@ $$\oint_{\partial \Omega} \mathbf{E} \cdot d\mathbf{S} = \frac{1}{\epsilon_0} \i
 plot1 & plot2
 # </example>
 # %%
-# <example>
+# <example title="Composable Plot with Legend">
 # User: Show a green square connected to a blue circle using a thick red line. Show a legend. Build up the plot from small/composable parts.
 # Assistant:
 import genstudio.plot as Plot
@@ -240,7 +264,7 @@ line_plot = Plot.line(
 )
 # </example>
 # %%
-# <example>
+# <example title="Animated Pixel Display">
 # User: Create an animated pixel display showing circular waves
 # Assistant:
 import genstudio.plot as Plot
@@ -295,7 +319,7 @@ data = generate_pixels(width=width, height=height, num_frames=60)
 
 # </example>
 # %%
-# <example>
+# <example title="Alphabet Slideshow">
 # User: Create an alphabet slideshow (controlled by click)
 # Assistant:
 import genstudio.plot as Plot
@@ -333,7 +357,7 @@ from genstudio.plot import js
 )
 # </example>
 # %%
-# <example>
+# <example title="Live Python Code Editor">
 # User: Create a simple live code editor that evaluates Python expressions
 # Assistant:
 import genstudio.plot as Plot
@@ -418,7 +442,7 @@ def evaluate(widget, _e):
 )
 # </example>
 # %%
-# <example>
+# <example title="Civilizations Timeline">
 # <given-user-file-context>
 
 # List of ancient civilizations with their temporal and geographic data
@@ -450,7 +474,7 @@ import genstudio.plot as Plot
 )
 # </example>
 # %%
-# <example>
+# <example title="Plot Type Examples">
 # User: What kinds of plots can I create with GenStudio? Please show me some examples.
 # Assistant:
 import genstudio.plot as Plot
@@ -543,7 +567,7 @@ Interactive features include:
 )
 # </example>
 # %%
-# <example>
+# <example title="Discoveries Timeline with Tooltips">
 # <given-user-file-context>
 
 # List of scientific discoveries with fields:
@@ -625,7 +649,7 @@ Hover over elements to see details about each discovery.
 )
 # </example>
 # %%
-# <example>
+# <example title="Animated Spring Motion">
 # User: Create a few-second motion animation showing a 2d spring animation where data comes from a numpy array. There are 3 dots, on the same horizontal line, oscillating horizontally at different speeds, not overlapping.
 # Assistant:
 import genstudio.plot as Plot
@@ -677,58 +701,58 @@ frames = generate_spring_motion()
 )
 # </example>
 # %%
-# <example>
+# <example title="Isotype Chart">
 # <given-user-file-context>
-data = [
-    {"animal": "pigs", "country": "Great Britain", "count": 1354979},
-    {"animal": "cattle", "country": "Great Britain", "count": 3962921},
-    {"animal": "sheep", "country": "Great Britain", "count": 10931215},
-    {"animal": "pigs", "country": "United States", "count": 6281935},
-    {"animal": "cattle", "country": "United States", "count": 9917873},
-    {"animal": "sheep", "country": "United States", "count": 7084151},
-]
+# pulsar_data is a numpy array of [x, y, wave_index] points representing pulsar waves
+# Each point has an x coordinate, y amplitude, and wave_index to identify which wave it belongs to
+from docs.examples.data import pulsar_data
+
 # </given-user-file-context>
 # User: Create an isotype chart for this data using emoji.
 # Assistant:
+# Here's a visualization that creates the iconic stacked wave effect:
+# 1. Creates a stacked line plot with white lines on black background
+# 2. Uses the `fy` parameter to create separate lines for each wave
+# 3. Removes axes and adds appropriate styling to match the iconic look
+
 import genstudio.plot as Plot
 
 (
-    Plot.initialState({"data": data})
-    | Plot.text(
+    Plot.initialState(
+        {
+            "data": pulsar_data,
+            # compute # of waves, we need it to determine layout
+            "waves": len(set(point[2] for point in pulsar_data)),
+            "height": Plot.js("$state.waves * 35 + 120"),
+        }
+    )
+    # stacked line plot
+    | Plot.line(
         Plot.js("$state.data"),
         {
-            "text": Plot.js(
-                """d => {
-                const emoji = {pigs: "🐷", cattle: "🐮", sheep: "🐑"};
-                return emoji[d.animal].repeat(Math.round(d.count / 1e6))
-            }"""
-            ),
-            "y": "animal",
-            "fy": "country",  # facet vertically by country
-            "dx": 10,  # space between axis label and emoji
-            "fontSize": 30,
-            "frameAnchor": "left",
+            "strokeWidth": 2,
+            "stroke": "white",
+            "fill": "black",
+            # facet vertically to stack waves
+            "fy": "2",  # wave identity is at index 2
         },
     )
-    + Plot.axisFy({"fontSize": 14, "frameAnchor": "top", "dy": -5})
-    + {  # compute a height to fit the data
-        "height": Plot.js(
-            """const rowHeight = 50;
-               const animals = new Set($state.data.map(d => d.animal)).size
-               const countries = new Set($state.data.map(d => d.country)).size
-               const titleHeight = 20
-               return animals * countries * rowHeight + titleHeight""",
-            expression=False,
-        ),
-        "y": {"label": None},
-        "fy": {"label": None},
+    + {  # compute a height from the data (typical when using fy)
+        "height": Plot.js("$state.height"),
+        "width": Plot.js("$state.height * 0.75"),
+        # reverse the fy scale so we occlude from back to front
+        "fy": {"reverse": True},
+        "className": "bg-black",
     }
-    + Plot.title("Live stock (millions)")
+    + Plot.hideAxis()
+    + Plot.margin(160, 40, 60, 20)
+    # the domain also needs to be computed from the data. can require hand tuning.
+    + Plot.domainY(Plot.js("[0, d3.max($state.data, ([x, y]) => y) / 16]"))
 )
-
+#
 # </example>
 # %%
-# <example>
+# <example title="Pulsar Plot (\"Unknown Pleasures\")">
 # <given-user-file-context>
 # pulsar_data is a numpy array of [x, y, wave_index] points representing pulsar waves
 # Each point has an x coordinate, y amplitude, and wave_index to identify which wave it belongs to
@@ -779,10 +803,9 @@ import genstudio.plot as Plot
 #
 # </example>
 # %%
-# <example>
+# <example title="Interactive Shape Playground">
 # User: Create an interactive shape playground where shapes can be rotated and scaled
 # Assistant:
-
 import genstudio.plot as Plot
 import numpy as np
 from genstudio.plot import js
@@ -842,8 +865,7 @@ def updateState(widget, _):
 )
 # </example>
 # %%
-# <example>
-# %%
+# <example title="Tabbed View">
 # User: Make a tabbed view with an example dot plot, details page, and settings screen with checkboxes.
 # Assistant:
 import genstudio.plot as Plot
@@ -932,7 +954,7 @@ tabs_view(
 )
 # </example>
 # %%
-# <example>
+# <example title="3D Spiral Point Cloud">
 # User: Render a 3d spiral point cloud.
 # Assistant:
 import genstudio.plot as Plot
@@ -990,7 +1012,7 @@ sizes = 0.01 + 0.02 * np.sin(t)
 )
 # </example>
 # %%
-# <example>
+# <example title="3D Animated Spheres">
 # User: I want to visualize an animation of two spheres with opposite growing/shrinking motion, including interactive controls to play/pause the animation and adjust the camera. Show the scene twice (synchronized motion/camera), one with white spheres and one with pink spheres.
 # Assistant:
 import genstudio.plot as Plot
@@ -1069,7 +1091,7 @@ camera = {
 )
 # </example>
 # %%
-# <example>
+# <example title="Bitmap Component Examples">
 # User: Show me how to use the bitmap component with different types of pixel data.
 # Assistant:
 import genstudio.plot as Plot

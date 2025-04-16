@@ -92,44 +92,46 @@ class StudioContext(ChromeContext):
         self.load_studio_html()
         data, buffers = widget.to_json_with_initialState(plot, buffers=[])
 
-        # Define threshold for sending buffers via HTTP (e.g., 1MB)
-        BUFFER_HTTP_THRESHOLD = 1 * 1024 * 1024
-        buffers_payload = []  # Single list for payload
-        num_inline = 0
-        num_url = 0
+        BUFFER_TOTAL_THRESHOLD = 10 * 1024 * 1024  # 10MB total for single URL
+        buffers_payload = []
 
-        if self.debug:
-            print(f"[StudioContext] Processing {len(buffers)} buffers for transfer.")
-
-        for i, buffer_bytes in enumerate(buffers):
-            if len(buffer_bytes) < BUFFER_HTTP_THRESHOLD:
-                # Encode small buffers inline (Base64 string)
-                encoded_buffer = base64.b64encode(buffer_bytes).decode("utf-8")
-                buffers_payload.append(encoded_buffer)
-                num_inline += 1
-            else:
-                # Create URL object for large buffers
-                buffer_filename = f"served_buffer_{self.id}_{i}.bin"
-                self.files[buffer_filename] = buffer_bytes
-                buffer_url = f"http://localhost:{self.server_port}/{buffer_filename}"
-                buffers_payload.append({"type": "url", "url": buffer_url})
-                num_url += 1
-                if self.debug:
-                    print(
-                        f"[StudioContext] Serving buffer {i} ({format_bytes(len(buffer_bytes))}) via URL: {buffer_url}"
-                    )
-
+        total_size = sum(len(b) for b in buffers)
         if self.debug:
             print(
-                f"[StudioContext] Transfer summary: {num_inline} inline buffers, {num_url} URL buffers."
+                f"[StudioContext] Processing {len(buffers)} buffers for transfer. Total size: {format_bytes(total_size)}"
             )
-            print(f"Total items in buffers payload: {len(buffers_payload)}")
+
+        if total_size > BUFFER_TOTAL_THRESHOLD:
+            # Concatenate all buffers and serve as a single URL
+            concat_bytes = b"".join(buffers)
+            buffer_filename = f"served_buffer_{self.id}_all.bin"
+            self.files[buffer_filename] = concat_bytes
+            buffer_url = f"http://localhost:{self.server_port}/{buffer_filename}"
+            buffers_payload = {
+                "type": "url",
+                "url": buffer_url,
+                "sizes": [len(b) for b in buffers],
+            }
+            if self.debug:
+                print(
+                    f"[StudioContext] Serving all buffers as a single URL: {buffer_url} ({format_bytes(len(concat_bytes))})"
+                )
+        else:
+            for i, buffer_bytes in enumerate(buffers):
+                encoded_buffer = base64.b64encode(buffer_bytes).decode("utf-8")
+                buffers_payload.append(encoded_buffer)
+
+        if self.debug:
+            if isinstance(buffers_payload, dict):
+                print("[StudioContext] Transfer summary: all buffers via single URL.")
+            else:
+                print(f"Total items in buffers payload: {len(buffers_payload)}")
 
         render_js = f"""
          (async () => {{
            console.log('[StudioContext] Received renderData call for ID: {self.id}');
            const data = {json.dumps(data)};
-           // Pass the mixed payload list (base64 strings or URL objects)
+           // Pass the mixed payload list (base64 strings, or a single URL object)
            const buffers_payload = {json.dumps(buffers_payload)};
            await window.genstudio.renderData('studio', data, buffers_payload, '{self.id}');
            await window.genstudio.whenReady('{self.id}');

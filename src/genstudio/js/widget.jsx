@@ -572,46 +572,41 @@ export const renderData = async (element, data, buffers_payload, id) => {
   }
 
   // --- Buffer Resolution --- //
-  const resolved_buffers = new Array(buffers_payload.length);
+  let resolved_buffers;
 
-  // Prepare resolution promises (decoding or fetching)
-  const resolutionPromises = buffers_payload.map(async (payload, index) => {
-    if (typeof payload === 'string') {
-      // Decode inline base64 buffer
+  if (buffers_payload && typeof buffers_payload === 'object' && buffers_payload.type === 'url') {
+    // All buffers are served as a single URL
+    try {
+      const response = await fetch(buffers_payload.url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const total = new Uint8Array(arrayBuffer);
+      // Use the sizes array to split the buffer
+      const sizes = buffers_payload.sizes || [];
+      resolved_buffers = [];
+      let offset = 0;
+      for (let i = 0; i < sizes.length; ++i) {
+        resolved_buffers.push(total.slice(offset, offset + sizes[i]));
+        offset += sizes[i];
+      }
+    } catch (e) {
+      console.error(`Error fetching buffer from URL ${buffers_payload.url}:`, e);
+      resolved_buffers = [];
+    }
+  } else if (Array.isArray(buffers_payload)) {
+    // Inline base64 buffers
+    resolved_buffers = buffers_payload.map((payload, index) => {
       try {
-        resolved_buffers[index] = Uint8Array.from(atob(payload), c => c.charCodeAt(0));
+        return Uint8Array.from(atob(payload), c => c.charCodeAt(0));
       } catch (e) {
         console.error(`Error decoding inline base64 buffer at index ${index}:`, e);
-        resolved_buffers[index] = null; // Mark as failed
+        return null;
       }
-    } else if (payload && payload.type === 'url') {
-      // Fetch URL buffer
-      try {
-        const response = await fetch(payload.url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        resolved_buffers[index] = new Uint8Array(arrayBuffer);
-      } catch (e) {
-        console.error(`Error fetching buffer from URL ${payload.url}:`, e);
-        resolved_buffers[index] = null; // Mark as failed
-      }
-    } else {
-      // Handle unexpected payload format
-      console.warn(`Unknown buffer payload format at index ${index}:`, payload);
-      resolved_buffers[index] = null; // Mark as failed
-    }
-  });
-
-  // Wait for all buffers to be resolved (fetched or decoded)
-  try {
-    await Promise.all(resolutionPromises);
-    console.log('[widget.jsx] All buffers resolved.', resolved_buffers);
-  } catch (e) {
-    console.error('Error resolving buffers:', e);
-    // Handle error appropriately
-    return;
+    });
+  } else {
+    resolved_buffers = [];
   }
   // --- End Buffer Resolution ---
 
