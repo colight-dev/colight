@@ -3,7 +3,7 @@ import {genstudio} from './globals'
 interface CanvasRegistry {
   [key: string]: {
     canvas: HTMLCanvasElement;
-    overlay?: HTMLImageElement;
+    overlay?: HTMLCanvasElement;
     device?: GPUDevice;
     context?: GPUCanvasContext;
     renderCallback?: (texture: GPUTexture, depthTexture: GPUTexture | null) => void;
@@ -60,11 +60,18 @@ export function useCanvasSnapshot(
  * @throws May throw if WebGPU operations fail
  */
 export async function createCanvasOverlays(): Promise<void> {
+  // Wait for a frame to ensure any pending renders complete
+
   const canvasEntries = Object.entries(activeCanvases);
   const start = performance.now();
   console.log(`[canvasSnapshot] Starting overlay creation for ${canvasEntries.length} canvases`);
 
-  for (const [id, entry] of canvasEntries) {
+  for (const [idx, [id, entry]] of canvasEntries.entries()) {
+    // Only wait 100ms every 4th item
+    if (idx % 2 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
     const { canvas, device, context, renderCallback } = entry;
     if (!device || !context || !renderCallback) {
       console.warn(`[canvasSnapshot] Missing required WebGPU resources for canvas ${id}`);
@@ -147,32 +154,22 @@ export async function createCanvasOverlays(): Promise<void> {
     }
 
     // Create canvas and draw the pixel data
-    const img = document.createElement('img');
-    img.style.position = 'absolute';
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const ctx = tempCanvas.getContext('2d')!;
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = width;
+    overlayCanvas.height = height;
+    const ctx = overlayCanvas.getContext('2d')!;
     const imageData = ctx.createImageData(width, height);
     imageData.data.set(pixelData);
     ctx.putImageData(imageData, 0, 0);
 
-    // Convert to data URL and set as image source
-    const dataUrl = tempCanvas.toDataURL();
-    await new Promise<void>((resolve) => {
-      img.onload = () => resolve();
-      img.src = dataUrl;
-    });
-
-    // Position the overlay absolutely within the parent container
-    img.style.position = 'absolute';
-    img.style.left = '0';
-    img.style.top = '0';
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.objectFit = 'cover';
-    img.style.opacity = '100%';
+    // Position the overlay canvas absolutely within the parent container
+    overlayCanvas.style.position = 'absolute';
+    overlayCanvas.style.left = '0';
+    overlayCanvas.style.top = '0';
+    overlayCanvas.style.width = '100%';
+    overlayCanvas.style.height = '100%';
+    overlayCanvas.style.objectFit = 'cover';
+    overlayCanvas.style.opacity = '100%';
 
     // Add to parent container
     const parentContainer = canvas.parentElement;
@@ -180,8 +177,8 @@ export async function createCanvasOverlays(): Promise<void> {
       console.warn('[canvasSnapshot] Canvas has no parent element');
       continue;
     }
-    parentContainer.appendChild(img);
-    entry.overlay = img;
+    parentContainer.appendChild(overlayCanvas);
+    entry.overlay = overlayCanvas;
 
     // Cleanup resources safely
     try {
