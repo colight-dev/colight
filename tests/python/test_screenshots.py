@@ -9,23 +9,35 @@ import genstudio.plot as Plot
 from genstudio.scene3d import Ellipsoid
 
 # Create an artifacts directory for screenshots
-ARTIFACTS_DIR = Path("./scratch/screenshots/test/")
+ARTIFACTS_DIR = Path("./scratch/")
 ARTIFACTS_DIR.mkdir(exist_ok=True, parents=True)
 
-
-def test_basic_screenshot():
-    """Test basic screenshot functionality"""
-    test_plot = Plot.initialState({"test": "hello"}) | [
+def basic_scene():
+    return Plot.initialState({"test": "hello", "count": 3}) | [
         "div",
         {"style": {"padding": "20px"}},
         Plot.js("$state.test"),
-    ]
+    ] | Ellipsoid(
+            Plot.js("""
+                Array.from({length: $state.count}, (_, i) => {
+                    const t = i * Math.PI / 10;
+                    return [
+                        Math.cos(t),
+                        Math.sin(t),
+                        i / $state.count
+                    ];
+                }).flat()
+            """),
+            half_size=0.1,
+            color=[1, 0, 0],  # Red color for all ellipsoids
+        )
 
-    screenshot_path = ARTIFACTS_DIR / "test.png"
-    test_plot.save_image(screenshot_path, debug=True)
+def test_basic_screenshot():
+    """Test basic screenshot functionality"""
+    test_plot = basic_scene()
 
-    assert screenshot_path.exists()
-    assert screenshot_path.stat().st_size > 0
+    test_plot.save_image(ARTIFACTS_DIR / "test.png", debug=True)
+    test_plot.save_pdf(ARTIFACTS_DIR / "test.pdf", debug=True)
 
 
 def test_counter_plot():
@@ -86,14 +98,8 @@ def test_counter_plot():
 
 if __name__ == "__main__":
     test_basic_screenshot()
-
     test_counter_plot()
 
-    with ChromeContext(debug=True) as chrome:
-        # Check WebGPU support
-        webgpu_status = chrome.check_webgpu_support()
-
-        # Save full GPU diagnostics
-        chrome.save_gpu_info(ARTIFACTS_DIR / "gpu_diagnostics.pdf")
-    with ChromeContext(debug=True) as chrome:
+    with ChromeContext(debug=True, width=1024, height=768) as chrome:
         chrome.check_webgpu_support()
+        chrome.save_gpu_info(ARTIFACTS_DIR / "gpu_status.pdf")

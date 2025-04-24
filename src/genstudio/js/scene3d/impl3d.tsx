@@ -173,21 +173,21 @@ function computeUniforms(containerWidth: number, containerHeight: number, camSta
   return { aspect, view, proj, mvp, forward, right, camUp, lightDir }
 }
 
-function renderPass({
+async function renderPass({
   device,
   context,
   depthTexture,
   renderObjects,
-  uniformBindGroup,
-  onRenderComplete
+  uniformBindGroup
 }: {
   device: GPUDevice;
   context: GPUCanvasContext;
   depthTexture: GPUTexture | null;
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
-  onRenderComplete: () => void;
 }) {
+  
+  try {
   // Begin render pass
   const cmd = device.createCommandEncoder();
   const pass = cmd.beginRenderPass({
@@ -218,9 +218,11 @@ function renderPass({
 
   pass.end();
   device.queue.submit([cmd.finish()]);
-  device.queue.onSubmittedWorkDone().then(onRenderComplete)
+  return device.queue.onSubmittedWorkDone()
 
-
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 function computeUniformData(containerWidth: number, containerHeight: number, camState: CameraState): Float32Array {
@@ -292,6 +294,25 @@ function alphaProperties(hasAlphaComponents: boolean, totalElementCount: number)
   }
 }
 
+const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const adapter = await navigator.gpu.requestAdapter({
+      powerPreference: 'high-performance'
+    });
+    
+    if (adapter) {
+      return adapter;
+    }
+
+    if (attempt < maxAttempts - 1) {
+      // console.log(`[Debug] Adapter request failed, retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error(`Failed to get GPU adapter after ${maxAttempts} attempts`);
+};
+
 export function SceneInner({
   components,
   containerWidth,
@@ -357,7 +378,7 @@ export function SceneInner({
   // Create a render callback for the canvas snapshot system
   // This function is called during PDF export to render the 3D scene to a texture
   // that can be captured as a static image
-  const renderToTexture = useCallback((targetTexture: GPUTexture, depthTexture: GPUTexture | null) => {
+  const renderToTexture = useCallback(async (targetTexture: GPUTexture, depthTexture: GPUTexture | null) => {
     if (!gpuRef.current) return;
     const { device, uniformBindGroup, renderObjects } = gpuRef.current;
 
@@ -367,13 +388,12 @@ export function SceneInner({
       getCurrentTexture: () => targetTexture
     } as GPUCanvasContext;
 
-    renderPass({
+    return renderPass({
       device,
       context: tempContext,
       depthTexture: depthTexture || null,
       renderObjects,
-      uniformBindGroup,
-      onRenderComplete: () => { }
+      uniformBindGroup
     });
   }, [containerWidth, containerHeight, activeCameraRef.current!]);
 
@@ -398,17 +418,17 @@ export function SceneInner({
   const initWebGPU = useCallback(async () => {
     if (!canvasRef.current) return;
     if (!navigator.gpu) {
-      console.error("WebGPU not supported in this browser.");
+      console.error("[Debug] WebGPU not supported in this browser.");
       return;
     }
     try {
-      const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) throw new Error("No GPU adapter found");
+      const adapter = await requestAdapterWithRetry();
+
       const device = await adapter.requestDevice().catch(err => {
-        console.error("Failed to create WebGPU device:", err);
+        console.error("[Debug] Failed to create WebGPU device:", err);
         throw err;
       });
-
+      
       // Add error handling for uncaptured errors
       device.addEventListener('uncapturederror', ((event: Event) => {
         if (event instanceof GPUUncapturedErrorEvent) {
@@ -475,7 +495,7 @@ export function SceneInner({
 
       setIsReady(true);
     } catch (err) {
-      console.error("Error initializing WebGPU:", err);
+      console.error("[Debug] Error during WebGPU initialization:", err);
     }
   }, []);
 
@@ -782,7 +802,7 @@ export function SceneInner({
 
   const pendingAnimationFrameRef = useRef<number | null>(null);
 
-  const renderFrame = useCallback(function renderFrameInner(source: string, camState?: CameraState, components?: ComponentConfig[]) {
+  const renderFrame = useCallback(async function renderFrameInner(source: string, camState?: CameraState, components?: ComponentConfig[]) {
     if (pendingAnimationFrameRef.current) {
       cancelAnimationFrame(pendingAnimationFrameRef.current)
       pendingAnimationFrameRef.current = null
@@ -847,7 +867,13 @@ export function SceneInner({
     const uniformData = computeUniformData(containerWidth, containerHeight, camState);
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
-    renderPass({ device, context, depthTexture, renderObjects, uniformBindGroup, onRenderComplete })
+    try {
+      await renderPass({ device, context, depthTexture, renderObjects, uniformBindGroup });
+      onRenderComplete();
+    } catch (err) {
+      console.error("[Debug] Error during renderPass:", err.message);
+      onRenderComplete();
+    }
 
     onFrameRendered?.(performance.now());
     onReady();

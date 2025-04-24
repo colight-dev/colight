@@ -39,8 +39,7 @@ def render_gaussians(bananas):
             ),
             "onCameraChange": Plot.js("(camera) => $state.update({camera})"),
         }
-    ) | Plot.Slider("i", range=len(bananas["xyz"] / 3))
-    #
+    )
 
 
 Plot.Row(*[render_gaussians(g) for g in banana_gaussians])

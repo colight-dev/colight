@@ -24,7 +24,7 @@ const activeCanvases: CanvasRegistry = {};
 export function useCanvasSnapshot(
   device?: GPUDevice,
   context?: GPUCanvasContext,
-  renderCallback?: (texture: GPUTexture, depthTexture: GPUTexture | null) => void
+  renderCallback?: (texture: GPUTexture, depthTexture: GPUTexture | null) => Promise<void>
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const id = useMemo(() => `scene3d_${Math.random().toString(36).slice(2)}`, []);
@@ -102,7 +102,7 @@ export async function createCanvasOverlays(): Promise<void> {
     });
 
     // Render the scene to our texture
-    renderCallback(texture, depthTexture);
+    await renderCallback(texture, depthTexture);
 
     // Create a buffer to read back the pixel data
     const readbackBuffer = device.createBuffer({
@@ -162,6 +162,7 @@ export async function createCanvasOverlays(): Promise<void> {
     imageData.data.set(pixelData);
     ctx.putImageData(imageData, 0, 0);
 
+    
     // Position the overlay canvas absolutely within the parent container
     overlayCanvas.style.position = 'absolute';
     overlayCanvas.style.left = '0';
@@ -211,5 +212,5 @@ export function removeCanvasOverlays(): void {
   });
 }
 
-genstudio.beforePDF = createCanvasOverlays;
-genstudio.afterPDF = removeCanvasOverlays;
+genstudio.beforeScreenCapture = createCanvasOverlays;
+genstudio.afterScreenCapture = removeCanvasOverlays;

@@ -281,6 +281,7 @@ class ChromeContext:
                     "--use-angle=vulkan",
                     "--enable-features=Vulkan",
                     "--enable-unsafe-webgpu",
+                    "--disable-vulkan-surface"
                 ]
             )
 
@@ -534,10 +535,22 @@ class ChromeContext:
                 }
 
                 try {
-                    // Request adapter with power preference to ensure we get a GPU
-                    const adapter = await navigator.gpu.requestAdapter({
-                        powerPreference: 'high-performance'
-                    });
+                    
+                    let adapter;
+                    const startTime = performance.now();
+                    for (let i = 0; i < 10; i++) {
+                        adapter = await navigator.gpu.requestAdapter({
+                            powerPreference: 'high-performance'
+                        });
+                        if (adapter) {
+                            console.log(`GPU adapter ready after ${((performance.now() - startTime)/1000).toFixed(2)}s (attempt ${i + 1})`);
+                            break;
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                    if (!adapter) {
+                        console.log(`Failed to get GPU adapter after ${((performance.now() - startTime)/1000).toFixed(2)}s`);
+                    }
 
                     if (!adapter) {
                         return {
