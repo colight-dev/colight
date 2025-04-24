@@ -1,3 +1,8 @@
+### [2025.4.1] - Apr 24, 2025
+
+- screen capture: render to texture for all screen capture modes, handle gpu errors, add --disable-vulkan-surface
+- pdf: send large buffers via http
+
 ### [2025.3.12] - Mar 21, 2025
 
 - Scene3D: support dynamic layers (js expressions)
