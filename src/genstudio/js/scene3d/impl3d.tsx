@@ -186,7 +186,7 @@ async function renderPass({
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
 }) {
-  
+
   try {
   // Begin render pass
   const cmd = device.createCommandEncoder();
@@ -299,7 +299,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: 'high-performance'
     });
-    
+
     if (adapter) {
       return adapter;
     }
@@ -428,7 +428,7 @@ export function SceneInner({
         console.error("[Debug] Failed to create WebGPU device:", err);
         throw err;
       });
-      
+
       // Add error handling for uncaptured errors
       device.addEventListener('uncapturederror', ((event: Event) => {
         if (event instanceof GPUUncapturedErrorEvent) {

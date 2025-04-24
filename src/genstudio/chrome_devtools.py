@@ -281,7 +281,7 @@ class ChromeContext:
                     "--use-angle=vulkan",
                     "--enable-features=Vulkan",
                     "--enable-unsafe-webgpu",
-                    "--disable-vulkan-surface"
+                    "--disable-vulkan-surface",
                 ]
             )
 
@@ -535,7 +535,7 @@ class ChromeContext:
                 }
 
                 try {
-                    
+
                     let adapter;
                     const startTime = performance.now();
                     for (let i = 0; i < 10; i++) {

@@ -12,12 +12,16 @@ from genstudio.scene3d import Ellipsoid
 ARTIFACTS_DIR = Path("./scratch/")
 ARTIFACTS_DIR.mkdir(exist_ok=True, parents=True)
 
+
 def basic_scene():
-    return Plot.initialState({"test": "hello", "count": 3}) | [
-        "div",
-        {"style": {"padding": "20px"}},
-        Plot.js("$state.test"),
-    ] | Ellipsoid(
+    return (
+        Plot.initialState({"test": "hello", "count": 3})
+        | [
+            "div",
+            {"style": {"padding": "20px"}},
+            Plot.js("$state.test"),
+        ]
+        | Ellipsoid(
             Plot.js("""
                 Array.from({length: $state.count}, (_, i) => {
                     const t = i * Math.PI / 10;
@@ -31,6 +35,8 @@ def basic_scene():
             half_size=0.1,
             color=[1, 0, 0],  # Red color for all ellipsoids
         )
+    )
+
 
 def test_basic_screenshot():
     """Test basic screenshot functionality"""

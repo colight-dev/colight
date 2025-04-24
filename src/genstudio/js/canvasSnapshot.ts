@@ -162,7 +162,7 @@ export async function createCanvasOverlays(): Promise<void> {
     imageData.data.set(pixelData);
     ctx.putImageData(imageData, 0, 0);
 
-    
+
     // Position the overlay canvas absolutely within the parent container
     overlayCanvas.style.position = 'absolute';
     overlayCanvas.style.left = '0';

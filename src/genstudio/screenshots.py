@@ -220,7 +220,7 @@ class StudioContext(ChromeContext):
         """
         if state_update:
             self.update_state([state_update])
-            
+
         image_bytes = self.capture_bytes()
 
         if output_path:
@@ -294,13 +294,17 @@ class StudioContext(ChromeContext):
         """
 
         # Trigger WebGPU canvas capture for 3D content before PDF generation
-        self.evaluate(f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True)
+        self.evaluate(
+            f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True
+        )
 
         # Capture the PDF content (including static images of 3D canvases)
         pdf_bytes = self.capture_pdf()
 
         # Cleanup and restore interactive 3D content
-        self.evaluate(f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True)
+        self.evaluate(
+            f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True
+        )
 
         if output_path:
             out_path = Path(output_path)
@@ -311,11 +315,15 @@ class StudioContext(ChromeContext):
                 print(f"[StudioContext] PDF saved to: {out_path}")
             return out_path
         return pdf_bytes
-    
+
     def capture_bytes(self):
-        self.evaluate(f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True)
+        self.evaluate(
+            f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True
+        )
         bytes = self.capture_image()
-        self.evaluate(f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True) 
+        self.evaluate(
+            f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True
+        )
         return bytes
 
     def capture_video(
@@ -376,9 +384,9 @@ class StudioContext(ChromeContext):
                 result = self.update_state([state_update])
                 if self.debug:
                     print(f"[StudioContext] State update {i} result: {result}")
-                
+
                 frame_bytes = self.capture_bytes()
-                
+
                 if proc.stdin:
                     proc.stdin.write(frame_bytes)
                     if self.debug:
