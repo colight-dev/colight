@@ -41,4 +41,4 @@ def multi_pdf(n, num_spheres=50, scale=1):
     )
 
 
-multi_pdf(40, 1000000, 4)
+multi_pdf(40, 10000, 4)

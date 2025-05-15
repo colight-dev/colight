@@ -105,7 +105,7 @@ class StudioContext(ChromeContext):
             # Concatenate all buffers and serve as a single URL
             concat_bytes = b"".join(buffers)
             buffer_filename = f"served_buffer_{self.id}_all.bin"
-            self.files[buffer_filename] = concat_bytes
+            self.server.add_served_file(buffer_filename, concat_bytes)
             buffer_url = f"http://localhost:{self.server_port}/{buffer_filename}"
             buffers_payload = {
                 "type": "url",
