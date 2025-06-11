@@ -8,7 +8,7 @@ TAILWIND_INPUT = """
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-""" + Path("src/genstudio/widget.css").read_text()
+""" + Path("src/colight/widget.css").read_text()
 
 
 def build_tailwind():

@@ -1,5 +1,5 @@
 """
-Screenshot utilities for GenStudio plots using a StudioContext which inherits from ChromeContext
+Screenshot utilities for Colight plots using a StudioContext which inherits from ChromeContext
 """
 
 import json
@@ -9,17 +9,17 @@ import base64
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import genstudio.widget as widget
-from genstudio.html import encode_buffers
-from genstudio.env import WIDGET_URL, CSS_URL
-from genstudio.chrome_devtools import ChromeContext, format_bytes
-from genstudio.util import read_file
+import colight.widget as widget
+from colight.html import encode_buffers
+from colight.env import WIDGET_URL, CSS_URL
+from colight.chrome_devtools import ChromeContext, format_bytes
+from colight.util import read_file
 
 
 class StudioContext(ChromeContext):
     """
-    StudioContext extends ChromeContext with GenStudio-specific methods.
-    It encapsulates behavior such as loading the GenStudio environment, rendering plots, and updating state.
+    StudioContext extends ChromeContext with Colight-specific methods.
+    It encapsulates behavior such as loading the Colight environment, rendering plots, and updating state.
     """
 
     def __init__(self, plot=None, **kwargs):
@@ -40,10 +40,10 @@ class StudioContext(ChromeContext):
         return context
 
     def load_studio_html(self):
-        # Check if GenStudio environment is already loaded
-        if not self.evaluate("typeof window.genstudio === 'object'"):
+        # Check if Colight environment is already loaded
+        if not self.evaluate("typeof window.colight === 'object'"):
             if self.debug:
-                print("[screenshots.py] Loading GenStudio HTML")
+                print("[screenshots.py] Loading Colight HTML")
 
             files = {}
             # Handle script content based on whether WIDGET_URL is a CDN URL or local file
@@ -69,7 +69,7 @@ class StudioContext(ChromeContext):
             <html>
             <head>
                 <meta charset=\"UTF-8\">
-                <title>GenStudio</title>
+                <title>Colight</title>
                 {style_tag}
                 {script_tag}
             </head>
@@ -80,14 +80,14 @@ class StudioContext(ChromeContext):
             """
             self.load_html(html, files=files)
         elif self.debug:
-            print("GenStudio already loaded, skipping initialization")
+            print("Colight already loaded, skipping initialization")
 
     def load_plot(self, plot, measure=True):
         """
-        Loads the plot in the GenStudio environment.
+        Loads the plot in the Colight environment.
         """
         if self.debug:
-            print("[StudioContext] Loading plot into GenStudio")
+            print("[StudioContext] Loading plot into Colight")
 
         self.load_studio_html()
         data, buffers = widget.to_json_with_initialState(plot, buffers=[])
@@ -133,8 +133,8 @@ class StudioContext(ChromeContext):
            const data = {json.dumps(data)};
            // Pass the mixed payload list (base64 strings, or a single URL object)
            const buffers_payload = {json.dumps(buffers_payload)};
-           await window.genstudio.renderData('studio', data, buffers_payload, '{self.id}');
-           await window.genstudio.whenReady('{self.id}');
+           await window.colight.renderData('studio', data, buffers_payload, '{self.id}');
+           await window.colight.whenReady('{self.id}');
          }})()
          """
         self.evaluate(render_js, await_promise=True)
@@ -148,7 +148,7 @@ class StudioContext(ChromeContext):
         """
         dimensions = self.evaluate("""
             (function() {
-                const container = document.querySelector('.genstudio-container');
+                const container = document.querySelector('.colight-container');
                 if (!container) return null;
                 const rect = container.getBoundingClientRect();
                 return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
@@ -161,7 +161,7 @@ class StudioContext(ChromeContext):
 
     def update_state(self, state_updates):
         """
-        Sends state updates to GenStudio. Expects state_updates to be a list.
+        Sends state updates to Colight. Expects state_updates to be a list.
         """
         if self.debug:
             print("[StudioContext] Updating state")
@@ -175,8 +175,8 @@ class StudioContext(ChromeContext):
             try {{
                 const updates = {json.dumps(state_data)}
                 const buffers = {encode_buffers(buffers)}
-                const result = window.genstudio.instances['{self.id}'].updateWithBuffers(updates, buffers);
-                await window.genstudio.whenReady('{self.id}');
+                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                await window.colight.whenReady('{self.id}');
                 return result;
             }} catch (e) {{
                 console.error('State update failed:', e);
@@ -295,7 +295,7 @@ class StudioContext(ChromeContext):
 
         # Trigger WebGPU canvas capture for 3D content before PDF generation
         self.evaluate(
-            f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
         )
 
         # Capture the PDF content (including static images of 3D canvases)
@@ -303,7 +303,7 @@ class StudioContext(ChromeContext):
 
         # Cleanup and restore interactive 3D content
         self.evaluate(
-            f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
         )
 
         if output_path:
@@ -318,11 +318,11 @@ class StudioContext(ChromeContext):
 
     def capture_bytes(self):
         self.evaluate(
-            f"window.genstudio.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
         )
         bytes = self.capture_image()
         self.evaluate(
-            f"window.genstudio.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
         )
         return bytes
 
@@ -425,7 +425,7 @@ def save_image(
     Render the plot and capture an image.
 
     Args:
-        plot: The GenStudio plot widget
+        plot: The Colight plot widget
         output_path: Optional path to save the image; if not provided, returns PNG bytes
         state_update: Optional state update to apply before capture
         width: Width of the browser window
@@ -457,7 +457,7 @@ def save_images(
     Capture a sequence of images with state updates.
 
     Args:
-        plot: The GenStudio plot widget
+        plot: The Colight plot widget
         state_updates: List of state update dictionaries to apply sequentially
         output_dir: Directory where images will be saved
         filenames: Optional list of filenames for each image; if not provided, filenames will be auto-generated
@@ -490,7 +490,7 @@ def save_pdf(
     Render the plot and capture a PDF of the page.
 
     Args:
-        plot: The GenStudio plot widget
+        plot: The Colight plot widget
         output_path: Optional path to save the PDF; if not provided, returns PDF bytes
         width: Width of the browser window
         height: Optional height of the browser window
@@ -520,7 +520,7 @@ def save_video(
     Capture a series of states from a plot as a video.
 
     Args:
-        plot: The GenStudio plot widget
+        plot: The Colight plot widget
         state_updates: List of state update dictionaries to apply sequentially
         filename: Path where the resulting video will be saved
         fps: Frame rate (frames per second) for the video

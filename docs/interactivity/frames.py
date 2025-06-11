@@ -3,7 +3,7 @@
 # `Plot.Frames` provides a convenient way to scrub or animate over a sequence of arbitrary plots. Each frame is rendered individually. It implicitly creates a slider and cycles through the provided frames. Here's a basic example:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 Plot.Frames(
     [

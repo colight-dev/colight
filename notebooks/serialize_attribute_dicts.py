@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Serializing Structured Data
 #
-# This example demonstrates two key features of GenStudio's state management:
+# This example demonstrates two key features of Colight's state management:
 #
 # 1. Support for serializing structured data using `@Pytree.dataclass`. Any class with an `attributes_dict`
 #    method can be automatically serialized and synchronized between Python and JavaScript.
@@ -10,9 +10,9 @@
 #    automatically creates intermediate objects/arrays as needed, maintaining proper reactivity.
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 from genjax import Pytree
-from genstudio.plot import js
+from colight.plot import js
 import jax.numpy as jnp
 
 

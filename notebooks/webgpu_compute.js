@@ -39,7 +39,7 @@
 //   textureStore(outputTex, vec2<i32>(gid.xy), outColor);
 // }
 
-const { html, React } = genstudio.api;
+const { html, React } = colight.api;
 const { useState } = React;
 export const colorScrubber = ({ value, onInput }) => {
   // Use internal state if no external value is provided (uncontrolled mode)

@@ -8,7 +8,7 @@ import numpy as np
 import traitlets
 import warnings
 
-from genstudio.env import CONFIG, WIDGET_URL, CSS_URL
+from colight.env import CONFIG, WIDGET_URL, CSS_URL
 
 
 class SubscriptableNamespace(SimpleNamespace):

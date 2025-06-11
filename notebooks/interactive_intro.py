@@ -1,5 +1,5 @@
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %% [markdown]
 # 1. Intro
@@ -33,8 +33,8 @@ Plot.Column(
 # How does state work?
 
 # %%
-import genstudio.plot as Plot
-from genstudio.plot import md
+import colight.plot as Plot
+from colight.plot import md
 
 #
 (
@@ -81,8 +81,8 @@ from genstudio.plot import md
 # LAYOUT / HTML
 
 # %%
-import genstudio.plot as Plot
-from genstudio.plot import md
+import colight.plot as Plot
+from colight.plot import md
 import numpy as np
 
 #
@@ -131,7 +131,7 @@ Plot.Column(
     {"gap": 4},
     [
         "span.py-3",
-        "`genstudio.plot` provides a 1:1 mapping between Observable Plot and python.",
+        "`colight.plot` provides a 1:1 mapping between Observable Plot and python.",
     ],
     ["span.font-bold", "Observable Plot (js):"],
     Plot.md(
@@ -146,7 +146,7 @@ Plot.plot({
 })
 ```"""
     ),
-    ["span.font-bold", "GenStudio (python):"],
+    ["span.font-bold", "Colight (python):"],
     Plot.md(
         """```
 (

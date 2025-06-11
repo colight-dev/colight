@@ -1,7 +1,6 @@
 name: WebGPU Screenshots
 
 on:
-  pull_request:
   push:
     branches:
       - huebert/screenshot-state

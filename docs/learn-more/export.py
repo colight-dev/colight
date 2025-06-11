@@ -1,6 +1,6 @@
 # ## Exporting HTML, Screenshots & Videos
 #
-# GenStudio provides methods to save visualizations as HTML files, images, or videos.
+# Colight provides methods to save visualizations as HTML files, images, or videos.
 #
 # ### HTML Files
 #

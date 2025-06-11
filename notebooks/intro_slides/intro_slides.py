@@ -47,7 +47,7 @@ for day in range(1, 21):
 
 
 # %% [markdown] slideshow={"slide_type": "slide"}
-# <h3 style="transform: rotate(-6deg) translateY(45px); display: inline-block;">GenStudio</h3>
+# <h3 style="transform: rotate(-6deg) translateY(45px); display: inline-block;">Colight</h3>
 # <h1 style="font-size: 11em;">Plot</h1>
 
 
@@ -66,7 +66,7 @@ for day in range(1, 21):
 # ### Works in common environments
 
 # %% slideshow={"slide_type": "slide"}
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %% [markdown] slideshow={"slide_type": "slide"}
 # ## Describe & use dimensional data
@@ -181,7 +181,7 @@ Plot.histogram(values)
 
 # %% [markdown] slideshow={"slide_type": "slide"}
 # ## Learn more:
-# - probcomp/genstudio
+# - colight-dev/colight
 # - Observable Plot (observablehq.com/plot)
 # <br/><br/>
 # ### Credits

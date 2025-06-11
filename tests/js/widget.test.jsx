@@ -2,8 +2,8 @@ import * as Plot from "@observablehq/plot";
 import { render, act } from '@testing-library/react';
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createStateStore, StateProvider } from '../../src/genstudio/js/widget';
-import { evaluate } from '../../src/genstudio/js/eval';
+import { createStateStore, StateProvider } from '../../src/colight/js/widget';
+import { evaluate } from '../../src/colight/js/eval';
 
 // Add this at the top of the file
 beforeEach(() => {

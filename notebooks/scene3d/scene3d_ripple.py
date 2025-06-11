@@ -1,9 +1,9 @@
 import numpy as np
 import math
 
-import genstudio.plot as Plot
-from genstudio.plot import js
-from genstudio.scene3d import PointCloud, Ellipsoid, deco
+import colight.plot as Plot
+from colight.plot import js
+from colight.scene3d import PointCloud, Ellipsoid, deco
 
 
 # ----------------- 1) Ripple Grid (Point Cloud) -----------------

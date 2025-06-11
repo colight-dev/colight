@@ -1,6 +1,6 @@
 # test numppy and jax arrays in widget and html modes
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 import jax.random as random
 import numpy as np
 

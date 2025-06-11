@@ -47,7 +47,7 @@ jobs:
         run: |
           yarn build
           # Force Git to track the build file temporarily
-          git add -f src/genstudio/js/widget_build.js
+          git add -f src/colight/js/widget.dist.js
 
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1
@@ -86,17 +86,17 @@ jobs:
 
       - name: Update widget URL and build Python package
         run: |
-          NPM_BASE="https://cdn.jsdelivr.net/npm/@probcomp/genstudio@${{ steps.versions.outputs.NPM_VERSION }}/dist"
-          JSDELIVR_JS_URL="${NPM_BASE}/widget_build.js"
+          NPM_BASE="https://cdn.jsdelivr.net/npm/@colight/core@${{ steps.versions.outputs.NPM_VERSION }}/dist"
+          JSDELIVR_JS_URL="${NPM_BASE}/widget.dist.js"
           JSDELIVR_CSS_URL="${NPM_BASE}/widget.css"
 
           # Update both URLs in the source
-          sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" src/genstudio/env.py
-          sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" src/genstudio/env.py
+          sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" src/colight/env.py
+          sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" src/colight/env.py
 
           poetry build
 
-          git checkout src/genstudio/util.py
+          git checkout src/colight/util.py
 
       - name: Deploy to PyPI
         run: |
@@ -118,8 +118,8 @@ jobs:
 
           # Copy both files to npm dist directory
           mkdir -p dist
-          cp src/genstudio/js/widget_build.js dist/
-          cp src/genstudio/widget.css dist/
+          cp src/colight/js/widget.dist.js dist/
+          cp src/colight/widget.css dist/
 
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public

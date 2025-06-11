@@ -1,6 +1,6 @@
 # Generated from version ^0.6.16 of Observable Plot
-from genstudio.layout import JSCall
-from genstudio.plot_spec import MarkSpec, PlotSpec
+from colight.layout import JSCall
+from colight.plot_spec import MarkSpec, PlotSpec
 from typing import Any
 
 PlotOptions = dict[str, Any] | JSCall

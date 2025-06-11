@@ -5,9 +5,9 @@
 # to Python as binary data.
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy
-from genstudio.plot import js
+from colight.plot import js
 
 # Generate points as a NumPy array (binary data)
 points = numpy.random.rand(8)

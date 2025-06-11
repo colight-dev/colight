@@ -1,5 +1,5 @@
-from genstudio.layout import JSExpr
-import genstudio.plot as Plot
+from colight.layout import JSExpr
+import colight.plot as Plot
 from typing import Any, Dict, Union, Optional, TypedDict
 
 import numpy as np

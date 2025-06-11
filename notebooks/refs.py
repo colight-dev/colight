@@ -6,7 +6,7 @@
 
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 numbers = Plot.ref([1, 2, 3])
 view = Plot.html(numbers).display_as("widget")

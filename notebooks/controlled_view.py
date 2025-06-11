@@ -1,6 +1,6 @@
 # %%
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 # demonstrate that we can implement a "controlled component" with props derived from state,
 # and when state changes the component is not unmounted.

@@ -3,21 +3,16 @@ requires = [ "poetry-core",]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "genstudio"
+name = "colight"
 version = "2025.4.1"
 description = ""
 authors = [ "Matthew Huebert <me@matt.is>",]
 license = "MIT"
 readme = "README.md"
-include = [ "src/genstudio/js/widget_build.js",]
+include = [ "src/colight/js/widget.dist.js",]
 [[tool.poetry.packages]]
-include = "genstudio"
+include = "colight"
 from = "src"
-
-[[tool.poetry.source]]
-name = "gcp"
-url = "https://us-west1-python.pkg.dev/probcomp-caliban/probcomp/simple/"
-priority = "explicit"
 
 [tool.pyright]
 venvPath = "."
@@ -38,7 +33,7 @@ websockets = "^15.0"
 ignore = [ "E402",]
 
 [tool.poetry.plugins."mkdocs.plugins"]
-"genstudio.docs.plugin" = "genstudio.docs.plugin:APIDocPlugin"
+"colight.docs.plugin" = "colight.docs.plugin:APIDocPlugin"
 
 [tool.poetry.group.dev.dependencies]
 jax = "0.4.33"

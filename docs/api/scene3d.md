@@ -1,4 +1,4 @@
-# genstudio.scene3d {: .api .api-title }
+# colight.scene3d {: .api .api-title }
 
 ### Scene {: .api .api-member }
 

@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Union
 
-# Import GenStudioHTTPServer
-from genstudio.server import GenStudioHTTPServer
+# Import ColightHTTPServer
+from colight.server import ColightHTTPServer
 
 DEBUG_WINDOW = False
 
@@ -100,8 +100,8 @@ class ChromeContext:
         self.chrome_process = None
         self.ws = None
         self.cmd_id = 0
-        # Use GenStudioHTTPServer for serving files
-        self.server = GenStudioHTTPServer(
+        # Use ColightHTTPServer for serving files
+        self.server = ColightHTTPServer(
             host="localhost", port=0, debug=debug, serve_cwd=True
         )
 
@@ -147,7 +147,7 @@ class ChromeContext:
             self.set_size()
             return  # Already started
 
-        # Start GenStudioHTTPServer
+        # Start ColightHTTPServer
         self.server.start()
         self.server_port = self.server.actual_port
 
@@ -263,7 +263,7 @@ class ChromeContext:
                 self.chrome_process.kill()
             self.chrome_process = None
 
-        # Stop GenStudioHTTPServer
+        # Stop ColightHTTPServer
         if self.server:
             if self.debug:
                 print("[chrome_devtools.py] Shutting down HTTP server")
@@ -309,7 +309,7 @@ class ChromeContext:
         """Serve HTML content and optional files over localhost and load it in the page"""
         self.set_size()
 
-        # Serve files using GenStudioHTTPServer
+        # Serve files using ColightHTTPServer
         if files:
             for k, v in files.items():
                 self.server.add_served_file(k, v)

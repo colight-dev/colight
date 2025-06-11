@@ -1,6 +1,6 @@
 import React from 'react';
-import { $StateContext } from '../../src/genstudio/js/context';
-import { createStateStore } from '../../src/genstudio/js/widget';
+import { $StateContext } from '../../src/colight/js/context';
+import { createStateStore } from '../../src/colight/js/widget';
 
 /**
  * Wraps a component with a blank state context for testing.

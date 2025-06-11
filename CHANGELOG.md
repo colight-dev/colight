@@ -59,7 +59,7 @@ BREAKING CHANGES:
 
 ### [2025.2.4] - Feb 28, 2025
 
-- add genstudio.scene3d for webgpu-backed 3d visualizations
+- add scene3d module for webgpu-backed 3d visualizations
 
 ### [2025.2.3] - Feb 25, 2025
 
@@ -100,14 +100,14 @@ BREAKING CHANGES:
 
 ### [2025.1.3] - Jan 16, 2025
 
-- FIX: breaking changes in esm.sh broke genstudio's js bundle
+- FIX: breaking changes in esm.sh broke js bundle
 
 ### [2024.12.4] - Dec 06, 2024
 
 - fix replaceBuffers ndarray handling
 - clarify Plot.js vs Plot.Import
 - return html/svg elements directly in hiccup/html
-- bring genstudio.api into Plot.js scope
+- bring api module into Plot.js scope
 - use a `source=` param with https?: and path: prefixes possible
 - add Plot.Import
 
@@ -314,7 +314,7 @@ BREAKING CHANGES:
 
 #### Other Changes
 - ci: always build docs
-- slim down genstudio deps
+- slim down deps
 - refactor: added api.js module
 - refactor: JSRef/JSCall use path instead of module/name
 - tests: added widget.test.jsx

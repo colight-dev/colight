@@ -1,9 +1,9 @@
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 from colorsys import hsv_to_rgb
-from genstudio.scene3d import deco, PointCloud
+from colight.scene3d import deco, PointCloud
 
 
 def make_torus_knot(n_points: int):

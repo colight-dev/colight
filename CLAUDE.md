@@ -1,4 +1,4 @@
-# GenStudio Development Reference
+# Colight Development Reference
 
 ## Build/Run Commands
 - Build frontend: `yarn build`
@@ -24,7 +24,7 @@
 
 ## Conventions / Approach
 - In Python notebooks, use Jupytext cell boundaries.
-- A GenStudio usage guide for LLMs is in `docs/llms.py`.
+- A Colight usage guide for LLMs is in `docs/llms.py`.
 - When writing React components, use Tailwind classes, wrapping in `tw` from `src/js/utils.ts`.
 
 For detailed patterns, review existing code in the corresponding module.

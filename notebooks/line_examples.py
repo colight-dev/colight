@@ -1,4 +1,4 @@
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # say we have data in format [x1, y1, x2, y2, category]
 # each entry represents a single line

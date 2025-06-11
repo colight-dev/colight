@@ -1,11 +1,10 @@
-[![PyPI version](https://badge.fury.io/py/genstudio.svg)](https://badge.fury.io/py/genstudio)
+[![PyPI version](https://badge.fury.io/py/colight.svg)](https://badge.fury.io/py/colight)
 
-# Gen Studio
-_Visualization tools for GenJAX._
+# Colight: declarative, reactive visualizations in Python
 
 -----
 
-`genstudio.plot` provides a composable way to create interactive plots using [Observable Plot](https://observablehq.com/plot/).
+`colight.plot` provides a composable way to create interactive plots using [Observable Plot](https://observablehq.com/plot/).
 
 Key features:
 
@@ -16,7 +15,7 @@ Key features:
 - Terse layout syntax for organizing plots into rows and columns
 - Hiccup implementation for interspersing arbitrary HTML
 
-For detailed usage instructions and examples, refer to the [Gen Studio User Guide](https://studio.gen.dev).
+For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
 
 ## Development
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { Img, img } from '../../../src/genstudio/js/plot/img'
+import { Img, img } from '../../../src/colight/js/plot/img'
 import * as Plot from "@observablehq/plot";
 
 describe('Img', () => {

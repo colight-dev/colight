@@ -1,12 +1,12 @@
 import { render, act } from '@testing-library/react';
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Bitmap } from '../../src/genstudio/js/components/bitmap';
-import { $StateContext } from '../../src/genstudio/js/context';
+import { Bitmap } from '../../src/colight/js/components/bitmap';
+import { $StateContext } from '../../src/colight/js/context';
 
 // Mock the useContainerWidth hook with a function that can be customized per test
 const mockUseContainerWidth = vi.fn(() => [React.createRef(), 500]);
-vi.mock('../../src/genstudio/js/utils', () => ({
+vi.mock('../../src/colight/js/utils', () => ({
   useContainerWidth: () => mockUseContainerWidth()
 }));
 

@@ -18,9 +18,9 @@ def get_config(k: str) -> Union[str, None]:
 
 
 try:
-    PARENT_PATH = pathlib.Path(importlib.util.find_spec("genstudio.util").origin).parent  # type: ignore
+    PARENT_PATH = pathlib.Path(importlib.util.find_spec("colight.util").origin).parent  # type: ignore
 except AttributeError:
-    raise ImportError("Cannot find the genstudio.util module")
+    raise ImportError("Cannot find the colight.util module")
 
 CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 
@@ -29,5 +29,5 @@ CDN_SCRIPT_URL = None
 CDN_CSS_URL = None
 
 # Local development paths
-WIDGET_URL = CDN_SCRIPT_URL or (PARENT_PATH / "js/widget_build.js")
+WIDGET_URL = CDN_SCRIPT_URL or (PARENT_PATH / "js/widget.dist.js")
 CSS_URL = CDN_CSS_URL or (PARENT_PATH / "widget.css")

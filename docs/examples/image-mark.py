@@ -12,7 +12,7 @@
 # - `y`: Y coordinate of top-left corner (default: 0)
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # allows filepath to work in both VS Code and mkdocs
 prefix = "docs" if "__file__" in globals() else ""

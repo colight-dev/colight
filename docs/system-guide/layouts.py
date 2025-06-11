@@ -1,10 +1,10 @@
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %% [markdown]
 # ## Layout Items
 
-# A `LayoutItem` is the base class for all visual elements in GenStudio that can be composed into layouts.
+# A `LayoutItem` is the base class for all visual elements in Colight that can be composed into layouts.
 # It provides core functionality for:
 # - Arranging items using `&` (row) and `|` (column) operators
 # - Serializing to JSON for rendering via `for_json()`
@@ -138,7 +138,7 @@ Plot.Row(
 # The `heights` option of `Plot.Column` works the same way:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 Plot.Column(
     Plot.html(["div.bg-red-200.p-2", "1/2 height"]),

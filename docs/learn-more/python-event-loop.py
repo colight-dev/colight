@@ -1,12 +1,12 @@
 # %% [markdown]
-# This guide demonstrates how to create Python-controlled animations using GenStudio plots, the `.reset` method, and interactive sliders. We'll cover:
+# This guide demonstrates how to create Python-controlled animations using Colight plots, the `.reset` method, and interactive sliders. We'll cover:
 # 1. Setting up a basic animated plot
 # 2. Creating interactive animations with ipywidgets
 #
 # We must use the `"widget"` [rendering modes](quickstart/#rendering-modes) for bidirectional python/javascript communication:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 Plot.configure({"display_as": "widget"})
 

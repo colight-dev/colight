@@ -1,12 +1,12 @@
 """
-Tests for WebGPU screenshot functionality in GenStudio
+Tests for WebGPU screenshot functionality in Colight
 """
 
 import shutil
 from pathlib import Path
-from genstudio.screenshots import ChromeContext
-import genstudio.plot as Plot
-from genstudio.scene3d import Ellipsoid
+from colight.screenshots import ChromeContext
+import colight.plot as Plot
+from colight.scene3d import Ellipsoid
 
 # Create an artifacts directory for screenshots
 ARTIFACTS_DIR = Path("./scratch/")

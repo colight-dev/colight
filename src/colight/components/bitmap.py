@@ -2,7 +2,7 @@ from typing import Union
 
 import numpy as np
 
-from genstudio.layout import Hiccup, JSExpr, JSRef, LayoutItem
+from colight.layout import Hiccup, JSExpr, JSRef, LayoutItem
 
 
 def bitmap(

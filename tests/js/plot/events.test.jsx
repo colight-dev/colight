@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { EventHandler, events } from '../../../src/genstudio/js/plot/events'
+import { EventHandler, events } from '../../../src/colight/js/plot/events'
 import * as Plot from "@observablehq/plot";
 import { JSDOM } from 'jsdom'
 

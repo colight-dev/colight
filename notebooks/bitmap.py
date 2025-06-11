@@ -1,4 +1,4 @@
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 
 import os

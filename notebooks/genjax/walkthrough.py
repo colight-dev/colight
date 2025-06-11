@@ -18,7 +18,7 @@
 # %load_ext autoreload
 # %autoreload 2
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 import genjax as genjax
 from genjax import gen

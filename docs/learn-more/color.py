@@ -1,4 +1,4 @@
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # ## Color Schemes
 #
@@ -40,7 +40,7 @@ import genstudio.plot as Plot
 #
 # ### Using D3 color scales directly
 #
-# GenStudio allows you to use [D3 color scales](https://github.com/d3/d3-scale-chromatic) directly in your plots:
+# Colight allows you to use [D3 color scales](https://github.com/d3/d3-scale-chromatic) directly in your plots:
 
 # %%
 (

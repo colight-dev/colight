@@ -1,12 +1,12 @@
 import numpy as np
-from genstudio.scene3d import (
+from colight.scene3d import (
     PointCloud,
     Ellipsoid,
     Cuboid,
     deco,
     LineBeams,
 )
-import genstudio.plot as Plot
+import colight.plot as Plot
 import math
 
 

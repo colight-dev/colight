@@ -1,12 +1,12 @@
 # %% [markdown]
 
-# This example demonstrates how to create synchronized highlights across multiple elements using the [Bylight library](https://github.com/mhuebert/bylight?tab=readme-ov-file#bylight) in GenStudio.
+# This example demonstrates how to create synchronized highlights across multiple elements using the [Bylight library](https://github.com/mhuebert/bylight?tab=readme-ov-file#bylight) in Colight.
 
 # %% [markdown]
 # First, let's import the necessary libraries and define our sample text:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 rhyme = """Roses are blue,
 Violets are red,

@@ -1,6 +1,6 @@
-# GenStudio
+# Colight
 
-GenStudio is a Python library for creating interactive, JavaScript-based visualizations. It provides a simple, composable way to generate plots, animations, and custom user interfaces from within a Python environment.
+Colight is a Python library for creating interactive, JavaScript-based visualizations. It provides a simple, composable way to generate plots, animations, and custom user interfaces from within a Python environment.
 
 [Getting Started](quickstart.py){ .md-button  .md-button--primary }
 
@@ -14,14 +14,8 @@ Key features:
 
 ### Installation
 
-To install GenStudio, run
+To install Colight, run
 
 ```bash
-pip install genstudio
-```
-
-If you're using [GenJAX](https://genjax.gen.dev), you can install GenStudio as an extra:
-
-```bash
-pip install genjax[genstudio]
+pip install colight
 ```

@@ -1,6 +1,6 @@
 # %%
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # Only one console.log, Plot marks are automatically wrapped in Plot.ref(); all usages point to the same instance.
 data = [[1, 2], [3, 4], [5, Plot.js("console.log('evaluating cached data') || 6")]]
@@ -19,7 +19,7 @@ Plot.dot([[1, 1]]) + Plot.ref(Plot.dot([[2, 2]]))
 
 # %%
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 data1 = Plot.ref(["div", 1, 2, 3])
 data2 = Plot.ref(["div", 9, 9, 9])
@@ -45,7 +45,7 @@ tailedWidget.state.update([tailedData, "concat", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 # We should see '123' logged once.
 Plot.initialState({"foo": 123}) & Plot.js("console.log($state.foo) || $state.foo")
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 from IPython.display import display
 
 p = Plot.new()

@@ -1,4 +1,4 @@
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 
 x = np.linspace(0, 10, 100)

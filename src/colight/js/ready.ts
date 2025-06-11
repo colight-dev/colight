@@ -1,5 +1,5 @@
 /**
- * Ready state tracking system for GenStudio components
+ * Ready state tracking system for Colight components
  *
  * This module provides utilities for tracking readiness of asynchronous components
  * like WebGPU rendering in Scene3d. Components can register themselves as "loading"

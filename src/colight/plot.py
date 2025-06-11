@@ -4,10 +4,10 @@ import json
 import pathlib
 from typing import Any, Dict, List, Optional, Union
 
-import genstudio.plot_defs as plot_defs
-from genstudio.components.bitmap import bitmap
-from genstudio.env import configure
-from genstudio.layout import (
+import colight.plot_defs as plot_defs
+from colight.components.bitmap import bitmap
+from colight.env import configure
+from colight.layout import (
     Column,
     Grid,
     Hiccup,
@@ -22,7 +22,7 @@ from genstudio.layout import (
     onChange,
     ref,
 )
-from genstudio.plot_defs import (
+from colight.plot_defs import (
     area,
     areaX,
     areaY,
@@ -159,7 +159,7 @@ from genstudio.plot_defs import (
     windowX,
     windowY,
 )
-from genstudio.plot_spec import MarkSpec, PlotSpec, new
+from colight.plot_spec import MarkSpec, PlotSpec, new
 
 # This module provides a composable way to create interactive plots using Observable Plot
 # and AnyWidget, built on the work of pyobsplot.
@@ -1131,7 +1131,7 @@ def Import(
     exclude: Optional[list[str]] = None,
     format: str = "esm",
 ) -> LayoutItem:
-    """Import JavaScript code into the GenStudio environment.
+    """Import JavaScript code into the Colight environment.
 
     Args:
         source: JavaScript source code. Can be:
@@ -1147,8 +1147,8 @@ def Import(
         format: Module format ('esm' or 'commonjs')
 
     Imported JavaScript code can access:
-    - `genstudio.imports`: Previous imports in the current plot (only for CommonJS imports)
-    - `React`, `d3`, `html` (for hiccup) and `genstudio.api` are defined globally
+    - `colight.imports`: Previous imports in the current plot (only for CommonJS imports)
+    - `React`, `d3`, `html` (for hiccup) and `colight.api` are defined globally
 
     Examples:
         # CDN import with namespace alias

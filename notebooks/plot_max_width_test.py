@@ -19,7 +19,7 @@
 # This notebook demonstrates the new `maxWidth` constraint for plots.
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 
 # %% [markdown]

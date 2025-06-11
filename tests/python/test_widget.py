@@ -7,7 +7,7 @@ try:
 except ImportError:
     jnp = None
 
-from genstudio.widget import (
+from colight.widget import (
     to_json,
     deserialize_buffer_entry,
     replace_buffers,

@@ -222,16 +222,16 @@ def get_all_definition_with_comments(module):
     return None
 
 
-# Example code to parse genstudio.plot.events docstring
+# Example code to parse colight.plot.events docstring
 if __name__ == "__main__":
     loader = GriffeLoader(docstring_parser=Parser.google)
-    module = loader.load("genstudio.plot")
+    module = loader.load("colight.plot")
 
     if "events" in module.members:
         events = module.members["events"]
         if events.docstring:
             parsed = events.docstring.parsed
-            print("Docstring sections for genstudio.plot.events:")
+            print("Docstring sections for colight.plot.events:")
             for section in parsed:
                 print(f"\nSection kind: {section.kind}")
 

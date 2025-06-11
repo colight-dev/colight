@@ -6,10 +6,10 @@ const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 
 const options = {
-  entryPoints: ['src/genstudio/js/widget.jsx'],
+  entryPoints: ['src/colight/js/widget.jsx'],
   bundle: true,
   format: 'esm',
-  outfile: 'src/genstudio/js/widget_build.js',
+  outfile: 'src/colight/js/widget.dist.js',
   plugins: [cssModulesPlugin()],
   minify: !watch,
   sourcemap: watch,
@@ -17,7 +17,7 @@ const options = {
 
 const USE_CDN_IMPORTS = false //!watch
 if (USE_CDN_IMPORTS) {
-  importMap.load('src/genstudio/js/import-map.cdn.json');
+  importMap.load('src/colight/js/import-map.cdn.json');
   options.plugins.push(importMap.plugin());
 }
 

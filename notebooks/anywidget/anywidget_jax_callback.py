@@ -30,7 +30,7 @@ w
 
 def effectful_fn(x):
     print(f"Performing an effect with {x}")
-    w.send({"kind": "genstudio", "content": x.tolist()})
+    w.send({"kind": "colight", "content": x.tolist()})
     return x
 
 

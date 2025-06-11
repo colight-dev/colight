@@ -1,6 +1,6 @@
-from genstudio.scene3d import Ellipsoid, deco
+from colight.scene3d import Ellipsoid, deco
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 
 Ellipsoid(
     # fill_mode="MajorWireframe",

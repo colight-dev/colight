@@ -1,15 +1,15 @@
 # %% [markdown]
 # # Animated Pixel Display
 #
-# This example demonstrates how to create an animated pixel display using NumPy arrays and `genstudio.plot`.
+# This example demonstrates how to create an animated pixel display using NumPy arrays and `colight.plot`.
 #
 #
 # First, let's import the required libraries:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 
 # %% [markdown]
 # ## Generate Pixels

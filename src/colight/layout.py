@@ -3,10 +3,10 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Optional, Self, Tuple, Union, cast
 
-from genstudio.env import CONFIG
-from genstudio.html import html_page, html_snippet
-import genstudio.screenshots as screenshots
-from genstudio.widget import Widget, WidgetState
+from colight.env import CONFIG
+from colight.html import html_page, html_snippet
+import colight.screenshots as screenshots
+from colight.widget import Widget, WidgetState
 
 
 def create_parent_dir(path: str) -> None:
@@ -17,7 +17,7 @@ def create_parent_dir(path: str) -> None:
 class HTML:
     def __init__(self, ast):
         self.ast = ast
-        self.id = f"genstudio-widget-{uuid.uuid4().hex}"
+        self.id = f"colight-widget-{uuid.uuid4().hex}"
 
     def set_ast(self, ast):
         self.ast = ast
@@ -320,7 +320,7 @@ def js(txt: str, *params: Any, expression=True) -> JSCode:
     - $state: Current plot state
     - html: render HTML using a JavaScript hiccup syntax
     - d3: D3.js library
-    - genstudio.api: roughly, the api exposed via the genstudio.plot module
+    - colight.api: roughly, the api exposed via the colight.plot module
 
     Args:
         txt (str): JavaScript code with optional %1, %2, etc. placeholders

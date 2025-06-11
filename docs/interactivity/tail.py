@@ -1,4 +1,4 @@
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %% [markdown]
 
@@ -14,7 +14,7 @@ Plot.html(
 # When animating using `Plot.Frames` or `Plot.Slider`, the range of the slider can be set dynamically by passing a reference to a list as a `rangeFrom` parameter. If the `tail` option is `True`, the animation will pause at the end of the range, then continue when more data is added to the list.
 
 # %%
-from genstudio.plot import js
+from colight.plot import js
 
 letters = Plot.ref(["A", "B", "C"], state_key="letters")
 

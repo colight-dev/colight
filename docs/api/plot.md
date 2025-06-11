@@ -1,4 +1,4 @@
-# genstudio.plot {: .api .api-title }
+# colight.plot {: .api .api-title }
 
 
 ## Interactivity
@@ -331,7 +331,7 @@ The code will be evaluated in a scope that includes:
 - $state: Current plot state
 - html: render HTML using a JavaScript hiccup syntax
 - d3: D3.js library
-- genstudio.api: roughly, the api exposed via the genstudio.plot module
+- colight.api: roughly, the api exposed via the colight.plot module
 
 Parameters
 {: .api .api-section }
@@ -979,7 +979,8 @@ Plot.spike(cities, {x: "longitude", y: "latitude", stroke: "red", length: "popul
     channel specifies the textual contents of the mark, which may be preformatted
     with line breaks (
 ,
-, or ), or wrapped or clipped using the
+, or
+), or wrapped or clipped using the
     **lineWidth** and **textOverflow** options.
 
     If **text** contains numbers or dates, a default formatter will be applied,
@@ -2860,7 +2861,7 @@ Attaches dimension metadata, for further processing in JavaScript.
 
 ### Import {: .api .api-member }
 
-Import JavaScript code into the GenStudio environment.
+Import JavaScript code into the Colight environment.
 
 Parameters
 {: .api .api-section }
@@ -2889,9 +2890,9 @@ Parameters
 - `format` (str): Module format ('esm' or 'commonjs')
 
 
-Imported JavaScript code can access:
-- `genstudio.imports`: Previous imports in the current plot (only for CommonJS imports)
-- `React`, `d3`, `html` (for hiccup) and `genstudio.api` are defined globally
+ImpcolightaScript code can access:
+- `colight.imports`: Previous imports incolightent plot (only for CommonJS imports)
+- `React`, `d3`, `html` (for hiccup) and `colight.api` are defined globally
 
 Examples
 {: .api .api-section }

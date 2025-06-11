@@ -1,8 +1,8 @@
 # %%
 # when js has computed state, it updates in the same transaction as its dependencies
 
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState(
@@ -33,8 +33,8 @@ from genstudio.plot import js
 # %%
 # when python has onChange listeners, they are called after an entire update-list from js is sent
 
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState(

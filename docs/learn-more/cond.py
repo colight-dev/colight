@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Conditional Rendering
 
-# GenStudio provides two main ways to conditionally render content:
+# Colight provides two main ways to conditionally render content:
 # - `Plot.cond` for if/else logic
 # - `Plot.case` for switch/case logic
 
@@ -12,7 +12,7 @@
 # Here's a simple example that changes text based on click count:
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState({"count": 0})
@@ -42,7 +42,7 @@ import genstudio.plot as Plot
 # It's especially useful when working with enumerated states or categorical data.
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState({"selected": None})

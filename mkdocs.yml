@@ -1,7 +1,7 @@
-site_name: GenStudio
-site_url: https://studio.gen.dev
-repo_url: https://github.com/probcomp/genstudio
-repo_name: probcomp/genstudio
+site_name: Colight
+site_url: https://colight.dev
+repo_url: https://github.com/colight-dev/colight
+repo_name: colight-dev/colight
 edit_uri: tree/docs/docs/
 theme:
   name: material
@@ -65,18 +65,18 @@ markdown_extensions:
   - md_in_html
 plugins:
   - search
-  - genstudio.docs.plugin:
+  - colight.docs.plugin:
       modules:
-        - module: genstudio.plot
+        - module: colight.plot
           output: api/plot.md
-        - module: genstudio.scene3d
+        - module: colight.scene3d
           output: api/scene3d.md
   - mkdocs-jupyter:
       include: ["*.py"]
       ignore: ["llms.py"]
       execute: true
       allow_errors: false
-      kernel_name: genstudio
+      kernel_name: colight
       include_requirejs: true
       include_source: True
       remove_tag_config:
@@ -94,5 +94,5 @@ extra_javascript:
   - js/scroll-fix.js
   - js/command-k.js
 hooks:
-  - src/genstudio/scripts/css_modifier.py
-  - src/genstudio/scripts/tailwind_builder.py
+  - src/colight/scripts/css_modifier.py
+  - src/colight/scripts/tailwind_builder.py

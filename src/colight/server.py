@@ -6,9 +6,9 @@ import mimetypes
 from typing import Dict, Union, Any
 
 
-class GenStudioRequestHandler(http.server.SimpleHTTPRequestHandler):
+class ColightRequestHandler(http.server.SimpleHTTPRequestHandler):
     """
-    Custom request handler for GenStudio.
+    Custom request handler for Colight.
     Serves files from multiple sources in a specific order:
     1. Dynamically added files/buffers (self.server_instance.served_files).
        - Buffers with a specific prefix are served once and then removed.
@@ -17,7 +17,7 @@ class GenStudioRequestHandler(http.server.SimpleHTTPRequestHandler):
     """
 
     def __init__(
-        self, request, client_address, server, server_instance: "GenStudioHTTPServer"
+        self, request, client_address, server, server_instance: "ColightHTTPServer"
     ):
         self.server_instance = server_instance
         if self.server_instance.static_dir and not self.server_instance.serve_cwd:
@@ -96,9 +96,9 @@ class GenStudioRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_error(404, "File not found")
 
 
-class GenStudioHTTPServer:
+class ColightHTTPServer:
     """
-    A general-purpose HTTP server for GenStudio.
+    A general-purpose HTTP server for Colight.
     Can serve dynamic files, static files from a directory, and optionally from CWD.
     """
 
@@ -130,14 +130,14 @@ class GenStudioHTTPServer:
         """Adds a file or buffer to be served dynamically. Replaces if path exists."""
         self.served_files[path] = content
         if self.debug:
-            print(f"[GenStudioServer] Added/Updated served file: {path}")
+            print(f"[ColightServer] Added/Updated served file: {path}")
 
     def remove_served_file(self, path: str) -> None:
         """Removes a file or buffer from the dynamic registry if it exists."""
         if path in self.served_files:
             del self.served_files[path]
             if self.debug:
-                print(f"[GenStudioServer] Removed served file: {path}")
+                print(f"[ColightServer] Removed served file: {path}")
 
     def get_url(self, path: str = "") -> str:
         """Returns the full HTTP URL for a given path on this server."""
@@ -146,11 +146,11 @@ class GenStudioHTTPServer:
     def start(self) -> None:
         if self.server_thread and self.server_thread.is_alive():
             if self.debug:
-                print(f"[GenStudioServer] Server already running on {self.get_url()}")
+                print(f"[ColightServer] Server already running on {self.get_url()}")
             return
 
         def handler_class(request, client_address, server):
-            return GenStudioRequestHandler(
+            return ColightRequestHandler(
                 request, client_address, server, server_instance=self
             )
 
@@ -166,19 +166,19 @@ class GenStudioHTTPServer:
 
         if self.debug:
             print(
-                f"[GenStudioServer] Starting HTTP server on {self.host}:{self.actual_port}"
+                f"[ColightServer] Starting HTTP server on {self.host}:{self.actual_port}"
             )
             if self.static_dir:
                 print(
-                    f"[GenStudioServer] Serving static files from (if not overridden by dynamic): {self.static_dir}"
+                    f"[ColightServer] Serving static files from (if not overridden by dynamic): {self.static_dir}"
                 )
             if self.serve_cwd:
                 print(
-                    "[GenStudioServer] CWD serving fallback enabled (for paths not in dynamic/static)."
+                    "[ColightServer] CWD serving fallback enabled (for paths not in dynamic/static)."
                 )
             if self.served_files:
                 print(
-                    f"[GenStudioServer] Pre-registered served files: {list(self.served_files.keys())}"
+                    f"[ColightServer] Pre-registered served files: {list(self.served_files.keys())}"
                 )
 
         self.server_thread = threading.Thread(
@@ -187,30 +187,30 @@ class GenStudioHTTPServer:
         self.server_thread.daemon = True
         self.server_thread.start()
         if self.debug:
-            print(f"[GenStudioServer] Server started. Access at {self.get_url()}")
+            print(f"[ColightServer] Server started. Access at {self.get_url()}")
 
     def stop(self) -> None:
         if self.httpd:
             if self.debug:
                 print(
-                    f"[GenStudioServer] Shutting down HTTP server on port {self.actual_port}"
+                    f"[ColightServer] Shutting down HTTP server on port {self.actual_port}"
                 )
             self.httpd.shutdown()  # Stop serve_forever loop
             if self.server_thread:
                 self.server_thread.join(timeout=1.0)  # Wait for thread to finish
                 if self.server_thread.is_alive() and self.debug:
-                    print("[GenStudioServer] Server thread did not join cleanly.")
+                    print("[ColightServer] Server thread did not join cleanly.")
             self.httpd.server_close()  # Release the port
             self.httpd = None
             self.server_thread = None
             if self.debug:
-                print("[GenStudioServer] Server stopped.")
+                print("[ColightServer] Server stopped.")
         elif self.debug:
             print(
-                "[GenStudioServer] Stop called but server not running or already stopped."
+                "[ColightServer] Stop called but server not running or already stopped."
             )
 
-    def __enter__(self) -> "GenStudioHTTPServer":
+    def __enter__(self) -> "ColightHTTPServer":
         self.start()
         return self
 
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     with open(server1_path, "w") as f:
         f.write("<h1>Hello from CWD via Server 1!</h1>")
 
-    with GenStudioHTTPServer(port=8000, debug=True, serve_cwd=True) as server1:
+    with ColightHTTPServer(port=8000, debug=True, serve_cwd=True) as server1:
         server1.add_served_file("dynamic.html", "<h1>Hello from Dynamic File!</h1>")
         server1.add_served_file(
             server1.buffer_prefix + "mybuffer.txt", b"This is a one-time buffer."
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     with open(static_asset_path, "w") as f:
         f.write("console.log('Static app.js loaded!');")
 
-    with GenStudioHTTPServer(
+    with ColightHTTPServer(
         port=8001, debug=True, static_dir=static_example_dir
     ) as server2:
         print(

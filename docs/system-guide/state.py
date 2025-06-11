@@ -1,12 +1,12 @@
 # %% tags=["hide_source"]
 
-import genstudio.plot as Plot
-from genstudio.plot import md
+import colight.plot as Plot
+from colight.plot import md
 
 # %% [markdown]
 # # State
 #
-# State in GenStudio is used when:
+# State in Colight is used when:
 # - Data is used in more than one place, or
 # - Data changes over time (via user interaction or from Python)
 #
@@ -58,7 +58,7 @@ Plot.Grid(
 
 # %%
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState({"clicks": 0})
@@ -77,7 +77,7 @@ import genstudio.plot as Plot
 # %% [markdown]
 # ## State Updates
 #
-# State updates in GenStudio work bidirectionally between Python and JavaScript:
+# State updates in Colight work bidirectionally between Python and JavaScript:
 #
 # ### Python → JavaScript Updates
 # When you update state from Python using `widget.state.update()` or by setting attributes directly:

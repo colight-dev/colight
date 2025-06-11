@@ -1,11 +1,11 @@
 # %% [markdown]
 
-# GenStudio provides a complete Python interface to the Observable Plot API,
+# Colight provides a complete Python interface to the Observable Plot API,
 # designed to be as consistent as possible with the original.
 
 # %%
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 data = [{"x": 1, "y": 2}, {"x": 2, "y": 3}, {"x": 3, "y": 4}]
 
@@ -23,18 +23,18 @@ data = [{"x": 1, "y": 2}, {"x": 2, "y": 3}, {"x": 3, "y": 4}]
 # })
 # ```
 
-# **GenStudio**
+# **Colight**
 
 # %%
 Plot.dot(data, {"x": "x", "y": "y"})
 
 # %% [markdown]
-# As you can see, the basic structure is very similar. The main difference is that in GenStudio, we don't wrap marks in a `Plot.plot()` call - the `Plot.dot()` function returns a `PlotSpec` object that can be displayed directly.
+# As you can see, the basic structure is very similar. The main difference is that in Colight, we don't wrap marks in a `Plot.plot()` call - the `Plot.dot()` function returns a `PlotSpec` object that can be displayed directly.
 
 # %% [markdown]
 # ## Combining Marks
 
-# In Observable Plot, you typically combine marks by including them in the `marks` array. In GenStudio, you use the `+` operator to combine marks and options:
+# In Observable Plot, you typically combine marks by including them in the `marks` array. In Colight, you use the `+` operator to combine marks and options:
 
 # **Observable Plot**
 # ```javascript
@@ -46,7 +46,7 @@ Plot.dot(data, {"x": "x", "y": "y"})
 # })
 # ```
 
-# **GenStudio**
+# **Colight**
 
 # %%
 Plot.dot(data, {"x": "x", "y": "y"}) + Plot.line(data, {"x": "x", "y": "y"})
@@ -54,7 +54,7 @@ Plot.dot(data, {"x": "x", "y": "y"}) + Plot.line(data, {"x": "x", "y": "y"})
 # %% [markdown]
 # ## Adding Plot Options
 
-# In Observable Plot, you typically add options to the `Plot.plot()` call. In GenStudio, you can add options using the `+` operator:
+# In Observable Plot, you typically add options to the `Plot.plot()` call. In Colight, you can add options using the `+` operator:
 
 # **Observable Plot**
 # ```javascript
@@ -65,7 +65,7 @@ Plot.dot(data, {"x": "x", "y": "y"}) + Plot.line(data, {"x": "x", "y": "y"})
 # })
 # ```
 
-# **GenStudio**
+# **Colight**
 
 # %%
 Plot.dot(data, {"x": "x", "y": "y"}) + Plot.domain([0, 4], [0, 5])
@@ -73,7 +73,7 @@ Plot.dot(data, {"x": "x", "y": "y"}) + Plot.domain([0, 4], [0, 5])
 # %% [markdown]
 # ## JavaScript Functions in Options
 
-# Observable Plot allows you to use JavaScript functions directly in your options. GenStudio provides a similar capability using `Plot.js()`:
+# Observable Plot allows you to use JavaScript functions directly in your options. Colight provides a similar capability using `Plot.js()`:
 
 # **Observable Plot**
 # ```javascript
@@ -88,7 +88,7 @@ Plot.dot(data, {"x": "x", "y": "y"}) + Plot.domain([0, 4], [0, 5])
 # })
 # ```
 
-# **GenStudio**
+# **Colight**
 
 # %%
 Plot.dot(data, {"x": "x", "y": "y", "fill": Plot.js("d => d.x > 2 ? 'red' : 'blue'")})
@@ -96,7 +96,7 @@ Plot.dot(data, {"x": "x", "y": "y", "fill": Plot.js("d => d.x > 2 ? 'red' : 'blu
 # %% [markdown]
 # ## Interactivity
 
-# Both Observable Plot and GenStudio support interactivity, but the approaches differ slightly due to the different environments.
+# Both Observable Plot and Colight support interactivity, but the approaches differ slightly due to the different environments.
 
 # **Observable Plot**
 # In Observable Plot, you typically use Observable's reactive programming model:
@@ -113,7 +113,7 @@ Plot.dot(data, {"x": "x", "y": "y", "fill": Plot.js("d => d.x > 2 ? 'red' : 'blu
 # })
 # ```
 
-# **GenStudio**
+# **Colight**
 
 # %%
 (
@@ -137,9 +137,9 @@ Plot.dot(data, {"x": "x", "y": "y", "fill": Plot.js("d => d.x > 2 ? 'red' : 'blu
 )
 
 # %% [markdown]
-# In GenStudio, we use the `Plot.Slider` function to create interactive elements, and `$state` to access their values in our JavaScript functions.
+# In Colight, we use the `Plot.Slider` function to create interactive elements, and `$state` to access their values in our JavaScript functions.
 
 # %% [markdown]
-# ## Additional Features in GenStudio
+# ## Additional Features in Colight
 
-# GenStudio includes some [additional marks](additions-to-observable) that aren't part of the core Observable Plot library.
+# Colight includes some [additional marks](additions-to-observable) that aren't part of the core Observable Plot library.

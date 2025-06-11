@@ -1,6 +1,6 @@
 import numpy as np
 import math
-from genstudio.scene3d import Ellipsoid, Cuboid, PointCloud
+from colight.scene3d import Ellipsoid, Cuboid, PointCloud
 
 # Common parameters for all tests
 offset_angle = 45  # degrees

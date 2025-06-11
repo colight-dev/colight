@@ -1,5 +1,5 @@
-from genstudio.scene3d import Scene, PointCloud, Ellipsoid
-import genstudio.plot as Plot
+from colight.scene3d import Scene, PointCloud, Ellipsoid
+import colight.plot as Plot
 
 # Create some example primitives
 point_cloud = PointCloud(

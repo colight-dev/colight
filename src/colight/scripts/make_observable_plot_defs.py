@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from genstudio.env import PARENT_PATH
-from genstudio.layout import JSCall
-from genstudio.plot_spec import MarkSpec, PlotSpec
+from colight.env import PARENT_PATH
+from colight.layout import JSCall
+from colight.plot_spec import MarkSpec, PlotSpec
 
 PlotOptions = dict[str, Any] | JSCall
 
@@ -179,8 +179,8 @@ plot_defs = "\n\n\n".join(
 
 plot_defs_module = f"""# Generated from version {OBSERVABLE_VERSION} of Observable Plot
 
-from genstudio.layout import JSCall
-from genstudio.plot_spec import MarkSpec, PlotSpec
+from colight.layout import JSCall
+from colight.plot_spec import MarkSpec, PlotSpec
 from typing import Any, Dict
 
 PlotOptions = dict[str, Any] | JSCall
@@ -197,7 +197,7 @@ with open(PARENT_PATH / "plot_defs.py", "w") as f:
     f.write(plot_defs_module)
 
 # %%
-import_statement = "from genstudio.plot_defs import " + ", ".join(
+import_statement = "from colight.plot_defs import " + ", ".join(
     sorted(OBSERVABLE_FNS.keys())
 )
 import_statement

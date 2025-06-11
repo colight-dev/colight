@@ -1,10 +1,10 @@
 # %% [markdown]
 # # Scene3D
 #
-# Scene3D builds on the same data and composition paradigms as GenStudio Plot but adds support for WebGPU–powered 3D primitives.
+# Scene3D builds on the same data and composition paradigms as Colight Plot but adds support for WebGPU–powered 3D primitives.
 #
 # %%
-from genstudio.scene3d import (
+from colight.scene3d import (
     Cuboid,
     Ellipsoid,
     LineBeams,
@@ -192,8 +192,8 @@ beams = LineBeams(
 # The `deco()` function takes an array of indices to decorate and the desired appearance properties.
 
 # %%
-import genstudio.plot as Plot
-from genstudio.scene3d import PointCloud
+import colight.plot as Plot
+from colight.scene3d import PointCloud
 import numpy as np
 
 # Create a point cloud with 100 points
@@ -221,7 +221,7 @@ cloud
 # In the example below, we decorate the hovered cube.
 
 # %%
-from genstudio.scene3d import Cuboid, deco
+from colight.scene3d import Cuboid, deco
 
 # Define centers for three non-overlapping cubes
 cuboid_centers = np.array(

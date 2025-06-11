@@ -1,8 +1,8 @@
 # %%
 
 # in python, the closest we have (now) to computed state is chaining onChange listeners.
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 
 (
@@ -36,8 +36,8 @@ from genstudio.plot import js
 # %%
 # in js, we _could_ chain onChange listeners the same way...
 
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState({"clicks": 0, "doubled": 0, "squared": 0})
@@ -66,8 +66,8 @@ from genstudio.plot import js
 # %%
 # BUT, js already supports computed state:
 
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState(

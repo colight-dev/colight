@@ -1,6 +1,6 @@
-from genstudio.scene3d import Ellipsoid
+from colight.scene3d import Ellipsoid
 import pickle
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 with open("./notebooks/banana_gaussians.pkl", "rb") as f:
     banana_gaussians = pickle.load(f)
@@ -8,13 +8,13 @@ with open("./notebooks/banana_gaussians.pkl", "rb") as f:
 
 def render_gaussians(bananas):
     """
-    Renders a Gen3D state's Gaussian ellipsoids using genstudio.scene3d.
+    Renders a Gen3D state's Gaussian ellipsoids using colight.scene3d.
 
     Parameters:
         state: A Gen3D state object containing Gaussian parameters
 
     Returns:
-        A genstudio Scene3D containing the rendered ellipsoids
+        A colight Scene3D containing the rendered ellipsoids
     """
 
     # Convert covariances to ellipsoid parameters using gen3d's function

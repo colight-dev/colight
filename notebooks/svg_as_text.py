@@ -1,5 +1,5 @@
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %% [markdown]
 # Example showing direct use of d3 to create an SVG visualization.

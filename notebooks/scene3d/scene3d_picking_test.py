@@ -1,13 +1,13 @@
 # %% Common imports and configuration
 import numpy as np
-from genstudio.scene3d import (
+from colight.scene3d import (
     Ellipsoid,
     Cuboid,
     LineBeams,
     PointCloud,
     deco,
 )
-from genstudio.plot import js
+from colight.plot import js
 
 # Common camera parameters
 DEFAULT_CAMERA = {"up": [0, 0, 1], "fov": 45, "near": 0.1, "far": 100}

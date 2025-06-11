@@ -1,7 +1,7 @@
 # %%
-import genstudio.plot as Plot
-import genstudio.scene3d as Scene3D
-from genstudio.plot import js
+import colight.plot as Plot
+import colight.scene3d as Scene3D
+from colight.plot import js
 
 # %% [markdown]
 # # Interactive Heart-Shaped Particle System

@@ -1,6 +1,6 @@
 # Create an isotype chart using text marks with emoji
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 data = [
     {"animal": "pigs", "country": "Great Britain", "count": 1354979},

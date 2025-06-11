@@ -1,9 +1,9 @@
 import base64
 import json
 import uuid
-from genstudio.util import read_file
-from genstudio.widget import to_json_with_initialState
-from genstudio.env import WIDGET_URL, CSS_URL
+from colight.util import read_file
+from colight.widget import to_json_with_initialState
+from colight.env import WIDGET_URL, CSS_URL
 
 
 def encode_string(s):
@@ -45,7 +45,7 @@ def get_style_content():
 
 
 def html_snippet(ast, id=None):
-    id = id or f"genstudio-widget-{uuid.uuid4().hex}"
+    id = id or f"colight-widget-{uuid.uuid4().hex}"
     data, buffers = to_json_with_initialState(ast, buffers=[])
 
     # Get JS and CSS content
@@ -71,7 +71,7 @@ def html_snippet(ast, id=None):
         }} catch (error) {{
             console.error('Failed to parse JSON:', error);
         }}
-        window.genstudio.renderData(container, data, {encode_buffers(buffers)});
+        window.colight.renderData(container, data, {encode_buffers(buffers)});
     </script>
     """
 
@@ -84,7 +84,7 @@ def html_page(ast, id=None):
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>GenStudio Widget</title>
+        <title>Colight Widget</title>
     </head>
     <body>
         {html_snippet(ast, id)}

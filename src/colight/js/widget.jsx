@@ -356,7 +356,7 @@ export function StateProvider(data) {
 
   useEffect(() => {
     if (currentAst) {
-      globals.genstudio.instances[data.id] = $state;
+      globals.colight.instances[data.id] = $state;
     }
   }, [!!currentAst])
 
@@ -407,7 +407,7 @@ function Viewer(data) {
 
   return (
     <div
-      className="genstudio-container"
+      className="colight-container"
       style={{ padding: CONTAINER_PADDING }}
       ref={elRef}
     >
@@ -531,7 +531,7 @@ function AnyWidgetApp() {
 }
 
 /**
- * Renders the GenStudio widget into a specified DOM element.
+ * Renders the Colight widget into a specified DOM element.
  * Handles both inline base64 encoded buffers and URLs for large buffers.
  *
  * @param {string|HTMLElement} element - The target DOM element or its ID.
@@ -627,4 +627,4 @@ export default {
   renderFile,
 };
 
-globals.genstudio.renderData = renderData;
+globals.colight.renderData = renderData;

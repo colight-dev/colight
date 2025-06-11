@@ -8,8 +8,8 @@ function resolveReference(path, obj) {
   return path.split(".").reduce((acc, key) => acc[key], obj);
 }
 
-// genstudio is on window so that ESM scripts can access it
-globals.genstudio.api = api;
+// colight is on window so that ESM scripts can access it
+globals.colight.api = api;
 window.d3 = api.d3
 window.html = api.html
 window.React = api.React
@@ -23,10 +23,10 @@ export async function createEvalEnv(imports) {
   // Helper to evaluate non-ESM code in a controlled scope
   function evaluateScriptWithImports(source, scope) {
     try {
-      globals.genstudio.imports = envImports;
+      globals.colight.imports = envImports;
       return new Function(...Object.keys(scope), source)(...Object.values(scope));
     } finally {
-      delete globals.genstudio.imports;
+      delete globals.colight.imports;
     }
   }
 
@@ -119,7 +119,7 @@ export async function createEvalEnv(imports) {
       console.error(`Spec:`, spec);
     }
   }
-  return { genstudio: {api}, ...envImports };;
+  return { colight: {api}, ...envImports };;
 }
 
 export function evaluate(node, $state, experimental, buffers) {

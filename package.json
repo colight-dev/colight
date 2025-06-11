@@ -1,10 +1,10 @@
 {
-  "name": "@probcomp/genstudio",
+  "name": "@colight/core",
   "version": "0.1.0",
   "main": "index.js",
-  "repository": "git@github.com:probcomp/genstudio.git",
-  "author": "Matthew Huebert <mhuebert@gmail.com>",
-  "license": "MIT",
+  "repository": "git@github.com:colight-dev/colight.git",
+  "author": "Matthew Huebert <me@matt.is>",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
@@ -53,7 +53,7 @@
     "test": "npm-run-all test:js test:py"
   },
   "files": [
-    "dist/widget_build.js",
+    "dist/widget.dist.js",
     "dist/widget.css"
   ],
   "publishConfig": {

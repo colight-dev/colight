@@ -1,5 +1,5 @@
 # %% tags=["hide_source"]
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 my_data = [[1, 1], [2, 1.5], [3, 1.25], [4, 2]]
 (my_plot := Plot.line(my_data, r=10))

@@ -3,8 +3,8 @@
 # This notebook shows how to save plots as static images and videos.
 
 
-import genstudio.plot as Plot
-from genstudio.scene3d import Ellipsoid
+import colight.plot as Plot
+from colight.scene3d import Ellipsoid
 from pathlib import Path
 import numpy as np
 

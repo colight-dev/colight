@@ -1,5 +1,5 @@
-import genstudio.plot as Plot
-from genstudio.plot import html, js
+import colight.plot as Plot
+from colight.plot import html, js
 
 Plot.configure(display_as="html")
 

@@ -1,7 +1,7 @@
 # %%
 
 import unittest
-from genstudio.layout import JSRef, JSCall
+from colight.layout import JSRef, JSCall
 
 d3 = JSRef("d3")
 Math = JSRef("Math")

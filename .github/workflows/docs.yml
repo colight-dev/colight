@@ -42,7 +42,7 @@ jobs:
       run: poetry install
 
     - name: Kernel install
-      run: poetry run python -m ipykernel install --user --name genstudio
+      run: poetry run python -m ipykernel install --user --name colight
 
     - name: mkdocs build
       run: poetry run mkdocs build

@@ -1,9 +1,9 @@
 import unittest
 
-import genstudio.plot as Plot
-from genstudio.layout import JSCall
-from genstudio.plot_spec import MarkSpec, PlotSpec
-from genstudio.widget import Widget
+import colight.plot as Plot
+from colight.layout import JSCall
+from colight.plot_spec import MarkSpec, PlotSpec
+from colight.widget import Widget
 
 
 class TestPlot(unittest.TestCase):

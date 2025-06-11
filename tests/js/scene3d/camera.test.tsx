@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { render, act, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { SceneInner } from '../../../src/genstudio/js/scene3d/impl3d';
-import type { ComponentConfig } from '../../../src/genstudio/js/scene3d/components';
-import type { CameraParams } from '../../../src/genstudio/js/scene3d/camera3d';
+import { SceneInner } from '../../../src/colight/js/scene3d/impl3d';
+import type { ComponentConfig } from '../../../src/colight/js/scene3d/components';
+import type { CameraParams } from '../../../src/colight/js/scene3d/camera3d';
 import { setupWebGPU, cleanupWebGPU } from '../webgpu-setup';
 import { withBlankState } from '../test-utils';
 

@@ -1,5 +1,5 @@
 # %% [markdown]
-# # GenStudio LLM Interaction Guide
+# # Colight LLM Interaction Guide
 #
 # ## Contents
 # - Library Context
@@ -24,7 +24,7 @@
 #   - Bitmap Component Examples: demonstrates `bitmap` component, NumPy pixel data formats (2D/3D), `Plot.Grid`.
 #
 # ## Library Context
-# GenStudio is a visualization library built for interactive data visualization in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
+# Colight is a visualization library built for interactive data visualization in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
 #
 # Layout components (Row, Column, Grid) allow flexible arrangement of elements and can be composed using & (Row) and | (Column) operators. HTML (via React) can be created using "hiccup in python", and tailwind css classes are supported.
 #
@@ -36,8 +36,8 @@
 # <example title="Clickable Box Counter">
 # User: Make a clickable yellow box that shows how many times it has been clicked.
 # Assistant:
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState({"clicks": 0})
@@ -55,7 +55,7 @@ from genstudio.plot import js
 # <example title="Click and Drag Scatter Plot">
 # User: Show an empty scatter plot. Let the user add points by clicking.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState({"points": []})
@@ -68,8 +68,8 @@ import genstudio.plot as Plot
 )
 # User: Great. Can you let me drag them around?
 # Assistant:
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState({"points": []})
@@ -210,7 +210,7 @@ from genstudio.plot import js
 # <example title="Scatter Plot with LaTeX">
 # User: Show a scatter plot of points in a stair-like pattern next to Gauss's law in LaTeX. Add pastel background colors.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 
 x = np.arange(10) / 10
@@ -232,7 +232,7 @@ plot1 & plot2
 # <example title="Composable Plot with Legend">
 # User: Show a green square connected to a blue circle using a thick red line. Show a legend. Build up the plot from small/composable parts.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # we'll specify colors using Plot.constantly and Plot.colorMap
 # (if we use literal color values they won't show up in the legend)
@@ -267,9 +267,9 @@ line_plot = Plot.line(
 # <example title="Animated Pixel Display">
 # User: Create an animated pixel display showing circular waves
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 
 
 def generate_pixels(width=100, height=100, num_frames=60):
@@ -322,8 +322,8 @@ data = generate_pixels(width=width, height=height, num_frames=60)
 # <example title="Alphabet Slideshow">
 # User: Create an alphabet slideshow (controlled by click)
 # Assistant:
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 (
     Plot.initialState({"frame": 0, "letters": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
@@ -360,8 +360,8 @@ from genstudio.plot import js
 # <example title="Live Python Code Editor">
 # User: Create a simple live code editor that evaluates Python expressions
 # Assistant:
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 import io
 import sys
 
@@ -452,7 +452,7 @@ from docs.examples.data import civilizations
 # </given-user-file-context>
 # User: Create a timeline visualization of the ancient civilizations I've defined above.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.barX(
@@ -475,9 +475,9 @@ import genstudio.plot as Plot
 # </example>
 # %%
 # <example title="Plot Type Examples">
-# User: What kinds of plots can I create with GenStudio? Please show me some examples.
+# User: What kinds of plots can I create with Colight? Please show me some examples.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
 
 # Generate some sample data
@@ -538,7 +538,7 @@ cat_data = [{"category": c, "value": v} for c, v in zip(categories, values)]
     )
     | Plot.md(
         """
-GenStudio provides access to the full Observable Plot API, which includes many plot types:
+Colight provides access to the full Observable Plot API, which includes many plot types:
 
 - Basic: line, dot (scatter), area, rect
 - Statistical: histogram, box, bin, density
@@ -581,7 +581,7 @@ from docs.examples.data import discoveries
 # </given-user-file-context>
 # User: Could you help me plot this dataset, showing a timeline of when each discovery was published and the period until it gained widespread acceptance? Include tooltips with the detailed descriptions.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState({"discoveries": discoveries})
@@ -652,9 +652,9 @@ Hover over elements to see details about each discovery.
 # <example title="Animated Spring Motion">
 # User: Create a few-second motion animation showing a 2d spring animation where data comes from a numpy array. There are 3 dots, on the same horizontal line, oscillating horizontally at different speeds, not overlapping.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 
 
 # Generate the animation frames
@@ -715,7 +715,7 @@ from docs.examples.data import pulsar_data
 # 2. Uses the `fy` parameter to create separate lines for each wave
 # 3. Removes axes and adds appropriate styling to match the iconic look
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState(
@@ -766,7 +766,7 @@ from docs.examples.data import pulsar_data
 # 2. Uses the `fy` parameter to create separate lines for each wave
 # 3. Removes axes and adds appropriate styling to match the iconic look
 
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 (
     Plot.initialState(
@@ -806,9 +806,9 @@ import genstudio.plot as Plot
 # <example title="Interactive Shape Playground">
 # User: Create an interactive shape playground where shapes can be rotated and scaled
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.plot import js
+from colight.plot import js
 
 
 def generate_shapes(scale=1.0, rotation=0.0):
@@ -868,8 +868,8 @@ def updateState(widget, _):
 # <example title="Tabbed View">
 # User: Make a tabbed view with an example dot plot, details page, and settings screen with checkboxes.
 # Assistant:
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 
 def tabs_view(tabs, contents):
@@ -957,9 +957,9 @@ tabs_view(
 # <example title="3D Spiral Point Cloud">
 # User: Render a 3d spiral point cloud.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.scene3d import PointCloud, Scene
+from colight.scene3d import PointCloud, Scene
 
 # Create a spiral point cloud
 n_points = 1000
@@ -1015,9 +1015,9 @@ sizes = 0.01 + 0.02 * np.sin(t)
 # <example title="3D Animated Spheres">
 # User: I want to visualize an animation of two spheres with opposite growing/shrinking motion, including interactive controls to play/pause the animation and adjust the camera. Show the scene twice (synchronized motion/camera), one with white spheres and one with pink spheres.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.scene3d import Ellipsoid, Scene
+from colight.scene3d import Ellipsoid, Scene
 
 
 def generate_ellipsoid_frames(n_frames=60):
@@ -1094,9 +1094,9 @@ camera = {
 # <example title="Bitmap Component Examples">
 # User: Show me how to use the bitmap component with different types of pixel data.
 # Assistant:
-import genstudio.plot as Plot
+import colight.plot as Plot
 import numpy as np
-from genstudio.components.bitmap import bitmap
+from colight.components.bitmap import bitmap
 
 # Example 1: Create a simple red square using a 3D numpy array
 red_pixels = np.zeros((2, 2, 3), dtype=np.uint8)

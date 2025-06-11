@@ -1,8 +1,8 @@
 import numpy as np
-from genstudio.scene3d import Ellipsoid, Cuboid, deco, Scene
-import genstudio.plot as Plot
+from colight.scene3d import Ellipsoid, Cuboid, deco, Scene
+import colight.plot as Plot
 import math
-from genstudio.plot import js
+from colight.plot import js
 
 
 def generate_cluster_centers(n_clusters, bounds=(-3, 3)):

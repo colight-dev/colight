@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inferDtype, evaluateNdarray, estimateJSONSize } from '../../src/genstudio/js/binary';
+import { inferDtype, evaluateNdarray, estimateJSONSize } from '../../src/colight/js/binary';
 
 describe('binary.js', () => {
   describe('inferDtype', () => {

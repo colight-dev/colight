@@ -1,14 +1,14 @@
 # %% [markdown]
-# # GenStudio JavaScript Import Guide
+# # Colight JavaScript Import Guide
 #
-# Import JavaScript code from URLs, files, or inline source into your GenStudio plots.
+# Import JavaScript code from URLs, files, or inline source into your Colight plots.
 #
 # %% [markdown]
 # ## Quick examples
 #
 # %%
 # Import from CDN
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 Plot.Import(source="https://cdn.skypack.dev/lodash-es", refer=["sum"]) | Plot.js(
     "sum([1, 2, 3])"
@@ -29,7 +29,7 @@ Plot.Import(
 # - Imported modules are cached to avoid reloading.
 # - ES Modules (ESM) format is supported by default. CommonJS modules can be used by setting format="commonjs". Differences:
 #   - ESM can load from HTTP via `import` but can't access other plot imports
-#   - CommonJS cannot load external modules (eg. `require` won't work) but can access other plot imports by reading from `genstudio.imports`
+#   - CommonJS cannot load external modules (eg. `require` won't work) but can access other plot imports by reading from `colight.imports`
 #
 # ## Import Sources
 # There are three ways to provide JavaScript code to import:
@@ -50,12 +50,12 @@ Plot.Import(
 # - `exclude`: List of exports to exclude when using `refer_all`
 # - `format`: Module format - "esm" (default) or "commonjs"
 #
-# ## GenStudio API Access
+# ## Colight API Access
 # Your JavaScript code can access:
-# - `genstudio.imports`: Previous imports in the current plot (only for CommonJS imports)
-# - `React`, `d3`, `html` (for hiccup) and `genstudio.api` are defined globally
+# - `colight.imports`: Previous imports in the current plot (only for CommonJS imports)
+# - `React`, `d3`, `html` (for hiccup) and `colight.api` are defined globally
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 # %%
 # CDN import showing namespace alias and selective imports
@@ -103,10 +103,10 @@ Plot.Import(
 # import { scaleLinear, scaleLog, scaleTime } from "https://cdn.skypack.dev/d3-scale"
 
 # %%
-# Using genstudio.api utilities
+# Using colight.api utilities
 Plot.Import(
     source="""
-    const {html} = genstudio.api;
+    const {html} = colight.api;
     export const greeting = (name) => html(["div.p-5.bg-green-100", name])
     """,
     refer=["greeting"],
@@ -115,7 +115,7 @@ Plot.Import(
 # import { greeting } from "[inline module]"
 
 # %%
-# CommonJS modules can access previous `genstudio.imports`
+# CommonJS modules can access previous `colight.imports`
 (
     Plot.Import(
         source="""
@@ -125,7 +125,7 @@ Plot.Import(
     )
     | Plot.Import(
         source="""
-    const {add} = genstudio.imports;
+    const {add} = colight.imports;
     module.exports.addTwice = (x) => add(x, x);
     """,
         format="commonjs",
@@ -143,8 +143,8 @@ Plot.Import(
 # - `Plot.Import`: Used to define reusable code, functions and dependencies that can be used in `Plot.js`.
 #
 # #### Scope Access
-# - `Plot.js`'s scope includes `$state`, `html`, `d3`, all imports, and `genstudio.api`.
-# - `Plot.Import`'s scope includes `genstudio.api`. If `format="commonjs"`, then `genstudio.imports` are also available.
+# - `Plot.js`'s scope includes `$state`, `html`, `d3`, all imports, and `colight.api`.
+# - `Plot.Import`'s scope includes `colight.api`. If `format="commonjs"`, then `colight.imports` are also available.
 #
 # %%
 # Direct scope access in Plot.js
@@ -156,7 +156,7 @@ Plot.Import(
 ) | Plot.js("message")  # Direct access to 'message'
 
 # %%
-# Must use genstudio and commonjs format in Plot.Import
+# Must use colight and commonjs format in Plot.Import
 (
     Plot.Import(
         source="""
@@ -166,7 +166,7 @@ Plot.Import(
     )
     | Plot.Import(
         source="""
-        const { message } = genstudio.imports;  // Access previous imports
+        const { message } = colight.imports;  // Access previous imports
         exports.echo = () => message;
         """,
         refer=["echo"],
@@ -186,7 +186,7 @@ Plot.Import(
 (
     Plot.Import(
         source="""
-    const { html } = genstudio.api;
+    const { html } = colight.api;
     export const Counter = ($state) => {
         return html([
             "div.p-3",

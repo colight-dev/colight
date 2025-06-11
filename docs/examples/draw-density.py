@@ -12,8 +12,8 @@
 
 # %%
 
-import genstudio.plot as Plot
-from genstudio.plot import js
+import colight.plot as Plot
+from colight.plot import js
 
 # %% [markdown]
 

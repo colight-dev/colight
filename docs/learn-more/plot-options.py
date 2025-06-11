@@ -1,13 +1,13 @@
 # %% [markdown]
 # # Plot Options
 #
-# `genstudio.plot` has many helper functions to specify Observable Plot options.
+# `colight.plot` has many helper functions to specify Observable Plot options.
 
 # %% [markdown]
 # ## Size and spacing
 
 # %%
-import genstudio.plot as Plot
+import colight.plot as Plot
 
 data = [[1, 1], [2, 2], [3, 3]]
 

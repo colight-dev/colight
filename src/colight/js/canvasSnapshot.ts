@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from 'react';
-import {genstudio} from './globals'
+import {colight} from './globals'
 interface CanvasRegistry {
   [key: string]: {
     canvas: HTMLCanvasElement;
@@ -212,5 +212,5 @@ export function removeCanvasOverlays(): void {
   });
 }
 
-genstudio.beforeScreenCapture = createCanvasOverlays;
-genstudio.afterScreenCapture = removeCanvasOverlays;
+colight.beforeScreenCapture = createCanvasOverlays;
+colight.afterScreenCapture = removeCanvasOverlays;
