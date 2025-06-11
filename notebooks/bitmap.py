@@ -1,7 +1,14 @@
 import genstudio.plot as Plot
 import numpy as np
 
-Plot.bitmap(np.random.rand(8, 8)).save_pdf("scratch/bitmap.pdf", debug=True)
+import os
+import shutil
+
+# Remove the scratch/bitmap directory if it exists
+if os.path.exists("scratch/bitmap"):
+    shutil.rmtree("scratch/bitmap")
+
+Plot.bitmap(np.random.rand(8, 8)).save_pdf("scratch/bitmap/single.pdf", debug=True)
 
 
 # Create bitmaps of different sizes
@@ -21,6 +28,6 @@ p = Plot.html(
 )
 
 [
-    p.save_pdf(f"scratch/bitmap_grid_{width}.pdf", width=width, debug=True)
-    for width in [200, 400, 500, 600, 700, 800, 1200, 1600]
+    p.save_pdf(f"scratch/bitmap/grid_{width}.pdf", width=width, debug=True)
+    for width in [200]  # [200, 400, 500, 600, 700, 800, 1200, 1600]
 ]
