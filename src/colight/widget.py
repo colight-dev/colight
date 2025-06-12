@@ -8,7 +8,7 @@ import numpy as np
 import traitlets
 import warnings
 
-from colight.env import CONFIG, WIDGET_URL, CSS_URL
+from colight.env import CONFIG, WIDGET_URL
 
 
 class SubscriptableNamespace(SimpleNamespace):
@@ -396,7 +396,7 @@ class WidgetState:
 
 class Widget(anywidget.AnyWidget):
     _esm = WIDGET_URL
-    _css = CSS_URL
+    # CSS is now embedded in the JS bundle
     callback_registry: Dict[str, Callable] = {}
     data = traitlets.Any().tag(sync=True, to_json=to_json_with_initialState)
 

@@ -4,6 +4,7 @@ import * as mobx from "mobx";
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
 import * as api from "./api";
+import '../widget.css';
 import { evaluate, createEvalEnv, collectBuffers, replaceBuffers } from "./eval";
 import { $StateContext, CONTAINER_PADDING } from "./context";
 import { useCellUnmounted, tw } from "./utils";
@@ -596,8 +597,13 @@ export const renderData = async (element, data, buffers_payload, id) => {
       resolved_buffers = [];
     }
   } else if (Array.isArray(buffers_payload)) {
-    // Inline base64 buffers
+    // Buffers can be either base64 strings or Uint8Arrays
     resolved_buffers = buffers_payload.map((payload, index) => {
+      // If payload is already a Uint8Array (from the .colight file loader)
+      if (payload instanceof Uint8Array) {
+        return payload;
+      }
+      // Otherwise assume it's a base64 string (from HTML embedding)
       try {
         return Uint8Array.from(atob(payload), c => c.charCodeAt(0));
       } catch (e) {

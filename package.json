@@ -11,7 +11,7 @@
     "@webgpu/types": "^0.1.53",
     "canvas": "^3.1.0",
     "esbuild": "^0.21.5",
-    "esbuild-css-modules-plugin": "^3.1.2",
+    "esbuild-css-modules-plugin": "^3.1.5",
     "jsdom": "^25.0.0",
     "npm-run-all": "^4.1.5",
     "pyright": "^1.1.367",
@@ -53,8 +53,7 @@
     "test": "npm-run-all test:js test:py"
   },
   "files": [
-    "dist/widget.dist.js",
-    "dist/widget.css"
+    "src/colight/dist"
   ],
   "publishConfig": {
     "access": "public"

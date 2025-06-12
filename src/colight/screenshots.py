@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Union
 
 import colight.widget as widget
 from colight.html import encode_buffers
-from colight.env import WIDGET_URL, CSS_URL
+from colight.env import WIDGET_URL
 from colight.chrome_devtools import ChromeContext, format_bytes
 from colight.util import read_file
 
@@ -57,12 +57,8 @@ class StudioContext(ChromeContext):
                 script_tag = '<script type="module" src="studio.js"></script>'
                 files["studio.js"] = read_file(WIDGET_URL)
 
-            if isinstance(CSS_URL, str):
-                style_tag = f'<style>@import "{CSS_URL}";</style>'
-            else:
-                style_tag = '<style>@import "studio.css";</style>'
-                with open(CSS_URL, "r") as file:
-                    files["studio.css"] = file.read()
+            # CSS is now embedded in the JS bundle - no separate styling needed
+            style_tag = ""
 
             html = f"""
             <!DOCTYPE html>
