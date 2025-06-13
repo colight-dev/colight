@@ -49,8 +49,9 @@
     "watch:docs": "poetry run mkdocs serve",
     "build:docs": "poetry run mkdocs build",
     "test:js": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "poetry run pytest tests/python/ --ignore=tests/python/test_screenshots.py",
-    "test": "npm-run-all test:js test:py"
+    "test:py": "poetry run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
+    "test:images": "poetry run python -m pytest tests/python/test_screenshots.py",
+    "test": "npm-run-all test:py test:js"
   },
   "files": [
     "src/colight/dist"

@@ -9,6 +9,7 @@ from colight.scene3d import Ellipsoid
 from pathlib import Path
 import numpy as np
 
+
 # Create output directory
 output_dir = Path("scratch/export_examples")
 output_dir.mkdir(exist_ok=True, parents=True)
@@ -33,6 +34,10 @@ points = np.column_stack(
     ]
 )
 dots = Plot.dot(points, r=10, fill="steelblue")
+
+dots.save_html(str(output_dir / "dots.html"), use_cdn=False)
+
+# %%
 
 ellipsoid_plot = (
     Plot.initialState({})
@@ -143,6 +148,10 @@ animated_scene = Plot.initialState({"t": 0}) | Ellipsoid(
 
 # Display the initial state
 animated_scene
+
+(animated_scene | Plot.Slider("t", range=60, fps=10)).save_html(
+    str(output_dir / "points.html"), use_cdn=False
+)
 
 # %%
 # Save as video if ffmpeg is available

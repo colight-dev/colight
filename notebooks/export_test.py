@@ -11,8 +11,8 @@ from pathlib import Path
 output_dir = Path("scratch")
 output_dir.mkdir(exist_ok=True)
 
-# Create a simple visualization
-print("Creating a visualization...")
+# Create a simple visual
+print("Creating a visual...")
 data = np.random.rand(10, 10)
 p = Plot.raster(data)
 
@@ -25,5 +25,5 @@ colight_path, example_path = export_colight(
 print("Success! Files created:")
 print(f"- .colight file: {colight_path}")
 print(f"- Example HTML: {example_path}")
-print(f"\nOpen {example_path} in your browser to view the visualization.")
+print(f"\nOpen {example_path} in your browser to view the visual.")
 print("It should work directly with the file:// protocol, no server needed.")

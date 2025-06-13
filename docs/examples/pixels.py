@@ -56,7 +56,7 @@ Plot.pixels(single_frame, imageWidth=50, imageHeight=50)
 # %% [markdown]
 # ## Create Interactive Display
 #
-# Now let's set up the visualization with animation controls. We manage the visualization state using `Plot.initialState`, which creates a shared state object accessible from both Python and JavaScript. The state contains our pixel data array, dimensions, current frame index, and animation speed. The Plot.pixels component reads the current frame from state using js("$state.pixels[$state.frame]"), while the slider component updates the frame index in state as it moves. This state-driven approach allows smooth coordination between the display and controls.
+# Now let's set up the visual with animation controls. We manage the state using `Plot.initialState`, which creates a shared state object accessible from both Python and JavaScript. The state contains our pixel data array, dimensions, current frame index, and animation speed. The Plot.pixels component reads the current frame from state using js("$state.pixels[$state.frame]"), while the slider component updates the frame index in state as it moves. This state-driven approach allows smooth coordination between the display and controls.
 
 # %%
 width = 50

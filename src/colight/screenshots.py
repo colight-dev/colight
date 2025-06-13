@@ -2,15 +2,16 @@
 Screenshot utilities for Colight plots using a StudioContext which inherits from ChromeContext
 """
 
+import base64
 import json
 import time
 import subprocess  # Added import for subprocess
-import base64
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import colight.widget as widget
-from colight.html import encode_buffers
+import colight.format as format
+
 from colight.env import WIDGET_URL
 from colight.chrome_devtools import ChromeContext, format_bytes
 from colight.util import read_file
@@ -86,51 +87,29 @@ class StudioContext(ChromeContext):
             print("[StudioContext] Loading plot into Colight")
 
         self.load_studio_html()
+
         data, buffers = widget.to_json_with_initialState(plot, buffers=[])
+        colight_data = format.create_bytes(data, buffers)
+        colight_filename = f"plot_{self.id}.colight"
+        self.server.add_served_file(colight_filename, colight_data)
+        colight_url = f"http://localhost:{self.server_port}/{colight_filename}"
 
-        BUFFER_TOTAL_THRESHOLD = 10 * 1024 * 1024  # 10MB total for single URL
-        buffers_payload = []
-
-        total_size = sum(len(b) for b in buffers)
         if self.debug:
             print(
-                f"[StudioContext] Processing {len(buffers)} buffers for transfer. Total size: {format_bytes(total_size)}"
+                f"[StudioContext] Serving .colight file: {colight_url} ({format_bytes(len(colight_data))})"
             )
-
-        if total_size > BUFFER_TOTAL_THRESHOLD:
-            # Concatenate all buffers and serve as a single URL
-            concat_bytes = b"".join(buffers)
-            buffer_filename = f"served_buffer_{self.id}_all.bin"
-            self.server.add_served_file(buffer_filename, concat_bytes)
-            buffer_url = f"http://localhost:{self.server_port}/{buffer_filename}"
-            buffers_payload = {
-                "type": "url",
-                "url": buffer_url,
-                "sizes": [len(b) for b in buffers],
-            }
-            if self.debug:
-                print(
-                    f"[StudioContext] Serving all buffers as a single URL: {buffer_url} ({format_bytes(len(concat_bytes))})"
-                )
-        else:
-            for i, buffer_bytes in enumerate(buffers):
-                encoded_buffer = base64.b64encode(buffer_bytes).decode("utf-8")
-                buffers_payload.append(encoded_buffer)
-
-        if self.debug:
-            if isinstance(buffers_payload, dict):
-                print("[StudioContext] Transfer summary: all buffers via single URL.")
-            else:
-                print(f"Total items in buffers payload: {len(buffers_payload)}")
+            print(f"[StudioContext] Contains {len(buffers)} buffers")
 
         render_js = f"""
          (async () => {{
-           console.log('[StudioContext] Received renderData call for ID: {self.id}');
-           const data = {json.dumps(data)};
-           // Pass the mixed payload list (base64 strings, or a single URL object)
-           const buffers_payload = {json.dumps(buffers_payload)};
-           await window.colight.renderData('studio', data, buffers_payload, '{self.id}');
-           await window.colight.whenReady('{self.id}');
+           console.log('[StudioContext] Loading .colight file for ID: {self.id}');
+           try {{
+             const colightData = await window.colight.loadColightFile('{colight_url}');
+             await window.colight.render('studio', colightData, '{self.id}');
+             await window.colight.whenReady('{self.id}');
+           }} catch (error) {{
+             console.error('[StudioContext] Failed to load .colight file:', error);
+           }}
          }})()
          """
         self.evaluate(render_js, await_promise=True)
@@ -166,11 +145,18 @@ class StudioContext(ChromeContext):
         buffers = []
         state_data = widget.to_json(state_updates, buffers=buffers)
 
+        # Convert buffers to base64 for passing to JavaScript (for state updates, not initial load)
+        encoded_buffers = [
+            base64.b64encode(buffer).decode("utf-8") for buffer in buffers
+        ]
+
         update_js = f"""
         (async function() {{
             try {{
                 const updates = {json.dumps(state_data)}
-                const buffers = {encode_buffers(buffers)}
+                const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
+                    Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+                );
                 const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
                 await window.colight.whenReady('{self.id}');
                 return result;
@@ -193,7 +179,7 @@ class StudioContext(ChromeContext):
             List of PNG image bytes
         """
         bytes_list = []
-        for i, state_update in enumerate(state_updates):
+        for state_update in state_updates:
             self.update_state([state_update])
             image_bytes = self.capture_bytes()
             bytes_list.append(image_bytes)

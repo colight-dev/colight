@@ -9,7 +9,7 @@ import colight.plot as Plot
             Plot.js("$state.count"),
         ],
         [
-            "button.px-4.py-2.bg-blue-500.text-white.rounded-md.hover:bg-blue-600",
+            "button.p-4.bg-blue-500.text-white.rounded-md.hover:bg-blue-600",
             {
                 "onClick": Plot.js("""
                                    () => $state.count += 1

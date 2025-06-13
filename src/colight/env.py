@@ -36,6 +36,6 @@ CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 CDN_SCRIPT_URL = None
 
 # Local development paths
-WIDGET_URL = CDN_SCRIPT_URL or (
-    PARENT_PATH / "dist/widget.mjs"
-)  # ESM build with CSS embedded
+WIDGET_URL = CDN_SCRIPT_URL or (PARENT_PATH / "dist/widget.mjs")
+
+ANYWIDGET_URL = str(WIDGET_URL).replace("widget.mjs", "anywidget.mjs")

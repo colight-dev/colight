@@ -1,5 +1,4 @@
 import os
-import json
 import tempfile
 
 import numpy as np
@@ -8,14 +7,14 @@ import colight.plot as Plot
 from colight.html import (
     html_snippet,
     html_page,
-    export_colight,
-    BINARY_DELIMITER,
 )
-from notebooks.embed_examples import create_embed_example
+
+from colight.format import parse_file, MAGIC_BYTES, HEADER_SIZE
+from notebooks.save_and_embed_file import create_embed_example
 
 
 def test_html_snippet():
-    """Test that html_snippet generates valid HTML"""
+    """Test that html_snippet generates valid HTML with new format"""
     p = Plot.barY(
         {"x": ["A", "B", "C"], "y": [1, 2, 3]},
     )
@@ -23,11 +22,11 @@ def test_html_snippet():
     html = html_snippet(p)
 
     # Basic checks
-    assert "<style>" in html
     assert "<div" in html
-    assert '<script type="application/json">' in html
+    assert '<script type="application/x-colight"' in html  # Updated for new format
     assert '<script type="module">' in html
-    assert "renderData" in html
+    assert "render" in html
+    assert "parseColightScript" in html  # Should use new parser
 
 
 def test_html_page():
@@ -48,48 +47,53 @@ def test_html_page():
 
 
 def test_export_colight():
-    """Test that export_colight creates a valid .colight file"""
-    # Create a visualization with binary data
+    """Test that export_colight creates a valid .colight file with new binary format"""
+    # Create a visual with binary data
     data = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float32)
     p = Plot.raster(data)
 
-    # Test without example file
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_path = os.path.join(tmpdir, "test.colight")
-        result_path = str(export_colight(p, output_path, create_example=False))
+    # Test without example file - also create in test-artifacts for JS tests
+    test_artifacts_dir = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "test-artifacts"
+    )
+    os.makedirs(test_artifacts_dir, exist_ok=True)
 
-        # Check that the file exists
-        assert os.path.exists(result_path)
+    # Create test file in artifacts directory for JS tests to use
+    artifact_path = os.path.join(test_artifacts_dir, "test-raster.colight")
+    result_path = p.save_file(artifact_path)
 
-        # Read the file
-        with open(result_path, "rb") as f:
-            content = f.read()
+    # Check that the file exists
+    assert os.path.exists(result_path)
 
-        # Check that it contains the delimiter
-        assert BINARY_DELIMITER in content
+    # Test the new binary format
+    with open(result_path, "rb") as f:
+        content = f.read()
 
-        # Split the content
-        parts = content.split(BINARY_DELIMITER)
-        assert len(parts) == 2
+    # Check header
+    assert len(content) >= HEADER_SIZE
+    magic = content[:8]
+    assert magic == MAGIC_BYTES
 
-        # Check the JSON header
-        json_header = parts[0].decode("utf-8")
-        header_data = json.loads(json_header)
+    # Parse using our parser
+    json_data, buffers = parse_file(result_path)
 
-        # Verify buffer layout
-        assert "bufferLayout" in header_data
-        assert "offsets" in header_data["bufferLayout"]
-        assert "count" in header_data["bufferLayout"]
-        assert "totalSize" in header_data["bufferLayout"]
+    # Verify buffer layout
+    assert "bufferLayout" in json_data
+    assert "offsets" in json_data["bufferLayout"]
+    assert "lengths" in json_data["bufferLayout"]
+    assert "count" in json_data["bufferLayout"]
+    assert "totalSize" in json_data["bufferLayout"]
 
-        # Verify binary data
-        binary_data = parts[1]
-        assert len(binary_data) > 0
+    # Verify we have buffers
+    assert len(buffers) > 0
+    buffer_layout = json_data["bufferLayout"]
+    assert len(buffers) == buffer_layout["count"]
 
     # Test with example file
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, "test2.colight")
-        colight_path, example_path = export_colight(p, output_path, create_example=True)
+        colight_path = p.save_file(output_path)
+        example_path = create_embed_example(colight_path, False)
 
         # Check that both files exist
         assert os.path.exists(colight_path)
@@ -106,19 +110,15 @@ def test_export_colight():
 
 def test_create_embed_example():
     """Test that create_embed_example creates a valid HTML example"""
-    # Create a visualization
+    # Create a visual
     p = Plot.barY(
         {"x": ["A", "B", "C"], "y": [1, 2, 3]},
     )
 
     # Export to temporary files
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Export the .colight file
         colight_path = os.path.join(tmpdir, "test.colight")
-        # Use create_example=False to ensure we're just exporting the file
-        export_colight(p, colight_path, create_example=False)
-
-        # Create the example HTML separately
+        p.save_file(colight_path)
         example_path = create_embed_example(colight_path)
 
         # Check that the file exists
@@ -139,10 +139,6 @@ def test_create_embed_example():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Export the .colight file
         colight_path = os.path.join(tmpdir, "test.colight")
-        export_colight(p, colight_path, create_example=False)
-
-        # Create the example HTML with local embed
-        example_path = create_embed_example(colight_path, use_local_embed=True)
-
-        # Check that the file exists
+        p.save_file(colight_path)
+        example_path = create_embed_example(colight_path, False)
         assert os.path.exists(example_path)

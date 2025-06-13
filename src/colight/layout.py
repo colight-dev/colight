@@ -3,10 +3,11 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Optional, Self, Tuple, Union, cast
 
+import colight.format as format
+import colight.screenshots as screenshots
 from colight.env import CONFIG
 from colight.html import html_page, html_snippet
-import colight.screenshots as screenshots
-from colight.widget import Widget, WidgetState
+from colight.widget import Widget, WidgetState, to_json_with_initialState
 
 
 def create_parent_dir(path: str) -> None:
@@ -102,11 +103,20 @@ class LayoutItem:
         else:
             return self.html()
 
-    def save_html(self, path: str) -> None:
+    def save_html(self, path: str, use_cdn=True) -> str:
         create_parent_dir(path)
         with open(path, "w") as f:
-            f.write(html_page(self.for_json()))
+            f.write(
+                html_page(
+                    self.for_json(), use_cdn=use_cdn, output_dir=Path(path).parent
+                )
+            )
         print(f"HTML saved to {path}")
+        return str(path)
+
+    def save_file(self, path: str) -> str:
+        data, buffers = to_json_with_initialState(self, buffers=[])
+        return format.create_file(data, buffers, path)
 
     def save_image(self, path, width=500, height=None, scale: float = 1.0, debug=False):
         """Save the plot as an image using headless browser.

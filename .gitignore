@@ -14,3 +14,4 @@ notebooks/webgpu.html
 **/__pycache__/**
 scratch
 src/colight/dist/**
+tests/test-artifacts/**

@@ -59,7 +59,7 @@ BREAKING CHANGES:
 
 ### [2025.2.4] - Feb 28, 2025
 
-- add scene3d module for webgpu-backed 3d visualizations
+- add scene3d module for webgpu-backed 3d visuals
 
 ### [2025.2.3] - Feb 25, 2025
 

@@ -160,7 +160,7 @@ Plot.Column(
         )
         + Plot.frame()
     ),
-    Plot.Slider("currentDay", plant_growth_described.size("day"), fps=10),
+    Plot.Slider("currentDay", range=plant_growth_described.size("day"), fps=10),
 )
 
 

@@ -1,10 +1,51 @@
+import os
+from pathlib import Path
+from typing import Union
+
 import colight.plot as Plot
+from colight.env import PARENT_PATH, WIDGET_URL
 from colight.plot import js
 from colight.scene3d import PointCloud
 from notebooks.scene3d.scene3d_ripple import create_ripple_grid
-from colight.html import export_colight
-from notebooks.embed_examples import create_embed_example
-from pathlib import Path
+
+
+def create_embed_example(
+    colight_path: Union[str, Path],
+    use_cdn: bool = True,
+) -> str:
+    """Create a minimal HTML example demonstrating .colight embedding."""
+    colight_path = Path(colight_path)
+    output_dir = colight_path.parent
+
+    rel_path = colight_path.name
+
+    if not use_cdn:
+        local_embed_path = PARENT_PATH / "dist/embed.mjs"
+        if local_embed_path.exists():
+            script_url = f"./{os.path.relpath(local_embed_path, output_dir)}"
+        else:
+            raise FileNotFoundError("Local embed.js not found. Run `yarn dev`")
+    elif isinstance(WIDGET_URL, str):
+        script_url = str(WIDGET_URL).replace("widget.mjs", "embed.mjs")
+    else:
+        script_url = "https://cdn.jsdelivr.net/npm/@colight/core/embed.js"
+
+    example_html = f"""<!DOCTYPE html>
+<html>
+<body>
+    <div class="colight-embed" data-src="{rel_path}"></a>
+    <script type="module">
+        import {{loadVisuals}} from "{script_url}"
+        loadVisuals()
+    </script>
+</body>
+</html>"""
+
+    example_path = output_dir / f"{colight_path.stem}.html"
+    with open(example_path, "w") as f:
+        f.write(example_html)
+    return str(example_path)
+
 
 # Create output directory if it doesn't exist
 output_dir = Path("scratch")
@@ -63,38 +104,7 @@ where:
 
 p
 
-# Method 1: Export with automatic example creation (recommended)
-print("\n1. Exporting visual with automatic example creation...")
-colight_path, example_path = export_colight(
-    p,
-    "scratch/embed_example.colight",
-    create_example=True,
-    use_local_embed=True,  # Use local embed.mjs for testing
-)
 
-print(f"✓ Created .colight file at: {colight_path}")
-print(f"✓ Created example HTML at: {example_path}")
+path = create_embed_example(p.save_file("scratch/embed_example.colight"), False)
 
-# Method 2: Export just the .colight file and create example separately
-print("\n2. Alternative method with separate example creation...")
-# Export as .colight file only
-colight_path2 = export_colight(
-    p, "scratch/embed_example2.colight", create_example=False
-)
-
-# Create an example HTML file showing how to embed it
-example_path2 = create_embed_example(
-    "scratch/embed_example2.colight",  # Path to the .colight file
-    use_local_embed=True,  # Use local embed.mjs for testing
-)
-
-print(f"✓ Created .colight file at: {colight_path2}")
-print(f"✓ Created example HTML at: {example_path2}")
-
-# Instructions for the user
-print("\n" + "=" * 70)
-print("VIEWING THE EXAMPLES")
-print("=" * 70)
-print("The example HTML files should work directly in your browser when opened:")
-print(f"1. {example_path}")
-print(f"2. {example_path2}")
+print(f"✓ Created .colight file at: {path}")

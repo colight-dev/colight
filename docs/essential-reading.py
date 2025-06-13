@@ -132,9 +132,9 @@ Plot.dot(
 #
 # Colight offers two rendering modes:
 #
-# 1. **HTML mode**: Renders visualizations as standalone HTML, ideal for embedding in web pages or exporting. Plots persist across kernel restarts.
+# 1. **HTML mode**: Renders visuals as standalone HTML, ideal for embedding in web pages or exporting. Plots persist across kernel restarts.
 #
-# 2. **Widget mode**: Renders visualizations as interactive Jupyter widgets. Enables bidirectional communication between Python and JavaScript.
+# 2. **Widget mode**: Renders visuals as interactive Jupyter widgets. Enables bidirectional communication between Python and JavaScript.
 #
 # You can choose the rendering mode in two ways:
 #
