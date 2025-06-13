@@ -3,7 +3,7 @@ import json
 import os
 import uuid
 
-from colight.env import WIDGET_URL, PARENT_PATH
+import colight.env as env
 from colight.format import create_bytes
 from colight.util import read_file
 from colight.widget import to_json_with_initialState
@@ -35,11 +35,11 @@ def encode_buffers(buffers):
 
 def get_script_content():
     """Get the JS content either from CDN or local file"""
-    if isinstance(WIDGET_URL, str):  # It's a CDN URL
-        return f'import {{ render }} from "{WIDGET_URL}";'
+    if isinstance(env.WIDGET_URL, str):  # It's a CDN URL
+        return f'import {{ render }} from "{env.WIDGET_URL}";'
     else:  # It's a local Path
         # Create a blob URL for the module
-        content = read_file(WIDGET_URL)
+        content = read_file(env.WIDGET_URL)
 
         return f"""
             const encodedContent = "{encode_string(content)}";
@@ -54,13 +54,13 @@ def get_script_content():
 def get_widget_script_url(use_cdn=True, output_dir=None):
     """Get the appropriate script URL for the widget, handling both CDN and local cases."""
     if use_cdn:
-        if isinstance(WIDGET_URL, str):
-            return WIDGET_URL
+        if isinstance(env.WIDGET_URL, str):
+            return env.WIDGET_URL
         else:
             return "https://cdn.jsdelivr.net/npm/@colight/core/widget.mjs"
     else:
         # Local development mode
-        local_widget_path = PARENT_PATH / "dist/widget.mjs"
+        local_widget_path = env.DIST_PATH / "widget.mjs"
         if local_widget_path.exists():
             if output_dir:
                 return f"./{os.path.relpath(local_widget_path, output_dir)}"

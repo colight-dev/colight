@@ -20,7 +20,7 @@ const widgetConfig = {
   ...commonOptions,
   format: 'esm',
   entryPoints: ['src/colight/js/widget.jsx'],
-  outfile: 'src/colight/dist/widget.mjs',
+  outfile: 'src/js-dist/widget.mjs',
   plugins: [],
 };
 
@@ -29,7 +29,7 @@ const anyWidgetConfig = {
   ...widgetConfig,
   format: 'esm',
   entryPoints: ['src/colight/js/anywidget.jsx'],
-  outfile: 'src/colight/dist/anywidget.mjs',
+  outfile: 'src/js-dist/anywidget.mjs',
 };
 
 // Embed build (IIFE format for standalone use with script tags)
@@ -38,11 +38,11 @@ const embedConfigJS = {
   format: 'iife',
   globalName: 'colight', // Makes it available as window.colight
   entryPoints: ['src/colight/js/embed.js'],
-  outfile: 'src/colight/dist/embed.js',
+  outfile: 'src/js-dist/embed.js',
   plugins: [],
 };
 
-const embedConfigESM = { ...embedConfigJS, format: 'esm', outfile: 'src/colight/dist/embed.mjs' }
+const embedConfigESM = { ...embedConfigJS, format: 'esm', outfile: 'src/js-dist/embed.mjs' }
 
 const configs = [widgetConfig, anyWidgetConfig, embedConfigJS, embedConfigESM]
 

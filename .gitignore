@@ -13,5 +13,6 @@ notebooks/webgpu.html
 **/node_modules/**
 **/__pycache__/**
 scratch
-src/colight/dist/**
+src/js-dist/**
 tests/test-artifacts/**
+lets-build

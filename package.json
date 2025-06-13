@@ -54,7 +54,7 @@
     "test": "npm-run-all test:py test:js"
   },
   "files": [
-    "src/colight/dist"
+    "src/js-dist"
   ],
   "publishConfig": {
     "access": "public"

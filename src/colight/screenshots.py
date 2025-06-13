@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Union
 import colight.widget as widget
 import colight.format as format
 
-from colight.env import WIDGET_URL
+import colight.env as env
 from colight.chrome_devtools import ChromeContext, format_bytes
 from colight.util import read_file
 
@@ -47,16 +47,18 @@ class StudioContext(ChromeContext):
                 print("[screenshots.py] Loading Colight HTML")
 
             files = {}
-            # Handle script content based on whether WIDGET_URL is a CDN URL or local file
-            if isinstance(WIDGET_URL, str):  # CDN URL
+            # Handle script content based on whether env.WIDGET_URL is a CDN URL or local file
+            if isinstance(env.WIDGET_URL, str):  # CDN URL
                 if self.debug:
-                    print(f"[screenshots.py] Using CDN script from: {WIDGET_URL}")
-                script_tag = f'<script type="module" src="{WIDGET_URL}"></script>'
+                    print(f"[screenshots.py] Using CDN script from: {env.WIDGET_URL}")
+                script_tag = f'<script type="module" src="{env.WIDGET_URL}"></script>'
             else:  # Local file
                 if self.debug:
-                    print(f"[screenshots.py] Loading local script from: {WIDGET_URL}")
+                    print(
+                        f"[screenshots.py] Loading local script from: {env.WIDGET_URL}"
+                    )
                 script_tag = '<script type="module" src="studio.js"></script>'
-                files["studio.js"] = read_file(WIDGET_URL)
+                files["studio.js"] = read_file(env.WIDGET_URL)
 
             # CSS is now embedded in the JS bundle - no separate styling needed
             style_tag = ""

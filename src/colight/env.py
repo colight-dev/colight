@@ -22,13 +22,15 @@ try:
     # First try the importlib.util approach
     util_spec = importlib.util.find_spec("colight.util")
     if util_spec and util_spec.origin:
-        PARENT_PATH = pathlib.Path(util_spec.origin).parent
+        COLIGHT_PATH = pathlib.Path(util_spec.origin).parent
     else:
         # Fallback: Get the directory of the current file
-        PARENT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
+        COLIGHT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 except Exception:
     # Another fallback approach
-    PARENT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
+    COLIGHT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
+
+DIST_PATH = COLIGHT_PATH.parent / "js-dist"
 
 CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 
@@ -36,6 +38,6 @@ CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 CDN_SCRIPT_URL = None
 
 # Local development paths
-WIDGET_URL = CDN_SCRIPT_URL or (PARENT_PATH / "dist/widget.mjs")
+WIDGET_URL = CDN_SCRIPT_URL or (DIST_PATH / "widget.mjs")
 
 ANYWIDGET_URL = str(WIDGET_URL).replace("widget.mjs", "anywidget.mjs")

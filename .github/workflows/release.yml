@@ -47,9 +47,7 @@ jobs:
         run: |
           yarn build
           # Force Git to track the build files temporarily
-          git add -f src/colight/js/widget.js
-          git add -f src/colight/js/widget.mjs
-          git add -f src/colight/js/embed.js
+          git add -f src/js-dist
 
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1
@@ -103,7 +101,7 @@ jobs:
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
-          ls -la dist/
+          ls -la src/js-dist/
           echo "=== Publishing to PyPI ==="
           poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
           poetry publish
@@ -118,7 +116,7 @@ jobs:
         run: |
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
 
-          cp src/colight/widget.css src/colight/dist/
+          cp src/colight/widget.css src/js-dist/
 
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
@@ -136,4 +134,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*"
+          artifacts: "src/js-dist/*"
