@@ -9,7 +9,7 @@ import colight.plot as Plot
 from colight.scene3d import Ellipsoid
 
 # Create an artifacts directory for screenshots
-ARTIFACTS_DIR = Path("./scratch/")
+ARTIFACTS_DIR = Path("./tests/test-artifacts/")
 ARTIFACTS_DIR.mkdir(exist_ok=True, parents=True)
 
 

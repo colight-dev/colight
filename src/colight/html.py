@@ -1,9 +1,12 @@
 import base64
 import json
+import os
 import uuid
+
+import colight.env as env
+from colight.format import create_bytes
 from colight.util import read_file
 from colight.widget import to_json_with_initialState
-from colight.env import WIDGET_URL, CSS_URL
 
 
 def encode_string(s):
@@ -11,83 +14,100 @@ def encode_string(s):
 
 
 def encode_buffers(buffers):
-    buffer_entries = [
-        f"'{base64.b64encode(buffer).decode('utf-8')}'" for buffer in buffers
-    ]
-    return "[" + ",".join(buffer_entries) + "]"
+    """
+    Encode binary buffers as base64 strings for inclusion in JavaScript.
+
+    This function takes a list of binary buffers and returns a JavaScript array literal
+    containing the base64-encoded versions of these buffers.
+
+    Args:
+        buffers: List of binary buffers to encode
+
+    Returns:
+        A string representation of a JavaScript array containing the base64-encoded buffers
+    """
+    # Encode each buffer as base64
+    buffer_entries = [base64.b64encode(buffer).decode("utf-8") for buffer in buffers]
+
+    # Return a proper JSON array of strings
+    return json.dumps(buffer_entries)
 
 
 def get_script_content():
     """Get the JS content either from CDN or local file"""
-    if isinstance(WIDGET_URL, str):  # It's a CDN URL
-        return f'import {{ renderData }} from "{WIDGET_URL}";'
+    if isinstance(env.WIDGET_URL, str):  # It's a CDN URL
+        return f'import {{ render }} from "{env.WIDGET_URL}";'
     else:  # It's a local Path
         # Create a blob URL for the module
-        content = read_file(WIDGET_URL)
+        content = read_file(env.WIDGET_URL)
 
         return f"""
             const encodedContent = "{encode_string(content)}";
             const decodedContent = atob(encodedContent);
             const moduleBlob = new Blob([decodedContent], {{ type: 'text/javascript' }});
             const moduleUrl = URL.createObjectURL(moduleBlob);
-            const {{ renderData }} = await import(moduleUrl);
+            const {{ render }} = await import(moduleUrl);
             URL.revokeObjectURL(moduleUrl);
         """
 
 
-def get_style_content():
-    """Get the CSS content either from CDN or local file"""
-    if isinstance(CSS_URL, str):  # It's a CDN URL
-        return f'@import "{CSS_URL}";'
-    else:  # It's a local Path
-        with open(CSS_URL, "r") as css_file:
-            return css_file.read()
+def get_widget_script_url(use_cdn=True, output_dir=None):
+    """Get the appropriate script URL for the widget, handling both CDN and local cases."""
+    if use_cdn:
+        if isinstance(env.WIDGET_URL, str):
+            return env.WIDGET_URL
+        else:
+            return "https://cdn.jsdelivr.net/npm/@colight/core/widget.mjs"
+    else:
+        # Local development mode
+        local_widget_path = env.DIST_PATH / "widget.mjs"
+        if local_widget_path.exists():
+            if output_dir:
+                return f"./{os.path.relpath(local_widget_path, output_dir)}"
+            else:
+                return str(local_widget_path)
+        else:
+            raise FileNotFoundError("Local widget.mjs not found. Run `yarn dev`")
 
 
-def html_snippet(ast, id=None):
+def html_snippet(ast, id=None, use_cdn=True, output_dir=None):
     id = id or f"colight-widget-{uuid.uuid4().hex}"
     data, buffers = to_json_with_initialState(ast, buffers=[])
 
-    # Get JS and CSS content
-    js_content = get_script_content()
-    css_content = get_style_content()
+    colight_data = create_bytes(data, buffers)
+    colight_base64 = base64.b64encode(colight_data).decode("utf-8")
+
+    # Get the appropriate script URL
+    script_url = get_widget_script_url(use_cdn, output_dir)
 
     html_content = f"""
-    <style>{css_content}</style>
     <div class="bg-white p3" id="{id}"></div>
 
-    <script type="application/json">
-        {json.dumps(data)}
+    <script type="application/x-colight" data-target="{id}">
+        {colight_base64}
     </script>
 
     <script type="module">
-        {js_content};
-
+        import {{ render, parseColightScript }} from "{script_url}";;
         const container = document.getElementById('{id}');
-        const jsonString = container.nextElementSibling.textContent;
-        let data;
-        try {{
-            data = JSON.parse(jsonString);
-        }} catch (error) {{
-            console.error('Failed to parse JSON:', error);
-        }}
-        window.colight.renderData(container, data, {encode_buffers(buffers)});
+        const colightData = parseColightScript(container.nextElementSibling);
+        render(container, colightData, '{id}');
     </script>
     """
 
     return html_content
 
 
-def html_page(ast, id=None):
+def html_page(ast, id=None, use_cdn=True, output_dir=None):
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Colight Widget</title>
+        <title>Colight Visual</title>
     </head>
     <body>
-        {html_snippet(ast, id)}
+        {html_snippet(ast, id, use_cdn=use_cdn, output_dir=output_dir)}
     </body>
     </html>
     """

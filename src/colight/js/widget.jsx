@@ -1,17 +1,18 @@
-import * as AnyWidgetReact from "@anywidget/react";
+
 import * as d3 from "d3";
 import * as mobx from "mobx";
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
 import * as api from "./api";
+import widgetCSS from '../widget.css';
 import { evaluate, createEvalEnv, collectBuffers, replaceBuffers } from "./eval";
 import { $StateContext, CONTAINER_PADDING } from "./context";
 import { useCellUnmounted, tw } from "./utils";
 import { ReadyStateManager } from "./ready";
 import * as globals from "./globals"
+import { parseColightData, parseColightScript } from "./format";
 
-const { createRender, useModelState, useModel, useExperimental } =
-  AnyWidgetReact;
+
 const { useState, useMemo, useCallback, useEffect } = React;
 
 function resolveRef(node, $state) {
@@ -22,6 +23,16 @@ function resolveRef(node, $state) {
 }
 
 window.moduleCache = window.moduleCache || new Map();
+
+// Inject CSS if not already present
+function injectCSS() {
+  if (!document.querySelector('#colight-widget-styles')) {
+    const style = document.createElement('style');
+    style.id = 'colight-widget-styles';
+    style.textContent = widgetCSS;
+    document.head.appendChild(style);
+  }
+}
 
 function applyUpdate($state, init, op, payload) {
   const evaluatedPayload = $state.evaluate(payload);
@@ -396,7 +407,9 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-function Viewer(data) {
+export function Viewer(data) {
+  injectCSS();
+
   const [el, setEl] = useState();
   const elRef = useCallback((element) => element && setEl(element), [setEl]);
   const isUnmounted = useCellUnmounted(el?.parentNode);
@@ -434,101 +447,100 @@ function parseJSON(jsonString) {
   }
 }
 
-function FileViewer() {
-  const [data, setData] = useState(null);
-  const [dragActive, setDragActive] = useState(false);
+// TODO - file viewer with .colight format
+// function FileViewer() {
+//   const [data, setData] = useState(null);
+//   const [dragActive, setDragActive] = useState(false);
 
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
+//   const handleDrag = (e) => {
+//     e.preventDefault();
+//     e.stopPropagation();
+//     if (e.type === "dragenter" || e.type === "dragover") {
+//       setDragActive(true);
+//     } else if (e.type === "dragleave") {
+//       setDragActive(false);
+//     }
+//   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
-    }
-  };
+//   const handleDrop = (e) => {
+//     e.preventDefault();
+//     e.stopPropagation();
+//     setDragActive(false);
+//     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+//       handleFile(e.dataTransfer.files[0]);
+//     }
+//   };
 
-  const handleChange = (e) => {
-    e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
-    }
-  };
+//   const handleChange = (e) => {
+//     e.preventDefault();
+//     if (e.target.files && e.target.files[0]) {
+//       handleFile(e.target.files[0]);
+//     }
+//   };
 
-  const handleFile = (file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = parseJSON(e.target.result);
-      if (data instanceof Error) {
-        alert("Error parsing JSON file. Please ensure it's a valid JSON.");
-      } else {
-        setData({
-          ...data,
-          size: estimateJSONSize(e.target.result),
-        });
-      }
-    };
-    reader.readAsText(file);
-  };
+//   const handleFile = (file) => {
+//     const reader = new FileReader();
+//     reader.onload = (e) => {
+//       const data = parseJSON(e.target.result);
+//       if (data instanceof Error) {
+//         alert("Error parsing JSON file. Please ensure it's a valid JSON.");
+//       } else {
+//         setData({
+//           ...data,
+//           size: estimateJSONSize(e.target.result),
+//         });
+//       }
+//     };
+//     reader.readAsText(file);
+//   };
 
-  return (
-    <div className={tw("p-3")}>
-      <div
-        className={tw(
-          `border-2 border-dashed rounded-lg p-5 text-center ${
-            dragActive ? "border-blue-500" : "border-gray-300"
-          }`
-        )}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-      >
-        <label
-          htmlFor="file-upload"
-          className={tw(
-            "text-sm inline-block px-3 py-2 mb-2 text-white bg-blue-600 rounded-full cursor-pointer hover:bg-blue-700"
-          )}
-        >
-          Choose a JSON file
-        </label>
-        <input
-          type="file"
-          id="file-upload"
-          accept=".json"
-          onChange={handleChange}
-          className={tw("hidden")}
-        />
-        <p className={tw("text-sm text-gray-600")}>
-          or drag and drop a JSON file here
-        </p>
-      </div>
-      {data && (
-        <div className={tw("mt-4")}>
-          <h2 className={tw("text-lg mb-3")}>Loaded JSON Data:</h2>
-          <Viewer {...data} />
-        </div>
-      )}
-    </div>
-  );
-}
+//   return (
+//     <div className={tw("p-3")}>
+//       <div
+//         className={tw(
+//           `border-2 border-dashed rounded-lg p-5 text-center ${
+//             dragActive ? "border-blue-500" : "border-gray-300"
+//           }`
+//         )}
+//         onDragEnter={handleDrag}
+//         onDragLeave={handleDrag}
+//         onDragOver={handleDrag}
+//         onDrop={handleDrop}
+//       >
+//         <label
+//           htmlFor="file-upload"
+//           className={tw(
+//             "text-sm inline-block px-3 py-2 mb-2 text-white bg-blue-600 rounded-full cursor-pointer hover:bg-blue-700"
+//           )}
+//         >
+//           Choose a JSON file
+//         </label>
+//         <input
+//           type="file"
+//           id="file-upload"
+//           accept=".json"
+//           onChange={handleChange}
+//           className={tw("hidden")}
+//         />
+//         <p className={tw("text-sm text-gray-600")}>
+//           or drag and drop a JSON file here
+//         </p>
+//       </div>
+//       {data && (
+//         <div className={tw("mt-4")}>
+//           <h2 className={tw("text-lg mb-3")}>Loaded JSON Data:</h2>
+//           <Viewer {...data} />
+//         </div>
+//       )}
+//     </div>
+//   );
+// }
 
-function AnyWidgetApp() {
-  const [data, _setData] = useModelState("data");
-  const experimental = useExperimental();
-  const model = useModel();
+// export const renderFile = (element) => {
+//   const root = ReactDOM.createRoot(element);
+//   root.render(<FileViewer />);
+// };
 
-  return <Viewer {...data} experimental={experimental} model={model} />;
-}
 
 /**
  * Renders the Colight widget into a specified DOM element.
@@ -541,8 +553,9 @@ function AnyWidgetApp() {
  *   - Objects like { type: 'url', url: string } for large buffers.
  * @param {string} id - A unique identifier for the widget instance.
  */
-export const renderData = async (element, data, buffers_payload, id) => {
+export const render = async (element, data, id) => {
   id = id || `widget-${Math.random().toString(36).substring(2, 15)}`;
+
 
   // If element is a string, treat it as an ID and find/create the element
   const el = typeof element === 'string'
@@ -557,74 +570,23 @@ export const renderData = async (element, data, buffers_payload, id) => {
   if (el._ReactRoot) {
     el._ReactRoot.unmount();
   }
-
-  // If data is a string, parse as JSON
-  let parsedData;
-  if (typeof data === 'string') {
-    try {
-      parsedData = JSON.parse(data);
-    } catch (e) {
-      console.error('Failed to parse data as JSON:', e);
-      return;
-    }
-  } else {
-    parsedData = data;
+  // Assert that data is an object
+  if (typeof data !== 'object' || data === null) {
+    console.error('data must be an object, got:', typeof data);
+    return;
   }
 
-  // --- Buffer Resolution --- //
-  let resolved_buffers;
-
-  if (buffers_payload && typeof buffers_payload === 'object' && buffers_payload.type === 'url') {
-    // All buffers are served as a single URL
-    try {
-      const response = await fetch(buffers_payload.url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      const total = new Uint8Array(arrayBuffer);
-      // Use the sizes array to split the buffer
-      const sizes = buffers_payload.sizes || [];
-      resolved_buffers = [];
-      let offset = 0;
-      for (let i = 0; i < sizes.length; ++i) {
-        resolved_buffers.push(total.slice(offset, offset + sizes[i]));
-        offset += sizes[i];
-      }
-    } catch (e) {
-      console.error(`Error fetching buffer from URL ${buffers_payload.url}:`, e);
-      resolved_buffers = [];
-    }
-  } else if (Array.isArray(buffers_payload)) {
-    // Inline base64 buffers
-    resolved_buffers = buffers_payload.map((payload, index) => {
-      try {
-        return Uint8Array.from(atob(payload), c => c.charCodeAt(0));
-      } catch (e) {
-        console.error(`Error decoding inline base64 buffer at index ${index}:`, e);
-        return null;
-      }
-    });
-  } else {
-    resolved_buffers = [];
+  const {buffers} = data
+  if (buffers !== undefined && buffers !== null && !Array.isArray(buffers)) {
+    console.error('buffers_payload must be an array, got:', typeof buffers);
   }
-  // --- End Buffer Resolution ---
 
   const root = ReactDOM.createRoot(el);
   el._ReactRoot = root;
   // Pass the original data (with placeholders) and the fully resolved buffers array
-  root.render(<Viewer {...parsedData} id={id} buffers={resolved_buffers} />);
+  root.render(<Viewer {...data} id={id} />);
 };
 
-export const renderFile = (element) => {
-  const root = ReactDOM.createRoot(element);
-  root.render(<FileViewer />);
-};
+export { parseColightData, parseColightScript };
 
-export default {
-  render: createRender(AnyWidgetApp),
-  renderData,
-  renderFile,
-};
-
-globals.colight.renderData = renderData;
+globals.colight.render = render;

@@ -24,7 +24,7 @@
 #   - Bitmap Component Examples: demonstrates `bitmap` component, NumPy pixel data formats (2D/3D), `Plot.Grid`.
 #
 # ## Library Context
-# Colight is a visualization library built for interactive data visualization in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
+# Colight is a library for interactive data visuals in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
 #
 # Layout components (Row, Column, Grid) allow flexible arrangement of elements and can be composed using & (Row) and | (Column) operators. HTML (via React) can be created using "hiccup in python", and tailwind css classes are supported.
 #
@@ -710,7 +710,7 @@ from docs.examples.data import pulsar_data
 # </given-user-file-context>
 # User: Create an isotype chart for this data using emoji.
 # Assistant:
-# Here's a visualization that creates the iconic stacked wave effect:
+# Here's a visual that creates the iconic stacked wave effect:
 # 1. Creates a stacked line plot with white lines on black background
 # 2. Uses the `fy` parameter to create separate lines for each wave
 # 3. Removes axes and adds appropriate styling to match the iconic look
@@ -761,7 +761,7 @@ from docs.examples.data import pulsar_data
 # </given-user-file-context>
 # User: Create a visualization inspired by the PSR B1919+21 pulsar plot (also known as the "Unknown Pleasures" album cover) - I've imported the data above.
 # Assistant:
-# Here's a visualization that creates the iconic stacked wave effect:
+# Here's a visual that creates the iconic stacked wave effect:
 # 1. Creates a stacked line plot with white lines on black background
 # 2. Uses the `fy` parameter to create separate lines for each wave
 # 3. Removes axes and adds appropriate styling to match the iconic look

@@ -1,6 +1,6 @@
 [![PyPI version](https://badge.fury.io/py/colight.svg)](https://badge.fury.io/py/colight)
 
-# Colight: declarative, reactive visualizations in Python
+# Colight: declarative, reactive visuals in Python
 
 -----
 
@@ -14,8 +14,11 @@ Key features:
 - HTML mode which persists plots across kernel restart/shutdown, and a Widget mode which supports Python<>JavaScript interactivity
 - Terse layout syntax for organizing plots into rows and columns
 - Hiccup implementation for interspersing arbitrary HTML
+- Export visualizations as HTML or as `.colight` files for embedding in websites
 
 For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
+
+```
 
 ## Development
 

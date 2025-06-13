@@ -46,8 +46,8 @@ jobs:
       - name: build the javascript bundle
         run: |
           yarn build
-          # Force Git to track the build file temporarily
-          git add -f src/colight/js/widget.dist.js
+          # Force Git to track the build files temporarily
+          git add -f src/js-dist
 
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1
@@ -86,8 +86,8 @@ jobs:
 
       - name: Update widget URL and build Python package
         run: |
-          NPM_BASE="https://cdn.jsdelivr.net/npm/@colight/core@${{ steps.versions.outputs.NPM_VERSION }}/dist"
-          JSDELIVR_JS_URL="${NPM_BASE}/widget.dist.js"
+          NPM_BASE="https://cdn.jsdelivr.net/npm/@colight/core@${{ steps.versions.outputs.NPM_VERSION }}"
+          JSDELIVR_JS_URL="${NPM_BASE}/widget.mjs"
           JSDELIVR_CSS_URL="${NPM_BASE}/widget.css"
 
           # Update both URLs in the source
@@ -101,7 +101,7 @@ jobs:
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
-          ls -la dist/
+          ls -la src/js-dist/
           echo "=== Publishing to PyPI ==="
           poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
           poetry publish
@@ -116,10 +116,7 @@ jobs:
         run: |
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
 
-          # Copy both files to npm dist directory
-          mkdir -p dist
-          cp src/colight/js/widget.dist.js dist/
-          cp src/colight/widget.css dist/
+          cp src/colight/widget.css src/js-dist/
 
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
@@ -137,4 +134,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*"
+          artifacts: "src/js-dist/*"

@@ -1,6 +1,12 @@
+import { parseColightData, loadColightFile } from './format.js';
+
 export const colight = {
   // Registry of all component instances
-  instances: {}
+  instances: {},
+
+  // Format parsing functions
+  parseColightData,
+  loadColightFile
 }
 
 colight.whenReady = async function(id) {

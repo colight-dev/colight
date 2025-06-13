@@ -121,7 +121,7 @@ def flatten_layers(layers):
 
 
 class Scene(Plot.LayoutItem):
-    """A 3D scene visualization component using WebGPU.
+    """A 3D scene visual component using WebGPU.
 
     This class creates an interactive 3D scene that can contain multiple types of components:
 
@@ -130,7 +130,7 @@ class Scene(Plot.LayoutItem):
     - Ellipsoid bounds (wireframe)
     - Cuboids
 
-    The visualization supports:
+    The component supports:
 
     - Orbit camera control (left mouse drag)
     - Pan camera control (shift + left mouse drag or middle mouse drag)

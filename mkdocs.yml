@@ -36,10 +36,12 @@ nav:
       - Mouse events: interactivity/events.py
       - Conditional Rendering: learn-more/cond.py
       - Tailing data: interactivity/tail.py
+  - Export:
+    - Save to File: export/save_to_file.py
+    - Images and Video: export/images_and_video.py
   - Advanced:
     - Python Event Loops: learn-more/python-event-loop.py
     - Compare with Observable Plot: learn-more/vs-observable.py
-    - Export Images/Video/HTML: learn-more/export.py
     - Plot Options: learn-more/plot-options.py
   - Examples:
       - Draw Density: examples/draw-density.py

@@ -11,7 +11,7 @@
     "@webgpu/types": "^0.1.53",
     "canvas": "^3.1.0",
     "esbuild": "^0.21.5",
-    "esbuild-css-modules-plugin": "^3.1.2",
+    "esbuild-css-modules-plugin": "^3.1.5",
     "jsdom": "^25.0.0",
     "npm-run-all": "^4.1.5",
     "pyright": "^1.1.367",
@@ -49,12 +49,12 @@
     "watch:docs": "poetry run mkdocs serve",
     "build:docs": "poetry run mkdocs build",
     "test:js": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "poetry run pytest tests/python/ --ignore=tests/python/test_screenshots.py",
-    "test": "npm-run-all test:js test:py"
+    "test:py": "poetry run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
+    "test:images": "poetry run python -m pytest tests/python/test_screenshots.py",
+    "test": "npm-run-all test:py test:js"
   },
   "files": [
-    "dist/widget.dist.js",
-    "dist/widget.css"
+    "src/js-dist"
   ],
   "publishConfig": {
     "access": "public"

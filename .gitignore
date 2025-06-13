@@ -1,4 +1,5 @@
 **/*_build.js
+**/*.mjs
 *.ipynb
 *.slides.html
 meta.json
@@ -12,3 +13,6 @@ notebooks/webgpu.html
 **/node_modules/**
 **/__pycache__/**
 scratch
+src/js-dist/**
+tests/test-artifacts/**
+lets-build
