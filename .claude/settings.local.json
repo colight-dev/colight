@@ -12,7 +12,8 @@
       "Bash(yarn test:py)",
       "Bash(yarn test:js:*)",
       "Bash(ls:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }

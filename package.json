@@ -42,15 +42,15 @@
     "tailwindcss": "^3.4.14"
   },
   "scripts": {
-    "release": "poetry run python scripts/release.py $*",
-    "alpha": "poetry run python scripts/release.py --alpha",
+    "release": "uv run python scripts/release.py $*",
+    "alpha": "uv run python scripts/release.py --alpha",
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
-    "watch:docs": "poetry run mkdocs serve",
-    "build:docs": "poetry run mkdocs build",
+    "watch:docs": "uv run mkdocs serve",
+    "build:docs": "uv run mkdocs build",
     "test:js": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "poetry run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
-    "test:images": "poetry run python -m pytest tests/python/test_screenshots.py",
+    "test:py": "uv run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
+    "test:images": "uv run python -m pytest tests/python/test_screenshots.py",
     "test": "npm-run-all test:py test:js"
   },
   "files": [
