@@ -15,14 +15,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install JavaScript dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: Build JavaScript
-        run: yarn build
-
-      - name: Run JavaScript tests
-        run: yarn test:js
+      - run: yarn install --frozen-lockfile
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -34,8 +27,11 @@ jobs:
         with:
           version: 1.8.3
 
-      - name: Install Python dependencies
-        run: poetry install
+      - run: poetry install
 
+      - name: Build JavaScript
+        run: yarn build
       - name: Run Python tests
         run: yarn test:py
+      - name: Run JavaScript tests
+        run: yarn test:js
