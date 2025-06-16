@@ -5,7 +5,7 @@
 - Build frontend: `yarn build`
 - Watch mode: `yarn dev`
 - Run tests: `yarn test` (both JS and Python)
-- Run JS tests only: `yarn test:js`
+- Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
 - Run Python tests: `yarn test:py` or `uv run pytest tests/python/`
 - Run single Python test: `uv run pytest tests/python/test_file.py::test_function`

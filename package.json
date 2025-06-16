@@ -48,7 +48,8 @@
     "dev": "node esbuild.config.mjs --watch",
     "watch:docs": "uv run mkdocs serve",
     "build:docs": "uv run mkdocs build",
-    "test:js": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
+    "test:js": "yarn vitest run",
+    "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
     "test:py": "uv run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
     "test:images": "uv run python -m pytest tests/python/test_screenshots.py",
     "test": "npm-run-all test:py test:js"
