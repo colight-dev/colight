@@ -61,18 +61,18 @@ jobs:
           # Handle different version scenarios
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             # Dev version for main pushes without tag
-            BASE_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+            BASE_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
             DEV_VERSION=$(date +'%Y%m%d%H%M')
             PYTHON_VERSION="${BASE_VERSION}.dev${DEV_VERSION}"
             NPM_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
-            python scripts/update_version.py "${PYTHON_VERSION}"
+            uv run python scripts/update_version.py "${PYTHON_VERSION}"
           elif [[ "${{ github.ref }}" =~ ^refs/tags/v.*\.alpha ]]; then
             # Alpha release from tag
             PYTHON_VERSION=${GITHUB_REF#refs/tags/v}
             NPM_VERSION=$(echo ${PYTHON_VERSION} | sed 's/\.alpha/-alpha./')
           else
             # Regular release from tag
-            PYTHON_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+            PYTHON_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
             NPM_VERSION=$PYTHON_VERSION
           fi
 
