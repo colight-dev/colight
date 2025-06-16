@@ -20,25 +20,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - run: npm install -g yarn
       - run: yarn install --frozen-lockfile
       - run: yarn build
 
-      - uses: snok/install-poetry@v1
-        with:
-          version: 1.8.3
-
-      - uses: actions/setup-python@v4
-        with:
-          python-version: 3.11.5
-          cache: 'poetry'
-
-      - run: poetry install
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Install deps
+        run: uv sync --group dev
 
       - name: Run WebGPU Screenshot Tests
-        run: poetry run python tests/python/test_screenshots.py
+        run: uv run python tests/python/test_screenshots.py
         env:
           PYTHONPATH: ${{ github.workspace }}
 

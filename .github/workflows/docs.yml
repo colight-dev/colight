@@ -20,43 +20,41 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out repository
-      uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-    - name: Yarn deps
-      run: yarn install --frozen-lockfile --production=false
+      - name: Yarn deps
+        run: yarn install --frozen-lockfile --production=false
 
-    - name: JavaScript bundle
-      run: yarn build
+      - name: JavaScript bundle
+        run: yarn build
 
-    - name: Python install
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11.5
-    - name: Poetry Install
-      uses: snok/install-poetry@v1
-      with:
-        version: 1.8.3
+      - name: Python install
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11.5
 
-    - name: Python deps (via poetry)
-      run: poetry install
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Install deps
+        run: uv sync --group dev
 
-    - name: Kernel install
-      run: poetry run python -m ipykernel install --user --name colight
+      - name: Kernel install
+        run: uv run python -m ipykernel install --user --name colight
 
-    - name: mkdocs build
-      run: poetry run mkdocs build
+      - name: mkdocs build
+        run: uv run mkdocs build
 
-    - name: Copy llms.py to site
-      run: cp docs/llms.py ./site/
+      - name: Copy llms.py to site
+        run: cp docs/llms.py ./site/
 
-    - name: Setup Pages
-      uses: actions/configure-pages@v5
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: './site'
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./site"
 
   deploy:
     environment:

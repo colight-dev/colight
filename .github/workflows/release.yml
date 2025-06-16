@@ -6,7 +6,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   check:
@@ -49,8 +49,8 @@ jobs:
           # Force Git to track the build files temporarily
           git add -f src/js-dist
 
-      - name: Install and configure Poetry
-        uses: snok/install-poetry@v1
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Set version components
         id: versions
@@ -58,18 +58,18 @@ jobs:
           # Handle different version scenarios
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             # Dev version for main pushes without tag
-            BASE_VERSION=$(poetry version -s)
+            BASE_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
             DEV_VERSION=$(date +'%Y%m%d%H%M')
             PYTHON_VERSION="${BASE_VERSION}.dev${DEV_VERSION}"
             NPM_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
-            poetry version ${PYTHON_VERSION}
+            python scripts/update_version.py "${PYTHON_VERSION}"
           elif [[ "${{ github.ref }}" =~ ^refs/tags/v.*\.alpha ]]; then
             # Alpha release from tag
             PYTHON_VERSION=${GITHUB_REF#refs/tags/v}
             NPM_VERSION=$(echo ${PYTHON_VERSION} | sed 's/\.alpha/-alpha./')
           else
             # Regular release from tag
-            PYTHON_VERSION=$(poetry version -s)
+            PYTHON_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
             NPM_VERSION=$PYTHON_VERSION
           fi
 
@@ -77,7 +77,7 @@ jobs:
           echo "NPM_VERSION=${NPM_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Install deps
-        run: poetry install --without dev
+        run: uv sync --group dev
 
       - name: Update version query params in widget.py
         run: |
@@ -94,7 +94,7 @@ jobs:
           sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" src/colight/env.py
           sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" src/colight/env.py
 
-          poetry build
+          uv build
 
           git checkout src/colight/util.py
 
@@ -103,14 +103,13 @@ jobs:
           echo "=== Checking build artifacts ==="
           ls -la src/js-dist/
           echo "=== Publishing to PyPI ==="
-          poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
-          poetry publish
+          uv publish --token ${{ secrets.PYPI_TOKEN }}
 
       - name: Setup Node.js for npm publishing
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish to npm
         run: |

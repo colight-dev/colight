@@ -1,10 +1,21 @@
 ci:
-    skip: [ruff, pyright]
+  skip: [ruff, pyright]
+  autoupdate_commit_msg: |
+    [pre-commit.ci] pre-commit autoupdate
+
+    updates:
+    - [{repo}]: {rev} → {new_rev} (hooks: {hook_ids})
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+    for more information, see https://pre-commit.ci
 
 default_install_hook_types:
   - pre-commit
   - post-checkout
   - post-merge
+
+fail_fast: false
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -12,31 +23,29 @@ repos:
     hooks:
       - id: check-yaml
         args: [--unsafe]
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
 
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.0
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.7.13
     hooks:
-      - id: nbstripout
+      - id: uv-lock
 
-  - repo: https://github.com/python-poetry/poetry
-    rev: 1.8.0
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
     hooks:
-      - id: poetry-check
-      - id: poetry-install
+      - id: prettier
+        types_or: [javascript, jsx, ts, tsx, json, yaml, markdown]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.7.2
     hooks:
       - id: ruff
-        types_or: [ python, pyi, jupyter ]
-        args: [ --fix ]
+        types_or: [python, pyi, jupyter]
+        args: [--fix]
 
       - id: ruff-format
-        types_or: [ python, pyi, jupyter ]
+        types_or: [python, pyi, jupyter]
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.387
     hooks:
-    - id: pyright
+      - id: pyright
