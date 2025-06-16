@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    include: ['tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}']
+    include: ['packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}']
   }
 })
