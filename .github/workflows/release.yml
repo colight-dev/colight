@@ -40,6 +40,12 @@ jobs:
         with:
           python-version: 3.11.5
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install deps
+        run: uv sync --group dev
+
       - name: Install dependencies with Yarn
         run: yarn install --frozen-lockfile --production=false
 
@@ -48,9 +54,6 @@ jobs:
           yarn build
           # Force Git to track the build files temporarily
           git add -f src/js-dist
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
 
       - name: Set version components
         id: versions
@@ -75,9 +78,6 @@ jobs:
 
           echo "PYTHON_VERSION=${PYTHON_VERSION}" >> $GITHUB_OUTPUT
           echo "NPM_VERSION=${NPM_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Install deps
-        run: uv sync --group dev
 
       - name: Update version query params in widget.py
         run: |
