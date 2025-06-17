@@ -58,10 +58,12 @@ def build_file(
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
     if format == "html":
-        html_content = generator.generate_html(forms, colight_files, title)
+        html_content = generator.generate_html(forms, colight_files, title, output_path)
         generator.write_html_file(html_content, output_path)
     else:
-        markdown_content = generator.generate_markdown(forms, colight_files, title)
+        markdown_content = generator.generate_markdown(
+            forms, colight_files, title, output_path
+        )
         generator.write_markdown_file(markdown_content, output_path)
 
     if verbose:

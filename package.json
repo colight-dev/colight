@@ -2,7 +2,10 @@
   "name": "@colight/core",
   "version": "0.1.0",
   "main": "index.js",
-  "repository": "git@github.com:colight-dev/colight.git",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/colight-dev/colight.git"
+  },
   "author": "Matthew Huebert <me@matt.is>",
   "license": "Apache-2.0",
   "devDependencies": {
@@ -48,13 +51,14 @@
     "dev": "node esbuild.config.mjs --watch",
     "watch:docs": "uv run mkdocs serve",
     "build:docs": "uv run mkdocs build",
-    "test:js": "yarn vitest run",
+    "test:js": "yarn build && yarn vitest run",
     "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
     "test:py": "uv run python -m pytest packages/colight/tests --ignore=packages/colight/tests/test_screenshots.py",
     "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
     "test:colight-site": "uv run python -m pytest packages/colight-site/tests",
     "test": "npm-run-all test:py test:js test:colight-site",
-    "pyright": "uv run pyright"
+    "pyright": "uv run pyright",
+    "serve-tests": "cd test-artifacts && uv run python -m http.server 8080"
   },
   "files": [
     "dist",

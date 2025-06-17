@@ -12,12 +12,14 @@ class MarkdownGenerator:
 
     def __init__(self, output_dir: pathlib.Path):
         self.output_dir = output_dir
+        self.output_file_dir = None  # Will be set when generating
 
     def generate_markdown(
         self,
         forms: List[Form],
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
+        output_path: Optional[pathlib.Path] = None,
     ) -> str:
         """Generate complete Markdown document."""
         lines = []
@@ -46,9 +48,24 @@ class MarkdownGenerator:
 
                 # Add colight embed if we have a visualization
                 if colight_file:
-                    # Use just the filename for simplicity and predictability
+                    # Use relative path from output file location to colight file
+                    if output_path:
+                        try:
+                            relative_path = colight_file.relative_to(output_path.parent)
+                        except ValueError:
+                            # If relative_to fails, construct path manually
+                            colight_dir_name = self.output_dir.name
+                            relative_path = (
+                                pathlib.Path(colight_dir_name) / colight_file.name
+                            )
+                    else:
+                        # Fallback to directory name + filename
+                        colight_dir_name = self.output_dir.name
+                        relative_path = (
+                            pathlib.Path(colight_dir_name) / colight_file.name
+                        )
                     lines.append(
-                        f'<div class="colight-embed" data-src="{colight_file.name}"></div>'
+                        f'<div class="colight-embed" data-src="{relative_path}"></div>'
                     )
                     lines.append("")
 
@@ -81,11 +98,13 @@ class MarkdownGenerator:
 
     def write_markdown_file(self, content: str, output_path: pathlib.Path):
         """Write markdown content to a file."""
+        self.output_file_dir = output_path.parent
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(content, encoding="utf-8")
 
     def write_html_file(self, content: str, output_path: pathlib.Path):
         """Write HTML content to a file."""
+        self.output_file_dir = output_path.parent
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(content, encoding="utf-8")
 
@@ -94,10 +113,13 @@ class MarkdownGenerator:
         forms: List[Form],
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
+        output_path: Optional[pathlib.Path] = None,
     ) -> str:
         """Generate complete HTML document with embedded visualizations."""
         # First generate markdown content
-        markdown_content = self.generate_markdown(forms, colight_files, title)
+        markdown_content = self.generate_markdown(
+            forms, colight_files, title, output_path
+        )
 
         # Convert markdown to HTML
         md = markdown.Markdown(extensions=["codehilite", "fenced_code"])
@@ -143,7 +165,7 @@ class MarkdownGenerator:
             padding: 0;
         }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@colight/core/embed.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@colight/core/dist/embed.js"></script>
 </head>
 <body>
     {content}
