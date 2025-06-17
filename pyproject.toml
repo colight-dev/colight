@@ -6,7 +6,15 @@ name = "colight-workspace"
 version = "2025.4.1"
 description = "Colight visualization library workspace (not installable)"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "colight",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+colight = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
