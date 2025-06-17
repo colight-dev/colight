@@ -56,15 +56,30 @@ def get_next_version(alpha_name=None):
 
 
 def update_pyproject_toml(new_version):
-    with open("pyproject.toml", "r") as f:
-        data = toml.load(f)
+    """Update version in all package pyproject.toml files."""
+    from pathlib import Path
 
-    data["tool"]["poetry"]["version"] = new_version
+    # Update all packages in packages/ directory
+    packages_dir = Path("packages")
+    updated_files = []
 
-    with open("pyproject.toml", "w") as f:
-        toml.dump(data, f)
+    for package_dir in packages_dir.iterdir():
+        if package_dir.is_dir():
+            pyproject_path = package_dir / "pyproject.toml"
+            if pyproject_path.exists():
+                with open(pyproject_path, "r") as f:
+                    data = toml.load(f)
 
-    print(f"Updated pyproject.toml with new version: {new_version}")
+                if "project" in data and "version" in data["project"]:
+                    data["project"]["version"] = new_version
+
+                    with open(pyproject_path, "w") as f:
+                        toml.dump(data, f)
+
+                    updated_files.append(str(pyproject_path))
+                    print(f"Updated {pyproject_path} with new version: {new_version}")
+
+    return updated_files
 
 
 def update_changelog(new_version):
@@ -191,14 +206,14 @@ def main():
         with open("CHANGELOG.md", "w") as f:
             f.write(alpha_entry + original_content)
 
-        update_pyproject_toml(new_version)
-        files_to_add.extend(["pyproject.toml", "CHANGELOG.md"])
+        updated_files = update_pyproject_toml(new_version)
+        files_to_add.extend(updated_files + ["CHANGELOG.md"])
     else:
         if not update_changelog(new_version):
             print("Release process cancelled.")
             return
-        update_pyproject_toml(new_version)
-        files_to_add.extend(["pyproject.toml", "CHANGELOG.md"])
+        updated_files = update_pyproject_toml(new_version)
+        files_to_add.extend(updated_files + ["CHANGELOG.md"])
 
     # Add changes
     subprocess.run(["git", "add"] + files_to_add)
