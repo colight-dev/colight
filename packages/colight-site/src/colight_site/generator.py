@@ -143,7 +143,7 @@ class MarkdownGenerator:
             padding: 0;
         }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@colight-dev/core/embed.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@colight/core/embed.js"></script>
 </head>
 <body>
     {content}

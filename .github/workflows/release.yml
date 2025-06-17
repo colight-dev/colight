@@ -40,21 +40,22 @@ jobs:
         with:
           python-version: 3.11.5
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v4
 
-      - name: Install deps
-        run: uv sync --group dev
+      - run: uv sync --group dev
 
-      - name: Install dependencies with Yarn
-        run: yarn install --frozen-lockfile --production=false
+      - run: yarn install --frozen-lockfile --production=false
 
       - name: build the javascript bundle
         run: |
           yarn build
           # Force Git to track the build files temporarily
           git add -f dist
-
+      - name: Setup Node.js for npm publishing
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
       - name: Set version components
         id: versions
         run: |
@@ -91,32 +92,27 @@ jobs:
           JSDELIVR_CSS_URL="${NPM_BASE}/widget.css"
 
           # Update both URLs in the source
-          sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" src/colight/env.py
-          sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" src/colight/env.py
+          sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" packages/colight/src/colight/env.py
+          sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" packages/colight/src/colight/env.py
 
-          uv build
-
-          git checkout src/colight/util.py
+          cd packages/colight && uv build --out-dir dist
+          cd ../colight-site && uv build --out-dir dist
 
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
-          ls -la dist/
-          echo "=== Publishing to PyPI ==="
-          uv publish --token ${{ secrets.PYPI_TOKEN }}
-
-      - name: Setup Node.js for npm publishing
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          registry-url: "https://registry.npmjs.org"
+          ls -la packages/colight/dist/
+          ls -la packages/colight-site/dist/
+          echo "=== Publishing colight to PyPI ==="
+          uv publish packages/colight/dist/* --token ${{ secrets.PYPI_TOKEN }}
+          echo "=== Publishing colight-site to PyPI ==="
+          uv publish packages/colight-site/dist/* --token ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish to npm
         run: |
+          ls -la packages/dist/
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
-
-          cp src/colight/widget.css dist/
-
+          cp packages/colight/src/colight/widget.css dist/
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
         env:
@@ -133,4 +129,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*"
+          artifacts: "dist/*,packages/colight/dist/*,packages/colight-site/dist/*"
