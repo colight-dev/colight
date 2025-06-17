@@ -16,7 +16,8 @@ dependencies = [
     "libcst>=1.4",
     "click>=8.1",
     "watchfiles>=0.21.0",
-    "colight>=2025.4.1",
+    "colight",
+    "markdown>=3.5",
 ]
 
 [dependency-groups]

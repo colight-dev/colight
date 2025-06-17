@@ -1,7 +1,8 @@
-"""Generate Markdown output from executed forms."""
+"""Generate Markdown and HTML output from executed forms."""
 
 import pathlib
 from typing import List, Optional
+import markdown
 
 from .parser import Form
 
@@ -83,10 +84,30 @@ class MarkdownGenerator:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(content, encoding="utf-8")
 
-    def generate_html_template(
-        self, markdown_content: str, title: str = "Colight Document"
+    def write_html_file(self, content: str, output_path: pathlib.Path):
+        """Write HTML content to a file."""
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding="utf-8")
+
+    def generate_html(
+        self,
+        forms: List[Form],
+        colight_files: List[Optional[pathlib.Path]],
+        title: Optional[str] = None,
     ) -> str:
-        """Generate a complete HTML document with Colight embed support."""
+        """Generate complete HTML document with embedded visualizations."""
+        # First generate markdown content
+        markdown_content = self.generate_markdown(forms, colight_files, title)
+
+        # Convert markdown to HTML
+        md = markdown.Markdown(extensions=["codehilite", "fenced_code"])
+        html_content = md.convert(markdown_content)
+
+        # Wrap in HTML template
+        return self._wrap_html_template(html_content, title or "Colight Document")
+
+    def _wrap_html_template(self, content: str, title: str) -> str:
+        """Wrap content in HTML template with Colight embed support."""
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -101,14 +122,6 @@ class MarkdownGenerator:
             margin: 0 auto;
             padding: 2rem;
             color: #333;
-        }}
-        
-        .colight-embed {{
-            margin: 1rem 0;
-            padding: 1rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: #f9f9f9;
         }}
         
         pre {{
@@ -130,34 +143,9 @@ class MarkdownGenerator:
             padding: 0;
         }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@colight-dev/core/embed.js"></script>
 </head>
 <body>
-    <div id="content"></div>
-    
-    <script>
-        // Parse markdown and render
-        const markdownContent = `{markdown_content}`;
-        document.getElementById('content').innerHTML = marked.parse(markdownContent);
-        
-        // Initialize colight embeds
-        document.addEventListener('DOMContentLoaded', function() {{
-            const embeds = document.querySelectorAll('.colight-embed');
-            embeds.forEach(embed => {{
-                const src = embed.getAttribute('data-src');
-                if (src) {{
-                    // Load and display colight file
-                    fetch(src)
-                        .then(response => response.json())
-                        .then(data => {{
-                            embed.innerHTML = `<pre>${{JSON.stringify(data, null, 2)}}</pre>`;
-                        }})
-                        .catch(error => {{
-                            embed.innerHTML = `<p>Error loading visualization: ${{src}}</p>`;
-                        }});
-                }}
-            }});
-        }});
-    </script>
+    {content}
 </body>
 </html>"""

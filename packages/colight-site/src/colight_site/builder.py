@@ -8,7 +8,10 @@ from .generator import MarkdownGenerator
 
 
 def build_file(
-    input_path: pathlib.Path, output_path: pathlib.Path, verbose: bool = False
+    input_path: pathlib.Path,
+    output_path: pathlib.Path,
+    verbose: bool = False,
+    format: str = "markdown",
 ):
     """Build a single .colight.py file."""
     if not is_colight_file(input_path):
@@ -50,20 +53,26 @@ def build_file(
                 print(f"  Form {i}: execution failed: {e}")
             colight_files.append(None)
 
-    # Generate markdown
+    # Generate output
     generator = MarkdownGenerator(colight_dir)
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
-    markdown_content = generator.generate_markdown(forms, colight_files, title)
 
-    # Write output
-    generator.write_markdown_file(markdown_content, output_path)
+    if format == "html":
+        html_content = generator.generate_html(forms, colight_files, title)
+        generator.write_html_file(html_content, output_path)
+    else:
+        markdown_content = generator.generate_markdown(forms, colight_files, title)
+        generator.write_markdown_file(markdown_content, output_path)
 
     if verbose:
         print(f"Generated {output_path}")
 
 
 def build_directory(
-    input_dir: pathlib.Path, output_dir: pathlib.Path, verbose: bool = False
+    input_dir: pathlib.Path,
+    output_dir: pathlib.Path,
+    verbose: bool = False,
+    format: str = "markdown",
 ):
     """Build all .colight.py files in a directory."""
     if verbose:
@@ -83,9 +92,10 @@ def build_directory(
         try:
             # Calculate relative output path
             rel_path = colight_file.relative_to(input_dir)
-            output_file = output_dir / rel_path.with_suffix(".md")
+            suffix = ".html" if format == "html" else ".md"
+            output_file = output_dir / rel_path.with_suffix(suffix)
 
-            build_file(colight_file, output_file, verbose=verbose)
+            build_file(colight_file, output_file, verbose=verbose, format=format)
         except Exception as e:
             print(f"Error building {colight_file}: {e}")
             if verbose:

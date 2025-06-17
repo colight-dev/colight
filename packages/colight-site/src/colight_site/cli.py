@@ -24,19 +24,29 @@ def main():
     help="Output file or directory",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
-def build(input_path: pathlib.Path, output: Optional[pathlib.Path], verbose: bool):
+@click.option(
+    "--format",
+    "-f",
+    type=click.Choice(["markdown", "html"]),
+    default="markdown",
+    help="Output format",
+)
+def build(
+    input_path: pathlib.Path, output: Optional[pathlib.Path], verbose: bool, format: str
+):
     """Build a .colight.py file into markdown/HTML."""
     if input_path.is_file():
         # Single file
         if not output:
-            output = input_path.with_suffix(".md")
-        builder.build_file(input_path, output, verbose=verbose)
+            suffix = ".html" if format == "html" else ".md"
+            output = input_path.with_suffix(suffix)
+        builder.build_file(input_path, output, verbose=verbose, format=format)
         click.echo(f"Built {input_path} -> {output}")
     else:
         # Directory
         if not output:
             output = pathlib.Path("build")
-        builder.build_directory(input_path, output, verbose=verbose)
+        builder.build_directory(input_path, output, verbose=verbose, format=format)
         click.echo(f"Built {input_path}/ -> {output}/")
 
 
@@ -50,11 +60,18 @@ def build(input_path: pathlib.Path, output: Optional[pathlib.Path], verbose: boo
     default="build",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
-def watch(input_path: pathlib.Path, output: pathlib.Path, verbose: bool):
+@click.option(
+    "--format",
+    "-f",
+    type=click.Choice(["markdown", "html"]),
+    default="markdown",
+    help="Output format",
+)
+def watch(input_path: pathlib.Path, output: pathlib.Path, verbose: bool, format: str):
     """Watch for changes and rebuild automatically."""
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
-    watcher.watch_and_build(input_path, output, verbose=verbose)
+    watcher.watch_and_build(input_path, output, verbose=verbose, format=format)
 
 
 @main.command()

@@ -35,16 +35,28 @@ def test_markdown_generation():
         assert 'data-src="test.colight"' in markdown
 
 
-def test_html_template():
-    """Test HTML template generation."""
+def test_html_generation():
+    """Test HTML generation."""
     with tempfile.TemporaryDirectory() as temp_dir:
         output_dir = pathlib.Path(temp_dir)
         generator = MarkdownGenerator(output_dir)
 
-        markdown = "# Test\n\nSome content"
-        html = generator.generate_html_template(markdown, "Test Title")
+        # Create mock forms
+        import_stmt = cst.parse_statement("import numpy as np")
+        expr_stmt = cst.parse_statement("np.sin(x)")
+
+        forms = [
+            Form(markdown=["This is a test"], node=import_stmt, start_line=1),
+            Form(markdown=["Create visualization"], node=expr_stmt, start_line=3),
+        ]
+
+        colight_files = [None, pathlib.Path("test.colight")]
+
+        html = generator.generate_html(forms, colight_files, "Test Document")
 
         assert "<!DOCTYPE html>" in html
-        assert "<title>Test Title</title>" in html
+        assert "<title>Test Document</title>" in html
         assert "colight-embed" in html
-        assert "marked.parse" in html
+        assert "@colight-dev/core/embed.js" in html
+        assert "<h1>Test Document</h1>" in html
+        assert "<p>This is a test</p>" in html
