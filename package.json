@@ -55,7 +55,7 @@
     "test": "npm-run-all test:py test:js"
   },
   "files": [
-    "src/js-dist"
+    "src/js-dist/*"
   ],
   "publishConfig": {
     "access": "public"
