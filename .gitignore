@@ -13,5 +13,5 @@ notebooks/webgpu.html
 **/node_modules/**
 **/__pycache__/**
 scratch
-src/js-dist/**
-tests/test-artifacts/**
+dist
+**/test-artifacts/**

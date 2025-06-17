@@ -16,20 +16,20 @@ const commonOptions = {
 };
 
 // Widget build (ESM)
-const widgetConfig = {
+const widgetESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['src/colight/js/widget.jsx'],
-  outfile: 'src/js-dist/widget.mjs',
+  entryPoints: ['packages/colight/src/colight/js/widget.jsx'],
+  outfile: 'dist/widget.mjs',
   plugins: [],
 };
 
 // AnyWidget build (ESM)
-const anyWidgetConfig = {
-  ...widgetConfig,
+const anywidgetESM = {
+  ...widgetESM,
   format: 'esm',
-  entryPoints: ['src/colight/js/anywidget.jsx'],
-  outfile: 'src/js-dist/anywidget.mjs',
+  entryPoints: ['packages/colight/src/colight/js/anywidget.jsx'],
+  outfile: 'dist/anywidget.mjs',
 };
 
 // Embed build (IIFE format for standalone use with script tags)
@@ -37,19 +37,25 @@ const embedConfigJS = {
   ...commonOptions,
   format: 'iife',
   globalName: 'colight', // Makes it available as window.colight
-  entryPoints: ['src/colight/js/embed.js'],
-  outfile: 'src/js-dist/embed.js',
+  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  outfile: 'dist/embed.js',
   plugins: [],
 };
 
-const embedConfigESM = { ...embedConfigJS, format: 'esm', outfile: 'src/js-dist/embed.mjs' }
+// AnyWidget build (ESM)
+const embedConfigESM = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  outfile: 'dist/embed.mjs',
+};
 
-const configs = [widgetConfig, anyWidgetConfig, embedConfigJS, embedConfigESM]
+const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch
 if (USE_CDN_IMPORTS) {
-  importMap.load('src/colight/js/import-map.cdn.json');
+  importMap.load('packages/colight/src/colight/js/import-map.cdn.json');
   configs.forEach(config => {
     config.plugins.push(importMap.plugin());
   });

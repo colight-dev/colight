@@ -1,27 +1,26 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# Workspace configuration for monorepo
+# This file provides shared tooling configuration but is not a buildable package
 
 [project]
-name = "colight"
+name = "colight-workspace"
 version = "2025.4.1"
-description = ""
-authors = [
-    {name = "Matthew Huebert", email = "me@matt.is"},
-]
-license = {text = "MIT"}
-readme = "README.md"
+description = "Colight visualization library workspace (not installable)"
 requires-python = ">=3.10"
 dependencies = [
-    "anywidget>=0.9.10",
-    "traitlets>=5.14.3",
-    "websockets>=15.0",
+    "colight",
 ]
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+colight = { workspace = true }
+
+# Shared development dependencies
 [dependency-groups]
 dev = [
-    "jax==0.4.33",
-    "jaxlib==0.4.33",
+    "jax>=0.4.33",
+    "jaxlib>=0.4.33",
     "watchfiles>=0.21.0",
     "jupyter-client>=8.6.2",
     "nbformat>=5.10.4",
@@ -39,17 +38,11 @@ dev = [
     "tomli-w>=1.0.0",
 ]
 
-[project.entry-points."mkdocs.plugins"]
-"colight.docs.plugin" = "colight.docs.plugin:APIDocPlugin"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/colight"]
-artifacts = ["src/colight/js/widget.mjs"]
-
+# Workspace-wide tool configuration
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "src", "tests", "docs",]
+include = [ "packages/*/src", "packages/*/tests", "docs",]
 exclude = [ "notebooks",]
 typeCheckingMode = "standard"
 reportUnusedExpression = false

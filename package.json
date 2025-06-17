@@ -50,12 +50,15 @@
     "build:docs": "uv run mkdocs build",
     "test:js": "yarn vitest run",
     "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "uv run python -m pytest tests/python --ignore=tests/python/test_screenshots.py",
-    "test:images": "uv run python -m pytest tests/python/test_screenshots.py",
-    "test": "npm-run-all test:py test:js"
+    "test:py": "uv run python -m pytest packages/colight/tests --ignore=packages/colight/tests/test_screenshots.py",
+    "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
+    "test:colight-site": "uv run python -m pytest packages/colight-site/tests",
+    "test": "npm-run-all test:py test:js test:colight-site",
+    "pyright": "uv run pyright"
   },
   "files": [
-    "src/js-dist/*"
+    "dist",
+    "packages/colight/src/js"
   ],
   "publishConfig": {
     "access": "public"

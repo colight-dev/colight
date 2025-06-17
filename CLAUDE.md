@@ -4,11 +4,12 @@
 
 - Build frontend: `yarn build`
 - Watch mode: `yarn dev`
-- Run tests: `yarn test` (both JS and Python)
+- Run tests: `yarn test` (JS, Python, and colight-site)
 - Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
-- Run Python tests: `yarn test:py` or `uv run pytest tests/python/`
-- Run single Python test: `uv run pytest tests/python/test_file.py::test_function`
+- Run Python tests: `yarn test:py` or `uv run pytest packages/colight/tests/`
+- Run colight-site tests: `yarn test:colight-site` or `uv run pytest packages/colight-site/tests/`
+- Run single Python test: `uv run pytest packages/colight/tests/test_file.py::test_function`
 - Typecheck Python: `pyright` or `yarn pyright`
 - Format & lint: `pre-commit run --all-files`
 - Docs: `yarn watch:docs` to serve, `yarn build:docs` to build
@@ -31,3 +32,13 @@
 - When writing React components, use Tailwind classes, wrapping in `tw` from `src/js/utils.ts`.
 
 For detailed patterns, review existing code in the corresponding module.
+
+## Monorepo Structure
+
+This project uses a monorepo structure with multiple packages:
+
+- `packages/colight/` - Main visualization library
+- `packages/colight-site/` - Static site generator for .colight.py files
+- Root workspace manages shared dependencies and tooling
+
+When working on specific packages, navigate to the package directory or use the workspace commands from the root.

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "colight"
+version = "2025.4.1"
+description = ""
+authors = [
+    {name = "Matthew Huebert", email = "me@matt.is"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anywidget>=0.9.10",
+    "traitlets>=5.14.3",
+    "websockets>=15.0",
+]
+
+[dependency-groups]
+dev = [
+    "jax>=0.4.33; python_version<'3.13'",
+    "jaxlib>=0.4.33; python_version<'3.13'",
+    "watchfiles>=0.21.0",
+    "jupyter-client>=8.6.2",
+    "nbformat>=5.10.4",
+    "numpy>=1.22,<2.0.0",
+    "pytest>=8.4.0",
+    "anthropic>=0.39.0",
+    "python-dotenv>=1.0.1",
+    "tomli-w>=1.0.0",
+]
+
+[project.entry-points."mkdocs.plugins"]
+"colight.docs.plugin" = "colight.docs.plugin:APIDocPlugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/colight"]
+artifacts = ["src/colight/js/widget.mjs"]
+
+[tool.pyright]
+venvPath = "../.."
+venv = ".venv"
+include = [ "src", "tests",]
+typeCheckingMode = "standard"
+reportUnusedExpression = false
+reportFunctionMemberAccess = false
+
+[tool.ruff.lint]
+ignore = [ "E402",]
