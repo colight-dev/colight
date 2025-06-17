@@ -57,7 +57,8 @@
     "pyright": "uv run pyright"
   },
   "files": [
-    "src/js-dist"
+    "dist",
+    "packages/colight/src/js"
   ],
   "publishConfig": {
     "access": "public"

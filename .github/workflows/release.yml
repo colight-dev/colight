@@ -53,7 +53,7 @@ jobs:
         run: |
           yarn build
           # Force Git to track the build files temporarily
-          git add -f src/js-dist
+          git add -f dist
 
       - name: Set version components
         id: versions
@@ -101,7 +101,7 @@ jobs:
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
-          ls -la src/js-dist/
+          ls -la dist/
           echo "=== Publishing to PyPI ==="
           uv publish --token ${{ secrets.PYPI_TOKEN }}
 
@@ -115,7 +115,7 @@ jobs:
         run: |
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
 
-          cp src/colight/widget.css src/js-dist/
+          cp src/colight/widget.css dist/
 
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
@@ -133,4 +133,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "src/js-dist/*"
+          artifacts: "dist/*"

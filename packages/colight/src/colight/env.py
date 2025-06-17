@@ -30,7 +30,7 @@ except Exception:
     # Another fallback approach
     COLIGHT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 
-DIST_PATH = COLIGHT_PATH.parent / "js-dist"
+DIST_PATH = COLIGHT_PATH.parent.parent.parent.parent / "dist"
 
 CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 
