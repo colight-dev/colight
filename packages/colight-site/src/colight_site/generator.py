@@ -45,20 +45,10 @@ class MarkdownGenerator:
 
                 # Add colight embed if we have a visualization
                 if colight_file:
-                    # Get relative path from output_dir to colight file
-                    try:
-                        relative_path = colight_file.relative_to(self.output_dir.parent)
-                        lines.append(
-                            f'<div class="colight-embed" data-src="{relative_path}"></div>'
-                        )
-                    except ValueError:
-                        # Fallback to directory name + filename if relative_to fails
-                        relative_path = (
-                            f"{colight_file.parent.name}/{colight_file.name}"
-                        )
-                        lines.append(
-                            f'<div class="colight-embed" data-src="{relative_path}"></div>'
-                        )
+                    # Use just the filename for simplicity and predictability
+                    lines.append(
+                        f'<div class="colight-embed" data-src="{colight_file.name}"></div>'
+                    )
                     lines.append("")
 
         return "\n".join(lines)
