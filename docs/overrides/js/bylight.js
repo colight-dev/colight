@@ -9,14 +9,19 @@ var bylight = (() => {
       __defProp(target, name, { get: all[name], enumerable: true });
   };
   var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
+    if ((from && typeof from === "object") || typeof from === "function") {
       for (let key of __getOwnPropNames(from))
         if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+          __defProp(to, key, {
+            get: () => from[key],
+            enumerable:
+              !(desc = __getOwnPropDesc(from, key)) || desc.enumerable,
+          });
     }
     return to;
   };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+  var __toCommonJS = (mod) =>
+    __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
   // src/index.ts
   var src_exports = {};
@@ -28,7 +33,7 @@ var bylight = (() => {
     findMatches: () => findMatches,
     findRegexMatches: () => findRegexMatches,
     highlight: () => highlight,
-    processLinksAndHighlight: () => processLinksAndHighlight
+    processLinksAndHighlight: () => processLinksAndHighlight,
   });
   function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -43,7 +48,7 @@ var bylight = (() => {
     "#76b7b2",
     "#d4af37",
     "#ff9da7",
-    "#f28e2c"
+    "#f28e2c",
   ];
   function matchWildcard(text, startIndex, nextLiteral) {
     let index = startIndex;
@@ -58,9 +63,17 @@ var bylight = (() => {
         inString = text[index];
       } else if (bracketDepth === 0 && text[index] === nextLiteral) {
         return index;
-      } else if (text[index] === "(" || text[index] === "[" || text[index] === "{") {
+      } else if (
+        text[index] === "(" ||
+        text[index] === "[" ||
+        text[index] === "{"
+      ) {
         bracketDepth++;
-      } else if (text[index] === ")" || text[index] === "]" || text[index] === "}") {
+      } else if (
+        text[index] === ")" ||
+        text[index] === "]" ||
+        text[index] === "}"
+      ) {
         if (bracketDepth === 0) {
           return index;
         }
@@ -111,39 +124,59 @@ var bylight = (() => {
         return null;
       }
     }
-    return patternPosition === pattern.length ? [startPosition, textPosition] : null;
+    return patternPosition === pattern.length
+      ? [startPosition, textPosition]
+      : null;
   }
   function findMatchesForPatterns(text, patterns, matchId) {
-    return patterns.flatMap(
-      (pattern) => findMatches(text, pattern).map(
-        (match) => [...match, matchId]
-      )
+    return patterns.flatMap((pattern) =>
+      findMatches(text, pattern).map((match) => [...match, matchId]),
     );
   }
   function generateUniqueId() {
     return `match-${Math.random().toString(36).slice(2, 11)}`;
   }
-  function highlight(target, patterns, options = {}, colorScheme = DefaultColors) {
-    if (!patterns || Array.isArray(patterns) && patterns.length === 0) {
+  function highlight(
+    target,
+    patterns,
+    options = {},
+    colorScheme = DefaultColors,
+  ) {
+    if (!patterns || (Array.isArray(patterns) && patterns.length === 0)) {
       return;
     }
     const patternsArray = Array.isArray(patterns) ? patterns : [patterns];
-    const elements = typeof target === "string" ? document.querySelectorAll(target) : target instanceof HTMLElement ? [target] : target;
+    const elements =
+      typeof target === "string"
+        ? document.querySelectorAll(target)
+        : target instanceof HTMLElement
+          ? [target]
+          : target;
     const { matchId = generateUniqueId() } = options;
     const processedPatterns = patternsArray.map((pattern, index) => {
       if (typeof pattern === "string") {
-        return { match: pattern, color: colorScheme[index % colorScheme.length] };
+        return {
+          match: pattern,
+          color: colorScheme[index % colorScheme.length],
+        };
       }
       return {
         match: pattern.match,
-        color: pattern.color || colorScheme[index % colorScheme.length]
+        color: pattern.color || colorScheme[index % colorScheme.length],
       };
     });
     elements.forEach((element) => {
       const text = element.textContent || "";
       const allMatches = processedPatterns.flatMap((pattern, index) => {
-        const subPatterns = pattern.match.split(",").map((p) => p.trim()).filter((p) => p !== "");
-        return findMatchesForPatterns(text, subPatterns, `${matchId}-${index}`).map((match) => [...match, `--bylight-color: ${pattern.color};`]);
+        const subPatterns = pattern.match
+          .split(",")
+          .map((p) => p.trim())
+          .filter((p) => p !== "");
+        return findMatchesForPatterns(
+          text,
+          subPatterns,
+          `${matchId}-${index}`,
+        ).map((match) => [...match, `--bylight-color: ${pattern.color};`]);
       });
       if (allMatches.length > 0) {
         element.innerHTML = `<code>${applyHighlights(text, allMatches)}</code>`;
@@ -156,10 +189,19 @@ var bylight = (() => {
       const beforeMatch = result.slice(0, start);
       const matchContent = result.slice(start, end);
       const afterMatch = result.slice(end);
-      return beforeMatch + `<span class="bylight-code" style="${styleString}" data-match-id="${matchId}">` + matchContent + "</span>" + afterMatch;
+      return (
+        beforeMatch +
+        `<span class="bylight-code" style="${styleString}" data-match-id="${matchId}">` +
+        matchContent +
+        "</span>" +
+        afterMatch
+      );
     }, text);
   }
-  function processLinksAndHighlight(targetElement, colorScheme = DefaultColors) {
+  function processLinksAndHighlight(
+    targetElement,
+    colorScheme = DefaultColors,
+  ) {
     const elements = targetElement.querySelectorAll('pre, a[href^="bylight"]');
     const preMap = /* @__PURE__ */ new Map();
     const linkMap = /* @__PURE__ */ new Map();
@@ -170,7 +212,12 @@ var bylight = (() => {
         preMap.set(element, []);
       } else if (element.tagName === "A") {
         const anchorElement = element;
-        const linkData = processAnchorElement(anchorElement, index, colorScheme, colorIndex);
+        const linkData = processAnchorElement(
+          anchorElement,
+          index,
+          colorScheme,
+          colorIndex,
+        );
         linkMap.set(anchorElement, linkData);
         colorMap.set(linkData.matchId, colorIndex);
         colorIndex = (colorIndex + 1) % colorScheme.length;
@@ -183,34 +230,40 @@ var bylight = (() => {
             return Array.from(preMap.keys());
           }
           if (indices === "up" || indices === "down") {
-            return findPreElementsInDirection(elements, index2, indices, parseInt(indices));
+            return findPreElementsInDirection(
+              elements,
+              index2,
+              indices,
+              parseInt(indices),
+            );
           }
-          return indices.map((offset) => findPreElementByOffset(elements, index2, offset)).filter((el) => el !== null);
+          return indices
+            .map((offset) => findPreElementByOffset(elements, index2, offset))
+            .filter((el) => el !== null);
         };
         const matchingPres = findMatchingPres(targetIndices, index);
         matchingPres.forEach((matchingPre) => {
           var _a;
           const text = matchingPre.textContent || "";
           const newMatches = findMatchesForPatterns(text, patterns, matchId);
-          (_a = preMap.get(matchingPre)) == null ? void 0 : _a.push(...newMatches);
+          (_a = preMap.get(matchingPre)) == null
+            ? void 0
+            : _a.push(...newMatches);
         });
-      }
+      },
     );
     preMap.forEach((matches, preElement) => {
       if (matches.length > 0) {
         const text = preElement.textContent || "";
-        const allMatches = matches.map(
-          ([start, end, matchId]) => {
-            const linkData = Array.from(linkMap.values()).find((data) => data.matchId === matchId);
-            const color = (linkData == null ? void 0 : linkData.color) || colorScheme[colorMap.get(matchId) || 0];
-            return [
-              start,
-              end,
-              matchId,
-              `--bylight-color: ${color};`
-            ];
-          }
-        );
+        const allMatches = matches.map(([start, end, matchId]) => {
+          const linkData = Array.from(linkMap.values()).find(
+            (data) => data.matchId === matchId,
+          );
+          const color =
+            (linkData == null ? void 0 : linkData.color) ||
+            colorScheme[colorMap.get(matchId) || 0];
+          return [start, end, matchId, `--bylight-color: ${color};`];
+        });
         preElement.innerHTML = `<code>${applyHighlights(text, allMatches)}</code>`;
       }
     });
@@ -223,7 +276,9 @@ var bylight = (() => {
       spanElement.dataset.matchId = matchId;
       spanElement.classList.add("bylight-link");
       spanElement.style.setProperty("--bylight-color", finalColor);
-      (_a = linkElement.parentNode) == null ? void 0 : _a.replaceChild(spanElement, linkElement);
+      (_a = linkElement.parentNode) == null
+        ? void 0
+        : _a.replaceChild(spanElement, linkElement);
     });
   }
   function processAnchorElement(anchorElement, index, colorScheme, colorIndex) {
@@ -236,10 +291,14 @@ var bylight = (() => {
     anchorElement.addEventListener("click", (e) => e.preventDefault());
     return {
       targetIndices,
-      patterns: (url.searchParams.get("match") || anchorElement.textContent || "").split(","),
+      patterns: (
+        url.searchParams.get("match") ||
+        anchorElement.textContent ||
+        ""
+      ).split(","),
       index,
       matchId,
-      color
+      color,
     };
   }
   function getTargetIndices(inParam, dirParam) {
@@ -282,7 +341,7 @@ var bylight = (() => {
       if (target.dataset.matchId) {
         const matchId = target.dataset.matchId;
         const elements = targetElement.querySelectorAll(
-          `[data-match-id="${matchId}"]`
+          `[data-match-id="${matchId}"]`,
         );
         elements.forEach((el) => {
           el.classList.add("bylight-hover");
@@ -294,7 +353,7 @@ var bylight = (() => {
       if (target.dataset.matchId) {
         const matchId = target.dataset.matchId;
         const elements = targetElement.querySelectorAll(
-          `[data-match-id="${matchId}"]`
+          `[data-match-id="${matchId}"]`,
         );
         elements.forEach((el) => {
           el.classList.remove("bylight-hover");
@@ -304,7 +363,8 @@ var bylight = (() => {
   }
   function bylight(options = {}) {
     const { target = "body", colorScheme = DefaultColors } = options;
-    const targetElement = typeof target === "string" ? document.querySelector(target) : target;
+    const targetElement =
+      typeof target === "string" ? document.querySelector(target) : target;
     if (!targetElement) {
       console.error(`bylight: Target element not found - ${target}`);
       return;

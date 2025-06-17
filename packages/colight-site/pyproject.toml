@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,9 +9,8 @@ name = "colight-site"
 version = "2025.4.1"
 description = "Static site generator for Colight visualizations"
 authors = [
-    {name = "Matthew Huebert", email = "me@matt.is"},
+    { name = "Matthew Huebert", email = "me@matt.is" },
 ]
-license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,24 +21,34 @@ dependencies = [
     "markdown>=3.5",
 ]
 
+[project.license]
+text = "MIT"
+
+[project.scripts]
+colight-site = "colight_site.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
 ]
 
-[project.scripts]
-colight-site = "colight_site.cli:main"
-
 [tool.hatch.build.targets.wheel]
-packages = ["src/colight_site"]
+packages = [
+    "src/colight_site",
+]
 
 [tool.pyright]
 venvPath = "../.."
 venv = ".venv"
-include = [ "src", "tests",]
+include = [
+    "src",
+    "tests",
+]
 typeCheckingMode = "standard"
 reportUnusedExpression = false
 reportFunctionMemberAccess = false
 
 [tool.ruff.lint]
-ignore = [ "E402",]
+ignore = [
+    "E402",
+]

@@ -20,15 +20,12 @@ The visualization supports:
 - Component click selection
 - Optional FPS display (set controls=['fps'])
 
-
-
 ### PointCloud {: .api .api-member }
 
 Create a point cloud element.
 
 Parameters
 {: .api .api-section }
-
 
 - `centers` (ArrayLike): Nx3 array of point centers or flattened array
 
@@ -46,15 +43,12 @@ Parameters
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
-
-
 ### Ellipsoid {: .api .api-member }
 
 Create an ellipsoid element.
 
 Parameters
 {: .api .api-section }
-
 
 - `centers` (ArrayLike): Nx3 array of ellipsoid centers or flattened array
 
@@ -76,13 +70,11 @@ Parameters
 
 - `fill_mode` (str): How the shape is drawn. One of:
 
-    - "Solid": Filled surface with solid color
+  - "Solid": Filled surface with solid color
 
-    - "MajorWireframe": Three axis-aligned ellipse cross-sections
+  - "MajorWireframe": Three axis-aligned ellipse cross-sections
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
-
-
 
 ### Cuboid {: .api .api-member }
 
@@ -90,7 +82,6 @@ Create a cuboid element.
 
 Parameters
 {: .api .api-section }
-
 
 - `centers` (ArrayLike): Nx3 array of cuboid centers or flattened array
 
@@ -112,15 +103,12 @@ Parameters
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
-
-
 ### LineBeams {: .api .api-member }
 
 Create a line beams element.
 
 Parameters
 {: .api .api-section }
-
 
 - `points` (ArrayLike): Array of quadruples [x,y,z,i, x,y,z,i, ...] where points sharing the same i value are connected in sequence
 
@@ -141,12 +129,9 @@ Parameters
 Returns
 {: .api .api-section }
 
-
 - A LineBeams scene component that renders connected beam segments. (SceneComponent)
 
 - Points are connected in sequence within groups sharing the same i value. (SceneComponent)
-
-
 
 ### deco {: .api .api-member }
 
@@ -154,7 +139,6 @@ Create a decoration for scene components.
 
 Parameters
 {: .api .api-section }
-
 
 - `indexes` (Union[int, np.integer, ArrayLike]): Single index or list of indices to decorate
 
@@ -166,6 +150,5 @@ Parameters
 
 Returns
 {: .api .api-section }
-
 
 - Dictionary containing decoration settings (Decoration)

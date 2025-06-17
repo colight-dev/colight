@@ -2,7 +2,7 @@
 
 # Colight: declarative, reactive visuals in Python
 
------
+---
 
 `colight.plot` provides a composable way to create interactive plots using [Observable Plot](https://observablehq.com/plot/).
 
@@ -18,8 +18,6 @@ Key features:
 
 For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
 
-```
-
 ## Development
 
 Run `yarn watch` to compile the JavaScript bundle.
@@ -27,6 +25,7 @@ Run `yarn watch` to compile the JavaScript bundle.
 ### CI Workflows
 
 The project has several CI workflows:
+
 - **Tests**: Runs JavaScript and Python unit tests
 - **WebGPU Screenshots**: Tests 3D WebGPU rendering capabilities by capturing screenshots in headless Chrome
 - **Docs**: Builds and deploys documentation

@@ -21,22 +21,24 @@ Pre-commit hooks ensure code consistency. They run automatically on each commit 
 Setup:
 
 1. Install pre-commit:
+
 ```bash
 pipx install pre-commit
 ```
 
 2. Install hooks:
+
 ```bash
 pre-commit install
 ```
 
 Run hooks manually:
+
 ```bash
 pre-commit run --all-files
 ```
 
 Hooks are configured in `.pre-commit-config.yaml`.
-
 
 ### WebGPU Testing
 

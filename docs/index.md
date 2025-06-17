@@ -2,7 +2,7 @@
 
 Colight is a Python library for creating interactive, JavaScript-based visuals. It provides a simple, composable way to generate plots, animations, and custom user interfaces from within a Python environment.
 
-[Getting Started](quickstart.py){ .md-button  .md-button--primary }
+[Getting Started](quickstart.py){ .md-button .md-button--primary }
 
 Key features:
 

@@ -80,14 +80,16 @@ export const colorScrubber = ({ value, onInput }) => {
   };
 
   // Linear gradient for the slider background using RGB values
-  const gradientBackground = `linear-gradient(to right, ${Array.from({ length: 12 }, (_, i) => {
-    const [r, g, b] = hslToRgb(i * 30);
-    return `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
-  }).join(', ')
-    })`;
+  const gradientBackground = `linear-gradient(to right, ${Array.from(
+    { length: 12 },
+    (_, i) => {
+      const [r, g, b] = hslToRgb(i * 30);
+      return `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
+    },
+  ).join(", ")})`;
 
   const handleColorChange = (e) => {
-    if (e.target.type === 'range') {
+    if (e.target.type === "range") {
       const newHue = parseInt(e.target.value, 10);
       const newColor = hslToRgb(newHue);
       if (onInput) {
@@ -99,25 +101,23 @@ export const colorScrubber = ({ value, onInput }) => {
     }
   };
 
-  return html(
+  return html([
+    "div.h-10.w-full.rounded-full.mb-4.overflow-hidden",
+    { style: { background: gradientBackground } },
     [
-      "div.h-10.w-full.rounded-full.mb-4.overflow-hidden",
-      { style: { background: gradientBackground } },
-      [
-        "input",
-        {
-          type: "range",
-          min: "0",
-          max: "360",
-          value: rgbToHue(currentColor),
-          onChange: handleColorChange,
-          className: `
+      "input",
+      {
+        type: "range",
+        min: "0",
+        max: "360",
+        value: rgbToHue(currentColor),
+        onChange: handleColorChange,
+        className: `
         w-full h-full appearance-none bg-transparent
         [&::-webkit-slider-thumb]:(border appearance-none rounded-full bg-white w-[20px] h-[20px])`,
-        },
-      ],
-    ]
-  );
+      },
+    ],
+  ]);
 };
 
 function setupVideoCanvas(width, height, showSourceVideo) {
@@ -188,7 +188,7 @@ async function initWebGPU(state, canvasId) {
   if (!adapter) {
     throw new Error("Failed to get GPU adapter");
   }
-  const device = await adapter.requestDevice({validationEnabled: true});
+  const device = await adapter.requestDevice({ validationEnabled: true });
   const canvas = document.getElementById(canvasId);
   const context = canvas.getContext("webgpu");
 
@@ -215,7 +215,7 @@ function createUniformBuffer(device, uniforms) {
   const uniformKeys = Object.keys(uniforms).sort();
   const uniformArray = uniformKeys.map((key) => uniforms[key]);
   const uniformData = new Float32Array(
-    uniformArray.length > 0 ? uniformArray : [0]
+    uniformArray.length > 0 ? uniformArray : [0],
   );
   const uniformBuffer = device.createBuffer({
     size: uniformData.byteLength,
@@ -233,18 +233,21 @@ function updateUniformBuffer(device, uniformBuffer, uniforms) {
   const uniformKeys = Object.keys(uniforms).sort();
   const uniformArray = uniformKeys.map((key) => uniforms[key]);
   const uniformData = new Float32Array(
-    uniformArray.length > 0 ? uniformArray : [0]
+    uniformArray.length > 0 ? uniformArray : [0],
   );
   device.queue.writeBuffer(
     uniformBuffer,
     0,
     uniformData.buffer,
     uniformData.byteOffset,
-    uniformData.byteLength
+    uniformData.byteLength,
   );
 }
 
-async function setupWebGPUResources(state, { width, height, canvasId, uniforms }) {
+async function setupWebGPUResources(
+  state,
+  { width, height, canvasId, uniforms },
+) {
   const { device, context, format } = await initWebGPU(state, canvasId);
   await setupWebcam(state, width, height);
 
@@ -359,13 +362,12 @@ async function setupWebGPUResources(state, { width, height, canvasId, uniforms }
 
 function transformWithDefaults(transform = {}) {
   return {
-    shader: transform.shader ?? '',
+    shader: transform.shader ?? "",
     workgroupSize: transform.workgroupSize ?? [16, 16],
     dispatchScale: transform.dispatchScale ?? 1,
-    customDispatch: transform.customDispatch ?? null
+    customDispatch: transform.customDispatch ?? null,
   };
 }
-
 
 function updateComputePipeline(state, transform) {
   const device = state.device;
@@ -423,7 +425,7 @@ async function renderFrame(state, transform, width, height) {
     device.queue.copyExternalImageToTexture(
       { source: imageBitmap },
       { texture: inputTexture },
-      [width, height]
+      [width, height],
     );
   } catch (error) {
     const imageData = videoCtx.getImageData(0, 0, width, height);
@@ -431,7 +433,7 @@ async function renderFrame(state, transform, width, height) {
       { texture: inputTexture },
       imageData.data,
       { bytesPerRow: width * 4 },
-      { width, height, depthOrArrayLayers: 1 }
+      { width, height, depthOrArrayLayers: 1 },
     );
   }
 
@@ -443,11 +445,10 @@ async function renderFrame(state, transform, width, height) {
   computePass.setBindGroup(0, computeBindGroup);
 
   // Use custom dispatch if provided, otherwise calculate based on dimensions and scale
-  const [wgX, wgY] =
-    transform.customDispatch || [
-      Math.ceil(width / (transform.workgroupSize[0] * transform.dispatchScale)),
-      Math.ceil(height / (transform.workgroupSize[1] * transform.dispatchScale)),
-    ];
+  const [wgX, wgY] = transform.customDispatch || [
+    Math.ceil(width / (transform.workgroupSize[0] * transform.dispatchScale)),
+    Math.ceil(height / (transform.workgroupSize[1] * transform.dispatchScale)),
+  ];
 
   // let's add that: if debugging is enabled, log dispatch workgroup values
   if (state.debug) {
@@ -482,7 +483,7 @@ export const WebGPUVideoView = ({
   height = 480,
   showSourceVideo = false,
   uniforms = {},
-  debug = false
+  debug = false,
 }) => {
   const canvasId = React.useId();
   const workgroupSize = transform.workgroupSize || [8, 8];
@@ -515,7 +516,7 @@ export const WebGPUVideoView = ({
     const { videoCanvas, videoCtx, cleanup } = setupVideoCanvas(
       width,
       height,
-      showSourceVideo
+      showSourceVideo,
     );
     webgpuRef.current.videoCanvas = videoCanvas;
     webgpuRef.current.videoCtx = videoCtx;
@@ -547,7 +548,8 @@ export const WebGPUVideoView = ({
       if (frameRef.current) {
         cancelAnimationFrame(frameRef.current);
       }
-      const { video, inputTexture, outputTexture, uniformBuffer } = webgpuRef.current;
+      const { video, inputTexture, outputTexture, uniformBuffer } =
+        webgpuRef.current;
       if (video?.srcObject) {
         video.srcObject.getTracks().forEach((track) => track.stop());
       }
@@ -566,7 +568,11 @@ export const WebGPUVideoView = ({
 
   // Update uniforms on change using helper function
   React.useEffect(() => {
-    updateUniformBuffer(webgpuRef.current.device, webgpuRef.current.uniformBuffer, uniforms);
+    updateUniformBuffer(
+      webgpuRef.current.device,
+      webgpuRef.current.uniformBuffer,
+      uniforms,
+    );
   }, [uniforms]);
 
   return html(["canvas", { id: canvasId, width, height }]);

@@ -25,24 +25,24 @@ nav:
   - Essential Reading: essential-reading.py
   - Scene3d: scene3d.py
   - The Basics:
-    - Layouts: system-guide/layouts.py
-    - State: system-guide/state.py
-    - HTML with Hiccup: system-guide/html-with-hiccup.py
-    - Color: learn-more/color.py
-    - JS Imports: system-guide/js-imports.py
-    - Interactivity & Animation:
-      - Sliders: interactivity/sliders.py
-      - Animating Frames: interactivity/frames.py
-      - Mouse events: interactivity/events.py
-      - Conditional Rendering: learn-more/cond.py
-      - Tailing data: interactivity/tail.py
+      - Layouts: system-guide/layouts.py
+      - State: system-guide/state.py
+      - HTML with Hiccup: system-guide/html-with-hiccup.py
+      - Color: learn-more/color.py
+      - JS Imports: system-guide/js-imports.py
+      - Interactivity & Animation:
+          - Sliders: interactivity/sliders.py
+          - Animating Frames: interactivity/frames.py
+          - Mouse events: interactivity/events.py
+          - Conditional Rendering: learn-more/cond.py
+          - Tailing data: interactivity/tail.py
   - Export:
-    - Save to File: export/save_to_file.py
-    - Images and Video: export/images_and_video.py
+      - Save to File: export/save_to_file.py
+      - Images and Video: export/images_and_video.py
   - Advanced:
-    - Python Event Loops: learn-more/python-event-loop.py
-    - Compare with Observable Plot: learn-more/vs-observable.py
-    - Plot Options: learn-more/plot-options.py
+      - Python Event Loops: learn-more/python-event-loop.py
+      - Compare with Observable Plot: learn-more/vs-observable.py
+      - Plot Options: learn-more/plot-options.py
   - Examples:
       - Draw Density: examples/draw-density.py
       - Live Editing Source Code: examples/live-edit-source.py
@@ -54,8 +54,8 @@ nav:
       - Rendering LaTeX: examples/katex.py
       - Render Pixel Data: examples/pixels.py
   - API Docs:
-    - Plot: api/plot.md
-    - Scene3D: api/scene3d.md
+      - Plot: api/plot.md
+      - Scene3D: api/scene3d.md
   - How Do I...: learn-more/how-do-i.py
 
   - Changelog: CHANGELOG.md
