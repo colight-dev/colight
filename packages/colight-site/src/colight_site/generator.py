@@ -4,7 +4,12 @@ import pathlib
 from typing import List, Optional
 import markdown
 
-from .parser import Form
+from colight_site.parser import Form
+from colight.env import VERSIONED_CDN_DIST_URL
+
+EMBED_URL = (
+    VERSIONED_CDN_DIST_URL + "/embed.js" if VERSIONED_CDN_DIST_URL else "/dist/embed.js"
+)
 
 
 class MarkdownGenerator:
@@ -48,28 +53,29 @@ class MarkdownGenerator:
 
                 # Add colight embed if we have a visualization
                 if colight_file:
-                    # Use relative path from output file location to colight file
-                    if output_path:
-                        try:
-                            relative_path = colight_file.relative_to(output_path.parent)
-                        except ValueError:
-                            # If relative_to fails, construct path manually
-                            colight_dir_name = self.output_dir.name
-                            relative_path = (
-                                pathlib.Path(colight_dir_name) / colight_file.name
-                            )
-                    else:
-                        # Fallback to directory name + filename
-                        colight_dir_name = self.output_dir.name
-                        relative_path = (
-                            pathlib.Path(colight_dir_name) / colight_file.name
-                        )
+                    embed_path = self._get_relative_path(colight_file, output_path)
                     lines.append(
-                        f'<div class="colight-embed" data-src="{relative_path}"></div>'
+                        f'<div class="colight-embed" data-src="{embed_path}"></div>'
                     )
                     lines.append("")
 
         return "\n".join(lines)
+
+    def _get_relative_path(
+        self, colight_file: pathlib.Path, output_path: Optional[pathlib.Path]
+    ) -> str:
+        """Get relative path from output file to colight file."""
+        if output_path:
+            try:
+                return str(colight_file.relative_to(output_path.parent))
+            except ValueError:
+                # If relative_to fails, construct path manually
+                colight_dir_name = self.output_dir.name
+                return str(pathlib.Path(colight_dir_name) / colight_file.name)
+        else:
+            # Fallback to directory name + filename
+            colight_dir_name = self.output_dir.name
+            return str(pathlib.Path(colight_dir_name) / colight_file.name)
 
     def _process_markdown_lines(self, markdown_lines: List[str]) -> str:
         """Process markdown lines from comments."""
@@ -165,9 +171,12 @@ class MarkdownGenerator:
             padding: 0;
         }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@colight/core/dist/embed.js"></script>
+    <script src="{EMBED_URL}"></script>
+    
 </head>
 <body>
-    {content}
+    <div class='prose'>
+        {content}
+    </div>
 </body>
 </html>"""

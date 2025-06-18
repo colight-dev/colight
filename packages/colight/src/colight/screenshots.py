@@ -47,18 +47,18 @@ class StudioContext(ChromeContext):
                 print("[screenshots.py] Loading Colight HTML")
 
             files = {}
-            # Handle script content based on whether env.WIDGET_URL is a CDN URL or local file
-            if isinstance(env.WIDGET_URL, str):  # CDN URL
+            # Handle script content based on whether env.WIDGET_PATH is a CDN URL or local file
+            if isinstance(env.WIDGET_PATH, str):  # CDN URL
                 if self.debug:
-                    print(f"[screenshots.py] Using CDN script from: {env.WIDGET_URL}")
-                script_tag = f'<script type="module" src="{env.WIDGET_URL}"></script>'
+                    print(f"[screenshots.py] Using CDN script from: {env.WIDGET_PATH}")
+                script_tag = f'<script type="module" src="{env.WIDGET_PATH}"></script>'
             else:  # Local file
                 if self.debug:
                     print(
-                        f"[screenshots.py] Loading local script from: {env.WIDGET_URL}"
+                        f"[screenshots.py] Loading local script from: {env.WIDGET_PATH}"
                     )
                 script_tag = '<script type="module" src="studio.js"></script>'
-                files["studio.js"] = read_file(env.WIDGET_URL)
+                files["studio.js"] = read_file(env.WIDGET_PATH)
 
             # CSS is now embedded in the JS bundle - no separate styling needed
             style_tag = ""

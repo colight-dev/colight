@@ -36,7 +36,6 @@ const anywidgetESM = {
 const embedConfigJS = {
   ...commonOptions,
   format: 'iife',
-  globalName: 'colight', // Makes it available as window.colight
   entryPoints: ['packages/colight/src/colight/js/embed.js'],
   outfile: 'dist/embed.js',
   plugins: [],

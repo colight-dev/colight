@@ -30,14 +30,15 @@ except Exception:
     # Another fallback approach
     COLIGHT_PATH = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 
-DIST_PATH = COLIGHT_PATH.parent.parent.parent.parent / "dist"
 
 CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 
 # CDN URLs for published assets - set during package build
-CDN_SCRIPT_URL = None
+VERSIONED_CDN_DIST_URL = None
+UNVERSIONED_CDN_DIST_URL = "https://cdn.jsdelivr.net/npm/@colight/core/dist"
+DIST_URL = str(VERSIONED_CDN_DIST_URL or "/dist")
+DIST_PATH = COLIGHT_PATH.parent.parent.parent.parent / "dist"  # local path to file
 
 # Local development paths
-WIDGET_URL = CDN_SCRIPT_URL or (DIST_PATH / "widget.mjs")
-
-ANYWIDGET_URL = str(WIDGET_URL).replace("widget.mjs", "anywidget.mjs")
+WIDGET_PATH = DIST_PATH / "widget.mjs"
+ANYWIDGET_PATH = str(WIDGET_PATH).replace("widget.mjs", "anywidget.mjs")

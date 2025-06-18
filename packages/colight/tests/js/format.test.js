@@ -45,17 +45,13 @@ describe("Colight Format", () => {
 
     // Verify each buffer has correct length
     for (let i = 0; i < buffers.length; i++) {
-      // Accept both Uint8Array and Node.js Buffer
-      expect(buffers[i]).toSatisfy(
-        (buf) =>
-          buf instanceof Uint8Array ||
-          (typeof Buffer !== "undefined" && buf instanceof Buffer),
-      );
-      expect(buffers[i].length).toBe(layout.lengths[i]);
+      // Buffers should be DataView objects
+      expect(buffers[i]).toBeInstanceOf(DataView);
+      expect(buffers[i].byteLength).toBe(layout.lengths[i]);
     }
 
     // Verify total size matches
-    const totalSize = buffers.reduce((sum, buf) => sum + buf.length, 0);
+    const totalSize = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
     expect(totalSize).toBe(layout.totalSize);
   });
 
@@ -100,11 +96,7 @@ describe("Colight Format", () => {
     for (const ref of bufferRefs) {
       expect(ref).toBeGreaterThanOrEqual(0);
       expect(ref).toBeLessThan(buffers.length);
-      expect(buffers[ref]).toSatisfy(
-        (buf) =>
-          buf instanceof Uint8Array ||
-          (typeof Buffer !== "undefined" && buf instanceof Buffer),
-      );
+      expect(buffers[ref]).toBeInstanceOf(DataView);
     }
   });
 
@@ -113,14 +105,10 @@ describe("Colight Format", () => {
     const data = parseColightData(fileData);
     const { buffers } = data;
 
-    // Verify buffers are typed arrays (not copies)
+    // Verify buffers are DataView objects (not copies)
     for (const buffer of buffers) {
-      expect(buffer).toSatisfy(
-        (buf) =>
-          buf instanceof Uint8Array ||
-          (typeof Buffer !== "undefined" && buf instanceof Buffer),
-      );
-      expect(buffer.length).toBeGreaterThan(0);
+      expect(buffer).toBeInstanceOf(DataView);
+      expect(buffer.byteLength).toBeGreaterThan(0);
     }
   });
 

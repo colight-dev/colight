@@ -57,15 +57,18 @@ describe("Colight Integration", () => {
     expect(layout.lengths.length).toBe(layout.count);
     expect(buffers.length).toBe(layout.count);
 
-    // Verify offsets are sequential
-    let expectedOffset = 0;
+    // Verify offsets are properly aligned (8-byte alignment)
+    const ALIGNMENT = 8;
     for (let i = 0; i < layout.count; i++) {
-      expect(layout.offsets[i]).toBe(expectedOffset);
-      expect(buffers[i].length).toBe(layout.lengths[i]);
-      expectedOffset += layout.lengths[i];
+      // Each buffer offset should be aligned
+      expect(layout.offsets[i] % ALIGNMENT).toBe(0);
+      expect(buffers[i].byteLength).toBe(layout.lengths[i]);
     }
 
-    expect(expectedOffset).toBe(layout.totalSize);
+    // Verify total size includes padding
+    const lastOffset = layout.offsets[layout.count - 1];
+    const lastLength = layout.lengths[layout.count - 1];
+    expect(layout.totalSize).toBeGreaterThanOrEqual(lastOffset + lastLength);
   });
 
   it("should have valid raster data structure for the test file", () => {
@@ -82,7 +85,7 @@ describe("Colight Integration", () => {
     expect(buffers.length).toBeGreaterThanOrEqual(1);
 
     // Buffers should contain actual data
-    const totalBytes = buffers.reduce((sum, buf) => sum + buf.length, 0);
+    const totalBytes = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
     expect(totalBytes).toBeGreaterThan(0);
 
     // Should have buffer references in the data

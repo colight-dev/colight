@@ -15,6 +15,7 @@ import Katex from "katex";
 import markdownItKatex from "./markdown-it-katex";
 import * as scene3d from "./scene3d/scene3d";
 import { Bitmap } from "./components/bitmap";
+import { inspect } from "./inspect";
 
 export const CONTAINER_PADDING = 10;
 const KATEX_CSS_URL =
@@ -362,6 +363,7 @@ export {
   render,
   scene3d,
   Bitmap,
+  inspect,
 };
 
 function renderArray($state, value) {
@@ -406,40 +408,45 @@ function DOMElementWrapper({ element }) {
 export const Node = mobxReact.observer(function ({ value }) {
   const $state = useContext($StateContext);
 
-  // handle pre-evaluated arrays
-  if (Array.isArray(value)) {
-    return renderArray($state, value);
-  }
+  try {
+    // handle pre-evaluated arrays
+    if (Array.isArray(value)) {
+      return renderArray($state, value);
+    }
 
-  const evaluatedValue = $state.evaluate(value);
+    const evaluatedValue = $state.evaluate(value);
 
-  // handle post-evaluated arrays (eg. arrays that came from a Plot.js expression)
-  if (Array.isArray(evaluatedValue)) {
-    return renderArray($state, evaluatedValue);
-  }
-  if (
-    typeof evaluatedValue === "object" &&
-    evaluatedValue !== null &&
-    "render" in evaluatedValue
-  ) {
-    return evaluatedValue.render();
-  }
+    // handle post-evaluated arrays (eg. arrays that came from a Plot.js expression)
+    if (Array.isArray(evaluatedValue)) {
+      return renderArray($state, evaluatedValue);
+    }
+    if (
+      typeof evaluatedValue === "object" &&
+      evaluatedValue !== null &&
+      "render" in evaluatedValue
+    ) {
+      return evaluatedValue.render();
+    }
 
-  if (
-    evaluatedValue instanceof HTMLElement ||
-    evaluatedValue instanceof SVGElement
-  ) {
-    return <DOMElementWrapper element={evaluatedValue} />;
-  }
+    if (
+      evaluatedValue instanceof HTMLElement ||
+      evaluatedValue instanceof SVGElement
+    ) {
+      return <DOMElementWrapper element={evaluatedValue} />;
+    }
 
-  if (
-    typeof evaluatedValue === "string" ||
-    typeof evaluatedValue === "number"
-  ) {
-    return <span>{evaluatedValue}</span>;
-  }
+    if (
+      typeof evaluatedValue === "string" ||
+      typeof evaluatedValue === "number"
+    ) {
+      return <span>{evaluatedValue}</span>;
+    }
 
-  return evaluatedValue;
+    return evaluatedValue;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
 });
 
 function isProps(props) {

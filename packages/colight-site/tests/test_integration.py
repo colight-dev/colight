@@ -2,7 +2,6 @@
 
 import pathlib
 import tempfile
-import json
 from colight_site.builder import build_file, init_project
 from colight_site.parser import is_colight_file
 
@@ -55,7 +54,7 @@ print("Processing complete!")
 
         # Check for colight embed
         assert 'class="colight-embed"' in markdown_content
-        assert 'data-src="form-' in markdown_content
+        assert "data-src=" in markdown_content and "form-" in markdown_content
 
         # Verify colight files were created
         colight_dir = temp_path / "test_colight"
@@ -64,10 +63,16 @@ print("Processing complete!")
         colight_files = list(colight_dir.glob("*.colight"))
         assert len(colight_files) >= 1  # At least one visualization
 
-        # Check first colight file content
+        # Check first colight file content - it should be a binary .colight file
         first_colight = colight_files[0]
-        colight_data = json.loads(first_colight.read_text())
-        assert "data" in colight_data or "repr" in colight_data
+        file_content = first_colight.read_bytes()
+        assert file_content.startswith(b"COLIGHT\x00")  # Check magic bytes
+
+        # The file should be parseable by the colight format module
+        from colight.format import parse_file
+
+        json_data, buffers = parse_file(first_colight)
+        assert "ast" in json_data  # Should have AST structure
 
 
 def test_project_initialization():

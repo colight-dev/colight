@@ -32,7 +32,7 @@ def test_markdown_generation():
         assert "```python" in markdown
         assert "import numpy as np" in markdown
         assert "np.sin(x)" in markdown
-        assert 'data-src="test.colight"' in markdown
+        assert "data-src=" in markdown and 'test.colight"' in markdown
 
 
 def test_html_generation():
@@ -57,6 +57,6 @@ def test_html_generation():
         assert "<!DOCTYPE html>" in html
         assert "<title>Test Document</title>" in html
         assert "colight-embed" in html
-        assert "@colight/core/dist/embed.js" in html
+        assert "embed.js" in html
         assert "<h1>Test Document</h1>" in html
         assert "<p>This is a test</p>" in html

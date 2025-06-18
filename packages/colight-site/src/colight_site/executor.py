@@ -8,6 +8,8 @@ import io
 import contextlib
 
 from .parser import Form
+from colight.layout import LayoutItem
+from colight.inspect import inspect
 
 
 class FormExecutor:
@@ -83,13 +85,12 @@ except ImportError:
         output_path = self.output_dir / f"form-{form_index:03d}.colight"
 
         try:
-            # Use colight's serialization to save the visualization
-            colight = self.env.get("colight")
-            if colight and hasattr(colight, "save"):
-                colight.save(value, str(output_path))
+            # If it's already a LayoutItem, save it directly
+            if isinstance(value, LayoutItem):
+                value.save_file(str(output_path))
             else:
-                # Fallback: create a simple colight file
-                self._create_simple_colight_file(value, output_path)
+                # Create a default visualization and save it
+                inspect(value).save_file(str(output_path))
 
             return output_path
 
@@ -111,30 +112,6 @@ except ImportError:
 
         # For now, assume anything else might be visualizable
         return True
-
-    def _create_simple_colight_file(self, value: Any, output_path: pathlib.Path):
-        """Create a simple .colight file as fallback."""
-        # This is a placeholder - in a real implementation, you'd use
-        # colight's actual serialization format
-        import json
-
-        # Try to create a JSON representation
-        try:
-            if hasattr(value, "tolist"):  # numpy arrays
-                data = value.tolist()
-            elif hasattr(value, "__dict__"):
-                data = str(value)  # Fallback to string representation
-            else:
-                data = str(value)
-
-            # Create a minimal colight format
-            colight_data = {"type": "visualization", "data": data, "repr": str(value)}
-
-            output_path.write_text(json.dumps(colight_data, indent=2))
-
-        except Exception:
-            # Ultimate fallback
-            output_path.write_text(f'{{"repr": "{str(value)}"}}')
 
 
 class SafeFormExecutor(FormExecutor):
