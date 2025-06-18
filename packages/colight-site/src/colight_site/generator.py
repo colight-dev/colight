@@ -25,6 +25,9 @@ class MarkdownGenerator:
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
+        hide_statements: bool = False,
+        hide_visuals: bool = False,
+        hide_code: bool = False,
     ) -> str:
         """Generate complete Markdown document."""
         lines = []
@@ -39,26 +42,49 @@ class MarkdownGenerator:
             # Check if this is a dummy form (markdown-only)
             is_dummy_form = self._is_dummy_form(form)
 
-            # Add regular markdown content from comments (separated by blank lines)
+            # Resolve form-specific settings: per-form metadata overrides file/CLI defaults
+            resolved_settings = form.metadata.resolve_with_defaults(
+                default_hide_statements=hide_statements,
+                default_hide_visuals=hide_visuals,
+                default_hide_code=hide_code,
+            )
+
+            # Always add markdown content from comments (separated by blank lines)
             if form.markdown:
                 markdown_content = self._process_markdown_lines(form.markdown)
                 if markdown_content.strip():
                     lines.append(markdown_content)
                     lines.append("")
 
-            # Add code block (but skip dummy forms and literals)
-            if not is_dummy_form:
-                code = form.code.strip()
-                show_code = code and not form.is_literal
+            # Determine if we should show the code block
+            # If this form explicitly sets hide_code=False (show-code), it overrides hide_statements
+            explicit_show_code = form.metadata.hide_code is False
 
-                if show_code:
-                    lines.append("```python")
-                    lines.append(code)
-                    lines.append("```")
-                    lines.append("")
+            if explicit_show_code:
+                # show-code pragma overrides both hide_code and hide_statements for this form
+                show_code_block = True
+            else:
+                # Normal logic: skip if hide_code is True OR if hide_statements is True and this is a statement
+                show_code_block = not resolved_settings["hide_code"] and not (
+                    resolved_settings["hide_statements"] and form.is_statement
+                )
 
+            if show_code_block:
+                # Add code block (but skip dummy forms and literals)
+                if not is_dummy_form:
+                    code = form.code.strip()
+                    show_code = code and not form.is_literal
+
+                    if show_code:
+                        lines.append("```python")
+                        lines.append(code)
+                        lines.append("```")
+                        lines.append("")
+
+            # Skip visuals if hide_visuals is True
+            if not resolved_settings["hide_visuals"]:
                 # Add colight embed if we have a visualization
-                if colight_file:
+                if colight_file and not is_dummy_form:
                     embed_path = self._get_relative_path(colight_file, output_path)
                     lines.append(
                         f'<div class="colight-embed" data-src="{embed_path}"></div>'
@@ -159,11 +185,20 @@ class MarkdownGenerator:
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
+        hide_statements: bool = False,
+        hide_visuals: bool = False,
+        hide_code: bool = False,
     ) -> str:
         """Generate complete HTML document with embedded visualizations."""
         # First generate markdown content
         markdown_content = self.generate_markdown(
-            forms, colight_files, title, output_path
+            forms,
+            colight_files,
+            title,
+            output_path,
+            hide_statements=hide_statements,
+            hide_visuals=hide_visuals,
+            hide_code=hide_code,
         )
 
         # Convert markdown to HTML

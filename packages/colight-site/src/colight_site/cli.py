@@ -31,21 +31,64 @@ def main():
     default="markdown",
     help="Output format",
 )
+@click.option(
+    "--hide-statements",
+    is_flag=True,
+    help="Hide statements, only show expressions",
+)
+@click.option(
+    "--hide-visuals",
+    is_flag=True,
+    help="Hide visuals, only show code",
+)
+@click.option(
+    "--hide-code",
+    is_flag=True,
+    help="Hide code blocks",
+)
+@click.option(
+    "--mostly-prose",
+    is_flag=True,
+    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
+)
 def build(
-    input_path: pathlib.Path, output: Optional[pathlib.Path], verbose: bool, format: str
+    input_path: pathlib.Path,
+    output: Optional[pathlib.Path],
+    verbose: bool,
+    format: str,
+    hide_statements: bool,
+    hide_visuals: bool,
+    hide_code: bool,
+    mostly_prose: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
+    # Handle --mostly-prose flag
+    if mostly_prose:
+        hide_statements = True
+        hide_code = True
+
+    # Create options dict
+    options = {
+        "hide_statements": hide_statements,
+        "hide_visuals": hide_visuals,
+        "hide_code": hide_code,
+    }
+
     if input_path.is_file():
         # Single file
         if not output:
             output = builder._get_output_path(input_path, format)
-        builder.build_file(input_path, output, verbose=verbose, format=format)
+        builder.build_file(
+            input_path, output, verbose=verbose, format=format, **options
+        )
         click.echo(f"Built {input_path} -> {output}")
     else:
         # Directory
         if not output:
             output = pathlib.Path("build")
-        builder.build_directory(input_path, output, verbose=verbose, format=format)
+        builder.build_directory(
+            input_path, output, verbose=verbose, format=format, **options
+        )
         click.echo(f"Built {input_path}/ -> {output}/")
 
 
@@ -66,11 +109,54 @@ def build(
     default="markdown",
     help="Output format",
 )
-def watch(input_path: pathlib.Path, output: pathlib.Path, verbose: bool, format: str):
+@click.option(
+    "--hide-statements",
+    is_flag=True,
+    help="Hide statements, only show expressions",
+)
+@click.option(
+    "--hide-visuals",
+    is_flag=True,
+    help="Hide visuals, only show code",
+)
+@click.option(
+    "--hide-code",
+    is_flag=True,
+    help="Hide code blocks",
+)
+@click.option(
+    "--mostly-prose",
+    is_flag=True,
+    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
+)
+def watch(
+    input_path: pathlib.Path,
+    output: pathlib.Path,
+    verbose: bool,
+    format: str,
+    hide_statements: bool,
+    hide_visuals: bool,
+    hide_code: bool,
+    mostly_prose: bool,
+):
     """Watch for changes and rebuild automatically."""
+    # Handle --mostly-prose flag
+    if mostly_prose:
+        hide_statements = True
+        hide_code = True
+
+    # Create options dict
+    options = {
+        "hide_statements": hide_statements,
+        "hide_visuals": hide_visuals,
+        "hide_code": hide_code,
+    }
+
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
-    watcher.watch_and_build(input_path, output, verbose=verbose, format=format)
+    watcher.watch_and_build(
+        input_path, output, verbose=verbose, format=format, **options
+    )
 
 
 @main.command()
