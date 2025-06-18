@@ -137,9 +137,17 @@ def _serialize_value(
                 dtype = str(value.dtype)
                 size = value.size
 
+                # Convert to list for serialization, with truncation if needed
+                if size <= max_items:
+                    data_value = value.tolist()
+                else:
+                    # For large arrays, only convert a sample
+                    flat = value.flatten()
+                    data_value = flat[:max_items].tolist()
+
                 return {
                     "type_info": type_info,
-                    "value": value,
+                    "value": data_value,
                     "shape": shape,
                     "dtype": dtype,
                     "size": size,
