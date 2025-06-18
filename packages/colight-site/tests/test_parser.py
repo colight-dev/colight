@@ -33,22 +33,29 @@ np.sin(x)
 
         forms = parse_colight_file(pathlib.Path(f.name))
 
-        # Should have 3 forms
-        assert len(forms) == 3
+        # Should have 5 forms (improved separation of markdown and code)
+        assert len(forms) == 5
 
         # First form: import (should have the title comments)
         assert "import numpy as np" in forms[0].code
         assert len(forms[0].markdown) > 0
         assert "This is a title" in forms[0].markdown[0]
 
-        # Second form: assignment
-        assert "Create data" not in forms[1].code
-        assert "x = np.linspace" in forms[1].code
+        # Second form: dummy markdown form for "Create data"
         assert "Create data" in forms[1].markdown[0]
+        assert forms[1].code.strip() == "pass"
 
-        # Third form: expression
-        assert "np.sin(x)" in forms[2].code
-        assert forms[2].is_expression
+        # Third form: assignment
+        assert "x = np.linspace" in forms[2].code
+        assert len(forms[2].markdown) == 0
+
+        # Fourth form: dummy markdown form for "This creates a visualization"
+        assert "This creates a visualization" in forms[3].markdown[0]
+        assert forms[3].code.strip() == "pass"
+
+        # Fifth form: expression
+        assert "np.sin(x)" in forms[4].code
+        assert forms[4].is_expression
 
         # Clean up
         pathlib.Path(f.name).unlink()
@@ -86,24 +93,32 @@ result = x, y, z
 
         forms = parse_colight_file(pathlib.Path(f.name))
 
-        # Should have 3 forms total (improved grouping)
-        assert len(forms) == 3
+        # Should have 6 forms total (improved separation of markdown and code)
+        assert len(forms) == 6
 
         # Form 0: import with title markdown
         assert "Title" in forms[0].markdown[0]
         assert "import numpy as np" in forms[0].code
 
-        # Form 1: comment + first statement + consecutive statements
+        # Form 1: dummy markdown form for "Some comment"
         assert "Some comment" in forms[1].markdown[0]
-        combined_code = forms[1].code
-        assert "x = np.linspace(0, 10, 100)" in combined_code
-        assert "y = np.sin(x)" in combined_code
-        assert "z = np.cos(x)" in combined_code
-        # Should be on separate lines
-        assert "\n" in combined_code
+        assert forms[1].code.strip() == "pass"
 
-        # Form 2: comment + final statement
-        assert "Another comment" in forms[2].markdown[0]
-        assert "result = x, y, z" in forms[2].code
+        # Form 2: first assignment
+        assert "x = np.linspace" in forms[2].code
+        assert len(forms[2].markdown) == 0
+
+        # Form 3: grouped assignments (consecutive code)
+        assert "y = np.sin" in forms[3].code
+        assert "z = np.cos" in forms[3].code
+        assert len(forms[3].markdown) == 0
+
+        # Form 4: dummy markdown form for "Another comment"
+        assert "Another comment" in forms[4].markdown[0]
+        assert forms[4].code.strip() == "pass"
+
+        # Form 5: final assignment
+        assert "result = x, y, z" in forms[5].code
+        assert len(forms[5].markdown) == 0
 
         pathlib.Path(f.name).unlink()

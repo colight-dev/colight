@@ -8,7 +8,6 @@ import io
 import contextlib
 
 from .parser import Form
-from colight.layout import LayoutItem
 from colight.inspect import inspect
 
 
@@ -77,21 +76,14 @@ except ImportError:
         if value is None:
             return None
 
-        # Check if this is a Colight-compatible object
-        if not self._is_colight_compatible(value):
-            return None
-
-        # Generate output filename
         output_path = self.output_dir / f"form-{form_index:03d}.colight"
 
         try:
-            # If it's already a LayoutItem, save it directly
-            if isinstance(value, LayoutItem):
-                value.save_file(str(output_path))
-            else:
-                # Create a default visualization and save it
-                inspect(value).save_file(str(output_path))
-
+            # Let inspect() handle all the complexity internally
+            visual = inspect(value)
+            if visual is None:
+                return None
+            visual.save_file(str(output_path))
             return output_path
 
         except Exception as e:
@@ -99,19 +91,6 @@ except ImportError:
                 f"Warning: Could not save Colight visualization: {e}", file=sys.stderr
             )
             return None
-
-    def _is_colight_compatible(self, value: Any) -> bool:
-        """Check if a value can be visualized with Colight."""
-        # Basic heuristic - anything that's not None and not a basic type
-        if value is None:
-            return False
-
-        # Skip basic types that don't make sense to visualize
-        if isinstance(value, (str, int, float, bool, type(None))):
-            return False
-
-        # For now, assume anything else might be visualizable
-        return True
 
 
 class SafeFormExecutor(FormExecutor):

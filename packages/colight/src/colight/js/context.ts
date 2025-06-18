@@ -10,4 +10,3 @@ declare global {
 export const $StateContext: React.Context<any> = (window.$StateContext =
   window.$StateContext || createContext<any>(undefined));
 export const AUTOGRID_MIN: number = 165;
-export const CONTAINER_PADDING: number = 10;

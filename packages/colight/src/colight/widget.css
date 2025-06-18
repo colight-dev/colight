@@ -74,6 +74,10 @@
     color: #333333;
 }
 
+.lm-Widget .colight-container {
+    padding: 10px;
+}
+
 .bylight-link {
     color: inherit;
     background-color: color-mix(in srgb, var(--bylight-color) 25%, transparent);
