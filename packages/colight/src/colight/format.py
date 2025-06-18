@@ -15,7 +15,12 @@ Header Structure (96 bytes):
 
 After header:
 - JSON section: Contains AST and metadata
-- Binary section: Concatenated binary buffers
+- Binary section: Concatenated binary buffers with 8-byte alignment
+
+Alignment guarantees:
+- The binary section starts at an 8-byte aligned offset from the file beginning
+- Each buffer within the binary section starts at an 8-byte aligned offset
+- This ensures zero-copy typed array creation for all standard numeric types
 
 The JSON includes buffer layout with offsets and lengths for each buffer.
 Buffer references in the AST keep using the existing index system.
@@ -50,7 +55,15 @@ def create_bytes(
     buffer_lengths = []
     current_offset = 0
 
+    # Alignment requirement (8 bytes covers all typed arrays)
+    ALIGNMENT = 8
+
     for buffer in buffers:
+        # Ensure offset is aligned
+        if current_offset % ALIGNMENT != 0:
+            padding = ALIGNMENT - (current_offset % ALIGNMENT)
+            current_offset += padding
+
         buffer_offsets.append(current_offset)
         buffer_length = len(buffer)
         buffer_lengths.append(buffer_length)
@@ -70,10 +83,15 @@ def create_bytes(
         "utf-8"
     )
 
-    # Calculate file layout
+    # Calculate file layout with alignment
     json_offset = HEADER_SIZE
     json_length = len(json_bytes)
-    binary_offset = json_offset + json_length
+
+    # Ensure binary section starts at an 8-byte aligned offset
+    unaligned_binary_offset = json_offset + json_length
+    binary_offset = (unaligned_binary_offset + 7) & ~7  # Round up to 8-byte boundary
+    json_padding = binary_offset - unaligned_binary_offset
+
     binary_length = current_offset
     num_buffers = len(buffers)
 
@@ -92,8 +110,20 @@ def create_bytes(
     result = bytearray()
     result.extend(header)
     result.extend(json_bytes)
-    for buffer in buffers:
+    result.extend(b"\x00" * json_padding)  # Padding after JSON to align binary section
+
+    # Write buffers with alignment padding
+    written_offset = 0
+    for i, buffer in enumerate(buffers):
+        # Add padding if needed
+        expected_offset = buffer_offsets[i]
+        if written_offset < expected_offset:
+            padding_size = expected_offset - written_offset
+            result.extend(b"\x00" * padding_size)
+            written_offset = expected_offset
+
         result.extend(buffer)
+        written_offset += len(buffer)
 
     return bytes(result)
 

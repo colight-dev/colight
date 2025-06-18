@@ -13,13 +13,16 @@ output_dir.mkdir(exist_ok=True)
 
 # Create a simple visual
 print("Creating a visual...")
-data = np.random.rand(10, 10)
-p = Plot.raster(data)
+# Create a 1D flat numpy array with interleaved x,y coordinates
+data = np.random.rand(2000)  # 1000 points * 2 coordinates = 2000 values
+p = Plot.dot(
+    {"x": np.random.rand(1000), "y": np.random.rand(1000)},
+)
 
 # Export with local embed
 print("Exporting to .colight with local development viewer...")
 colight_path = p.save_file("scratch/test_export.colight")
-example_path = create_embed_example(colight_path, False)
+example_path = create_embed_example(colight_path)
 
 print("Success! Files created:")
 print(f"- .colight file: {colight_path}")

@@ -2,8 +2,7 @@ import colight.plot as Plot
 from colight.plot import js
 from colight.scene3d import PointCloud
 from notebooks.scene3d.scene3d_ripple import create_ripple_grid
-from colight.html import export_colight
-from notebooks.embed_examples import create_embed_example
+from notebooks.save_and_embed_file import create_embed_example
 from pathlib import Path
 
 # Create output directory if it doesn't exist
@@ -61,40 +60,6 @@ where:
     )
 )
 
-p
-
-# Method 1: Export with automatic example creation (recommended)
-print("\n1. Exporting visual with automatic example creation...")
-colight_path, example_path = export_colight(
-    p,
-    "scratch/embed_example.colight",
-    create_example=True,
-    use_local_embed=True,  # Use local embed.mjs for testing
-)
-
+colight_path = p.save_file("scratch/embed_example.colight")
+create_embed_example(colight_path)
 print(f"✓ Created .colight file at: {colight_path}")
-print(f"✓ Created example HTML at: {example_path}")
-
-# Method 2: Export just the .colight file and create example separately
-print("\n2. Alternative method with separate example creation...")
-# Export as .colight file only
-colight_path2 = export_colight(
-    p, "scratch/embed_example2.colight", create_example=False
-)
-
-# Create an example HTML file showing how to embed it
-example_path2 = create_embed_example(
-    "scratch/embed_example2.colight",  # Path to the .colight file
-    use_local_embed=True,  # Use local embed.mjs for testing
-)
-
-print(f"✓ Created .colight file at: {colight_path2}")
-print(f"✓ Created example HTML at: {example_path2}")
-
-# Instructions for the user
-print("\n" + "=" * 70)
-print("VIEWING THE EXAMPLES")
-print("=" * 70)
-print("The example HTML files should work directly in your browser when opened:")
-print(f"1. {example_path}")
-print(f"2. {example_path2}")

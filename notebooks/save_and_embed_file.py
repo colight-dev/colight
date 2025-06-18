@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Union
 
@@ -9,26 +8,13 @@ from colight.scene3d import PointCloud
 from notebooks.scene3d.scene3d_ripple import create_ripple_grid
 
 
-def create_embed_example(
-    colight_path: Union[str, Path],
-    use_cdn: bool = True,
-) -> str:
+def create_embed_example(colight_path: Union[str, Path]) -> str:
     """Create a minimal HTML example demonstrating .colight embedding."""
     colight_path = Path(colight_path)
     output_dir = colight_path.parent
 
     rel_path = colight_path.name
-
-    if not use_cdn:
-        local_embed_path = env.DIST_PATH / "embed.mjs"
-        if local_embed_path.exists():
-            script_url = f"./{os.path.relpath(local_embed_path, output_dir)}"
-        else:
-            raise FileNotFoundError("Local embed.js not found. Run `yarn dev`")
-    elif isinstance(env.WIDGET_URL, str):
-        script_url = str(env.WIDGET_URL).replace("widget.mjs", "embed.mjs")
-    else:
-        script_url = "https://cdn.jsdelivr.net/npm/@colight/core/embed.js"
+    script_url = env.UNVERSIONED_CDN_DIST_URL + "/embed.js"
 
     example_html = f"""<!DOCTYPE html>
 <html>
@@ -105,6 +91,6 @@ where:
 p
 
 
-path = create_embed_example(p.save_file("scratch/embed_example.colight"), False)
+path = create_embed_example(p.save_file("scratch/embed_example.colight"))
 
 print(f"✓ Created .colight file at: {path}")

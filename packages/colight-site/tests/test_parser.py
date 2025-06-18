@@ -42,6 +42,7 @@ np.sin(x)
         assert "This is a title" in forms[0].markdown[0]
 
         # Second form: assignment
+        assert "Create data" not in forms[1].code
         assert "x = np.linspace" in forms[1].code
         assert "Create data" in forms[1].markdown[0]
 
@@ -61,5 +62,48 @@ def test_parse_empty_file():
 
         forms = parse_colight_file(pathlib.Path(f.name))
         assert len(forms) == 0
+
+
+def test_consecutive_code_grouping():
+    """Test that consecutive code statements are grouped into single forms."""
+    content = """# Title
+# Description
+
+import numpy as np
+
+# Some comment
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+z = np.cos(x)
+
+# Another comment
+result = x, y, z
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms = parse_colight_file(pathlib.Path(f.name))
+
+        # Should have 3 forms total (improved grouping)
+        assert len(forms) == 3
+
+        # Form 0: import with title markdown
+        assert "Title" in forms[0].markdown[0]
+        assert "import numpy as np" in forms[0].code
+
+        # Form 1: comment + first statement + consecutive statements
+        assert "Some comment" in forms[1].markdown[0]
+        combined_code = forms[1].code
+        assert "x = np.linspace(0, 10, 100)" in combined_code
+        assert "y = np.sin(x)" in combined_code
+        assert "z = np.cos(x)" in combined_code
+        # Should be on separate lines
+        assert "\n" in combined_code
+
+        # Form 2: comment + final statement
+        assert "Another comment" in forms[2].markdown[0]
+        assert "result = x, y, z" in forms[2].code
 
         pathlib.Path(f.name).unlink()

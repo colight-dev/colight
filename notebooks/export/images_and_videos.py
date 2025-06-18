@@ -35,7 +35,7 @@ points = np.column_stack(
 )
 dots = Plot.dot(points, r=10, fill="steelblue")
 
-dots.save_html(str(output_dir / "dots.html"), use_cdn=False)
+dots.save_html(str(output_dir / "dots.html"))
 
 # %%
 
@@ -150,7 +150,7 @@ animated_scene = Plot.initialState({"t": 0}) | Ellipsoid(
 animated_scene
 
 (animated_scene | Plot.Slider("t", range=60, fps=10)).save_html(
-    str(output_dir / "points.html"), use_cdn=False
+    str(output_dir / "points.html")
 )
 
 # %%

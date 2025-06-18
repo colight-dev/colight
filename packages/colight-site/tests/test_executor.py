@@ -2,7 +2,6 @@
 
 import pathlib
 import tempfile
-import json
 from colight_site.executor import FormExecutor, SafeFormExecutor
 from colight_site.parser import parse_colight_file
 
@@ -130,11 +129,16 @@ def test_colight_visualization_saving():
         assert colight_file.exists()
         assert colight_file.name == "form-000.colight"
 
-        # Verify file content
-        content = json.loads(colight_file.read_text())
-        assert (
-            content["data"] == [1, 2, 3, 4, 5] or content["repr"] == "[1, 2, 3, 4, 5]"
-        )
+        # Verify file content - it should be a binary .colight file with magic bytes
+        file_content = colight_file.read_bytes()
+        assert file_content.startswith(b"COLIGHT\x00")  # Check magic bytes
+
+        # The file should be parseable by the colight format module
+        from colight.format import parse_file
+
+        json_data, buffers = parse_file(colight_file)
+        assert "ast" in json_data  # Should have AST structure
+        assert "display_as" in json_data  # Should have display preferences
 
 
 def test_error_handling():

@@ -13,7 +13,7 @@ const HEADER_SIZE = 96;
  * Parse a .colight file from ArrayBuffer or Uint8Array.
  *
  * @param {ArrayBuffer|Uint8Array} data - The .colight file content
- * @returns {{...jsonData, buffers: Uint8Array[]}} - Parsed JSON data spread with buffers array
+ * @returns {{...jsonData, buffers: DataView[]}} - Parsed JSON data spread with buffers array
  * @throws {Error} If file format is invalid
  */
 export function parseColightData(data) {
@@ -52,10 +52,10 @@ export function parseColightData(data) {
     throw new Error(`Unsupported .colight file version: ${version}`);
   }
 
-  // Robustness checks
-  if (binaryOffset !== jsonOffset + jsonLength) {
+  // Robustness checks - binary section should be after JSON section (with possible padding)
+  if (binaryOffset < jsonOffset + jsonLength) {
     throw new Error(
-      `Invalid .colight file: Binary section should start immediately after JSON section`,
+      `Invalid .colight file: Binary section overlaps with JSON section`,
     );
   }
 
@@ -109,9 +109,13 @@ export function parseColightData(data) {
       );
     }
 
-    // Create a view into the binary data without copying
+    // Create a DataView into the binary data without copying
     // This is memory efficient as requested
-    const buffer = binaryData.subarray(offset, offset + length);
+    const buffer = new DataView(
+      binaryData.buffer,
+      binaryData.byteOffset + offset,
+      length,
+    );
     buffers.push(buffer);
   }
 
@@ -122,7 +126,7 @@ export function parseColightData(data) {
  * Load and parse a .colight file from a URL.
  *
  * @param {string} url - URL to the .colight file
- * @returns {Promise<{...jsonData, buffers: Uint8Array[]}>} - Parsed data and buffers
+ * @returns {Promise<{...jsonData, buffers: DataView[]}>} - Parsed data and buffers
  */
 export async function loadColightFile(url) {
   try {
@@ -145,7 +149,7 @@ export async function loadColightFile(url) {
  * Parse .colight data from a script tag with type='application/x-colight'.
  *
  * @param {HTMLScriptElement} scriptElement - The script element containing base64-encoded .colight data
- * @returns {{...jsonData, buffers: Uint8Array[]}} - Parsed data and buffers
+ * @returns {{...jsonData, buffers: DataView[]}} - Parsed data and buffers
  */
 export function parseColightScript(scriptElement) {
   // Get the base64-encoded content from the script tag

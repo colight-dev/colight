@@ -50,7 +50,7 @@ p.save_file("my_visual.colight")
 #
 # ```html
 # <!-- Import the Colight embed script -->
-# <script type="module" src="https://cdn.jsdelivr.net/npm/@colight/core/embed.js"></script>
+# <script type="module" src="https://cdn.jsdelivr.net/npm/@colight/core/dist/embed.js"></script>
 #
 # <!-- Embed the visualization -->
 # <div class="colight-embed" data-src="./my_visualization.colight"></div>
@@ -60,7 +60,7 @@ p.save_file("my_visual.colight")
 #
 # ```html
 # <script type="module">
-#   import { loadVisual } from "https://cdn.jsdelivr.net/npm/@colight/core/embed.js";
+#   import { loadVisual } from "https://cdn.jsdelivr.net/npm/@colight/core/dist/embed.js";
 #   loadVisual("#my-container", "./my_visualization.colight");
 # </script>
 # <div id="my-container"></div>

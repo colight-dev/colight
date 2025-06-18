@@ -9,7 +9,7 @@ function resolveReference(path, obj) {
 }
 
 // colight is on window so that ESM scripts can access it
-globals.colight.api = api;
+window.colight.api = api;
 window.d3 = api.d3;
 window.html = api.html;
 window.React = api.React;

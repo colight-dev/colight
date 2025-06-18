@@ -134,19 +134,12 @@ describe("Widget", () => {
     it("should render a reactive variable in markdown", async () => {
       const ast = {
         __type__: "function",
-        path: "Hiccup",
+        path: "md",
         args: [
-          "div",
           {
-            __type__: "function",
-            path: "md",
-            args: [
-              {
-                __type__: "js_source",
-                expression: true,
-                value: "`Count: ${$state.count}`",
-              },
-            ],
+            __type__: "js_source",
+            expression: true,
+            value: "`Count: ${$state.count}`",
           },
         ],
       };

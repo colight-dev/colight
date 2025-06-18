@@ -117,6 +117,7 @@ export function evaluateNdarray(node) {
   const ArrayConstructor = dtypeMap[dtype] || Float64Array;
 
   // Create typed array directly from the DataView's buffer
+  // Our format guarantees 8-byte alignment for all buffers
   const flatArray = new ArrayConstructor(
     data.buffer,
     data.byteOffset,
