@@ -10,7 +10,7 @@ import {
   collectBuffers,
   replaceBuffers,
 } from "./eval";
-import { $StateContext, CONTAINER_PADDING } from "./context";
+import { $StateContext } from "./context";
 import { useCellUnmounted, tw } from "./utils";
 import { ReadyStateManager } from "./ready";
 import * as globals from "./globals";
@@ -440,11 +440,7 @@ export function Viewer(data) {
   }
 
   return (
-    <div
-      className="colight-container"
-      style={{ padding: CONTAINER_PADDING }}
-      ref={elRef}
-    >
+    <div className="colight-container" ref={elRef}>
       {el && (
         <ErrorBoundary>
           <StateProvider {...data} />

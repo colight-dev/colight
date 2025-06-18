@@ -103,6 +103,96 @@ class Form:
                 return isinstance(self.node.body[0], cst.Expr)
         return False
 
+    @property
+    def is_literal(self) -> bool:
+        """Check if this form contains only literal values."""
+        if not self.is_expression:
+            return False
+
+        if isinstance(self.node, cst.SimpleStatementLine) and len(self.node.body) == 1:
+            expr = self.node.body[0]
+            if isinstance(expr, cst.Expr):
+                return self._is_literal_value(expr.value)
+        return False
+
+    def _is_literal_value(self, node: cst.BaseExpression) -> bool:
+        """Check if a CST node represents a literal value."""
+        # Simple literals
+        if isinstance(
+            node, (cst.Integer, cst.Float, cst.SimpleString, cst.FormattedString)
+        ):
+            return True
+
+        # Boolean literals (Name nodes for True/False)
+        if isinstance(node, cst.Name) and node.value in ("True", "False", "None"):
+            return True
+
+        # Unary operations on numeric literals (e.g., -42, +3.14)
+        if isinstance(node, cst.UnaryOperation):
+            if isinstance(node.operator, (cst.Minus, cst.Plus)):
+                return self._is_literal_value(node.expression)
+            return False
+
+        # Literal collections (lists, tuples, sets, dicts with only literal contents)
+        if isinstance(node, cst.List):
+            return all(
+                self._is_literal_value(elem.value)
+                for elem in node.elements
+                if isinstance(elem, cst.Element)
+            )
+
+        if isinstance(node, cst.Tuple):
+            return all(
+                self._is_literal_value(elem.value)
+                for elem in node.elements
+                if isinstance(elem, cst.Element)
+            )
+
+        if isinstance(node, cst.Set):
+            return all(
+                self._is_literal_value(elem.value)
+                for elem in node.elements
+                if isinstance(elem, cst.Element)
+            )
+
+        if isinstance(node, cst.Dict):
+            return all(
+                self._is_literal_value(elem.key) and self._is_literal_value(elem.value)
+                for elem in node.elements
+                if isinstance(elem, cst.DictElement) and elem.key is not None
+            )
+
+        # Bytes literals and concatenated strings
+        if isinstance(node, cst.ConcatenatedString):
+            return all(
+                isinstance(part, (cst.SimpleString, cst.FormattedString))
+                for part in [node.left, node.right]
+            )
+
+        return False
+
+    @property
+    def is_dummy_form(self) -> bool:
+        """Check if this form is a dummy form (markdown-only with pass statement)."""
+        # Check if the node is a SimpleStatementLine with a single Pass statement
+        if isinstance(self.node, cst.SimpleStatementLine):
+            if len(self.node.body) == 1 and isinstance(self.node.body[0], cst.Pass):
+                return True
+
+        # Check if it's a CombinedStatements with only dummy pass statements
+        if isinstance(self.node, CombinedStatements):
+            for stmt in self.node.statements:
+                if isinstance(stmt, cst.SimpleStatementLine):
+                    if len(stmt.body) == 1 and isinstance(stmt.body[0], cst.Pass):
+                        continue  # This is a dummy pass
+                    else:
+                        return False  # Has real code
+                else:
+                    return False  # Has real code
+            return True  # All statements are dummy passes
+
+        return False
+
 
 class FormExtractor(cst.CSTVisitor):
     """Extract forms (comment + code blocks) from a CST."""
@@ -123,6 +213,10 @@ class FormExtractor(cst.CSTVisitor):
                 if line.comment:
                     comment_text = line.comment.value.lstrip("#").strip()
                     self.pending_markdown.append(comment_text)
+                elif line.whitespace.value.strip() == "":
+                    # Empty line in header
+                    if self.pending_markdown and self.pending_markdown[-1]:
+                        self.pending_markdown.append("")  # Add paragraph break
 
         for stmt in node.body:
             self._process_statement(stmt)
@@ -148,6 +242,18 @@ class FormExtractor(cst.CSTVisitor):
         self, stmt: Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]
     ) -> None:
         """Process a single statement and its leading comments."""
+        markdown_info = self._analyze_statement_markdown(stmt)
+
+        if markdown_info["has_comments"]:
+            self._handle_statement_with_markdown(stmt, markdown_info)
+        else:
+            # No comments - add to pending statements for grouping
+            self.pending_statements.append(stmt)
+
+        self._update_line_counter(stmt)
+
+    def _analyze_statement_markdown(self, stmt) -> dict:
+        """Analyze markdown comments associated with a statement."""
         # Extract leading comments
         leading_lines = []
         if hasattr(stmt, "leading_lines"):
@@ -157,6 +263,8 @@ class FormExtractor(cst.CSTVisitor):
 
         # Process comments in leading lines
         has_new_markdown = False
+        has_blank_line_separation = False
+
         for line in leading_lines:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
@@ -166,29 +274,65 @@ class FormExtractor(cst.CSTVisitor):
                     self.pending_markdown.append(comment_text)
                     has_new_markdown = True
             elif line.whitespace.value.strip() == "":
-                # Empty line - split markdown blocks only if it's truly empty
-                # (no comment and only whitespace)
+                # Empty line - indicates separation
+                has_blank_line_separation = True
                 if self.pending_markdown and self.pending_markdown[-1]:
                     self.pending_markdown.append("")  # Add paragraph break
 
-        # Decide whether to start a new form or group with previous statements
-        if has_new_markdown or self.pending_markdown:
-            # New markdown found - flush any pending statements first
-            self._flush_pending_statements()
+        has_substantial_markdown = any(line.strip() for line in self.pending_markdown)
 
-            # Create form with markdown + this statement
-            form = Form(
-                markdown=self.pending_markdown.copy(),
-                node=stmt,
-                start_line=self.current_line,
-            )
-            self.forms.append(form)
-            self.pending_markdown.clear()
+        return {
+            "has_comments": has_new_markdown or self.pending_markdown,
+            "has_separation": has_blank_line_separation,
+            "is_substantial": has_substantial_markdown,
+        }
+
+    def _handle_statement_with_markdown(self, stmt, markdown_info: dict) -> None:
+        """Handle a statement that has associated markdown comments."""
+        if markdown_info["has_separation"] and self.pending_markdown:
+            if markdown_info["is_substantial"]:
+                self._create_separate_markdown_and_code_forms(stmt)
+            else:
+                self._create_combined_form(stmt)
         else:
-            # No new markdown - add to pending statements for grouping
-            self.pending_statements.append(stmt)
+            # Comments are connected to code (no separation or no blank line)
+            self._create_combined_form(stmt)
 
-        # Update line counter (approximate)
+    def _create_separate_markdown_and_code_forms(self, stmt) -> None:
+        """Create separate forms for markdown and code."""
+        self._flush_pending_statements()
+
+        # Create standalone markdown form
+        dummy_node = cst.SimpleStatementLine([cst.Pass()])
+        markdown_form = Form(
+            markdown=self.pending_markdown.copy(),
+            node=dummy_node,
+            start_line=self.current_line,
+        )
+        self.forms.append(markdown_form)
+        self.pending_markdown.clear()
+
+        # Then create code form without markdown
+        code_form = Form(
+            markdown=[],
+            node=stmt,
+            start_line=self.current_line,
+        )
+        self.forms.append(code_form)
+
+    def _create_combined_form(self, stmt) -> None:
+        """Create a form combining markdown and code."""
+        self._flush_pending_statements()
+        form = Form(
+            markdown=self.pending_markdown.copy(),
+            node=stmt,
+            start_line=self.current_line,
+        )
+        self.forms.append(form)
+        self.pending_markdown.clear()
+
+    def _update_line_counter(self, stmt) -> None:
+        """Update the line counter based on statement size."""
         if hasattr(stmt, "body"):
             self.current_line += len(str(stmt).split("\n"))
         else:
@@ -240,33 +384,40 @@ class FormExtractor(cst.CSTVisitor):
             has_meaningful_markdown = current_form.markdown and any(
                 line.strip() for line in current_form.markdown
             )
+            is_dummy_form = self._is_dummy_form(current_form)
 
             if has_meaningful_markdown:
-                # Look ahead to see if we should group this with following forms
-                group = [current_form]
-                j = i + 1
-
-                # Collect consecutive forms with no meaningful markdown
-                while j < len(forms):
-                    next_form = forms[j]
-                    next_has_markdown = next_form.markdown and any(
-                        line.strip() for line in next_form.markdown
-                    )
-
-                    if not next_has_markdown:
-                        group.append(next_form)
-                        j += 1
-                    else:
-                        break
-
-                # Create merged form if we have multiple forms
-                if len(group) > 1:
-                    merged_form = self._create_merged_form(group, [])
-                    merged_forms.append(merged_form)
-                else:
+                # If this is a dummy form (standalone markdown), don't merge it with following forms
+                if is_dummy_form:
                     merged_forms.append(current_form)
+                    i += 1
+                else:
+                    # Look ahead to see if we should group this with following forms
+                    group = [current_form]
+                    j = i + 1
 
-                i = j
+                    # Collect consecutive forms with no meaningful markdown
+                    while j < len(forms):
+                        next_form = forms[j]
+                        next_has_markdown = next_form.markdown and any(
+                            line.strip() for line in next_form.markdown
+                        )
+                        next_is_dummy = self._is_dummy_form(next_form)
+
+                        if not next_has_markdown and not next_is_dummy:
+                            group.append(next_form)
+                            j += 1
+                        else:
+                            break
+
+                    # Create merged form if we have multiple forms
+                    if len(group) > 1:
+                        merged_form = self._create_merged_form(group, [])
+                        merged_forms.append(merged_form)
+                    else:
+                        merged_forms.append(current_form)
+
+                    i = j
             else:
                 # Form with no markdown - should be merged with previous or following forms
                 # This case should be rare due to our grouping logic, but handle it
@@ -274,6 +425,10 @@ class FormExtractor(cst.CSTVisitor):
                 i += 1
 
         return merged_forms
+
+    def _is_dummy_form(self, form: Form) -> bool:
+        """Check if this form is a dummy form (markdown-only with pass statement)."""
+        return form.is_dummy_form
 
     def _create_merged_form(self, forms: List[Form], markdown: List[str]) -> Form:
         """Create a merged form from a list of forms."""

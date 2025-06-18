@@ -38,8 +38,7 @@ def build(
     if input_path.is_file():
         # Single file
         if not output:
-            suffix = ".html" if format == "html" else ".md"
-            output = input_path.with_suffix(suffix)
+            output = builder._get_output_path(input_path, format)
         builder.build_file(input_path, output, verbose=verbose, format=format)
         click.echo(f"Built {input_path} -> {output}")
     else:

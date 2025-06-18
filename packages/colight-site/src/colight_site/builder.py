@@ -7,6 +7,19 @@ from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 
 
+def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
+    """Convert .colight.py input path to output path with correct extension."""
+    if input_path.name.endswith(".colight.py"):
+        # Remove .colight.py and add the new extension
+        base_name = input_path.name[:-11]  # Remove ".colight.py"
+        suffix = ".html" if format == "html" else ".md"
+        return input_path.parent / (base_name + suffix)
+    else:
+        # Fallback for non-.colight.py files
+        suffix = ".html" if format == "html" else ".md"
+        return input_path.with_suffix(suffix)
+
+
 def build_file(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
@@ -94,8 +107,8 @@ def build_directory(
         try:
             # Calculate relative output path
             rel_path = colight_file.relative_to(input_dir)
-            suffix = ".html" if format == "html" else ".md"
-            output_file = output_dir / rel_path.with_suffix(suffix)
+            output_file_rel = _get_output_path(rel_path, format)
+            output_file = output_dir / output_file_rel
 
             build_file(colight_file, output_file, verbose=verbose, format=format)
         except Exception as e:

@@ -352,6 +352,7 @@ export function repeat(data) {
 }
 export {
   d3,
+  inspect,
   MarkSpec,
   Plot,
   PlotSpec,
@@ -363,7 +364,7 @@ export {
   render,
   scene3d,
   Bitmap,
-  inspect,
+  tw,
 };
 
 function renderArray($state, value) {

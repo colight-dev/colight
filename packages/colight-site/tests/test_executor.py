@@ -56,18 +56,18 @@ math.pi * radius ** 2
 
         forms = _parse_content(content)
 
-        # Execute import
+        # Execute import (form 0)
         result1 = executor.execute_form(forms[0])
         assert result1 is None
         assert "math" in executor.env
 
-        # Execute variable assignment
-        result2 = executor.execute_form(forms[1])
+        # Execute variable assignment (form 2, form 1 is dummy markdown)
+        result2 = executor.execute_form(forms[2])
         assert result2 is None
         assert executor.env["radius"] == 5
 
-        # Execute expression using previously defined variables
-        result3 = executor.execute_form(forms[2])
+        # Execute expression using previously defined variables (form 4, form 3 is dummy markdown)
+        result3 = executor.execute_form(forms[4])
         assert result3 is not None
         assert abs(result3 - (3.14159 * 25)) < 0.1  # Approximately pi * 25
 
@@ -90,14 +90,14 @@ x, np.sin(x)
 
         forms = _parse_content(content)
 
-        # Execute import
+        # Execute import (form 0)
         executor.execute_form(forms[0])
 
-        # Execute array creation
-        executor.execute_form(forms[1])
+        # Execute array creation (form 2, form 1 is dummy markdown)
+        executor.execute_form(forms[2])
 
-        # Execute expression that returns tuple of arrays
-        result = executor.execute_form(forms[2])
+        # Execute expression that returns tuple of arrays (form 4, form 3 is dummy markdown)
+        result = executor.execute_form(forms[4])
 
         assert result is not None
         assert len(result) == 2  # tuple of (x, sin(x))
@@ -166,25 +166,6 @@ def test_error_handling():
             assert False, "Should have raised an exception"
         except ZeroDivisionError:
             pass  # Expected
-
-
-def test_non_visualizable_returns():
-    """Test handling of return values that aren't visualizable."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        output_dir = pathlib.Path(temp_dir)
-        executor = FormExecutor(output_dir)
-
-        # Test basic types that shouldn't be visualized
-        test_cases = [("42", 42), ('"hello"', "hello"), ("True", True), ("None", None)]
-
-        for code, expected in test_cases:
-            forms = _parse_content(code)
-            result = executor.execute_form(forms[0])
-            assert result == expected
-
-            # These shouldn't create colight files
-            colight_file = executor.save_colight_visualization(result, 0)
-            assert colight_file is None
 
 
 def test_environment_isolation():

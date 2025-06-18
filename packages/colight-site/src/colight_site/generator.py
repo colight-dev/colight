@@ -36,20 +36,26 @@ class MarkdownGenerator:
 
         # Process each form
         for i, (form, colight_file) in enumerate(zip(forms, colight_files)):
-            # Add markdown content from comments
+            # Check if this is a dummy form (markdown-only)
+            is_dummy_form = self._is_dummy_form(form)
+
+            # Add regular markdown content from comments (separated by blank lines)
             if form.markdown:
                 markdown_content = self._process_markdown_lines(form.markdown)
                 if markdown_content.strip():
                     lines.append(markdown_content)
                     lines.append("")
 
-            # Add code block
-            code = form.code.strip()
-            if code:
-                lines.append("```python")
-                lines.append(code)
-                lines.append("```")
-                lines.append("")
+            # Add code block (but skip dummy forms and literals)
+            if not is_dummy_form:
+                code = form.code.strip()
+                show_code = code and not form.is_literal
+
+                if show_code:
+                    lines.append("```python")
+                    lines.append(code)
+                    lines.append("```")
+                    lines.append("")
 
                 # Add colight embed if we have a visualization
                 if colight_file:
@@ -60,6 +66,10 @@ class MarkdownGenerator:
                     lines.append("")
 
         return "\n".join(lines)
+
+    def _is_dummy_form(self, form: Form) -> bool:
+        """Check if this form is a dummy form (markdown-only with pass statement)."""
+        return form.is_dummy_form
 
     def _get_relative_path(
         self, colight_file: pathlib.Path, output_path: Optional[pathlib.Path]
@@ -90,7 +100,11 @@ class MarkdownGenerator:
             if line.strip() == "":
                 # Empty line - end current paragraph
                 if current_paragraph:
-                    result_lines.append(" ".join(current_paragraph))
+                    # Check if we should preserve line breaks (e.g., for headers)
+                    if self._should_preserve_line_breaks(current_paragraph):
+                        result_lines.extend(current_paragraph)
+                    else:
+                        result_lines.append(" ".join(current_paragraph))
                     current_paragraph = []
                     result_lines.append("")  # Add paragraph break
             else:
@@ -98,9 +112,34 @@ class MarkdownGenerator:
 
         # Add final paragraph
         if current_paragraph:
-            result_lines.append(" ".join(current_paragraph))
+            # Check if we should preserve line breaks
+            if self._should_preserve_line_breaks(current_paragraph):
+                result_lines.extend(current_paragraph)
+            else:
+                result_lines.append(" ".join(current_paragraph))
 
         return "\n".join(result_lines)
+
+    # Markdown patterns that require preserved line breaks
+    MARKDOWN_PATTERNS = [
+        lambda line: line.startswith("#"),  # Headers
+        lambda line: all(c in "=-" for c in line) and len(line) >= 3,  # Underlines
+        lambda line: line.startswith(("-", "*", "+")) and len(line) > 1,  # Lists
+        lambda line: line.split(".")[0].isdigit(),  # Numbered lists
+        lambda line: line.startswith(">"),  # Blockquotes
+        lambda line: line.startswith(("```", "~~~")),  # Code fences
+        lambda line: "|" in line,  # Tables
+    ]
+
+    def _should_preserve_line_breaks(self, lines: List[str]) -> bool:
+        """Check if line breaks should be preserved for this block of lines."""
+        for line in lines:
+            stripped = line.strip()
+            if stripped and any(
+                pattern(stripped) for pattern in self.MARKDOWN_PATTERNS
+            ):
+                return True
+        return False
 
     def write_markdown_file(self, content: str, output_path: pathlib.Path):
         """Write markdown content to a file."""
@@ -152,26 +191,30 @@ class MarkdownGenerator:
             color: #333;
         }}
         
-        pre {{
-            background: #f4f4f4;
-            padding: 1rem;
-            border-radius: 4px;
-            overflow-x: auto;
+        .prose > * {{
+            margin-top: 1em;
+            margin-bottom: 1em;
         }}
+        
+        .prose {{
+            font-size: 14px;
+        }}
+        .prose pre {{
+            background: #f4f4f4;
+            color: #333;
+        }}
+
         
         code {{
             background: #f4f4f4;
-            padding: 0.2em 0.4em;
-            border-radius: 3px;
-            font-size: 0.9em;
+            color: #333;
         }}
         
-        pre code {{
-            background: none;
-            padding: 0;
-        }}
+    
+        
     </style>
     <script src="{EMBED_URL}"></script>
+    <script>colight.api.tw("prose")</script>
     
 </head>
 <body>

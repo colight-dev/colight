@@ -55,8 +55,8 @@
     "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
     "test:py": "uv run python -m pytest packages/colight/tests --ignore=packages/colight/tests/test_screenshots.py",
     "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
-    "test:colight-site": "uv run python -m pytest packages/colight-site/tests",
-    "test": "npm-run-all test:py test:js test:colight-site",
+    "test:site": "uv run python -m pytest packages/colight-site/tests",
+    "test": "npm-run-all test:py test:js test:site",
     "pyright": "uv run pyright",
     "serve-tests": "uv run python -m http.server 8080"
   },
