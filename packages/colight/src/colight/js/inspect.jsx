@@ -53,7 +53,14 @@ function CompactExpandable({
       {isExpanded ? (
         <>
           <div className={tw("ml-8")}>{children}</div>
-          <span className={tw(`${bracketClasses} ml-5`)}>{brackets.close}</span>
+          <span
+            className={tw(
+              `${bracketClasses} ${isExpanded ? "rounded-md" : "rounded-r-md"} ml-5`,
+            )}
+            onClick={() => setIsExpanded(!isExpanded)}
+          >
+            {brackets.close}
+          </span>
         </>
       ) : (
         <span

@@ -61,13 +61,13 @@ math.pi * radius ** 2
         assert result1 is None
         assert "math" in executor.env
 
-        # Execute variable assignment (form 2, form 1 is dummy markdown)
-        result2 = executor.execute_form(forms[2])
+        # Execute variable assignment (form 1)
+        result2 = executor.execute_form(forms[1])
         assert result2 is None
         assert executor.env["radius"] == 5
 
-        # Execute expression using previously defined variables (form 4, form 3 is dummy markdown)
-        result3 = executor.execute_form(forms[4])
+        # Execute expression using previously defined variables (form 2)
+        result3 = executor.execute_form(forms[2])
         assert result3 is not None
         assert abs(result3 - (3.14159 * 25)) < 0.1  # Approximately pi * 25
 
@@ -93,11 +93,11 @@ x, np.sin(x)
         # Execute import (form 0)
         executor.execute_form(forms[0])
 
-        # Execute array creation (form 2, form 1 is dummy markdown)
-        executor.execute_form(forms[2])
+        # Execute array creation (form 1)
+        executor.execute_form(forms[1])
 
-        # Execute expression that returns tuple of arrays (form 4, form 3 is dummy markdown)
-        result = executor.execute_form(forms[4])
+        # Execute expression that returns tuple of arrays (form 2)
+        result = executor.execute_form(forms[2])
 
         assert result is not None
         assert len(result) == 2  # tuple of (x, sin(x))
@@ -198,6 +198,6 @@ def _parse_content(content: str):
         f.write(content)
         f.flush()
 
-        forms = parse_colight_file(pathlib.Path(f.name))
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
         pathlib.Path(f.name).unlink()
         return forms

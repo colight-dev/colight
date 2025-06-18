@@ -25,6 +25,9 @@ def build_file(
     output_path: pathlib.Path,
     verbose: bool = False,
     format: str = "markdown",
+    hide_statements: bool = False,
+    hide_visuals: bool = False,
+    hide_code: bool = False,
 ):
     """Build a single .colight.py file."""
     if not is_colight_file(input_path):
@@ -35,9 +38,18 @@ def build_file(
 
     try:
         # Parse the file
-        forms = parse_colight_file(input_path)
+        forms, file_metadata = parse_colight_file(input_path)
         if verbose:
             print(f"Found {len(forms)} forms")
+            if any(
+                [
+                    file_metadata.hide_statements,
+                    file_metadata.hide_visuals,
+                    file_metadata.hide_code,
+                    file_metadata.format,
+                ]
+            ):
+                print(f"File metadata: {file_metadata}")
     except Exception as e:
         if verbose:
             print(f"Parse error: {e}")
@@ -70,12 +82,25 @@ def build_file(
     generator = MarkdownGenerator(colight_dir)
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
-    if format == "html":
-        html_content = generator.generate_html(forms, colight_files, title, output_path)
+    # Merge file metadata with CLI options (CLI takes precedence)
+    merged_options = file_metadata.merge_with_cli_options(
+        hide_statements=hide_statements,
+        hide_visuals=hide_visuals,
+        hide_code=hide_code,
+        format=format,
+    )
+
+    # Extract the actual format to use
+    final_format = merged_options.pop("format") or format
+
+    if final_format == "html":
+        html_content = generator.generate_html(
+            forms, colight_files, title, output_path, **merged_options
+        )
         generator.write_html_file(html_content, output_path)
     else:
         markdown_content = generator.generate_markdown(
-            forms, colight_files, title, output_path
+            forms, colight_files, title, output_path, **merged_options
         )
         generator.write_markdown_file(markdown_content, output_path)
 
@@ -88,6 +113,9 @@ def build_directory(
     output_dir: pathlib.Path,
     verbose: bool = False,
     format: str = "markdown",
+    hide_statements: bool = False,
+    hide_visuals: bool = False,
+    hide_code: bool = False,
 ):
     """Build all .colight.py files in a directory."""
     if verbose:
@@ -110,7 +138,15 @@ def build_directory(
             output_file_rel = _get_output_path(rel_path, format)
             output_file = output_dir / output_file_rel
 
-            build_file(colight_file, output_file, verbose=verbose, format=format)
+            build_file(
+                colight_file,
+                output_file,
+                verbose=verbose,
+                format=format,
+                hide_statements=hide_statements,
+                hide_visuals=hide_visuals,
+                hide_code=hide_code,
+            )
         except Exception as e:
             print(f"Error building {colight_file}: {e}")
             if verbose:

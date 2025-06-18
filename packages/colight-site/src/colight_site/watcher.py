@@ -11,15 +11,34 @@ def watch_and_build(
     output_path: pathlib.Path,
     verbose: bool = False,
     format: str = "markdown",
+    hide_statements: bool = False,
+    hide_visuals: bool = False,
+    hide_code: bool = False,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")
 
     # Build initially
     if input_path.is_file():
-        builder.build_file(input_path, output_path, verbose=verbose, format=format)
+        builder.build_file(
+            input_path,
+            output_path,
+            verbose=verbose,
+            format=format,
+            hide_statements=hide_statements,
+            hide_visuals=hide_visuals,
+            hide_code=hide_code,
+        )
     else:
-        builder.build_directory(input_path, output_path, verbose=verbose, format=format)
+        builder.build_directory(
+            input_path,
+            output_path,
+            verbose=verbose,
+            format=format,
+            hide_statements=hide_statements,
+            hide_visuals=hide_visuals,
+            hide_code=hide_code,
+        )
 
     # Watch for changes
     for changes in watch(input_path):
@@ -38,7 +57,13 @@ def watch_and_build(
                 if input_path.is_file():
                     if input_path in colight_changes:
                         builder.build_file(
-                            input_path, output_path, verbose=verbose, format=format
+                            input_path,
+                            output_path,
+                            verbose=verbose,
+                            format=format,
+                            hide_statements=hide_statements,
+                            hide_visuals=hide_visuals,
+                            hide_code=hide_code,
                         )
                         print(f"Rebuilt {input_path}")
                 else:
@@ -53,6 +78,9 @@ def watch_and_build(
                                 output_file,
                                 verbose=verbose,
                                 format=format,
+                                hide_statements=hide_statements,
+                                hide_visuals=hide_visuals,
+                                hide_code=hide_code,
                             )
                             print(f"Rebuilt {changed_file}")
             except Exception as e:
