@@ -58,7 +58,7 @@
     "test:site": "uv run python -m pytest packages/colight-site/tests",
     "test": "npm-run-all test:py test:js test:site",
     "pyright": "uv run pyright",
-    "serve-tests": "uv run python -m http.server 8080"
+    "serve-tests": "uv run livereload ."
   },
   "files": [
     "dist",

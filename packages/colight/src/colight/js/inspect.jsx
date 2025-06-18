@@ -13,44 +13,62 @@ const PRIMITIVE_COLORS = {
   datetime: "font-mono",
 };
 
-// TypeTag component for expandable containers
+// Bracket styles for different collection types
+const BRACKET_STYLES = {
+  list: { open: "[", close: "]" },
+  tuple: { open: "(", close: ")" },
+  set: { open: "{", close: "}" },
+  dict: { open: "{", close: "}" },
+};
 
-function TypeTag({ typeInfo, count, isExpanded, onClick }) {
-  return (
-    <span className={tw(`inline-block text-xs font-mono`)} onClick={onClick}>
-      {isExpanded !== undefined && (
-        <span
-          className={tw(
-            `inline-block transform transition-transform mr-1 ${isExpanded ? "rotate-90" : "rotate-0"}`,
-          )}
-        >
-          ▶
-        </span>
-      )}
-      {typeInfo.type}
-      {count && <span className={tw("ml-[2px]")}>({count})</span>}
-    </span>
-  );
-}
-
-function ExpandableContainer({
+function CompactExpandable({
   typeInfo,
-  count,
   children,
   defaultExpanded = false,
+  headerTag,
 }) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [isHovered, setIsHovered] = useState(false);
+  const brackets = BRACKET_STYLES[typeInfo.type] || { open: "(", close: ")" };
+  const bracketClasses = `cursor-pointer font-mono text-gray-500 p-1 ${isHovered ? "bg-gray-100" : ""}`;
 
   return (
-    <div className={tw("border rounded-lg overflow-hidden")}>
-      <div
-        className={tw(`px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100`)}
+    <div
+      className={tw("inline-block align-top")}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <span
+        className={tw(
+          `${bracketClasses} ${isExpanded ? "rounded-md" : "rounded-l-md"}`,
+        )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <TypeTag typeInfo={typeInfo} count={count} isExpanded={isExpanded} />
-      </div>
-      {isExpanded && (
-        <div className={tw("px-3 py-2 bg-white border-t")}>{children}</div>
+        <span className={tw("text-gray-600 select-none pl-1")}>
+          {isExpanded ? "▼" : "▶"}
+        </span>
+        {headerTag && <span className={tw("ml-2 mr-1")}>{headerTag}</span>}
+        <span className={tw(`ml-1`)}>{brackets.open}</span>
+      </span>
+      {isExpanded ? (
+        <>
+          <div className={tw("ml-8")}>{children}</div>
+          <span className={tw(`${bracketClasses} ml-5`)}>{brackets.close}</span>
+        </>
+      ) : (
+        <span
+          className={tw(
+            `${bracketClasses} pl-0 ${isExpanded ? "rounded-md" : "rounded-r-md"}`,
+          )}
+        >
+          <span onClick={() => setIsExpanded(!isExpanded)}>...</span>
+          <span
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={tw("px-1")}
+          >
+            {brackets.close}
+          </span>
+        </span>
       )}
     </div>
   );
@@ -71,136 +89,196 @@ function TruncationNotice({ length, shown, onShowMore }) {
   );
 }
 
-function ArrayPreview({ data, shape, dtype }) {
+function ArrayPreview({ data, shape }) {
   const isVector = shape && shape.length === 1;
   const isMatrix = shape && shape.length === 2;
 
   if (isVector && Array.isArray(data)) {
     return (
-      <div className={tw("space-y-2")}>
-        <div className={tw("text-sm text-gray-600")}>
-          Shape: [{shape.join(", ")}]{dtype && ` • dtype: ${dtype}`}
-        </div>
-        <div className={tw("flex flex-wrap gap-1 max-h-32 overflow-y-auto")}>
-          {data.slice(0, 20).map((item, i) => (
-            <span
-              key={i}
-              className={tw("px-2 py-1 bg-gray-100 rounded text-sm font-mono")}
-            >
-              {typeof item === "number" ? item.toFixed(3) : String(item)}
-            </span>
-          ))}
-          {data.length > 20 && <span className={tw("text-gray-500")}>...</span>}
-        </div>
+      <div className={tw("flex flex-wrap gap-1 max-h-32 overflow-y-auto")}>
+        {data.slice(0, 50).map((item, i) => (
+          <span key={i} className={tw("text-gray-400 text-xs font-mono")}>
+            {typeof item === "number" ? item.toFixed(3) : String(item)}
+          </span>
+        ))}
+        {data.length > 50 && (
+          <span className={tw("text-gray-500 text-xs")}>...</span>
+        )}
       </div>
     );
   }
 
   if (isMatrix && Array.isArray(data) && Array.isArray(data[0])) {
     return (
-      <div className={tw("space-y-2")}>
-        <div className={tw("text-sm text-gray-600")}>
-          Shape: [{shape.join(", ")}]{dtype && ` • dtype: ${dtype}`}
-        </div>
-        <div className={tw("overflow-x-auto")}>
-          <table className={tw("text-sm font-mono border-collapse")}>
-            <tbody>
-              {data.slice(0, 5).map((row, i) => (
-                <tr key={i}>
-                  {row.slice(0, 10).map((cell, j) => (
-                    <td key={j} className={tw("px-2 py-1 border text-right")}>
-                      {typeof cell === "number"
-                        ? cell.toFixed(3)
-                        : String(cell)}
-                    </td>
-                  ))}
-                  {row.length > 10 && (
-                    <td className={tw("px-2 py-1 text-gray-500")}>...</td>
-                  )}
-                </tr>
-              ))}
-              {data.length > 5 && (
-                <tr>
-                  <td
-                    colSpan={Math.min(10, data[0]?.length || 0)}
-                    className={tw("px-2 py-1 text-center text-gray-500")}
-                  >
-                    ...
+      <div className={tw("overflow-x-auto")}>
+        <table className={tw("text-xs font-mono")}>
+          <tbody>
+            {data.slice(0, 8).map((row, i) => (
+              <tr key={i}>
+                {row.slice(0, 12).map((cell, j) => (
+                  <td key={j} className={tw("px-1.5 py-0.5 text-right")}>
+                    {typeof cell === "number" ? cell.toFixed(3) : String(cell)}
                   </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+                {row.length > 12 && (
+                  <td className={tw("px-1.5 py-0.5 text-gray-500")}>...</td>
+                )}
+              </tr>
+            ))}
+            {data.length > 8 && (
+              <tr>
+                <td
+                  colSpan={Math.min(12, data[0]?.length || 0) + 1}
+                  className={tw("px-1.5 py-0.5 text-center text-gray-500")}
+                >
+                  ...
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     );
   }
 
   // For higher dimensional arrays or non-standard formats
   return (
-    <div className={tw("space-y-2")}>
-      {shape && (
-        <div className={tw("text-sm text-gray-600")}>
-          Shape: [{shape.join(", ")}]{dtype && ` • dtype: ${dtype}`}
-        </div>
+    <pre
+      className={tw(
+        "text-xs bg-gray-100 p-2 rounded overflow-x-auto max-h-32 font-mono",
       )}
-      <pre
-        className={tw(
-          "text-sm bg-gray-100 p-2 rounded overflow-x-auto max-h-32",
-        )}
-      >
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
+    >
+      {JSON.stringify(data, null, 2)}
+    </pre>
   );
 }
 
-function KeyValueTable({ items, length }) {
+function CompactDictItems({ items, length }) {
+  const groupedItems = [];
+  let currentGroup = [];
+
+  items.forEach((item) => {
+    const isPrimitive =
+      item.value?.type_info?.category === "builtin" &&
+      !["list", "tuple", "set", "dict"].includes(item.value?.type_info?.type);
+
+    if (!isPrimitive && currentGroup.length > 0) {
+      groupedItems.push({ items: currentGroup, inline: true });
+      currentGroup = [];
+    }
+
+    currentGroup.push(item);
+
+    if (!isPrimitive) {
+      groupedItems.push({ items: currentGroup, inline: false });
+      currentGroup = [];
+    }
+  });
+
+  if (currentGroup.length > 0) {
+    groupedItems.push({ items: currentGroup, inline: true });
+  }
+
   return (
-    <div className={tw("space-y-1")}>
-      {items.map((item, i) => (
-        <div
-          key={i}
-          className={tw(
-            "flex gap-2 py-1 border-b border-gray-100 last:border-b-0",
+    <div className={tw("space-y-2")}>
+      {groupedItems.map((group, groupIdx) => (
+        <div key={groupIdx}>
+          {group.inline ? (
+            <div className={tw("flex flex-wrap gap-2")}>
+              {group.items.map((item, i) => (
+                <span key={i}>
+                  <InspectValue data={item.key} inline />
+                  <span className={tw("mx-1")}>:</span>
+                  <InspectValue data={item.value} inline />
+                  {i < group.items.length - 1 && (
+                    <span className={tw("ml-2 text-gray-400")}>,</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div>
+              {group.items.map((item, i) => (
+                <div key={i} className={tw("mb-2")}>
+                  <InspectValue data={item.key} inline />
+                  <span className={tw("mx-1")}>:</span>
+                  <InspectValue data={item.value} />
+                </div>
+              ))}
+            </div>
           )}
-        >
-          <div
-            className={tw("font-medium text-gray-700 min-w-0 flex-shrink-0")}
-          >
-            <InspectValue data={item.key} inline />:
-          </div>
-          <div className={tw("min-w-0 flex-1")}>
-            <InspectValue data={item.value} inline />
-          </div>
+          {groupIdx < groupedItems.length - 1 && (
+            <div className={tw("border-t border-gray-200 my-2")} />
+          )}
         </div>
       ))}
-      <TruncationNotice length={length} shown={items.length} />
+      {length > items.length && (
+        <TruncationNotice length={length} shown={items.length} />
+      )}
     </div>
   );
 }
 
-function CollectionItems({ items, length }) {
+function CompactCollectionItems({ items, length }) {
+  const groupedItems = [];
+  let currentGroup = [];
+
+  items.forEach((item) => {
+    const isPrimitive =
+      item?.type_info?.category === "builtin" &&
+      !["list", "tuple", "set", "dict"].includes(item?.type_info?.type);
+
+    if (!isPrimitive && currentGroup.length > 0) {
+      groupedItems.push({ items: currentGroup, inline: true });
+      currentGroup = [];
+    }
+
+    currentGroup.push(item);
+
+    if (!isPrimitive) {
+      groupedItems.push({ items: currentGroup, inline: false });
+      currentGroup = [];
+    }
+  });
+
+  if (currentGroup.length > 0) {
+    groupedItems.push({ items: currentGroup, inline: true });
+  }
+
   return (
-    <div className={tw("space-y-1")}>
-      <div className={tw("flex flex-wrap items-center gap-1")}>
-        {items.map((item, i) => (
-          <React.Fragment key={i}>
-            <span className={tw("inline-block")}>
-              <InspectValue data={item} inline />
-            </span>
-            {i < items.length - 1 && (
-              <span className={tw("text-gray-400")}>,</span>
-            )}
-          </React.Fragment>
-        ))}
-        {length > items.length && (
-          <>
-            <span className={tw("text-gray-400")}>,</span>
-            <TruncationNotice length={length} shown={items.length} />
-          </>
-        )}
-      </div>
+    <div className={tw("space-y-2")}>
+      {groupedItems.map((group, groupIdx) => (
+        <div key={groupIdx}>
+          {group.inline ? (
+            <div className={tw("flex flex-wrap gap-1")}>
+              {group.items.map((item, i) => (
+                <React.Fragment key={i}>
+                  <InspectValue data={item} inline />
+                  {i < group.items.length - 1 && (
+                    <span className={tw("text-gray-400")}>,</span>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          ) : (
+            <div>
+              {group.items.map((item, i) => (
+                <div key={i} className={tw("mb-2")}>
+                  <InspectValue data={item} />
+                </div>
+              ))}
+            </div>
+          )}
+          {groupIdx < groupedItems.length - 1 && (
+            <div className={tw("border-t border-gray-200 my-2")} />
+          )}
+        </div>
+      ))}
+      {length > items.length && (
+        <div className={tw("mt-2")}>
+          <TruncationNotice length={length} shown={items.length} />
+        </div>
+      )}
     </div>
   );
 }
@@ -374,16 +452,12 @@ function InspectValue({ data, inline = false }) {
     );
   }
 
-  // Handle collections with expandable interface
+  // Handle collections with compact expandable interface
   if (type_info.type === "dict") {
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={length}
-        defaultExpanded={length <= 10}
-      >
-        <KeyValueTable items={value} length={length} />
-      </ExpandableContainer>
+      <CompactExpandable typeInfo={type_info} defaultExpanded={length <= 5}>
+        <CompactDictItems items={value} length={length} />
+      </CompactExpandable>
     );
   }
 
@@ -393,27 +467,32 @@ function InspectValue({ data, inline = false }) {
     type_info.type === "set"
   ) {
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={length}
-        defaultExpanded={length <= 10}
-      >
-        <CollectionItems items={value} length={length} />
-      </ExpandableContainer>
+      <CompactExpandable typeInfo={type_info} defaultExpanded={length <= 5}>
+        <CompactCollectionItems items={value} length={length} />
+      </CompactExpandable>
     );
   }
 
   // Handle NumPy and JAX arrays
   if (type_info.category === "numpy" || type_info.category === "jax") {
-    const count = shape ? shape.reduce((a, b) => a * b, 1) : undefined;
+    const shapeStr = shape ? shape.join(", ") : "";
+    const count = shape ? `(${shapeStr})` : "";
+
+    const headerTag = (
+      <span className={tw("text-gray-500 text-xs font-mono")}>
+        {dtype || "float64"}
+        <span className={tw("ml-0.5")}>{count}</span>
+      </span>
+    );
+
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={count}
-        defaultExpanded={true}
+      <CompactExpandable
+        typeInfo={{ type: "list" }}
+        defaultExpanded={false}
+        headerTag={headerTag}
       >
-        <ArrayPreview data={value} shape={shape} dtype={dtype} />
-      </ExpandableContainer>
+        <ArrayPreview data={value} shape={shape} />
+      </CompactExpandable>
     );
   }
 
@@ -421,55 +500,70 @@ function InspectValue({ data, inline = false }) {
   if (type_info.category === "pandas" && type_info.type === "DataFrame") {
     const count = shape ? shape[0] * shape[1] : undefined;
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={count}
-        defaultExpanded={true}
-      >
-        <PandasTable
-          data={value}
-          columns={columns}
-          dtypes={dtypes}
-          shape={shape}
-          truncated={truncated}
-        />
-      </ExpandableContainer>
+      <div className={tw("border rounded-lg overflow-hidden")}>
+        <div className={tw(`px-3 py-2 bg-gray-50`)}>
+          <span className={tw("text-xs font-mono")}>
+            {type_info.type}
+            {count && <span className={tw("ml-[2px]")}>({count})</span>}
+          </span>
+        </div>
+        <div className={tw("px-3 py-2 bg-white border-t")}>
+          <PandasTable
+            data={value}
+            columns={columns}
+            dtypes={dtypes}
+            shape={shape}
+            truncated={truncated}
+          />
+        </div>
+      </div>
     );
   }
 
   // Handle pandas Series
   if (type_info.category === "pandas" && type_info.type === "Series") {
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={shape ? shape[0] : undefined}
-        defaultExpanded={shape[0] <= 20}
-      >
-        <ArrayPreview data={value} shape={shape} dtype={dtype} />
-      </ExpandableContainer>
+      <div className={tw("border rounded-lg overflow-hidden")}>
+        <div className={tw(`px-3 py-2 bg-gray-50`)}>
+          <span className={tw("text-xs font-mono")}>
+            {type_info.type}
+            {shape && <span className={tw("ml-[2px]")}>({shape[0]})</span>}
+          </span>
+        </div>
+        <div className={tw("px-3 py-2 bg-white border-t")}>
+          <ArrayPreview data={value} shape={shape} />
+        </div>
+      </div>
     );
   }
 
   // Handle custom objects with attributes
   if (attributes && attributes.length > 0) {
     return (
-      <ExpandableContainer
-        typeInfo={type_info}
-        count={attributes.length}
-        defaultExpanded={false}
-      >
-        <div className={tw("space-y-2")}>
-          <div className={tw("text-sm bg-gray-100 p-2 rounded font-mono")}>
-            {value}
-          </div>
-          {attributes.length > 0 && (
-            <div>
-              <h4 className={tw("font-medium text-sm mb-2")}>Attributes:</h4>
-              <KeyValueTable items={attributes} length={attributes.length} />
-            </div>
-          )}
+      <div className={tw("border rounded-lg overflow-hidden")}>
+        <div className={tw(`px-3 py-2 bg-gray-50`)}>
+          <span className={tw("text-xs font-mono")}>
+            {type_info.type}
+            <span className={tw("ml-[2px]")}>({attributes.length})</span>
+          </span>
         </div>
-      </ExpandableContainer>
+        <div className={tw("px-3 py-2 bg-white border-t")}>
+          <div className={tw("space-y-2")}>
+            <div className={tw("text-sm bg-gray-100 p-2 rounded font-mono")}>
+              {value}
+            </div>
+            {attributes.length > 0 && (
+              <div>
+                <h4 className={tw("font-medium text-sm mb-2")}>Attributes:</h4>
+                <CompactDictItems
+                  items={attributes}
+                  length={attributes.length}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     );
   }
 

@@ -219,14 +219,14 @@ class TestSerialization:
             assert result["type_info"]["category"] == "numpy"
             assert result["shape"] == (5,)
             assert result["dtype"] == "int64"
-            # assert result["value"] == [1, 2, 3, 4, 5]
+            assert result["value"] == [1, 2, 3, 4, 5]
 
             # 2D array
             arr2d = np.array([[1, 2], [3, 4]])
             result = _serialize_value(arr2d)
             assert isinstance(result, dict)
             assert result["shape"] == (2, 2)
-            # assert result["value"] == [[1, 2], [3, 4]]
+            assert result["value"] == [[1, 2], [3, 4]]
 
             # Large array (should be truncated)
             large_arr = np.zeros(1000)

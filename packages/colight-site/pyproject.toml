@@ -19,6 +19,7 @@ dependencies = [
     "watchfiles>=0.21.0",
     "colight",
     "markdown>=3.5",
+    "livereload>=2.7.1",
 ]
 
 [project.license]
