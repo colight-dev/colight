@@ -594,25 +594,39 @@ class ChromeContext:
 
         return result.get("result", {}).get("value")
 
-    def capture_image(self) -> bytes:
-        """Capture a screenshot of the page as PNG bytes."""
-        if self.debug:
-            print("[chrome_devtools.py] Capturing image")
+    def capture_image(self, format: str = "png", quality: int = 90) -> bytes:
+        """Capture a screenshot of the page as PNG or WebP bytes.
 
-        result = self._send_command(
-            "Page.captureScreenshot",
-            {
-                "format": "png",
-                "captureBeyondViewport": True,
-                "clip": {
-                    "x": 0,
-                    "y": 0,
-                    "width": self.width,
-                    "height": self.height,
-                    "scale": self.scale,
-                },
+        Args:
+            format: Image format ("png" or "webp")
+            quality: Image quality for WebP (0-100, ignored for PNG)
+
+        Returns:
+            Image bytes in the specified format
+        """
+        if self.debug:
+            print(f"[chrome_devtools.py] Capturing image in {format.upper()} format")
+
+        if format not in ["png", "webp"]:
+            raise ValueError(f"Unsupported format: {format}. Use 'png' or 'webp'.")
+
+        params = {
+            "format": format,
+            "captureBeyondViewport": True,
+            "clip": {
+                "x": 0,
+                "y": 0,
+                "width": self.width,
+                "height": self.height,
+                "scale": self.scale,
             },
-        )
+        }
+
+        # Add quality parameter for WebP
+        if format == "webp":
+            params["quality"] = quality
+
+        result = self._send_command("Page.captureScreenshot", params)
 
         if not result or "data" not in result:
             raise RuntimeError("Failed to capture image")
