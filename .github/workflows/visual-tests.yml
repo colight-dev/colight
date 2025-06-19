@@ -6,7 +6,7 @@ on:
 
 jobs:
   visual-tests:
-    runs-on: parallelhoss
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: NcStudios/VulkanCI@v1.0
@@ -46,5 +46,5 @@ jobs:
         with:
           name: visual-test-results
           path: |
-            packages/colight/tests/test-artifacts/
-            scratch/screenshots/
+            packages/colight/tests/visual/baselines
+            packages/colight/test-artifacts/visual
