@@ -16,6 +16,8 @@ def chrome_available() -> bool:
         return True
     except Exception:
         return False
+
+
 import colight.plot as Plot
 from colight.scene3d import Ellipsoid
 
@@ -115,7 +117,7 @@ def test_counter_plot():
         assert video_path.stat().st_size > 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__x":
     if chrome_available():
         test_basic_screenshot()
         test_counter_plot()

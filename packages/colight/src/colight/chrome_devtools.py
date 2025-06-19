@@ -96,6 +96,61 @@ def check_chrome_version(chrome_path):
         raise RuntimeError(f"Failed to determine Chrome version: {e}")
 
 
+def shutdown_chrome(debug=False):
+    """Explicitly shut down Chrome and clean up global state
+
+    This function can be called to immediately terminate Chrome without waiting
+    for contexts to close or keep-alive timers to expire. Useful for tests
+    or when you need to ensure Chrome is completely stopped.
+
+    Args:
+        debug: Whether to print debug messages during shutdown
+    """
+    global _shared_process, _shared_port, _shared_owned, _active_count, _shutdown_timer
+
+    if debug:
+        print("[chrome_devtools.py] Explicitly shutting down Chrome")
+
+    # Cancel any pending shutdown timer
+    if _shutdown_timer:
+        _shutdown_timer.cancel()
+        _shutdown_timer = None
+        if debug:
+            print("[chrome_devtools.py] Cancelled pending shutdown timer")
+
+    # Terminate Chrome process if it exists and is running
+    if _shared_process and _shared_process.poll() is None:
+        if debug:
+            print("[chrome_devtools.py] Terminating Chrome process")
+        _shared_process.terminate()
+        try:
+            _shared_process.wait(timeout=5)
+            if debug:
+                print("[chrome_devtools.py] Chrome process terminated successfully")
+        except subprocess.TimeoutExpired:
+            if debug:
+                print(
+                    "[chrome_devtools.py] Chrome process did not terminate, forcing kill"
+                )
+            _shared_process.kill()
+            _shared_process.wait()
+
+    # Clean up port file
+    if PORT_FILE.exists():
+        PORT_FILE.unlink()
+        if debug:
+            print("[chrome_devtools.py] Removed port file")
+
+    # Reset global state
+    _shared_process = None
+    _shared_port = None
+    _shared_owned = False
+    _active_count = 0
+
+    if debug:
+        print("[chrome_devtools.py] Chrome shutdown complete")
+
+
 class ChromeContext:
     """Manages a Chrome instance and provides methods for content manipulation and screenshots"""
 
@@ -120,6 +175,7 @@ class ChromeContext:
         self.chrome_process = None
         self.ws = None
         self.cmd_id = 0
+        self.target_id = None  # Store target ID for tab cleanup
         # Use ColightHTTPServer for serving files
         self.server = ColightHTTPServer(
             host="localhost", port=0, debug=debug, serve_cwd=True
@@ -159,7 +215,12 @@ class ChromeContext:
 
     def start(self):
         """Start Chrome and connect to DevTools Protocol"""
-        global _shared_process, _shared_port, _shared_owned, _active_count, _shutdown_timer
+        global \
+            _shared_process, \
+            _shared_port, \
+            _shared_owned, \
+            _active_count, \
+            _shutdown_timer
 
         if self.chrome_process:
             if self.debug:
@@ -286,6 +347,12 @@ class ChromeContext:
                     raise RuntimeError("Chrome did not start in time")
                 time.sleep(0.1)
 
+        chrome_startup_time = time.time() - start_time
+        if self.debug:
+            print(
+                f"[chrome_devtools.py] Chrome became responsive in {chrome_startup_time:.3f}s"
+            )
+
         # Always open a fresh page for this context
         try:
             req = urllib.request.Request(
@@ -293,6 +360,7 @@ class ChromeContext:
                 method="PUT",
             )
             target = json.loads(urllib.request.urlopen(req, timeout=5).read())
+            self.target_id = target["id"]  # Store target ID for cleanup
             ws_url = target["webSocketDebuggerUrl"]
         except Exception as e:
             raise RuntimeError(f"Failed to open Chrome page: {e}")
@@ -306,18 +374,43 @@ class ChromeContext:
 
     def stop(self):
         """Stop Chrome and clean up"""
-        global _shared_process, _shared_port, _shared_owned, _active_count, _shutdown_timer
+        global \
+            _shared_process, \
+            _shared_port, \
+            _shared_owned, \
+            _active_count, \
+            _shutdown_timer
 
         if self.debug:
             print("[chrome_devtools.py] Stopping Chrome process")
+
+        # Close the tab if we have a target ID
+        if self.target_id and self.ws:
+            try:
+                if self.debug:
+                    print(f"[chrome_devtools.py] Closing tab {self.target_id}")
+                # Close the tab using the target ID
+                req = urllib.request.Request(
+                    f"http://localhost:{self.port}/json/close/{self.target_id}",
+                    method="PUT",
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                if self.debug:
+                    print(
+                        f"[chrome_devtools.py] Failed to close tab {self.target_id}: {e}"
+                    )
 
         if self.ws:
             self.ws.close()
             self.ws = None
 
+        self.target_id = None  # Clear target ID
+
         _active_count -= 1
         if self.chrome_process and not DEBUG_WINDOW:
             if _active_count <= 0 and _shared_owned:
+
                 def _term():
                     global _shared_process, _shared_port, _shared_owned, _shutdown_timer
                     if _shared_process:
@@ -336,10 +429,19 @@ class ChromeContext:
                     _shared_owned = False
                     _shared_process = None
                     _shared_port = None
+
                 if self.keep_alive > 0:
+                    if self.debug:
+                        print(
+                            f"[chrome_devtools.py] Scheduling Chrome shutdown in {self.keep_alive}s (keep_alive timeout)"
+                        )
                     _shutdown_timer = threading.Timer(self.keep_alive, _term)
                     _shutdown_timer.start()
                 else:
+                    if self.debug:
+                        print(
+                            "[chrome_devtools.py] Shutting down Chrome immediately (keep_alive=0)"
+                        )
                     _term()
 
             self.chrome_process = None
@@ -362,11 +464,19 @@ class ChromeContext:
                     _shared_port = None
 
                 if self.keep_alive > 0:
+                    if self.debug:
+                        print(
+                            f"[chrome_devtools.py] Scheduling Chrome shutdown in {self.keep_alive}s (keep_alive timeout, no process reference)"
+                        )
                     _shutdown_timer = threading.Timer(self.keep_alive, _term)
                     _shutdown_timer.start()
                 else:
+                    if self.debug:
+                        print(
+                            "[chrome_devtools.py] Shutting down Chrome immediately (keep_alive=0, no process reference)"
+                        )
                     _term()
-        
+
         # Stop ColightHTTPServer
         if self.server:
             if self.debug:
