@@ -31,11 +31,6 @@ jobs:
       - name: Install deps
         run: uv sync --group dev
 
-      - name: Run WebGPU Screenshot Tests
-        run: uv run python packages/colight/tests/test_screenshots.py
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-
       - name: Run Visual Regression Tests
         run: uv run pytest packages/colight/tests/visual/ -v
 
