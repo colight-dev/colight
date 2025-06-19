@@ -15,6 +15,13 @@
 - Format & lint: `pre-commit run --all-files`
 - Docs: `yarn watch:docs` to serve, `yarn build:docs` to build
 
+## Visual Testing
+
+- Run visual regression tests: `uv run pytest tests/visual/ -v`
+- Update visual baselines: `uv run python scripts/update_visual_baselines.py`
+- Visual tests run in CI and compare pixel-perfect against baselines
+- Update baselines when you intentionally change visual output
+
 ## Code Style Guide
 
 - **Python**: snake_case for variables/functions, PascalCase for classes

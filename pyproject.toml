@@ -28,6 +28,7 @@ dev = [
     "python-dotenv>=1.0.1",
     "tomli-w>=1.0.0",
     "pandas>=2.3.0",
+    "pillow>=11.2.1",
 ]
 
 # Workspace-wide tool configuration

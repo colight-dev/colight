@@ -1,11 +1,11 @@
-name: WebGPU Screenshots
+name: Visual Tests
 
 on:
+  pull_request:
   push:
-    branches:
-      - huebert/screenshot-state
+
 jobs:
-  webgpu-screenshots:
+  visual-tests:
     runs-on: parallelhoss
     steps:
       - uses: actions/checkout@v4
@@ -32,14 +32,20 @@ jobs:
         run: uv sync --group dev
 
       - name: Run WebGPU Screenshot Tests
-        run: uv run python tests/python/test_screenshots.py
+        run: uv run python packages/colight/tests/test_screenshots.py
         env:
           PYTHONPATH: ${{ github.workspace }}
 
-      - name: Upload screenshots
+      - name: Run Visual Regression Tests
+        run: uv run pytest tests/visual/ -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload visual test artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: webgpu-screenshots
+          name: visual-test-results
           path: |
+            tests/test-artifacts/
             scratch/screenshots/
