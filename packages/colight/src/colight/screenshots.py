@@ -23,7 +23,7 @@ class StudioContext(ChromeContext):
     It encapsulates behavior such as loading the Colight environment, rendering plots, and updating state.
     """
 
-    def __init__(self, plot=None, **kwargs):
+    def __init__(self, plot=None, reuse=True, keep_alive: float = 1.0, **kwargs):
         """
         Initialize StudioContext with optional plot
 
@@ -32,7 +32,7 @@ class StudioContext(ChromeContext):
             **kwargs: Additional arguments passed to ChromeContext
         """
         self._plot = plot
-        super().__init__(**kwargs)
+        super().__init__(reuse=reuse, keep_alive=keep_alive, **kwargs)
 
     def __enter__(self):
         context = super().__enter__()
@@ -404,6 +404,8 @@ def save_image(
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
+    reuse: bool = True,
+    keep_alive: float = 1.0,
 ) -> Union[Path, bytes]:
     """
     Render the plot and capture an image.
@@ -421,7 +423,13 @@ def save_image(
         Path to saved image if output_path is provided, otherwise PNG bytes
     """
     with StudioContext(
-        plot=plot, width=width, height=height, scale=scale, debug=debug
+        plot=plot,
+        width=width,
+        height=height,
+        scale=scale,
+        debug=debug,
+        reuse=reuse,
+        keep_alive=keep_alive,
     ) as studio:
         return studio.save_image(output_path, state_update)
 
@@ -436,6 +444,8 @@ def save_images(
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
+    reuse: bool = True,
+    keep_alive: float = 1.0,
 ) -> List[Path]:
     """
     Capture a sequence of images with state updates.
@@ -455,7 +465,13 @@ def save_images(
         List of paths to the saved images
     """
     with StudioContext(
-        plot=plot, width=width, height=height, scale=scale, debug=debug
+        plot=plot,
+        width=width,
+        height=height,
+        scale=scale,
+        debug=debug,
+        reuse=reuse,
+        keep_alive=keep_alive,
     ) as studio:
         return studio.save_image_sequence(
             state_updates, output_dir, filenames, filename_base
@@ -469,6 +485,8 @@ def save_pdf(
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
+    reuse: bool = True,
+    keep_alive: float = 1.0,
 ) -> Union[Path, bytes]:
     """
     Render the plot and capture a PDF of the page.
@@ -485,7 +503,13 @@ def save_pdf(
         Path to saved PDF if output_path is provided, otherwise PDF bytes
     """
     with StudioContext(
-        plot=plot, width=width, height=height, scale=scale, debug=debug
+        plot=plot,
+        width=width,
+        height=height,
+        scale=scale,
+        debug=debug,
+        reuse=reuse,
+        keep_alive=keep_alive,
     ) as studio:
         return studio.save_pdf(output_path)
 
@@ -499,6 +523,8 @@ def save_video(
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
+    reuse: bool = True,
+    keep_alive: float = 1.0,
 ) -> Path:
     """
     Capture a series of states from a plot as a video.
@@ -517,6 +543,12 @@ def save_video(
         Path to the saved video file
     """
     with StudioContext(
-        plot=plot, width=width, height=height, scale=scale, debug=debug
+        plot=plot,
+        width=width,
+        height=height,
+        scale=scale,
+        debug=debug,
+        reuse=reuse,
+        keep_alive=keep_alive,
     ) as studio:
         return studio.capture_video(state_updates, filename, fps)
