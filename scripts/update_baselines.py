@@ -24,11 +24,11 @@ colight_dir = Path(__file__).parent.parent / "packages" / "colight"
 os.chdir(colight_dir)
 sys.path.insert(0, str(colight_dir))
 
-from packages.colight.tests.visual.test_visual_regression import (
+from tests.visual.test_visual_regression import (  # pyright: ignore
     create_comprehensive_plot,
     chrome_available,
 )
-from packages.colight.tests.visual.utils import save_baseline, get_test_paths
+from tests.visual.utils import save_baseline, get_test_paths  # pyright: ignore
 
 
 def update_baselines():
