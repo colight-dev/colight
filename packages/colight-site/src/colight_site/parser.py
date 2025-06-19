@@ -4,44 +4,105 @@ import libcst as cst
 from dataclasses import dataclass, field
 from typing import List, Union, Optional, Literal
 import pathlib
+import re
+
+
+def _extract_pragma_tags(text: str) -> set[str]:
+    """Extract all pragma tags from text using a single regex pattern."""
+    # Single comprehensive pattern to match all our tag types
+    tags = set(re.findall(r"\b(?:hide|show|format)-\w+\b", text.lower()))
+
+    # Normalize to consistent forms
+    normalized = set()
+    for tag in tags:
+        # Convert singular to plural for consistency
+        if tag.endswith(("statement", "visual")):
+            normalized.add(tag + "s")
+        else:
+            normalized.add(tag)
+
+    return normalized
+
+
+def should_hide_statements(tags: set[str]) -> bool:
+    """Check if statements should be hidden based on tags."""
+    # show- tags override hide- tags
+    if "show-statements" in tags:
+        return False
+    return "hide-statements" in tags
+
+
+def should_hide_visuals(tags: set[str]) -> bool:
+    """Check if visuals should be hidden based on tags."""
+    # show- tags override hide- tags
+    if "show-visuals" in tags:
+        return False
+    return "hide-visuals" in tags
+
+
+def should_hide_code(tags: set[str]) -> bool:
+    """Check if code should be hidden based on tags."""
+    # show- tags override hide- tags
+    if "show-code" in tags:
+        return False
+    return "hide-code" in tags
+
+
+def _get_formats_from_tags(tags: set[str]) -> set[str]:
+    """Extract formats from pragma tags."""
+    formats = set()
+    if "format-html" in tags:
+        formats.add("html")
+    if "format-markdown" in tags:
+        formats.add("markdown")
+    return formats
+
+
+def _is_pragma_comment(comment_text: str) -> bool:
+    """Check if a comment is a pragma comment.
+
+    Only accepts comments starting with | or %% as pragma starters.
+    """
+    # Remove leading whitespace
+    text = comment_text.strip()
+
+    # Only check for explicit pragma starters: | or %%
+    return text.startswith("|") or text.startswith("%%")
+
+
+def _extract_pragma_content(comment_text: str) -> str:
+    """Extract the pragma content from a comment.
+
+    Removes the | or %% prefix and returns the content.
+    """
+    text = comment_text.strip()
+
+    if text.startswith("|"):
+        return text[1:].strip()
+    elif text.startswith("%%"):
+        return text[2:].strip()
+    else:
+        # This shouldn't happen if _is_pragma_comment is used correctly
+        return text
 
 
 @dataclass
 class FormMetadata:
     """Metadata extracted from per-form pragma annotations."""
 
-    hide_statements: Optional[bool] = None  # None means inherit from parent
-    hide_visuals: Optional[bool] = None
-    hide_code: Optional[bool] = None
+    pragma_tags: set[str] = field(default_factory=set)
 
-    def resolve_with_defaults(
-        self,
-        default_hide_statements: bool = False,
-        default_hide_visuals: bool = False,
-        default_hide_code: bool = False,
-    ) -> dict:
-        """Resolve form metadata with default values."""
-        return {
-            "hide_statements": self.hide_statements
-            if self.hide_statements is not None
-            else default_hide_statements,
-            "hide_visuals": self.hide_visuals
-            if self.hide_visuals is not None
-            else default_hide_visuals,
-            "hide_code": self.hide_code
-            if self.hide_code is not None
-            else default_hide_code,
-        }
+    def resolve_with_defaults(self, default_tags: set[str]) -> set[str]:
+        """Resolve form metadata with default tags."""
+        # Form-specific tags override defaults
+        return self.pragma_tags if self.pragma_tags else default_tags
 
 
 @dataclass
 class FileMetadata:
     """Metadata extracted from file-level pragma annotations."""
 
-    hide_statements: bool = False
-    hide_visuals: bool = False
-    hide_code: bool = False
-    format: Optional[str] = None  # 'html' or 'markdown'
+    pragma_tags: set[str] = field(default_factory=set)
 
     def merge_with_cli_options(
         self,
@@ -49,31 +110,30 @@ class FileMetadata:
         hide_visuals: bool = False,
         hide_code: bool = False,
         format: Optional[str] = None,
-        mostly_prose: bool = False,
-    ) -> dict:
+    ) -> tuple[set[str], set[str]]:
         """Merge file metadata with CLI options. CLI options take precedence."""
-        # Start with file metadata
-        result = {
-            "hide_statements": self.hide_statements,
-            "hide_visuals": self.hide_visuals,
-            "hide_code": self.hide_code,
-            "format": self.format,
-        }
+        # Start with file metadata tags
+        result_tags = self.pragma_tags.copy()
 
-        # CLI options override file metadata
+        # CLI options override/add to file metadata
         if hide_statements:
-            result["hide_statements"] = True
+            result_tags.add("hide-statements")
         if hide_visuals:
-            result["hide_visuals"] = True
+            result_tags.add("hide-visuals")
         if hide_code:
-            result["hide_code"] = True
-        if format:
-            result["format"] = format
-        if mostly_prose:
-            result["hide_statements"] = True
-            result["hide_code"] = True
+            result_tags.add("hide-code")
 
-        return result
+        # Get formats from file metadata
+        result_formats = _get_formats_from_tags(self.pragma_tags)
+
+        # CLI format option overrides file metadata formats
+        if format:
+            result_formats = {format}
+        elif not result_formats:
+            # Default to markdown if no format specified
+            result_formats = {"markdown"}
+
+        return result_tags, result_formats
 
 
 class CombinedStatements:
@@ -305,7 +365,7 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
         for line in module.header:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
-                if comment_text.strip().startswith("|") and "colight:" in comment_text:
+                if _is_pragma_comment(comment_text):
                     elements.append(
                         RawElement("pragma", comment_text, 1)
                     )  # TODO: real line numbers
@@ -321,10 +381,7 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
             for line in stmt.leading_lines:
                 if line.comment:
                     comment_text = line.comment.value.lstrip("#").strip()
-                    if (
-                        comment_text.strip().startswith("|")
-                        and "colight:" in comment_text
-                    ):
+                    if _is_pragma_comment(comment_text):
                         elements.append(RawElement("pragma", comment_text, 1))
                     else:
                         elements.append(RawElement("comment", comment_text, 1))
@@ -341,7 +398,23 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
     """Step 2: Group elements into forms with clear rules."""
     forms = []
 
+    # Skip file-level pragmas at the beginning
+    # File-level pragmas are those at the top followed by at least one empty line
     i = 0
+
+    # Count consecutive pragmas at the beginning
+    while i < len(elements) and elements[i].type == "pragma":
+        i += 1
+
+    # Check if these pragmas are followed by a blank line
+    if i > 0 and i < len(elements) and elements[i].type == "blank_line":
+        # These are file-level pragmas, skip past the blank line
+        i += 1
+    else:
+        # No blank line after pragmas, so they're not file-level
+        # Reset to beginning
+        i = 0
+
     while i < len(elements):
         current_markdown = []
         current_pragmas = []
@@ -402,33 +475,23 @@ def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
     """Extract file-level metadata from elements at the start."""
     metadata = FileMetadata()
 
-    # Only process consecutive pragma elements at the very beginning
-    in_file_pragma_section = True
+    # File-level pragmas are those at the top followed by at least one empty line
+    i = 0
 
-    for elem in elements:
-        if in_file_pragma_section and elem.type == "pragma":
-            if isinstance(elem.content, str):
-                options_str = elem.content.split("colight:", 1)[1].strip()
-                options = _parse_pragma_options(options_str)
+    # Collect consecutive pragmas at the beginning
+    pragma_contents = []
+    while i < len(elements) and elements[i].type == "pragma":
+        if isinstance(elements[i].content, str):
+            pragma_contents.append(elements[i].content)
+        i += 1
 
-                # Apply options to metadata
-                if options["hide_statements"] is not None:
-                    metadata.hide_statements = options["hide_statements"]
-                if options["hide_visuals"] is not None:
-                    metadata.hide_visuals = options["hide_visuals"]
-                if options["hide_code"] is not None:
-                    metadata.hide_code = options["hide_code"]
-                if options["format"] is not None:
-                    metadata.format = options["format"]
-                if options["mostly_prose"]:
-                    metadata.hide_statements = True
-                    metadata.hide_code = True
-        elif elem.type in ["comment", "blank_line"]:
-            # Comments and blank lines end the file pragma section
-            in_file_pragma_section = False
-        else:
-            # Hit code or other content, definitely done with file pragmas
-            break
+    # Check if these pragmas are followed by a blank line
+    if i < len(elements) and elements[i].type == "blank_line":
+        # These are file-level pragmas
+        for pragma_content in pragma_contents:
+            content = _extract_pragma_content(pragma_content)
+            tags = _extract_pragma_tags(content)
+            metadata.pragma_tags.update(tags)
 
     return metadata
 
@@ -441,17 +504,10 @@ def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
         # Parse form-level metadata from pragma comments
         form_metadata = FormMetadata()
         for pragma in raw_form.pragma_comments:
-            if isinstance(pragma, str) and "colight:" in pragma:
-                options_str = pragma.split("colight:", 1)[1].strip()
-                options = _parse_pragma_options(options_str)
-
-                # Apply options to form metadata (no format or mostly_prose for forms)
-                if options["hide_statements"] is not None:
-                    form_metadata.hide_statements = options["hide_statements"]
-                if options["hide_visuals"] is not None:
-                    form_metadata.hide_visuals = options["hide_visuals"]
-                if options["hide_code"] is not None:
-                    form_metadata.hide_code = options["hide_code"]
+            if isinstance(pragma, str):
+                pragma_content = _extract_pragma_content(pragma)
+                tags = _extract_pragma_tags(pragma_content)
+                form_metadata.pragma_tags.update(tags)
 
         # Convert code statements to proper node
         if len(raw_form.code_statements) == 1:
@@ -470,48 +526,6 @@ def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
         forms.append(form)
 
     return forms
-
-
-def _parse_pragma_options(options_str: str) -> dict:
-    """Parse pragma options string into a dictionary of settings.
-
-    Supports both hide- and show- options. show- options override hide- options.
-    """
-    result = {
-        "hide_statements": None,
-        "hide_visuals": None,
-        "hide_code": None,
-        "format": None,
-        "mostly_prose": False,
-    }
-
-    # Split by comma and process each option
-    options = [opt.strip() for opt in options_str.split(",")]
-
-    for option in options:
-        option = option.strip()
-
-        if option == "hide-statements":
-            result["hide_statements"] = True
-        elif option == "show-statements":
-            result["hide_statements"] = False
-        elif option == "hide-visuals":
-            result["hide_visuals"] = True
-        elif option == "show-visuals":
-            result["hide_visuals"] = False
-        elif option == "hide-code":
-            result["hide_code"] = True
-        elif option == "show-code":
-            result["hide_code"] = False
-        elif option == "mostly-prose":
-            result["mostly_prose"] = True
-        elif option == "format-html":
-            result["format"] = "html"
-        elif option == "format-markdown":
-            result["format"] = "markdown"
-        # Silently ignore unknown options for forward compatibility
-
-    return result
 
 
 def parse_colight_file(file_path: pathlib.Path) -> tuple[List[Form], FileMetadata]:

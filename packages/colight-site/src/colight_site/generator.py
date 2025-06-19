@@ -4,7 +4,12 @@ import pathlib
 from typing import List, Optional
 import markdown
 
-from colight_site.parser import Form
+from colight_site.parser import (
+    Form,
+    should_hide_statements,
+    should_hide_visuals,
+    should_hide_code,
+)
 from colight.env import VERSIONED_CDN_DIST_URL
 
 EMBED_URL = (
@@ -25,11 +30,12 @@ class MarkdownGenerator:
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
-        hide_statements: bool = False,
-        hide_visuals: bool = False,
-        hide_code: bool = False,
+        pragma_tags: Optional[set[str]] = None,
     ) -> str:
         """Generate complete Markdown document."""
+        if pragma_tags is None:
+            pragma_tags = set()
+
         lines = []
 
         # Add title if provided
@@ -43,11 +49,7 @@ class MarkdownGenerator:
             is_dummy_form = self._is_dummy_form(form)
 
             # Resolve form-specific settings: per-form metadata overrides file/CLI defaults
-            resolved_settings = form.metadata.resolve_with_defaults(
-                default_hide_statements=hide_statements,
-                default_hide_visuals=hide_visuals,
-                default_hide_code=hide_code,
-            )
+            resolved_tags = form.metadata.resolve_with_defaults(pragma_tags)
 
             # Always add markdown content from comments (separated by blank lines)
             if form.markdown:
@@ -57,16 +59,16 @@ class MarkdownGenerator:
                     lines.append("")
 
             # Determine if we should show the code block
-            # If this form explicitly sets hide_code=False (show-code), it overrides hide_statements
-            explicit_show_code = form.metadata.hide_code is False
+            # If this form explicitly has show-code, it overrides hide_statements
+            explicit_show_code = "show-code" in resolved_tags
 
             if explicit_show_code:
                 # show-code pragma overrides both hide_code and hide_statements for this form
                 show_code_block = True
             else:
                 # Normal logic: skip if hide_code is True OR if hide_statements is True and this is a statement
-                show_code_block = not resolved_settings["hide_code"] and not (
-                    resolved_settings["hide_statements"] and form.is_statement
+                show_code_block = not should_hide_code(resolved_tags) and not (
+                    should_hide_statements(resolved_tags) and form.is_statement
                 )
 
             if show_code_block:
@@ -82,7 +84,7 @@ class MarkdownGenerator:
                         lines.append("")
 
             # Skip visuals if hide_visuals is True
-            if not resolved_settings["hide_visuals"]:
+            if not should_hide_visuals(resolved_tags):
                 # Add colight embed if we have a visualization
                 if colight_file and not is_dummy_form:
                     embed_path = self._get_relative_path(colight_file, output_path)
@@ -185,9 +187,7 @@ class MarkdownGenerator:
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
-        hide_statements: bool = False,
-        hide_visuals: bool = False,
-        hide_code: bool = False,
+        pragma_tags: Optional[set[str]] = None,
     ) -> str:
         """Generate complete HTML document with embedded visualizations."""
         # First generate markdown content
@@ -196,9 +196,7 @@ class MarkdownGenerator:
             colight_files,
             title,
             output_path,
-            hide_statements=hide_statements,
-            hide_visuals=hide_visuals,
-            hide_code=hide_code,
+            pragma_tags=pragma_tags,
         )
 
         # Convert markdown to HTML

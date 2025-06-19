@@ -95,7 +95,7 @@ def test_hide_statements_flag():
 
     # Generate with hide_statements=True
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_statements=True
+        forms, colight_files, pragma_tags={"hide-statements"}
     )
     assert "import numpy as np" not in markdown_hidden  # statement
     assert "x = np.linspace(0, 10, 100)" not in markdown_hidden  # statement
@@ -130,7 +130,9 @@ def test_hide_code_flag():
     assert "np.sin(x)" in markdown
 
     # Generate with hide_code=True
-    markdown_hidden = generator.generate_markdown(forms, colight_files, hide_code=True)
+    markdown_hidden = generator.generate_markdown(
+        forms, colight_files, pragma_tags={"hide-code"}
+    )
     assert "```python" not in markdown_hidden
     assert "import numpy as np" not in markdown_hidden
     assert "np.sin(x)" not in markdown_hidden
@@ -162,7 +164,7 @@ def test_hide_visuals_flag():
 
     # Generate with hide_visuals=True
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_visuals=True
+        forms, colight_files, pragma_tags={"hide-visuals"}
     )
     assert "colight-embed" not in markdown_hidden
     assert "data-src=" not in markdown_hidden
@@ -188,20 +190,20 @@ def test_per_form_metadata_overrides():
             markdown=["This form should hide its code"],
             node=import_stmt,
             start_line=1,
-            metadata=FormMetadata(hide_code=True),  # Override to hide code
+            metadata=FormMetadata(pragma_tags={"hide-code"}),  # Override to hide code
         ),
         Form(
             markdown=["This form should show its code"],
             node=expr_stmt,
             start_line=2,
-            metadata=FormMetadata(hide_code=False),  # Override to show code
+            metadata=FormMetadata(pragma_tags={"show-code"}),  # Override to show code
         ),
     ]
 
     colight_files = [None, pathlib.Path("test.colight")]
 
-    # Generate with global hide_code=False (should be overridden per-form)
-    markdown = generator.generate_markdown(forms, colight_files, hide_code=False)
+    # Generate with default settings (should be overridden per-form)
+    markdown = generator.generate_markdown(forms, colight_files)
 
     # First form should hide code due to per-form metadata
     assert "This form should hide its code" in markdown
@@ -212,8 +214,8 @@ def test_per_form_metadata_overrides():
     assert "np.sin(x)" in markdown
 
 
-def test_show_code_overrides_mostly_prose():
-    """Test that show-code pragma overrides mostly-prose for specific forms."""
+def test_show_code_overrides_hide_code():
+    """Test that show-code pragma overrides hide-code for specific forms."""
     output_dir = artifacts_dir
     generator = MarkdownGenerator(output_dir)
 
@@ -221,16 +223,16 @@ def test_show_code_overrides_mostly_prose():
     import tempfile
     from colight_site.parser import parse_colight_file
 
-    content = """#| colight: mostly-prose
+    content = """#| hide-statements hide-code
 
-# First form - should hide code due to mostly-prose
+# First form - should hide code due to file-level flags
 import numpy as np
 
 #| colight: show-code
-# Second form - should show code despite mostly-prose
+# Second form - should show code despite file-level hide-code
 x = np.array([1, 2, 3])
 
-# Third form - should hide code again (back to mostly-prose default)
+# Third form - should hide code again (back to file defaults)
 y = x * 2
 """
 
@@ -240,19 +242,19 @@ y = x * 2
 
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
-        # Apply file metadata
-        merged_options = metadata.merge_with_cli_options()
-        generator_options = {k: v for k, v in merged_options.items() if k != "format"}
-
+        # Use the file metadata tags directly
         colight_files: List[Optional[pathlib.Path]] = [None] * len(forms)
 
         markdown = generator.generate_markdown(
-            forms, colight_files, title="Test Document", **generator_options
+            forms,
+            colight_files,
+            title="Test Document",
+            pragma_tags=metadata.pragma_tags,
         )
 
         # Check results
-        assert "import numpy as np" not in markdown  # hidden by mostly-prose
+        assert "import numpy as np" not in markdown  # hidden by file-level hide-code
         assert "x = np.array([1, 2, 3])" in markdown  # shown by show-code override
-        assert "y = x * 2" not in markdown  # hidden by mostly-prose
+        assert "y = x * 2" not in markdown  # hidden by file-level hide-code
 
         pathlib.Path(f.name).unlink()
