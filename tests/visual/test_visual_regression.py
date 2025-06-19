@@ -76,30 +76,26 @@ def create_comprehensive_plot():
 
     # Add KaTeX equation
     equation = Plot.md(
-        r"""
-    ### Mathematical Example
-    
-    The **Gaussian distribution** is fundamental in statistics:
-    
-    $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\right)^2}$$
-    
-    where $\mu$ is the mean and $\sigma$ is the standard deviation.
-    """,
+        r"""### Mathematical Example
+
+The **Gaussian distribution** is fundamental in statistics:
+
+$$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\right)^2}$$
+
+where $\mu$ is the mean and $\sigma$ is the standard deviation.""",
         className="bg-gray-50 p-4 rounded",
     )
 
     # Add descriptive markdown
     description = Plot.md(
-        """
-    ## Visual Regression Test Example
-    
-    This plot demonstrates:
-    - **Multiple chart types**: scatter, line, and bar charts
-    - **Mathematical notation**: rendered with KaTeX
-    - **Consistent styling**: using Colight's layout system
-    
-    This serves as both a regression test and a usage example.
-    """,
+        """## Visual Regression Test Example
+
+This plot demonstrates:
+- **Multiple chart types**: scatter, line, and bar charts
+- **Mathematical notation**: rendered with KaTeX
+- **Consistent styling**: using Colight's layout system
+
+This serves as both a regression test and a usage example.""",
         className="bg-blue-50 p-4 rounded mt-4",
     )
 
