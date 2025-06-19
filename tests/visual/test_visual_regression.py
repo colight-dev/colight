@@ -23,7 +23,7 @@ def chrome_available() -> bool:
 
 
 # Create output directory for test artifacts
-TEST_OUTPUT_DIR = Path("./tests/test-artifacts/visual/")
+TEST_OUTPUT_DIR = Path("./packages/colight/tests/test-artifacts/visual/")
 TEST_OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 

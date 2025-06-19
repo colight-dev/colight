@@ -12,21 +12,21 @@ import markdownItKatex from "./markdown-it-katex";
 import { tw, joinClasses } from "./utils";
 
 import MarkdownIt from "markdown-it";
+const KATEX_DIST_URL = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist";
 
-const KATEX_CSS_URL =
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
+const KATEX_CSS_URL = `${KATEX_DIST_URL}/katex.min.css`;
 
 // KaTeX font URLs for preloading
 const KATEX_FONTS = [
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Main-Regular.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Math-Italic.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Main-Bold.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Main-Italic.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_AMS-Regular.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Size1-Regular.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Size2-Regular.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Size3-Regular.woff2",
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/KaTeX_Size4-Regular.woff2",
+  `${KATEX_DIST_URL}/fonts/KaTeX_Main-Regular.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Math-Italic.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Main-Bold.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Main-Italic.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_AMS-Regular.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Size1-Regular.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Size2-Regular.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Size3-Regular.woff2`,
+  `${KATEX_DIST_URL}/fonts/KaTeX_Size4-Regular.woff2`,
 ];
 
 let katexResourcesPromise = null;
