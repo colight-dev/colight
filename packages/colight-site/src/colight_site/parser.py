@@ -10,40 +10,42 @@ import re
 def _extract_pragma_tags(text: str) -> set[str]:
     """Extract all pragma tags from text using a single regex pattern."""
     # Single comprehensive pattern to match all our tag types
-    return set(re.findall(r"\b(?:hide|show|format|mostly)-\w+\b", text.lower()))
+    tags = set(re.findall(r"\b(?:hide|show|format|mostly)-\w+\b", text.lower()))
 
+    # Normalize to consistent forms
+    normalized = set()
+    for tag in tags:
+        # Convert singular to plural for consistency
+        if tag.endswith(("statement", "visual")):
+            normalized.add(tag + "s")
+        else:
+            normalized.add(tag)
 
-def has_tag_pattern(tags: set[str], pattern_base: str) -> bool:
-    """Check if any tag matches a pattern (handles plural/singular)."""
-    return any(tag.startswith(pattern_base) for tag in tags)
+    return normalized
 
 
 def should_hide_statements(tags: set[str]) -> bool:
     """Check if statements should be hidden based on tags."""
     # show- tags override hide- tags
-    if has_tag_pattern(tags, "show-statement"):
+    if "show-statements" in tags:
         return False
-    if has_tag_pattern(tags, "hide-statement") or "mostly-prose" in tags:
-        return True
-    return False
+    return "hide-statements" in tags or "mostly-prose" in tags
 
 
 def should_hide_visuals(tags: set[str]) -> bool:
     """Check if visuals should be hidden based on tags."""
     # show- tags override hide- tags
-    if has_tag_pattern(tags, "show-visual"):
+    if "show-visuals" in tags:
         return False
-    return has_tag_pattern(tags, "hide-visual")
+    return "hide-visuals" in tags
 
 
 def should_hide_code(tags: set[str]) -> bool:
     """Check if code should be hidden based on tags."""
     # show- tags override hide- tags
-    if has_tag_pattern(tags, "show-code"):
+    if "show-code" in tags:
         return False
-    if has_tag_pattern(tags, "hide-code") or "mostly-prose" in tags:
-        return True
-    return False
+    return "hide-code" in tags or "mostly-prose" in tags
 
 
 def _get_formats_from_tags(tags: set[str]) -> set[str]:
@@ -98,25 +100,25 @@ class FormMetadata:
     # Compatibility properties for existing tests
     @property
     def hide_statements(self) -> Optional[bool]:
-        if has_tag_pattern(self.pragma_tags, "show-statement"):
+        if "show-statements" in self.pragma_tags:
             return False
-        if has_tag_pattern(self.pragma_tags, "hide-statement"):
+        if "hide-statements" in self.pragma_tags:
             return True
         return None
 
     @property
     def hide_visuals(self) -> Optional[bool]:
-        if has_tag_pattern(self.pragma_tags, "show-visual"):
+        if "show-visuals" in self.pragma_tags:
             return False
-        if has_tag_pattern(self.pragma_tags, "hide-visual"):
+        if "hide-visuals" in self.pragma_tags:
             return True
         return None
 
     @property
     def hide_code(self) -> Optional[bool]:
-        if has_tag_pattern(self.pragma_tags, "show-code"):
+        if "show-code" in self.pragma_tags:
             return False
-        if has_tag_pattern(self.pragma_tags, "hide-code"):
+        if "hide-code" in self.pragma_tags:
             return True
         return None
 

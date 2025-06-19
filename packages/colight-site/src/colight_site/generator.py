@@ -9,7 +9,6 @@ from colight_site.parser import (
     should_hide_statements,
     should_hide_visuals,
     should_hide_code,
-    has_tag_pattern,
 )
 from colight.env import VERSIONED_CDN_DIST_URL
 
@@ -61,7 +60,7 @@ class MarkdownGenerator:
 
             # Determine if we should show the code block
             # If this form explicitly has show-code, it overrides hide_statements
-            explicit_show_code = has_tag_pattern(resolved_tags, "show-code")
+            explicit_show_code = "show-code" in resolved_tags
 
             if explicit_show_code:
                 # show-code pragma overrides both hide_code and hide_statements for this form
