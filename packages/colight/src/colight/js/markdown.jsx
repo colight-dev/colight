@@ -1,4 +1,6 @@
-import { useState, useEffect, useContext, useRef } from "react";
+import * as React from "react";
+const { useState, useEffect, useContext, useRef, useCallback, useMemo } = React;
+
 import { $StateContext } from "./context";
 import Katex from "katex";
 import markdownItKatex from "./markdown-it-katex";

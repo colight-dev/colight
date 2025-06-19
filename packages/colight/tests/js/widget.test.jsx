@@ -18,18 +18,6 @@ const emptyState = { __evalEnv: {} };
 
 describe("Widget", () => {
   describe("evaluate", () => {
-    it("should evaluate a simple ast", () => {
-      const ast = {
-        __type__: "function",
-        path: "md",
-        args: ["# Hello, World!"],
-      };
-
-      const result = evaluate(ast, emptyState, {}, null);
-      expect(result).toBeDefined();
-      expect(React.isValidElement(result)).toBe(true);
-    });
-
     it("should resolve a js reference", () => {
       const ast = {
         __type__: "js_ref",

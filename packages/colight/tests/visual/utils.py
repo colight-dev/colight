@@ -95,7 +95,7 @@ def get_test_paths(test_name: str, output_dir: Path) -> tuple[Path, Path, Path]:
     Returns:
         Tuple of (baseline_path, actual_path, diff_path)
     """
-    baseline_path = Path("baselines") / f"{test_name}.png"
+    baseline_path = Path("packages/colight/tests/visual/baselines") / f"{test_name}.png"
     actual_path = output_dir / f"{test_name}.png"
     diff_path = output_dir / f"{test_name}_diff.png"
 

@@ -10,7 +10,7 @@ import pytest
 import numpy as np
 import colight.plot as Plot
 from colight.chrome_devtools import find_chrome, check_chrome_version
-from visual.utils import compare_images, get_test_paths
+from tests.visual.utils import compare_images, get_test_paths
 
 
 def chrome_available() -> bool:
@@ -133,12 +133,12 @@ def test_comprehensive_visual_regression():
                 f"Baseline: {baseline_path}\n"
                 f"Actual: {actual_path}\n"
                 f"Diff: {diff_path}\n"
-                f"To update baseline: cd packages/colight && uv run python tests/visual/update_baselines.py"
+                f"To update baseline: uv run python scripts/update_baselines.py"
             )
     else:
         pytest.fail(
             f"Baseline image not found: {baseline_path}\n"
-            f"To create baseline: cd packages/colight && uv run python tests/visual/update_baselines.py"
+            f"To create baseline: uv run python scripts/update_baselines.py"
         )
 
 

@@ -17,8 +17,8 @@
 
 ## Visual Testing
 
-- Run visual regression tests: `uv run pytest tests/visual/ -v`
-- Update visual baselines: `uv run python scripts/update_visual_baselines.py`
+- Run visual regression tests: `cd packages/colight && uv run pytest tests/visual/ -v`
+- Update visual baselines: `cd packages/colight && uv run python scripts/update_baselines.py`
 - Visual tests run in CI and compare pixel-perfect against baselines
 - Update baselines when you intentionally change visual output
 

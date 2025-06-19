@@ -5,8 +5,8 @@ Script to update visual test baselines.
 Run this when you've intentionally changed something visual and need to
 update the reference images for regression testing.
 
-Usage (from colight package directory):
-    uv run python tests/visual/update_baselines.py
+Usage (from repository root):
+    uv run python scripts/update_baselines.py
 
 This will:
 1. Generate all visual test plots
@@ -16,14 +16,19 @@ This will:
 
 import sys
 import shutil
+import os
 from pathlib import Path
 
-# Add the tests directory to Python path so we can import test modules
-tests_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(tests_dir))
+# Change to colight package directory and add to Python path
+colight_dir = Path(__file__).parent.parent / "packages" / "colight"
+os.chdir(colight_dir)
+sys.path.insert(0, str(colight_dir))
 
-from visual.test_visual_regression import create_comprehensive_plot, chrome_available
-from visual.utils import save_baseline, get_test_paths
+from packages.colight.tests.visual.test_visual_regression import (
+    create_comprehensive_plot,
+    chrome_available,
+)
+from packages.colight.tests.visual.utils import save_baseline, get_test_paths
 
 
 def update_baselines():
