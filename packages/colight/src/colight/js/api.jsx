@@ -1,81 +1,21 @@
-import { $StateContext, AUTOGRID_MIN as AUTOGRID_MIN_WIDTH } from "./context";
+import { $StateContext, AUTOGRID_MIN } from "./context";
 import { MarkSpec, PlotSpec } from "./plot";
 import * as Plot from "@observablehq/plot";
 import bylight from "bylight";
 import * as d3 from "d3";
-import MarkdownIt from "markdown-it";
 import * as mobxReact from "mobx-react-lite";
 import * as React from "react";
+const { useState, useEffect, useContext, useRef, useCallback, useMemo } = React;
 import * as ReactDOM from "react-dom/client";
 import * as render from "./plot/render";
 import { Grid, Row, Column } from "./layout";
 import { joinClasses, tw } from "./utils";
-const { useState, useEffect, useContext, useRef, useCallback } = React;
-import Katex from "katex";
-import markdownItKatex from "./markdown-it-katex";
 import * as scene3d from "./scene3d/scene3d";
 import { Bitmap } from "./components/bitmap";
 import { inspect } from "./inspect";
+import { md, katex } from "./markdown";
 
 export const CONTAINER_PADDING = 10;
-const KATEX_CSS_URL =
-  "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
-
-let katexCssLoaded = false;
-function loadKatexCss() {
-  if (katexCssLoaded) return;
-  if (!document.querySelector(`link[href="${KATEX_CSS_URL}"]`)) {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = KATEX_CSS_URL;
-    document.head.appendChild(link);
-  }
-  katexCssLoaded = true;
-}
-
-export function katex(tex) {
-  const containerRef = useRef(null);
-
-  loadKatexCss();
-
-  useEffect(() => {
-    if (containerRef.current) {
-      try {
-        Katex.render(tex, containerRef.current, {
-          throwOnError: false,
-        });
-      } catch (error) {
-        console.error("Error rendering KaTeX:", error);
-      }
-    }
-  }, [tex]);
-
-  return <div ref={containerRef} />;
-}
-
-const MarkdownItInstance = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: true,
-  quotes: `""''`,
-});
-
-MarkdownItInstance.use(markdownItKatex);
-
-export function md(options, text) {
-  if (typeof options === "string" && !text) {
-    text = options;
-    options = {};
-  }
-  loadKatexCss();
-
-  return (
-    <div
-      className={tw(joinClasses("prose", options.className))}
-      dangerouslySetInnerHTML={{ __html: MarkdownItInstance.render(text) }}
-    />
-  );
-}
 
 export const Slider = mobxReact.observer(function (options) {
   let {
@@ -365,6 +305,8 @@ export {
   scene3d,
   Bitmap,
   tw,
+  md,
+  katex,
 };
 
 function renderArray($state, value) {
