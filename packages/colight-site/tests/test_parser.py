@@ -388,3 +388,199 @@ x = np.array([1, 2, 3])
         assert array_form.metadata.hide_code is None
 
         pathlib.Path(f.name).unlink()
+
+
+def test_new_pragma_formats():
+    """Test new pragma formats with %% and | starters without colight: prefix."""
+    content = """# %% hide-code
+# Regular comment
+import numpy as np
+
+#| format-html
+# Another comment
+x = np.array([1, 2, 3])
+
+# hide-statements in regular comment 
+y = x * 2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Should have 3 forms
+        assert len(forms) == 3
+
+        # First form should have hide_code=True from %% pragma
+        import_form = None
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+                break
+        assert import_form is not None
+        assert import_form.metadata.hide_code is True
+
+        # Third form should have hide_statements=True from liberal matching
+        y_form = None
+        for form in forms:
+            if "y = x * 2" in form.code:
+                y_form = form
+                break
+        assert y_form is not None
+        assert y_form.metadata.hide_statements is True
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_liberal_tag_matching():
+    """Test that tags are matched liberally anywhere in comments."""
+    content = """# mostly-prose flag test
+# %% This comment has hide-code somewhere in it
+import numpy as np
+
+# Some text with show-visuals and other words
+x = np.array([1, 2, 3])
+
+# format-markdown should work too
+y = x * 2
+
+z = y + 1
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Find the forms and check their metadata
+        import_form = None
+        x_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+
+        # Check that liberal matching worked
+        assert import_form is not None
+        assert import_form.metadata.hide_code is True
+
+        assert x_form is not None
+        assert x_form.metadata.hide_visuals is False  # show-visuals
+
+        # File-level metadata from mostly-prose
+        assert metadata.hide_statements is True
+        assert metadata.hide_code is True
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_mixed_pragma_formats():
+    """Test mixing old and new pragma formats."""
+    content = """#| colight: hide-statements
+# %% format-html
+# Regular comment
+import numpy as np
+
+#| show-code
+x = np.array([1, 2, 3])
+"""
+
+    metadata = parse_file_metadata(content)
+
+    # Both old and new formats should be parsed
+    assert metadata.hide_statements is True
+    assert metadata.format == "html"
+
+
+def test_case_insensitive_matching():
+    """Test that tag matching is case insensitive."""
+    content = """# %% Hide-Code Format-HTML
+import numpy as np
+
+# SHOW-VISUALS
+x = np.array([1, 2, 3])
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        assert metadata.format == "html"
+
+        # Find forms and check metadata
+        import_form = None
+        x_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+
+        assert import_form is not None
+        assert import_form.metadata.hide_code is True
+
+        assert x_form is not None
+        assert x_form.metadata.hide_visuals is False  # show-visuals
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_plural_singular_support():
+    """Test that both plural and singular forms work."""
+    content = """# %% hide-statement
+import numpy as np
+
+# hide-statements should also work
+x = np.array([1, 2, 3])
+
+# show-visual
+y = x * 2
+
+# show-visuals should also work
+z = y + 1
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Find forms
+        import_form = None
+        x_form = None
+        y_form = None
+        z_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+            elif "y = x * 2" in form.code:
+                y_form = form
+            elif "z = y + 1" in form.code:
+                z_form = form
+
+        # Check that both singular and plural forms work
+        assert import_form is not None
+        assert import_form.metadata.hide_statements is True  # hide-statement
+
+        assert x_form is not None
+        assert x_form.metadata.hide_statements is True  # hide-statements
+
+        assert y_form is not None
+        assert y_form.metadata.hide_visuals is False  # show-visual
+
+        assert z_form is not None
+        assert z_form.metadata.hide_visuals is False  # show-visuals
+
+        pathlib.Path(f.name).unlink()

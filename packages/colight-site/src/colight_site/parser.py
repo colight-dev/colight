@@ -4,6 +4,47 @@ import libcst as cst
 from dataclasses import dataclass, field
 from typing import List, Union, Optional, Literal
 import pathlib
+import re
+
+
+def _extract_pragma_tags(text: str) -> set[str]:
+    """Extract all pragma tags from text using a single regex pattern."""
+    # Single comprehensive pattern to match all our tag types
+    return set(re.findall(r"\b(?:hide|show|format|mostly)-\w+\b", text.lower()))
+
+
+def _is_pragma_comment(comment_text: str) -> bool:
+    """Check if a comment is a pragma comment.
+
+    Accepts comments starting with | or %% as pragma starters.
+    Also looks for our specific tags anywhere in the comment.
+    """
+    # Remove leading whitespace
+    text = comment_text.strip()
+
+    # Check for explicit pragma starters: | or %%
+    if text.startswith("|") or text.startswith("%%"):
+        return True
+
+    # Check for our tags using the centralized extraction function
+    tags = _extract_pragma_tags(text)
+    return len(tags) > 0
+
+
+def _extract_pragma_content(comment_text: str) -> str:
+    """Extract the pragma content from a comment.
+
+    If it starts with | or %%, remove that prefix.
+    Otherwise, return the full text since it contains our tags.
+    """
+    text = comment_text.strip()
+
+    if text.startswith("|"):
+        return text[1:].strip()
+    elif text.startswith("%%"):
+        return text[2:].strip()
+    else:
+        return text
 
 
 @dataclass
@@ -305,7 +346,7 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
         for line in module.header:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
-                if comment_text.strip().startswith("|") and "colight:" in comment_text:
+                if _is_pragma_comment(comment_text):
                     elements.append(
                         RawElement("pragma", comment_text, 1)
                     )  # TODO: real line numbers
@@ -321,10 +362,7 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
             for line in stmt.leading_lines:
                 if line.comment:
                     comment_text = line.comment.value.lstrip("#").strip()
-                    if (
-                        comment_text.strip().startswith("|")
-                        and "colight:" in comment_text
-                    ):
+                    if _is_pragma_comment(comment_text):
                         elements.append(RawElement("pragma", comment_text, 1))
                     else:
                         elements.append(RawElement("comment", comment_text, 1))
@@ -408,7 +446,7 @@ def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
     for elem in elements:
         if in_file_pragma_section and elem.type == "pragma":
             if isinstance(elem.content, str):
-                options_str = elem.content.split("colight:", 1)[1].strip()
+                options_str = _extract_pragma_content(elem.content)
                 options = _parse_pragma_options(options_str)
 
                 # Apply options to metadata
@@ -441,8 +479,8 @@ def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
         # Parse form-level metadata from pragma comments
         form_metadata = FormMetadata()
         for pragma in raw_form.pragma_comments:
-            if isinstance(pragma, str) and "colight:" in pragma:
-                options_str = pragma.split("colight:", 1)[1].strip()
+            if isinstance(pragma, str):
+                options_str = _extract_pragma_content(pragma)
                 options = _parse_pragma_options(options_str)
 
                 # Apply options to form metadata (no format or mostly_prose for forms)
@@ -475,6 +513,7 @@ def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
 def _parse_pragma_options(options_str: str) -> dict:
     """Parse pragma options string into a dictionary of settings.
 
+    Takes a liberal approach: looks for our tags anywhere in the string with word boundaries.
     Supports both hide- and show- options. show- options override hide- options.
     """
     result = {
@@ -485,31 +524,38 @@ def _parse_pragma_options(options_str: str) -> dict:
         "mostly_prose": False,
     }
 
-    # Split by comma and process each option
-    options = [opt.strip() for opt in options_str.split(",")]
+    # Extract all pragma tags from the text
+    tags = _extract_pragma_tags(options_str)
 
-    for option in options:
-        option = option.strip()
+    # Helper function to check if any tag matches a pattern (handles plural/singular)
+    def has_tag_pattern(pattern_base: str) -> bool:
+        return any(tag.startswith(pattern_base) for tag in tags)
 
-        if option == "hide-statements":
-            result["hide_statements"] = True
-        elif option == "show-statements":
-            result["hide_statements"] = False
-        elif option == "hide-visuals":
-            result["hide_visuals"] = True
-        elif option == "show-visuals":
-            result["hide_visuals"] = False
-        elif option == "hide-code":
-            result["hide_code"] = True
-        elif option == "show-code":
-            result["hide_code"] = False
-        elif option == "mostly-prose":
-            result["mostly_prose"] = True
-        elif option == "format-html":
-            result["format"] = "html"
-        elif option == "format-markdown":
-            result["format"] = "markdown"
-        # Silently ignore unknown options for forward compatibility
+    # Process hide- patterns
+    if has_tag_pattern("hide-statement"):
+        result["hide_statements"] = True
+    if has_tag_pattern("hide-visual"):
+        result["hide_visuals"] = True
+    if has_tag_pattern("hide-code"):
+        result["hide_code"] = True
+
+    # Process show- patterns (these override hide-)
+    if has_tag_pattern("show-statement"):
+        result["hide_statements"] = False
+    if has_tag_pattern("show-visual"):
+        result["hide_visuals"] = False
+    if has_tag_pattern("show-code"):
+        result["hide_code"] = False
+
+    # Process format patterns
+    if "format-html" in tags:
+        result["format"] = "html"
+    if "format-markdown" in tags:
+        result["format"] = "markdown"
+
+    # Process mostly-prose
+    if "mostly-prose" in tags:
+        result["mostly_prose"] = True
 
     return result
 
