@@ -10,7 +10,7 @@ import pytest
 import numpy as np
 import colight.plot as Plot
 from colight.chrome_devtools import find_chrome, check_chrome_version
-from tests.visual.utils import compare_images, get_test_paths
+from tests.visual.utils import compare_images
 
 
 def chrome_available() -> bool:
@@ -23,7 +23,7 @@ def chrome_available() -> bool:
 
 
 # Create output directory for test artifacts
-TEST_OUTPUT_DIR = Path("./test-artifacts/visual/")
+TEST_OUTPUT_DIR = Path("./packages/colight/test-artifacts/visual/")
 TEST_OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 
@@ -101,6 +101,24 @@ This serves as both a regression test and a usage example.""",
 
     # Combine everything vertically
     return charts_row | equation | description
+
+
+def get_test_paths(test_name: str, output_dir: Path) -> tuple[Path, Path, Path]:
+    """
+    Get the standard paths for a visual test.
+
+    Args:
+        test_name: Name of the test (without extension)
+        output_dir: Directory for test outputs
+
+    Returns:
+        Tuple of (baseline_path, actual_path, diff_path)
+    """
+    baseline_path = Path("packages/colight/tests/visual/baselines") / f"{test_name}.png"
+    actual_path = output_dir / f"{test_name}.png"
+    diff_path = output_dir / f"{test_name}_diff.png"
+
+    return baseline_path, actual_path, diff_path
 
 
 @pytest.mark.skipif(not chrome_available(), reason="Chrome not installed")

@@ -37,8 +37,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Run Visual Regression Tests
-        working-directory: packages/colight
-        run: uv run pytest tests/visual/ -v
+        run: uv run pytest packages/colight/tests/visual/ -v
 
       - name: Upload visual test artifacts
         uses: actions/upload-artifact@v4

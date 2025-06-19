@@ -82,21 +82,3 @@ def save_baseline(actual_path: Path, baseline_path: Path) -> None:
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(actual_path, baseline_path)
     print(f"Saved baseline: {baseline_path}")
-
-
-def get_test_paths(test_name: str, output_dir: Path) -> tuple[Path, Path, Path]:
-    """
-    Get the standard paths for a visual test.
-
-    Args:
-        test_name: Name of the test (without extension)
-        output_dir: Directory for test outputs
-
-    Returns:
-        Tuple of (baseline_path, actual_path, diff_path)
-    """
-    baseline_path = Path("tests/visual/baselines") / f"{test_name}.png"
-    actual_path = output_dir / f"{test_name}.png"
-    diff_path = output_dir / f"{test_name}_diff.png"
-
-    return baseline_path, actual_path, diff_path
