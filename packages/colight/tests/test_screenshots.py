@@ -4,7 +4,18 @@ Tests for WebGPU screenshot functionality in Colight
 
 import shutil
 from pathlib import Path
+import pytest
 from colight.screenshots import ChromeContext
+from colight.chrome_devtools import find_chrome, check_chrome_version
+
+
+def chrome_available() -> bool:
+    try:
+        chrome_path = find_chrome()
+        check_chrome_version(chrome_path)
+        return True
+    except Exception:
+        return False
 import colight.plot as Plot
 from colight.scene3d import Ellipsoid
 
@@ -38,6 +49,7 @@ def basic_scene():
     )
 
 
+@pytest.mark.skipif(not chrome_available(), reason="Chrome not installed")
 def test_basic_screenshot():
     """Test basic screenshot functionality"""
     test_plot = basic_scene()
@@ -46,6 +58,7 @@ def test_basic_screenshot():
     test_plot.save_pdf(ARTIFACTS_DIR / "test.pdf", debug=True)
 
 
+@pytest.mark.skipif(not chrome_available(), reason="Chrome not installed")
 def test_counter_plot():
     """Test more complex plot with state updates"""
     counter_plot = (
@@ -103,9 +116,10 @@ def test_counter_plot():
 
 
 if __name__ == "__main__":
-    test_basic_screenshot()
-    test_counter_plot()
+    if chrome_available():
+        test_basic_screenshot()
+        test_counter_plot()
 
-    with ChromeContext(debug=True, width=1024, height=768) as chrome:
-        chrome.check_webgpu_support()
-        chrome.save_gpu_info(ARTIFACTS_DIR / "gpu_status.pdf")
+        with ChromeContext(debug=True, width=1024, height=768) as chrome:
+            chrome.check_webgpu_support()
+            chrome.save_gpu_info(ARTIFACTS_DIR / "gpu_status.pdf")

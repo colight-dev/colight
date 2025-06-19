@@ -4,8 +4,8 @@ Quick test script for the .colight export functionality.
 
 import colight.plot as Plot
 import numpy as np
-from colight.html import export_colight
 from pathlib import Path
+from notebooks.save_and_embed_file import create_embed_example
 
 # Create output directory
 output_dir = Path("scratch")
@@ -18,9 +18,8 @@ p = Plot.raster(data)
 
 # Export with local embed
 print("Exporting to .colight with local development viewer...")
-colight_path, example_path = export_colight(
-    p, "scratch/test_export.colight", create_example=True, use_local_embed=True
-)
+colight_path = p.save_file("scratch/test_export.colight")
+example_path = create_embed_example(colight_path, False)
 
 print("Success! Files created:")
 print(f"- .colight file: {colight_path}")
