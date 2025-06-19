@@ -95,7 +95,7 @@ def test_hide_statements_flag():
 
     # Generate with hide_statements=True
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_statements=True
+        forms, colight_files, pragma_tags={"hide-statements"}
     )
     assert "import numpy as np" not in markdown_hidden  # statement
     assert "x = np.linspace(0, 10, 100)" not in markdown_hidden  # statement
@@ -130,7 +130,9 @@ def test_hide_code_flag():
     assert "np.sin(x)" in markdown
 
     # Generate with hide_code=True
-    markdown_hidden = generator.generate_markdown(forms, colight_files, hide_code=True)
+    markdown_hidden = generator.generate_markdown(
+        forms, colight_files, pragma_tags={"hide-code"}
+    )
     assert "```python" not in markdown_hidden
     assert "import numpy as np" not in markdown_hidden
     assert "np.sin(x)" not in markdown_hidden
@@ -162,7 +164,7 @@ def test_hide_visuals_flag():
 
     # Generate with hide_visuals=True
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_visuals=True
+        forms, colight_files, pragma_tags={"hide-visuals"}
     )
     assert "colight-embed" not in markdown_hidden
     assert "data-src=" not in markdown_hidden
@@ -188,20 +190,20 @@ def test_per_form_metadata_overrides():
             markdown=["This form should hide its code"],
             node=import_stmt,
             start_line=1,
-            metadata=FormMetadata(hide_code=True),  # Override to hide code
+            metadata=FormMetadata(pragma_tags={"hide-code"}),  # Override to hide code
         ),
         Form(
             markdown=["This form should show its code"],
             node=expr_stmt,
             start_line=2,
-            metadata=FormMetadata(hide_code=False),  # Override to show code
+            metadata=FormMetadata(pragma_tags={"show-code"}),  # Override to show code
         ),
     ]
 
     colight_files = [None, pathlib.Path("test.colight")]
 
-    # Generate with global hide_code=False (should be overridden per-form)
-    markdown = generator.generate_markdown(forms, colight_files, hide_code=False)
+    # Generate with default settings (should be overridden per-form)
+    markdown = generator.generate_markdown(forms, colight_files)
 
     # First form should hide code due to per-form metadata
     assert "This form should hide its code" in markdown
@@ -240,14 +242,14 @@ y = x * 2
 
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
-        # Apply file metadata
-        merged_options = metadata.merge_with_cli_options()
-        generator_options = {k: v for k, v in merged_options.items() if k != "format"}
-
+        # Use the file metadata tags directly
         colight_files: List[Optional[pathlib.Path]] = [None] * len(forms)
 
         markdown = generator.generate_markdown(
-            forms, colight_files, title="Test Document", **generator_options
+            forms,
+            colight_files,
+            title="Test Document",
+            pragma_tags=metadata.pragma_tags,
         )
 
         # Check results

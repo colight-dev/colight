@@ -83,24 +83,26 @@ def build_file(
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
     # Merge file metadata with CLI options (CLI takes precedence)
-    merged_options = file_metadata.merge_with_cli_options(
+    result = file_metadata.merge_with_cli_options(
         hide_statements=hide_statements,
         hide_visuals=hide_visuals,
         hide_code=hide_code,
         format=format,
     )
+    pragma_tags, formats = result  # type: ignore
 
-    # Extract the actual format to use
-    final_format = merged_options.pop("format") or format
+    # For now, use the first format (single output)
+    # TODO: In the future, we could generate multiple formats
+    final_format = next(iter(formats))
 
     if final_format == "html":
         html_content = generator.generate_html(
-            forms, colight_files, title, output_path, **merged_options
+            forms, colight_files, title, output_path, pragma_tags=pragma_tags
         )
         generator.write_html_file(html_content, output_path)
     else:
         markdown_content = generator.generate_markdown(
-            forms, colight_files, title, output_path, **merged_options
+            forms, colight_files, title, output_path, pragma_tags=pragma_tags
         )
         generator.write_markdown_file(markdown_content, output_path)
 

@@ -119,10 +119,10 @@ def test_parse_file_metadata_basic():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is True
-    assert metadata.hide_visuals is False
-    assert metadata.hide_code is False
-    assert metadata.format == "html"
+    assert "hide-statements" in metadata.pragma_tags
+    assert "format-html" in metadata.pragma_tags
+    assert "hide-visuals" not in metadata.pragma_tags
+    assert "hide-code" not in metadata.pragma_tags
 
 
 def test_parse_file_metadata_multiple_options():
@@ -176,26 +176,26 @@ import numpy as np
 
 def test_file_metadata_merge_with_cli():
     """Test merging file metadata with CLI options."""
-    metadata = FileMetadata(hide_statements=True, format="html")
+    metadata = FileMetadata(pragma_tags={"hide-statements", "format-html"})
 
     # CLI options should override file metadata
     result = metadata.merge_with_cli_options(hide_visuals=True, format="markdown")
 
-    assert result["hide_statements"] is True  # from file
-    assert result["hide_visuals"] is True  # from CLI
-    assert result["hide_code"] is False  # default
-    assert result["format"] == "markdown"  # CLI override
+    assert result["hide_statements"] is True  # from file  # type: ignore
+    assert result["hide_visuals"] is True  # from CLI  # type: ignore
+    assert result["hide_code"] is False  # default  # type: ignore
+    assert result["format"] == "markdown"  # CLI override  # type: ignore
 
 
 def test_file_metadata_mostly_prose_cli():
     """Test that CLI mostly-prose flag works correctly."""
-    metadata = FileMetadata(hide_visuals=True)
+    metadata = FileMetadata(pragma_tags={"hide-visuals"})
 
     result = metadata.merge_with_cli_options(mostly_prose=True)
 
-    assert result["hide_statements"] is True  # from mostly_prose
-    assert result["hide_code"] is True  # from mostly_prose
-    assert result["hide_visuals"] is True  # preserved from file
+    assert result["hide_statements"] is True  # from mostly_prose  # type: ignore
+    assert result["hide_code"] is True  # from mostly_prose  # type: ignore
+    assert result["hide_visuals"] is True  # preserved from file  # type: ignore
 
 
 def test_parse_colight_file_with_metadata():
@@ -331,16 +331,12 @@ def test_form_metadata_resolve_with_defaults():
     from colight_site.parser import FormMetadata
 
     # Test with some overrides
-    metadata = FormMetadata(hide_code=True, hide_visuals=False)
-    resolved = metadata.resolve_with_defaults(
-        default_hide_statements=True,
-        default_hide_visuals=True,
-        default_hide_code=False,
-    )
+    metadata = FormMetadata(pragma_tags={"hide-code", "show-visuals"})
+    default_tags = {"hide-statements", "hide-visuals"}
+    resolved = metadata.resolve_with_defaults(default_tags)
 
-    assert resolved["hide_statements"] is True  # inherited from defaults
-    assert resolved["hide_visuals"] is False  # overridden by form metadata
-    assert resolved["hide_code"] is True  # overridden by form metadata
+    # Form metadata should override defaults
+    assert resolved == {"hide-code", "show-visuals"}
 
 
 def test_file_vs_per_form_pragma_distinction():
