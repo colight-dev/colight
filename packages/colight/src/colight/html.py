@@ -36,7 +36,7 @@ def get_script_content():
     """Get the JS content either from CDN or local file"""
     if env.VERSIONED_CDN_DIST_URL:
         return (
-            f'import {{ render }} from "{env.VERSIONED_CDN_DIST_URL + '/widget.mjs'}";'
+            f'import {{ render }} from "{env.VERSIONED_CDN_DIST_URL + "/widget.mjs"}";'
         )
     else:  # It's a local Path
         # Create a blob URL for the module
