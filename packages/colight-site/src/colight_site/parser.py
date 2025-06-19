@@ -10,7 +10,7 @@ import re
 def _extract_pragma_tags(text: str) -> set[str]:
     """Extract all pragma tags from text using a single regex pattern."""
     # Single comprehensive pattern to match all our tag types
-    tags = set(re.findall(r"\b(?:hide|show|format|mostly)-\w+\b", text.lower()))
+    tags = set(re.findall(r"\b(?:hide|show|format)-\w+\b", text.lower()))
 
     # Normalize to consistent forms
     normalized = set()
@@ -29,7 +29,7 @@ def should_hide_statements(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-statements" in tags:
         return False
-    return "hide-statements" in tags or "mostly-prose" in tags
+    return "hide-statements" in tags
 
 
 def should_hide_visuals(tags: set[str]) -> bool:
@@ -45,7 +45,7 @@ def should_hide_code(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-code" in tags:
         return False
-    return "hide-code" in tags or "mostly-prose" in tags
+    return "hide-code" in tags
 
 
 def _get_formats_from_tags(tags: set[str]) -> set[str]:
@@ -135,7 +135,6 @@ class FileMetadata:
         hide_visuals: bool = False,
         hide_code: bool = False,
         format: Optional[str] = None,
-        mostly_prose: bool = False,
     ) -> Union[tuple[set[str], set[str]], dict]:
         """Merge file metadata with CLI options. CLI options take precedence."""
         # Start with file metadata tags
@@ -148,8 +147,6 @@ class FileMetadata:
             result_tags.add("hide-visuals")
         if hide_code:
             result_tags.add("hide-code")
-        if mostly_prose:
-            result_tags.add("mostly-prose")
 
         # Get formats from file metadata
         result_formats = _get_formats_from_tags(self.pragma_tags)
@@ -460,7 +457,23 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
     """Step 2: Group elements into forms with clear rules."""
     forms = []
 
+    # Skip file-level pragmas at the beginning
+    # File-level pragmas are those at the top followed by at least one empty line
     i = 0
+
+    # Count consecutive pragmas at the beginning
+    while i < len(elements) and elements[i].type == "pragma":
+        i += 1
+
+    # Check if these pragmas are followed by a blank line
+    if i > 0 and i < len(elements) and elements[i].type == "blank_line":
+        # These are file-level pragmas, skip past the blank line
+        i += 1
+    else:
+        # No blank line after pragmas, so they're not file-level
+        # Reset to beginning
+        i = 0
+
     while i < len(elements):
         current_markdown = []
         current_pragmas = []
@@ -521,21 +534,23 @@ def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
     """Extract file-level metadata from elements at the start."""
     metadata = FileMetadata()
 
-    # Only process consecutive pragma elements at the very beginning
-    in_file_pragma_section = True
+    # File-level pragmas are those at the top followed by at least one empty line
+    i = 0
 
-    for elem in elements:
-        if in_file_pragma_section and elem.type == "pragma":
-            if isinstance(elem.content, str):
-                pragma_content = _extract_pragma_content(elem.content)
-                tags = _extract_pragma_tags(pragma_content)
-                metadata.pragma_tags.update(tags)
-        elif elem.type in ["comment", "blank_line"]:
-            # Comments and blank lines end the file pragma section
-            in_file_pragma_section = False
-        else:
-            # Hit code or other content, definitely done with file pragmas
-            break
+    # Collect consecutive pragmas at the beginning
+    pragma_contents = []
+    while i < len(elements) and elements[i].type == "pragma":
+        if isinstance(elements[i].content, str):
+            pragma_contents.append(elements[i].content)
+        i += 1
+
+    # Check if these pragmas are followed by a blank line
+    if i < len(elements) and elements[i].type == "blank_line":
+        # These are file-level pragmas
+        for pragma_content in pragma_contents:
+            content = _extract_pragma_content(pragma_content)
+            tags = _extract_pragma_tags(content)
+            metadata.pragma_tags.update(tags)
 
     return metadata
 

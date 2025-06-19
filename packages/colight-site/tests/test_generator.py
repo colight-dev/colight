@@ -214,8 +214,8 @@ def test_per_form_metadata_overrides():
     assert "np.sin(x)" in markdown
 
 
-def test_show_code_overrides_mostly_prose():
-    """Test that show-code pragma overrides mostly-prose for specific forms."""
+def test_show_code_overrides_hide_code():
+    """Test that show-code pragma overrides hide-code for specific forms."""
     output_dir = artifacts_dir
     generator = MarkdownGenerator(output_dir)
 
@@ -223,16 +223,16 @@ def test_show_code_overrides_mostly_prose():
     import tempfile
     from colight_site.parser import parse_colight_file
 
-    content = """#| colight: mostly-prose
+    content = """#| hide-statements hide-code
 
-# First form - should hide code due to mostly-prose
+# First form - should hide code due to file-level flags
 import numpy as np
 
 #| colight: show-code
-# Second form - should show code despite mostly-prose
+# Second form - should show code despite file-level hide-code
 x = np.array([1, 2, 3])
 
-# Third form - should hide code again (back to mostly-prose default)
+# Third form - should hide code again (back to file defaults)
 y = x * 2
 """
 
@@ -253,8 +253,8 @@ y = x * 2
         )
 
         # Check results
-        assert "import numpy as np" not in markdown  # hidden by mostly-prose
+        assert "import numpy as np" not in markdown  # hidden by file-level hide-code
         assert "x = np.array([1, 2, 3])" in markdown  # shown by show-code override
-        assert "y = x * 2" not in markdown  # hidden by mostly-prose
+        assert "y = x * 2" not in markdown  # hidden by file-level hide-code
 
         pathlib.Path(f.name).unlink()

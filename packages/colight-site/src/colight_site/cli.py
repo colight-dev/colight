@@ -46,11 +46,6 @@ def main():
     is_flag=True,
     help="Hide code blocks",
 )
-@click.option(
-    "--mostly-prose",
-    is_flag=True,
-    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
-)
 def build(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
@@ -59,14 +54,8 @@ def build(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
-    mostly_prose: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
-    # Handle --mostly-prose flag
-    if mostly_prose:
-        hide_statements = True
-        hide_code = True
-
     # Create options dict
     options = {
         "hide_statements": hide_statements,
@@ -124,11 +113,6 @@ def build(
     is_flag=True,
     help="Hide code blocks",
 )
-@click.option(
-    "--mostly-prose",
-    is_flag=True,
-    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
-)
 def watch(
     input_path: pathlib.Path,
     output: pathlib.Path,
@@ -137,14 +121,8 @@ def watch(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
-    mostly_prose: bool,
 ):
     """Watch for changes and rebuild automatically."""
-    # Handle --mostly-prose flag
-    if mostly_prose:
-        hide_statements = True
-        hide_code = True
-
     # Create options dict
     options = {
         "hide_statements": hide_statements,

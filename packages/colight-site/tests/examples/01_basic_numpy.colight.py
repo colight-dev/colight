@@ -1,4 +1,4 @@
-# | colight: mostly-prose
+# | hide-statements hide-code
 
 # Basic NumPy Visualization
 
