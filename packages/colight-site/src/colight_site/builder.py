@@ -41,14 +41,7 @@ def build_file(
         forms, file_metadata = parse_colight_file(input_path)
         if verbose:
             print(f"Found {len(forms)} forms")
-            if any(
-                [
-                    file_metadata.hide_statements,
-                    file_metadata.hide_visuals,
-                    file_metadata.hide_code,
-                    file_metadata.format,
-                ]
-            ):
+            if file_metadata.pragma_tags:
                 print(f"File metadata: {file_metadata}")
     except Exception as e:
         if verbose:
@@ -83,13 +76,12 @@ def build_file(
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
     # Merge file metadata with CLI options (CLI takes precedence)
-    result = file_metadata.merge_with_cli_options(
+    pragma_tags, formats = file_metadata.merge_with_cli_options(
         hide_statements=hide_statements,
         hide_visuals=hide_visuals,
         hide_code=hide_code,
         format=format,
     )
-    pragma_tags, formats = result  # type: ignore
 
     # For now, use the first format (single output)
     # TODO: In the future, we could generate multiple formats

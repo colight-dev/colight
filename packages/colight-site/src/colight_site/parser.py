@@ -97,31 +97,6 @@ class FormMetadata:
         # Form-specific tags override defaults
         return self.pragma_tags if self.pragma_tags else default_tags
 
-    # Compatibility properties for existing tests
-    @property
-    def hide_statements(self) -> Optional[bool]:
-        if "show-statements" in self.pragma_tags:
-            return False
-        if "hide-statements" in self.pragma_tags:
-            return True
-        return None
-
-    @property
-    def hide_visuals(self) -> Optional[bool]:
-        if "show-visuals" in self.pragma_tags:
-            return False
-        if "hide-visuals" in self.pragma_tags:
-            return True
-        return None
-
-    @property
-    def hide_code(self) -> Optional[bool]:
-        if "show-code" in self.pragma_tags:
-            return False
-        if "hide-code" in self.pragma_tags:
-            return True
-        return None
-
 
 @dataclass
 class FileMetadata:
@@ -135,7 +110,7 @@ class FileMetadata:
         hide_visuals: bool = False,
         hide_code: bool = False,
         format: Optional[str] = None,
-    ) -> Union[tuple[set[str], set[str]], dict]:
+    ) -> tuple[set[str], set[str]]:
         """Merge file metadata with CLI options. CLI options take precedence."""
         # Start with file metadata tags
         result_tags = self.pragma_tags.copy()
@@ -158,41 +133,7 @@ class FileMetadata:
             # Default to markdown if no format specified
             result_formats = {"markdown"}
 
-        # For backward compatibility, if this is called from builder.py, return tuple
-        # Otherwise return dict for test compatibility
-        import inspect
-
-        frame = inspect.currentframe()
-        if frame:
-            frame = frame.f_back
-        if frame and "builder.py" in frame.f_code.co_filename:
-            return result_tags, result_formats
-        else:
-            # Return backward-compatible dict for tests
-            return {
-                "hide_statements": should_hide_statements(result_tags),
-                "hide_visuals": should_hide_visuals(result_tags),
-                "hide_code": should_hide_code(result_tags),
-                "format": next(iter(result_formats)) if result_formats else None,
-            }
-
-    # Compatibility properties for existing tests
-    @property
-    def hide_statements(self) -> bool:
-        return should_hide_statements(self.pragma_tags)
-
-    @property
-    def hide_visuals(self) -> bool:
-        return should_hide_visuals(self.pragma_tags)
-
-    @property
-    def hide_code(self) -> bool:
-        return should_hide_code(self.pragma_tags)
-
-    @property
-    def format(self) -> Optional[str]:
-        formats = _get_formats_from_tags(self.pragma_tags)
-        return next(iter(formats)) if formats else None
+        return result_tags, result_formats
 
 
 class CombinedStatements:
