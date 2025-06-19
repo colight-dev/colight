@@ -14,7 +14,7 @@ def create_embed_example(colight_path: Union[str, Path]) -> str:
     output_dir = colight_path.parent
 
     rel_path = colight_path.name
-    script_url = env.UNVERSIONED_CDN_DIST_URL + "/embed.js"
+    script_url = env.UNVERSIONED_CDN_DIST_URL + "/embed.mjs"
 
     example_html = f"""<!DOCTYPE html>
 <html>
