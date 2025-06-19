@@ -400,7 +400,7 @@ import numpy as np
 # Another comment
 x = np.array([1, 2, 3])
 
-# hide-statements in regular comment 
+#| hide-statements
 y = x * 2
 """
 
@@ -422,7 +422,7 @@ y = x * 2
         assert import_form is not None
         assert import_form.metadata.hide_code is True
 
-        # Third form should have hide_statements=True from liberal matching
+        # Third form should have hide_statements=True from | pragma
         y_form = None
         for form in forms:
             if "y = x * 2" in form.code:
@@ -435,15 +435,15 @@ y = x * 2
 
 
 def test_liberal_tag_matching():
-    """Test that tags are matched liberally anywhere in comments."""
-    content = """# mostly-prose flag test
+    """Test that tags are matched liberally anywhere in pragma comments."""
+    content = """#| mostly-prose flag test
 # %% This comment has hide-code somewhere in it
 import numpy as np
 
-# Some text with show-visuals and other words
+#| Some text with show-visuals and other words
 x = np.array([1, 2, 3])
 
-# format-markdown should work too
+# %% format-markdown should work too
 y = x * 2
 
 z = y + 1
@@ -502,7 +502,7 @@ def test_case_insensitive_matching():
     content = """# %% Hide-Code Format-HTML
 import numpy as np
 
-# SHOW-VISUALS
+#| SHOW-VISUALS
 x = np.array([1, 2, 3])
 """
 
@@ -538,13 +538,13 @@ def test_plural_singular_support():
     content = """# %% hide-statement
 import numpy as np
 
-# hide-statements should also work
+#| hide-statements should also work
 x = np.array([1, 2, 3])
 
-# show-visual
+# %% show-visual
 y = x * 2
 
-# show-visuals should also work
+#| show-visuals should also work
 z = y + 1
 """
 
@@ -582,5 +582,38 @@ z = y + 1
 
         assert z_form is not None
         assert z_form.metadata.hide_visuals is False  # show-visuals
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_regular_comments_not_pragmas():
+    """Test that regular comments with tag-like words are not treated as pragmas."""
+    content = """# Regular comment with hide-code mentioned
+import numpy as np
+
+# This comment mentions show-visuals but should be ignored
+x = np.array([1, 2, 3])
+
+# Some text with mostly-prose should not affect anything
+y = x * 2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # File metadata should be defaults (no pragmas detected)
+        assert metadata.hide_statements is False
+        assert metadata.hide_visuals is False
+        assert metadata.hide_code is False
+        assert metadata.format is None
+
+        # All form metadata should be None (no pragmas detected)
+        for form in forms:
+            assert form.metadata.hide_statements is None
+            assert form.metadata.hide_visuals is None
+            assert form.metadata.hide_code is None
 
         pathlib.Path(f.name).unlink()

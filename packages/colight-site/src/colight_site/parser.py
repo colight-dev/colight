@@ -16,26 +16,19 @@ def _extract_pragma_tags(text: str) -> set[str]:
 def _is_pragma_comment(comment_text: str) -> bool:
     """Check if a comment is a pragma comment.
 
-    Accepts comments starting with | or %% as pragma starters.
-    Also looks for our specific tags anywhere in the comment.
+    Only accepts comments starting with | or %% as pragma starters.
     """
     # Remove leading whitespace
     text = comment_text.strip()
 
-    # Check for explicit pragma starters: | or %%
-    if text.startswith("|") or text.startswith("%%"):
-        return True
-
-    # Check for our tags using the centralized extraction function
-    tags = _extract_pragma_tags(text)
-    return len(tags) > 0
+    # Only check for explicit pragma starters: | or %%
+    return text.startswith("|") or text.startswith("%%")
 
 
 def _extract_pragma_content(comment_text: str) -> str:
     """Extract the pragma content from a comment.
 
-    If it starts with | or %%, remove that prefix.
-    Otherwise, return the full text since it contains our tags.
+    Removes the | or %% prefix and returns the content.
     """
     text = comment_text.strip()
 
@@ -44,6 +37,7 @@ def _extract_pragma_content(comment_text: str) -> str:
     elif text.startswith("%%"):
         return text[2:].strip()
     else:
+        # This shouldn't happen if _is_pragma_comment is used correctly
         return text
 
 
