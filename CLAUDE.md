@@ -10,6 +10,7 @@
 - Run Python tests: `yarn test:py` or `uv run pytest packages/colight/tests/`
 - Run colight-site tests: `yarn test:colight-site` or `uv run pytest packages/colight-site/tests/`
 - Run single Python test: `uv run pytest packages/colight/tests/test_file.py::test_function`
+- **IMPORTANT**: Always use `uv run python` instead of `python` directly
 - Typecheck Python: `pyright` or `yarn pyright`
 - Format & lint: `pre-commit run --all-files`
 - Docs: `yarn watch:docs` to serve, `yarn build:docs` to build

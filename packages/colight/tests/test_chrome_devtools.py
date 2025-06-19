@@ -7,11 +7,6 @@ import time
 import json
 import urllib.request
 from pathlib import Path
-import sys
-import os
-
-# Add the src directory to the path so we can import colight
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from colight.chrome_devtools import ChromeContext, shutdown_chrome
 
@@ -21,7 +16,12 @@ def get_open_tabs(port):
     try:
         response = urllib.request.urlopen(f"http://localhost:{port}/json", timeout=1)
         tabs = json.loads(response.read())
-        return [tab for tab in tabs if tab.get("type") == "page"]
+        # Filter out the default data:, tab that Chrome creates on startup
+        return [
+            tab
+            for tab in tabs
+            if tab.get("type") == "page" and tab.get("url") != "data:,"
+        ]
     except Exception:
         return []
 
@@ -68,9 +68,9 @@ def test_chrome_devtools():
         print(f"✅ Chrome started in {startup_time:.3f}s")
 
         # Verify initial tab count
-        if not verify_tab_cleanup(chrome.port, expected_count=1, debug=True):
-            print("❌ Expected 1 tab after context creation")
-            return False
+        assert verify_tab_cleanup(
+            chrome.port, expected_count=1, debug=True
+        ), "Expected 1 tab after context creation"
 
         # Test 2: HTML loading and screenshot
         print("\n2. Testing HTML loading and screenshot...")
@@ -107,9 +107,9 @@ def test_chrome_devtools():
 
     # Verify tab cleanup after context closes
     print("\n   Verifying tab cleanup after context close...")
-    if not verify_tab_cleanup(chrome.port, expected_count=0, debug=True):
-        print("❌ Expected 0 tabs after context close")
-        return False
+    assert verify_tab_cleanup(
+        chrome.port, expected_count=0, debug=True
+    ), "Expected 0 tabs after context close"
     print("✅ Tab cleanup verified")
 
     print("✅ Chrome shutdown complete")
@@ -133,9 +133,9 @@ def test_chrome_devtools():
             )
 
     # Verify tab cleanup
-    if not verify_tab_cleanup(chrome.port, expected_count=0, debug=True):
-        print("❌ Expected 0 tabs after WebGPU test")
-        return False
+    assert verify_tab_cleanup(
+        chrome.port, expected_count=0, debug=True
+    ), "Expected 0 tabs after WebGPU test"
 
     # Test 4: Multiple contexts and tab cleanup
     print("\n4. Testing multiple contexts and tab cleanup...")
@@ -150,9 +150,9 @@ def test_chrome_devtools():
         contexts.append(ctx)
 
     # Verify we have 3 tabs open
-    if not verify_tab_cleanup(contexts[0].port, expected_count=3, debug=True):
-        print("❌ Expected 3 tabs after creating 3 contexts")
-        return False
+    assert verify_tab_cleanup(
+        contexts[0].port, expected_count=3, debug=True
+    ), "Expected 3 tabs after creating 3 contexts"
 
     print("   All contexts created, now closing them...")
     for i, ctx in enumerate(contexts):
@@ -161,9 +161,9 @@ def test_chrome_devtools():
 
     # Verify all tabs are closed
     print("   Verifying all tabs are closed...")
-    if not verify_tab_cleanup(contexts[0].port, expected_count=0, debug=True):
-        print("❌ Expected 0 tabs after closing all contexts")
-        return False
+    assert verify_tab_cleanup(
+        contexts[0].port, expected_count=0, debug=True
+    ), "Expected 0 tabs after closing all contexts"
 
     print("✅ Multiple contexts test complete")
 
@@ -183,8 +183,7 @@ def test_chrome_devtools():
     try:
         # Try to connect to Chrome - should fail if properly shut down
         urllib.request.urlopen("http://localhost:9222/json", timeout=1)
-        print("❌ Chrome is still running after shutdown")
-        return False
+        assert False, "Chrome is still running after shutdown"
     except Exception:
         print("✅ Chrome properly shut down")
 
@@ -192,7 +191,6 @@ def test_chrome_devtools():
     print("All tests completed successfully! 🎉")
     print("=" * 60)
     print(f"Check {test_dir} for generated test artifacts")
-    return True
 
 
 def test_tab_cleanup_stress():
@@ -215,23 +213,20 @@ def test_tab_cleanup_stress():
         contexts.append(ctx)
 
     # Verify all tabs are open
-    if not verify_tab_cleanup(
+    assert verify_tab_cleanup(
         contexts[0].port, expected_count=num_contexts, debug=True
-    ):
-        print(f"❌ Expected {num_contexts} tabs")
-        return False
+    ), f"Expected {num_contexts} tabs"
 
     print(f"Closing {num_contexts} contexts...")
     for ctx in contexts:
         ctx.stop()
 
     # Verify all tabs are closed
-    if not verify_tab_cleanup(contexts[0].port, expected_count=0, debug=True):
-        print("❌ Expected 0 tabs after stress test")
-        return False
+    assert verify_tab_cleanup(
+        contexts[0].port, expected_count=0, debug=True
+    ), "Expected 0 tabs after stress test"
 
     print("✅ Stress test completed successfully")
-    return True
 
 
 if __name__ == "__main__":

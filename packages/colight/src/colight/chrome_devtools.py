@@ -13,6 +13,7 @@ import threading
 import urllib.request
 from websockets.sync.client import connect
 import sys
+import atexit
 from pathlib import Path
 from typing import Union
 
@@ -28,6 +29,38 @@ _shared_port: int | None = None
 _shared_owned = False
 _active_count = 0
 _shutdown_timer: threading.Timer | None = None
+
+
+def _cleanup_on_exit():
+    """Cleanup function called on program exit"""
+    global _shared_process, _shutdown_timer
+
+    # Cancel any pending shutdown timer
+    if _shutdown_timer:
+        _shutdown_timer.cancel()
+        _shutdown_timer = None
+
+    # Terminate Chrome if still running
+    if _shared_process and _shared_process.poll() is None:
+        try:
+            _shared_process.terminate()
+            _shared_process.wait(timeout=2)
+        except Exception:
+            try:
+                _shared_process.kill()
+            except Exception:
+                pass
+
+    # Remove port file
+    if PORT_FILE.exists():
+        try:
+            PORT_FILE.unlink()
+        except Exception:
+            pass
+
+
+# Register cleanup function to run on exit
+atexit.register(_cleanup_on_exit)
 
 
 def format_bytes(bytes):
