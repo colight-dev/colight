@@ -50,3 +50,7 @@ This project uses a monorepo structure with multiple packages:
 - Root workspace manages shared dependencies and tooling
 
 When working on specific packages, navigate to the package directory or use the workspace commands from the root.
+
+## Development Guidelines
+
+- Use yarn, not npm

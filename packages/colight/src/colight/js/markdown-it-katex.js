@@ -34,15 +34,6 @@ const isValidDelim = (state, pos) => {
     ); // Lowercase
   };
 
-  const isPunctChar = (char) => {
-    return (
-      (char >= 0x21 && char <= 0x2f) || // ! to /
-      (char >= 0x3a && char <= 0x40) || // : to @
-      (char >= 0x5b && char <= 0x60) || // [ to `
-      (char >= 0x7b && char <= 0x7e)
-    ); // { to ~
-  };
-
   // More specific rules for delimiter validation
   return {
     can_open:
