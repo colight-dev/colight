@@ -260,8 +260,8 @@ class SitePlugin(BasePlugin):
             print(f"[colight] Found {len(forms)} forms in {file_path.name}")
 
         # Merge metadata with options
-        merged_options = file_metadata.merge_with_cli_options(**options)
-        final_format = merged_options.pop("format", "markdown")
+        pragma_tags, formats = file_metadata.merge_with_cli_options(**options)
+        final_format = next(iter(formats), "markdown")
 
         # Write .colight files directly to the site directory
         # Calculate the destination path in the site directory
@@ -352,11 +352,21 @@ class SitePlugin(BasePlugin):
         if final_format == "html":
             # For now, we'll generate markdown and let MkDocs convert it
             content = generator.generate_markdown(
-                forms, colight_files, title, file_path, path_context, **merged_options
+                forms,
+                colight_files,
+                title,
+                file_path,
+                path_context,
+                pragma_tags=pragma_tags,
             )
         else:
             content = generator.generate_markdown(
-                forms, colight_files, title, file_path, path_context, **merged_options
+                forms,
+                colight_files,
+                title,
+                file_path,
+                path_context,
+                pragma_tags=pragma_tags,
             )
 
         return content

@@ -47,11 +47,6 @@ def main():
     help="Hide code blocks",
 )
 @click.option(
-    "--mostly-prose",
-    is_flag=True,
-    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
-)
-@click.option(
     "--colight-output-path",
     type=str,
     help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
@@ -69,16 +64,10 @@ def build(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
-    mostly_prose: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
 ):
     """Build a .colight.py file into markdown/HTML."""
-    # Handle --mostly-prose flag
-    if mostly_prose:
-        hide_statements = True
-        hide_code = True
-
     # Create options dict
     options = {
         "hide_statements": hide_statements,
@@ -109,9 +98,11 @@ def build(
             output,
             verbose=verbose,
             format=format,
+            hide_statements=hide_statements,
+            hide_visuals=hide_visuals,
+            hide_code=hide_code,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
-            **options,
         )
         click.echo(f"Built {input_path}/ -> {output}/")
 
@@ -149,11 +140,6 @@ def build(
     help="Hide code blocks",
 )
 @click.option(
-    "--mostly-prose",
-    is_flag=True,
-    help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
-)
-@click.option(
     "--colight-output-path",
     type=str,
     help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
@@ -171,23 +157,10 @@ def watch(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
-    mostly_prose: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
 ):
     """Watch for changes and rebuild automatically."""
-    # Handle --mostly-prose flag
-    if mostly_prose:
-        hide_statements = True
-        hide_code = True
-
-    # Create options dict
-    options = {
-        "hide_statements": hide_statements,
-        "hide_visuals": hide_visuals,
-        "hide_code": hide_code,
-    }
-
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
     watcher.watch_and_build(
@@ -195,9 +168,11 @@ def watch(
         output,
         verbose=verbose,
         format=format,
+        hide_statements=hide_statements,
+        hide_visuals=hide_visuals,
+        hide_code=hide_code,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
-        **options,
     )
 
 

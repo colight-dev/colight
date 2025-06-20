@@ -1,6 +1,7 @@
 """File watching functionality for colight-site."""
 
 import pathlib
+from typing import Optional
 from watchfiles import watch
 
 from . import builder
@@ -14,8 +15,8 @@ def watch_and_build(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
-    colight_output_path: str = None,
-    colight_embed_path: str = None,
+    colight_output_path: Optional[str] = None,
+    colight_embed_path: Optional[str] = None,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")

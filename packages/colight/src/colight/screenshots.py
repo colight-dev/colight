@@ -170,20 +170,24 @@ class StudioContext(ChromeContext):
         """
         return self.evaluate(update_js, await_promise=True)
 
-    def capture_image_sequence(self, state_updates: List[Dict]) -> List[bytes]:
+    def capture_image_sequence(
+        self, state_updates: List[Dict], format: str = "png", quality: int = 90
+    ) -> List[bytes]:
         """
         Capture a sequence of images after applying each state update.
 
         Args:
             state_updates: List of state updates to apply before each capture
+            format: Image format ("png" or "webp")
+            quality: Image quality for WebP format (0-100, ignored for PNG)
 
         Returns:
-            List of PNG image bytes
+            List of image bytes in the specified format
         """
         bytes_list = []
         for state_update in state_updates:
             self.update_state([state_update])
-            image_bytes = self.capture_bytes()
+            image_bytes = self.capture_bytes(format=format, quality=quality)
             bytes_list.append(image_bytes)
         return bytes_list
 
@@ -191,6 +195,7 @@ class StudioContext(ChromeContext):
         self,
         output_path: Optional[Union[str, Path]] = None,
         state_update: Optional[Dict] = None,
+        quality: int = 90,
     ) -> Union[Path, bytes]:
         """
         Save an image of the current plot state.
@@ -198,6 +203,7 @@ class StudioContext(ChromeContext):
         Args:
             output_path: Optional path to save the image; if not provided, returns PNG bytes
             state_update: Optional state update to apply before capturing
+            quality: Image quality for WebP format (0-100, ignored for PNG)
 
         Returns:
             Path to saved image if output_path provided, otherwise PNG bytes
@@ -205,17 +211,30 @@ class StudioContext(ChromeContext):
         if state_update:
             self.update_state([state_update])
 
-        image_bytes = self.capture_bytes()
-
+        # Infer format from file extension
         if output_path:
             out_path = Path(output_path)
+            ext = out_path.suffix.lower()
+            if ext == ".webp":
+                format = "webp"
+            elif ext == ".png":
+                format = "png"
+            else:
+                # Default to PNG for unknown extensions
+                format = "png"
+
+            image_bytes = self.capture_bytes(format=format, quality=quality)
             out_path.parent.mkdir(exist_ok=True, parents=True)
             with open(out_path, "wb") as f:
                 f.write(image_bytes)
             if self.debug:
                 print(f"[StudioContext] Image saved to: {out_path}")
             return out_path
-        return image_bytes
+        else:
+            # Default to PNG when returning bytes
+            format = "png"
+            image_bytes = self.capture_bytes(format=format, quality=quality)
+            return image_bytes
 
     def save_image_sequence(
         self,
@@ -223,6 +242,7 @@ class StudioContext(ChromeContext):
         output_dir: Union[str, Path],
         filenames: Optional[List[str]] = None,
         filename_base: Optional[str] = "screenshot",
+        quality: int = 90,
     ) -> List[Path]:
         """
         Save a sequence of images after applying each state update.
@@ -232,6 +252,7 @@ class StudioContext(ChromeContext):
             output_dir: Directory where images will be saved
             filenames: Optional list of filenames for each image
             filename_base: Base name for generating filenames if not provided
+            quality: Image quality for WebP format (0-100, ignored for PNG)
 
         Returns:
             List of paths to saved images
@@ -248,9 +269,19 @@ class StudioContext(ChromeContext):
             filenames = [f"{filename_base}_{i}.png" for i in range(len(state_updates))]
 
         output_paths = [output_dir / name for name in filenames]
+
+        # Infer format from first filename (assume all files use same format)
+        first_ext = output_paths[0].suffix.lower() if output_paths else ".png"
+        if first_ext == ".webp":
+            format = "webp"
+        else:
+            format = "png"
+
         saved_paths = []
 
-        image_bytes_list = self.capture_image_sequence(state_updates)
+        image_bytes_list = self.capture_image_sequence(
+            state_updates, format=format, quality=quality
+        )
         for i, (image_bytes, out_path) in enumerate(
             zip(image_bytes_list, output_paths)
         ):
@@ -300,11 +331,12 @@ class StudioContext(ChromeContext):
             return out_path
         return pdf_bytes
 
-    def capture_bytes(self):
+    def capture_bytes(self, format: str = "png", quality: int = 90):
+        """Capture image bytes in specified format."""
         self.evaluate(
             f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
         )
-        bytes = self.capture_image()
+        bytes = self.capture_image(format=format, quality=quality)
         self.evaluate(
             f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
         )
@@ -403,6 +435,7 @@ def save_image(
     width: int = 400,
     height: Optional[int] = None,
     scale: float = 1.0,
+    quality: int = 90,
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
@@ -417,6 +450,7 @@ def save_image(
         width: Width of the browser window
         height: Optional height of the browser window
         scale: Device scale factor
+        quality: Image quality for WebP format (0-100, ignored for PNG)
         debug: Whether to print debug information
 
     Returns:
@@ -431,7 +465,7 @@ def save_image(
         reuse=reuse,
         keep_alive=keep_alive,
     ) as studio:
-        return studio.save_image(output_path, state_update)
+        return studio.save_image(output_path, state_update, quality)
 
 
 def save_images(
@@ -443,6 +477,7 @@ def save_images(
     width: int = 800,
     height: Optional[int] = None,
     scale: float = 1.0,
+    quality: int = 90,
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
@@ -459,6 +494,7 @@ def save_images(
         width: Width of the browser window
         height: Optional height of the browser window
         scale: Device scale factor
+        quality: Image quality for WebP format (0-100, ignored for PNG)
         debug: Whether to print debug information
 
     Returns:
@@ -474,7 +510,7 @@ def save_images(
         keep_alive=keep_alive,
     ) as studio:
         return studio.save_image_sequence(
-            state_updates, output_dir, filenames, filename_base
+            state_updates, output_dir, filenames, filename_base, quality
         )
 
 

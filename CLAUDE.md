@@ -15,6 +15,13 @@
 - Format & lint: `pre-commit run --all-files`
 - Docs: `yarn docs:watch` to serve, `yarn docs:build` to build
 
+## Visual Testing
+
+- Run visual regression tests: `cd packages/colight && uv run pytest tests/visual/ -v`
+- Update visual baselines: `cd packages/colight && uv run python scripts/update_baselines.py`
+- Visual tests run in CI and compare pixel-perfect against baselines
+- Update baselines when you intentionally change visual output
+
 ## Code Style Guide
 
 - **Python**: snake_case for variables/functions, PascalCase for classes
@@ -43,3 +50,7 @@ This project uses a monorepo structure with multiple packages:
 - Root workspace manages shared dependencies and tooling
 
 When working on specific packages, navigate to the package directory or use the workspace commands from the root.
+
+## Development Guidelines
+
+- Use yarn, not npm

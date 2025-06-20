@@ -114,18 +114,27 @@ class LayoutItem:
         data, buffers = to_json_with_initialState(self, buffers=[])
         return format.create_file(data, buffers, path)
 
-    def save_image(self, path, width=500, height=None, scale: float = 1.0, debug=False):
+    def save_image(
+        self, path, width=500, height=None, scale: float = 1.0, quality=90, debug=False
+    ):
         """Save the plot as an image using headless browser.
 
         Args:
-            path: Path to save the image to
+            path: Path to save the image to. Format is inferred from file extension (.png or .webp)
             width: Width of the image in pixels (default: 500)
             height: Optional height of the image in pixels
             scale: Scale factor for rendering (default: 1.0)
+            quality: Image quality for WebP format (0-100, ignored for PNG, default: 90)
             debug: Whether to print debug information
         """
         screenshots.save_image(
-            self, path, width=width, height=height, scale=scale, debug=debug
+            self,
+            path,
+            width=width,
+            height=height,
+            scale=scale,
+            quality=quality,
+            debug=debug,
         )
         print(f"Image saved to {path}")
 
@@ -146,6 +155,7 @@ class LayoutItem:
         filename_base="screenshot",
         width=500,
         height=None,
+        quality=90,
         debug=False,
     ):
         """Save a sequence of images for different states of the plot.
@@ -157,6 +167,7 @@ class LayoutItem:
             filename_base: Base name for auto-generating filenames if filenames not provided
             width: Width of the images in pixels (default: 500)
             height: Optional height of the images in pixels
+            quality: Image quality for WebP format (0-100, ignored for PNG, default: 90)
             debug: Whether to print debug information
 
         Returns:
@@ -171,6 +182,7 @@ class LayoutItem:
             filename_base=filename_base,
             width=width,
             height=height,
+            quality=quality,
             debug=debug,
         )
 

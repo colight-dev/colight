@@ -7,6 +7,10 @@ from colight_site.parser import (
     is_colight_file,
     parse_file_metadata,
     FileMetadata,
+    should_hide_statements,
+    should_hide_visuals,
+    should_hide_code,
+    _get_formats_from_tags,
 )
 
 
@@ -119,10 +123,10 @@ def test_parse_file_metadata_basic():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is True
-    assert metadata.hide_visuals is False
-    assert metadata.hide_code is False
-    assert metadata.format == "html"
+    assert "hide-statements" in metadata.pragma_tags
+    assert "format-html" in metadata.pragma_tags
+    assert "hide-visuals" not in metadata.pragma_tags
+    assert "hide-code" not in metadata.pragma_tags
 
 
 def test_parse_file_metadata_multiple_options():
@@ -132,23 +136,25 @@ def test_parse_file_metadata_multiple_options():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is True
-    assert metadata.hide_visuals is True
-    assert metadata.hide_code is False
-    assert metadata.format == "markdown"
+    assert should_hide_statements(metadata.pragma_tags) is True
+    assert should_hide_visuals(metadata.pragma_tags) is True
+    assert should_hide_code(metadata.pragma_tags) is False
+    formats = _get_formats_from_tags(metadata.pragma_tags)
+    assert "markdown" in formats
 
 
-def test_parse_file_metadata_mostly_prose():
-    """Test the mostly-prose shorthand."""
-    source = """#| colight: mostly-prose
+def test_parse_file_metadata_combined_flags():
+    """Test combining multiple flags."""
+    source = """#| hide-statements hide-code
 
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is True
-    assert metadata.hide_visuals is False
-    assert metadata.hide_code is True
-    assert metadata.format is None
+    assert should_hide_statements(metadata.pragma_tags) is True
+    assert should_hide_visuals(metadata.pragma_tags) is False
+    assert should_hide_code(metadata.pragma_tags) is True
+    formats = _get_formats_from_tags(metadata.pragma_tags)
+    assert len(formats) == 0
 
 
 def test_parse_file_metadata_no_pragmas():
@@ -157,10 +163,11 @@ def test_parse_file_metadata_no_pragmas():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is False
-    assert metadata.hide_visuals is False
-    assert metadata.hide_code is False
-    assert metadata.format is None
+    assert should_hide_statements(metadata.pragma_tags) is False
+    assert should_hide_visuals(metadata.pragma_tags) is False
+    assert should_hide_code(metadata.pragma_tags) is False
+    formats = _get_formats_from_tags(metadata.pragma_tags)
+    assert len(formats) == 0
 
 
 def test_parse_file_metadata_unknown_options():
@@ -170,37 +177,43 @@ def test_parse_file_metadata_unknown_options():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert metadata.hide_statements is True
-    assert metadata.format == "html"
+    assert should_hide_statements(metadata.pragma_tags) is True
+    formats = _get_formats_from_tags(metadata.pragma_tags)
+    assert "html" in formats
 
 
 def test_file_metadata_merge_with_cli():
     """Test merging file metadata with CLI options."""
-    metadata = FileMetadata(hide_statements=True, format="html")
+    metadata = FileMetadata(pragma_tags={"hide-statements", "format-html"})
 
     # CLI options should override file metadata
-    result = metadata.merge_with_cli_options(hide_visuals=True, format="markdown")
+    result_tags, result_formats = metadata.merge_with_cli_options(
+        hide_visuals=True, format="markdown"
+    )
 
-    assert result["hide_statements"] is True  # from file
-    assert result["hide_visuals"] is True  # from CLI
-    assert result["hide_code"] is False  # default
-    assert result["format"] == "markdown"  # CLI override
+    assert should_hide_statements(result_tags) is True  # from file
+    assert should_hide_visuals(result_tags) is True  # from CLI
+    assert should_hide_code(result_tags) is False  # default
+    assert "markdown" in result_formats  # CLI override
 
 
-def test_file_metadata_mostly_prose_cli():
-    """Test that CLI mostly-prose flag works correctly."""
-    metadata = FileMetadata(hide_visuals=True)
+def test_file_metadata_cli_overrides():
+    """Test that CLI flags work correctly."""
+    metadata = FileMetadata(pragma_tags={"hide-visuals"})
 
-    result = metadata.merge_with_cli_options(mostly_prose=True)
+    result_tags, result_formats = metadata.merge_with_cli_options(
+        hide_statements=True, hide_code=True
+    )
 
-    assert result["hide_statements"] is True  # from mostly_prose
-    assert result["hide_code"] is True  # from mostly_prose
-    assert result["hide_visuals"] is True  # preserved from file
+    assert should_hide_statements(result_tags) is True  # from CLI
+    assert should_hide_code(result_tags) is True  # from CLI
+    assert should_hide_visuals(result_tags) is True  # preserved from file
 
 
 def test_parse_colight_file_with_metadata():
     """Test parsing a colight file with metadata."""
     content = """#| colight: hide-statements, format-html
+
 # This is a title
 # Some description
 
@@ -217,8 +230,9 @@ x = np.linspace(0, 10, 100)
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # Check that metadata was parsed correctly
-        assert metadata.hide_statements is True
-        assert metadata.format == "html"
+        assert should_hide_statements(metadata.pragma_tags) is True
+        formats = _get_formats_from_tags(metadata.pragma_tags)
+        assert "html" in formats
 
         # Check that forms were still parsed correctly
         assert len(forms) >= 1
@@ -231,6 +245,7 @@ def test_pragma_comments_filtered():
     """Test that pragma comments are not included in markdown output."""
     content = """#| colight: hide-statements
 #| colight: format-html
+
 # This is a regular comment
 # This should appear in output
 
@@ -247,8 +262,9 @@ x = np.linspace(0, 10, 100)
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # Check that metadata was parsed correctly
-        assert metadata.hide_statements is True
-        assert metadata.format == "html"
+        assert should_hide_statements(metadata.pragma_tags) is True
+        formats = _get_formats_from_tags(metadata.pragma_tags)
+        assert "html" in formats
 
         # Check that pragma comments are not in any form's markdown
         all_markdown = []
@@ -275,7 +291,7 @@ import numpy as np
 """
     metadata = parse_file_metadata(source)
     # show-statements should override hide-statements
-    assert metadata.hide_statements is False
+    assert should_hide_statements(metadata.pragma_tags) is False
 
 
 def test_per_form_pragma_parsing():
@@ -311,7 +327,7 @@ y = np.sin(x)
                 break
 
         assert form_with_hide_code is not None
-        assert form_with_hide_code.metadata.hide_code is True
+        assert should_hide_code(form_with_hide_code.metadata.pragma_tags) is True
 
         # Find form with show-visuals
         form_with_show_visuals = None
@@ -321,7 +337,7 @@ y = np.sin(x)
                 break
 
         assert form_with_show_visuals is not None
-        assert form_with_show_visuals.metadata.hide_visuals is False
+        assert should_hide_visuals(form_with_show_visuals.metadata.pragma_tags) is False
 
         pathlib.Path(f.name).unlink()
 
@@ -331,23 +347,19 @@ def test_form_metadata_resolve_with_defaults():
     from colight_site.parser import FormMetadata
 
     # Test with some overrides
-    metadata = FormMetadata(hide_code=True, hide_visuals=False)
-    resolved = metadata.resolve_with_defaults(
-        default_hide_statements=True,
-        default_hide_visuals=True,
-        default_hide_code=False,
-    )
+    metadata = FormMetadata(pragma_tags={"hide-code", "show-visuals"})
+    default_tags = {"hide-statements", "hide-visuals"}
+    resolved = metadata.resolve_with_defaults(default_tags)
 
-    assert resolved["hide_statements"] is True  # inherited from defaults
-    assert resolved["hide_visuals"] is False  # overridden by form metadata
-    assert resolved["hide_code"] is True  # overridden by form metadata
+    # Form metadata should override defaults
+    assert resolved == {"hide-code", "show-visuals"}
 
 
 def test_file_vs_per_form_pragma_distinction():
     """Test that file-level pragmas only apply at the top, per-form pragmas are local."""
-    content = """#| colight: mostly-prose
+    content = """#| hide-statements hide-code
 
-# First form - affected by file-level mostly-prose
+# First form - affected by file-level pragmas
 import numpy as np
 
 #| colight: format-html
@@ -362,9 +374,12 @@ x = np.array([1, 2, 3])
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # File metadata should only include the top-level pragma
-        assert metadata.hide_statements is True  # from mostly-prose
-        assert metadata.hide_code is True  # from mostly-prose
-        assert metadata.format is None  # format-html is per-form, not file-level
+        assert (
+            should_hide_statements(metadata.pragma_tags) is True
+        )  # from file-level flags
+        assert should_hide_code(metadata.pragma_tags) is True  # from file-level flags
+        formats = _get_formats_from_tags(metadata.pragma_tags)
+        assert len(formats) == 0  # format-html is per-form, not file-level
 
         # Find forms
         import_form = None
@@ -379,12 +394,247 @@ x = np.array([1, 2, 3])
         assert array_form is not None
 
         # Import form should have no specific metadata (inherits file defaults)
-        assert import_form.metadata.hide_statements is None
-        assert import_form.metadata.hide_code is None
+        assert len(import_form.metadata.pragma_tags) == 0
 
-        # Array form should not have any metadata from the format-html pragma
-        # (per-form pragmas that don't apply to FormMetadata are ignored)
-        assert array_form.metadata.hide_statements is None
-        assert array_form.metadata.hide_code is None
+        # Array form should have the format-html pragma from its per-form annotation
+        assert "format-html" in array_form.metadata.pragma_tags
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_new_pragma_formats():
+    """Test new pragma formats with %% and | starters without colight: prefix."""
+    content = """# %% hide-code
+# Regular comment
+import numpy as np
+
+#| format-html
+# Another comment
+x = np.array([1, 2, 3])
+
+#| hide-statements
+y = x * 2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Should have 3 forms
+        assert len(forms) == 3
+
+        # First form should have hide_code=True from %% pragma
+        import_form = None
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+                break
+        assert import_form is not None
+        assert should_hide_code(import_form.metadata.pragma_tags) is True
+
+        # Third form should have hide_statements=True from | pragma
+        y_form = None
+        for form in forms:
+            if "y = x * 2" in form.code:
+                y_form = form
+                break
+        assert y_form is not None
+        assert should_hide_statements(y_form.metadata.pragma_tags) is True
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_liberal_tag_matching():
+    """Test that tags are matched liberally anywhere in pragma comments."""
+    content = """#| hide-statements hide-code flag test
+
+# %% This comment has hide-code somewhere in it
+import numpy as np
+
+#| Some text with show-visuals and other words
+x = np.array([1, 2, 3])
+
+# %% format-markdown should work too
+y = x * 2
+
+z = y + 1
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Find the forms and check their metadata
+        import_form = None
+        x_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+
+        # Check that liberal matching worked
+        assert import_form is not None
+        assert should_hide_code(import_form.metadata.pragma_tags) is True
+
+        assert x_form is not None
+        assert should_hide_visuals(x_form.metadata.pragma_tags) is False  # show-visuals
+
+        # File-level metadata from file-level flags
+        assert should_hide_statements(metadata.pragma_tags) is True
+        assert should_hide_code(metadata.pragma_tags) is True
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_mixed_pragma_formats():
+    """Test mixing old and new pragma formats."""
+    content = """#| colight: hide-statements
+# %% format-html
+
+# Regular comment
+import numpy as np
+
+#| show-code
+x = np.array([1, 2, 3])
+"""
+
+    metadata = parse_file_metadata(content)
+
+    # Both old and new formats should be parsed
+    assert should_hide_statements(metadata.pragma_tags) is True
+    formats = _get_formats_from_tags(metadata.pragma_tags)
+    assert "html" in formats
+
+
+def test_case_insensitive_matching():
+    """Test that tag matching is case insensitive."""
+    content = """# %% Hide-Code Format-HTML
+
+import numpy as np
+
+#| SHOW-VISUALS
+x = np.array([1, 2, 3])
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        formats = _get_formats_from_tags(metadata.pragma_tags)
+        assert "html" in formats
+        # File-level hide_code should be in file metadata
+        assert should_hide_code(metadata.pragma_tags) is True
+
+        # Find forms and check metadata
+        import_form = None
+        x_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+
+        assert import_form is not None
+
+        assert x_form is not None
+        assert should_hide_visuals(x_form.metadata.pragma_tags) is False  # show-visuals
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_plural_singular_support():
+    """Test that both plural and singular forms work."""
+    content = """# %% hide-statement
+import numpy as np
+
+#| hide-statements should also work
+x = np.array([1, 2, 3])
+
+# %% show-visual
+y = x * 2
+
+#| show-visuals should also work
+z = y + 1
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Find forms
+        import_form = None
+        x_form = None
+        y_form = None
+        z_form = None
+
+        for form in forms:
+            if "import numpy" in form.code:
+                import_form = form
+            elif "x = np.array" in form.code:
+                x_form = form
+            elif "y = x * 2" in form.code:
+                y_form = form
+            elif "z = y + 1" in form.code:
+                z_form = form
+
+        # Check that both singular and plural forms work
+        assert import_form is not None
+        assert (
+            should_hide_statements(import_form.metadata.pragma_tags) is True
+        )  # hide-statement
+
+        assert x_form is not None
+        assert (
+            should_hide_statements(x_form.metadata.pragma_tags) is True
+        )  # hide-statements
+
+        assert y_form is not None
+        assert should_hide_visuals(y_form.metadata.pragma_tags) is False  # show-visual
+
+        assert z_form is not None
+        assert should_hide_visuals(z_form.metadata.pragma_tags) is False  # show-visuals
+
+        pathlib.Path(f.name).unlink()
+
+
+def test_regular_comments_not_pragmas():
+    """Test that regular comments with tag-like words are not treated as pragmas."""
+    content = """# Regular comment with hide-code mentioned
+import numpy as np
+
+# This comment mentions show-visuals but should be ignored
+x = np.array([1, 2, 3])
+
+# Some text with hide-statements should not affect anything
+y = x * 2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # File metadata should be defaults (no pragmas detected)
+        assert should_hide_statements(metadata.pragma_tags) is False
+        assert should_hide_visuals(metadata.pragma_tags) is False
+        assert should_hide_code(metadata.pragma_tags) is False
+        formats = _get_formats_from_tags(metadata.pragma_tags)
+        assert len(formats) == 0
+
+        # All form metadata should be empty (no pragmas detected)
+        for form in forms:
+            assert len(form.metadata.pragma_tags) == 0
 
         pathlib.Path(f.name).unlink()
