@@ -51,6 +51,16 @@ def main():
     is_flag=True,
     help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
 )
+@click.option(
+    "--colight-output-path",
+    type=str,
+    help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
+)
+@click.option(
+    "--colight-embed-path",
+    type=str,
+    help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
+)
 def build(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
@@ -60,6 +70,8 @@ def build(
     hide_visuals: bool,
     hide_code: bool,
     mostly_prose: bool,
+    colight_output_path: Optional[str],
+    colight_embed_path: Optional[str],
 ):
     """Build a .colight.py file into markdown/HTML."""
     # Handle --mostly-prose flag
@@ -79,7 +91,13 @@ def build(
         if not output:
             output = builder._get_output_path(input_path, format)
         builder.build_file(
-            input_path, output, verbose=verbose, format=format, **options
+            input_path,
+            output,
+            verbose=verbose,
+            format=format,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
+            **options,
         )
         click.echo(f"Built {input_path} -> {output}")
     else:
@@ -87,7 +105,13 @@ def build(
         if not output:
             output = pathlib.Path("build")
         builder.build_directory(
-            input_path, output, verbose=verbose, format=format, **options
+            input_path,
+            output,
+            verbose=verbose,
+            format=format,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
+            **options,
         )
         click.echo(f"Built {input_path}/ -> {output}/")
 
@@ -129,6 +153,16 @@ def build(
     is_flag=True,
     help="Show only markdown blocks and visuals from expressions (implies --hide-statements --hide-code)",
 )
+@click.option(
+    "--colight-output-path",
+    type=str,
+    help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
+)
+@click.option(
+    "--colight-embed-path",
+    type=str,
+    help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
+)
 def watch(
     input_path: pathlib.Path,
     output: pathlib.Path,
@@ -138,6 +172,8 @@ def watch(
     hide_visuals: bool,
     hide_code: bool,
     mostly_prose: bool,
+    colight_output_path: Optional[str],
+    colight_embed_path: Optional[str],
 ):
     """Watch for changes and rebuild automatically."""
     # Handle --mostly-prose flag
@@ -155,7 +191,13 @@ def watch(
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
     watcher.watch_and_build(
-        input_path, output, verbose=verbose, format=format, **options
+        input_path,
+        output,
+        verbose=verbose,
+        format=format,
+        colight_output_path=colight_output_path,
+        colight_embed_path=colight_embed_path,
+        **options,
     )
 
 

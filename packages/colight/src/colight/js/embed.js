@@ -115,6 +115,8 @@ export function loadVisuals(options = {}) {
  */
 export function initialize() {
   if (typeof document !== "undefined") {
+    window.colight.loadVisual = loadVisual;
+    window.colight.loadVisuals = loadVisuals;
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => loadVisuals());
     } else {

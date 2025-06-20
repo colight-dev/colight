@@ -1,7 +1,7 @@
 """Generate Markdown and HTML output from executed forms."""
 
 import pathlib
-from typing import List, Optional
+from typing import List, Optional, Dict
 import markdown
 
 from colight_site.parser import Form
@@ -15,9 +15,14 @@ EMBED_URL = (
 class MarkdownGenerator:
     """Generate Markdown from forms and their execution results."""
 
-    def __init__(self, output_dir: pathlib.Path):
+    def __init__(
+        self, output_dir: pathlib.Path, embed_path_template: Optional[str] = None
+    ):
         self.output_dir = output_dir
         self.output_file_dir = None  # Will be set when generating
+        self.embed_path_template = (
+            embed_path_template or "{basename}_colight/form-{form:03d}.colight"
+        )
 
     def generate_markdown(
         self,
@@ -25,6 +30,7 @@ class MarkdownGenerator:
         colight_files: List[Optional[pathlib.Path]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
+        path_context: Optional[Dict[str, str]] = None,
         hide_statements: bool = False,
         hide_visuals: bool = False,
         hide_code: bool = False,
@@ -85,7 +91,9 @@ class MarkdownGenerator:
             if not resolved_settings["hide_visuals"]:
                 # Add colight embed if we have a visualization
                 if colight_file and not is_dummy_form:
-                    embed_path = self._get_relative_path(colight_file, output_path)
+                    # Format the embed path template
+                    context = {**(path_context or {}), "form": i}
+                    embed_path = self.embed_path_template.format(**context)
                     lines.append(
                         f'<div class="colight-embed" data-src="{embed_path}"></div>'
                     )

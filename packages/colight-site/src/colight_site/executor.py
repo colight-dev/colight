@@ -14,11 +14,14 @@ from colight.inspect import inspect
 class FormExecutor:
     """Execute forms in a persistent namespace."""
 
-    def __init__(self, output_dir: pathlib.Path):
+    def __init__(
+        self, output_dir: pathlib.Path, output_path_template: Optional[str] = None
+    ):
         self.env: Dict[str, Any] = {}
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.form_counter = 0
+        self.output_path_template = output_path_template or "form-{form:03d}.colight"
 
         # Setup basic imports
         self._setup_environment()
@@ -70,21 +73,47 @@ except ImportError:
             raise
 
     def save_colight_visualization(
-        self, value: Any, form_index: int
+        self,
+        value: Any,
+        form_index: int,
+        output_path: Optional[pathlib.Path] = None,
+        path_context: Optional[Dict[str, str]] = None,
     ) -> Optional[pathlib.Path]:
         """Save a Colight visualization to a .colight file."""
         if value is None:
             return None
 
-        output_path = self.output_dir / f"form-{form_index:03d}.colight"
+        # Format the output path template
+        if path_context is None:
+            path_context = {}
+
+        # Add form index to context
+        context = {**path_context, "form": form_index}
+
+        # Format the template
+        formatted_path = self.output_path_template.format(**context)
+
+        # Resolve relative to output_path's parent or output_dir
+        if output_path and formatted_path.startswith("./"):
+            # Relative to the markdown file's location
+            base_dir = output_path.parent
+            formatted_path = formatted_path[2:]  # Remove ./
+        else:
+            # Use the default output_dir
+            base_dir = self.output_dir
+
+        output_file_path = base_dir / formatted_path
+
+        # Ensure parent directory exists
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             # Let inspect() handle all the complexity internally
             visual = inspect(value)
             if visual is None:
                 return None
-            visual.save_file(str(output_path))
-            return output_path
+            visual.save_file(str(output_file_path))
+            return output_file_path
 
         except Exception as e:
             print(

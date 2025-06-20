@@ -70,7 +70,11 @@ class APIDocPlugin(BasePlugin):
                 dest_dir=getattr(config, "site_dir"),
                 use_directory_urls=getattr(config, "use_directory_urls"),
             )
-            files.remove(new_file)
+            # Only remove if it exists
+            try:
+                files.remove(new_file)
+            except ValueError:
+                pass  # File doesn't exist in collection yet
             files.append(new_file)
 
         return files

@@ -305,6 +305,9 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
         for line in module.header:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
+                # Skip Jupyter cell delimiters
+                if comment_text.startswith("%%") or comment_text == "%%":
+                    continue
                 if comment_text.strip().startswith("|") and "colight:" in comment_text:
                     elements.append(
                         RawElement("pragma", comment_text, 1)
@@ -321,6 +324,9 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
             for line in stmt.leading_lines:
                 if line.comment:
                     comment_text = line.comment.value.lstrip("#").strip()
+                    # Skip Jupyter cell delimiters
+                    if comment_text.startswith("%%") or comment_text == "%%":
+                        continue
                     if (
                         comment_text.strip().startswith("|")
                         and "colight:" in comment_text

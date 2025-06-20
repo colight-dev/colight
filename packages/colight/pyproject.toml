@@ -23,7 +23,9 @@ dependencies = [
 text = "MIT"
 
 [project.entry-points."mkdocs.plugins"]
-"colight.docs.plugin" = "colight.docs.plugin:APIDocPlugin"
+"colight.docs.api_plugin" = "colight.docs.api_plugin:APIDocPlugin"
+"colight.docs.colight_plugin" = "colight.docs.colight_plugin:ColightPlugin"
+"colight.docs.site_plugin" = "colight.docs.site_plugin:SitePlugin"
 
 [dependency-groups]
 dev = [

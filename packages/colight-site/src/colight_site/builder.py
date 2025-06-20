@@ -1,21 +1,26 @@
 """Main builder module that coordinates parsing, execution, and generation."""
 
 import pathlib
+from typing import Optional, List
 
-from .parser import parse_colight_file, is_colight_file
+from .parser import parse_colight_file
 from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 
 
 def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
-    """Convert .colight.py input path to output path with correct extension."""
+    """Convert Python file path to output path with correct extension."""
     if input_path.name.endswith(".colight.py"):
         # Remove .colight.py and add the new extension
         base_name = input_path.name[:-11]  # Remove ".colight.py"
         suffix = ".html" if format == "html" else ".md"
         return input_path.parent / (base_name + suffix)
+    elif input_path.suffix == ".py":
+        # For regular .py files, replace .py with the output extension
+        suffix = ".html" if format == "html" else ".md"
+        return input_path.with_suffix(suffix)
     else:
-        # Fallback for non-.colight.py files
+        # Fallback for other files
         suffix = ".html" if format == "html" else ".md"
         return input_path.with_suffix(suffix)
 
@@ -28,10 +33,12 @@ def build_file(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    colight_output_path: Optional[str] = None,
+    colight_embed_path: Optional[str] = None,
 ):
-    """Build a single .colight.py file."""
-    if not is_colight_file(input_path):
-        raise ValueError(f"Not a .colight.py file: {input_path}")
+    """Build a single Python file."""
+    if not input_path.suffix == ".py":
+        raise ValueError(f"Not a Python file: {input_path}")
 
     if verbose:
         print(f"Building {input_path} -> {output_path}")
@@ -60,15 +67,45 @@ def build_file(
         return
 
     # Setup execution environment
+    # Default templates if not provided
+    output_template = (
+        colight_output_path or "./{basename}_colight/form-{form:03d}.colight"
+    )
+    embed_template = colight_embed_path or "{basename}_colight/form-{form:03d}.colight"
+
+    # For backward compatibility, create a directory for executor
+    # This will be used as a base directory for relative paths
     colight_dir = output_path.parent / (output_path.stem + "_colight")
-    executor = SafeFormExecutor(colight_dir)
+    executor = SafeFormExecutor(colight_dir, output_path_template=output_template)
+
+    # Prepare path context for templates
+    # Get relative path from build root (assumes we're building from a common root)
+    try:
+        # Try to get relative path from input's parent's parent (assuming docs/ or src/ structure)
+        build_root = input_path.parent.parent
+        rel_path = output_path.relative_to(build_root)
+    except ValueError:
+        # Fallback to just using the output path's parent
+        build_root = output_path.parent
+        rel_path = output_path.relative_to(output_path.parent)
+
+    path_context = {
+        "basename": output_path.stem,
+        "filename": output_path.name,
+        "reldir": str(rel_path.parent) if str(rel_path.parent) != "." else "",
+        "relpath": str(rel_path.with_suffix("")),
+        "abspath": str(output_path.absolute()),
+        "absdir": str(output_path.parent.absolute()),
+    }
 
     # Execute forms and collect visualizations
     colight_files = []
     for i, form in enumerate(forms):
         try:
             result = executor.execute_form(form, str(input_path))
-            colight_file = executor.save_colight_visualization(result, i)
+            colight_file = executor.save_colight_visualization(
+                result, i, output_path=output_path, path_context=path_context
+            )
             colight_files.append(colight_file)
 
             if verbose and colight_file:
@@ -79,7 +116,7 @@ def build_file(
             colight_files.append(None)
 
     # Generate output
-    generator = MarkdownGenerator(colight_dir)
+    generator = MarkdownGenerator(colight_dir, embed_path_template=embed_template)
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
     # Merge file metadata with CLI options (CLI takes precedence)
@@ -100,7 +137,7 @@ def build_file(
         generator.write_html_file(html_content, output_path)
     else:
         markdown_content = generator.generate_markdown(
-            forms, colight_files, title, output_path, **merged_options
+            forms, colight_files, title, output_path, path_context, **merged_options
         )
         generator.write_markdown_file(markdown_content, output_path)
 
@@ -116,39 +153,66 @@ def build_directory(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    colight_output_path: Optional[str] = None,
+    colight_embed_path: Optional[str] = None,
+    include_patterns: Optional[List[str]] = None,
+    ignore_patterns: Optional[List[str]] = None,
 ):
-    """Build all .colight.py files in a directory."""
+    """Build all Python files in a directory matching the patterns."""
     if verbose:
         print(f"Building directory {input_dir} -> {output_dir}")
 
-    # Find all .colight.py files
-    colight_files = []
-    for path in input_dir.rglob("*.py"):
-        if is_colight_file(path):
-            colight_files.append(path)
+    # Default to .colight.py files if no include patterns specified
+    if include_patterns is None:
+        include_patterns = ["*.colight.py"]
+    if ignore_patterns is None:
+        ignore_patterns = []
+
+    # Find all Python files matching patterns
+    python_files = []
+    for include_pattern in include_patterns:
+        for path in input_dir.rglob(include_pattern):
+            if path.suffix == ".py":
+                # Always ignore __pycache__ directories and __init__.py files
+                if "__pycache__" in path.parts or path.name == "__init__.py":
+                    continue
+
+                # Check if file should be ignored by user patterns
+                should_ignore = False
+                for ignore_pattern in ignore_patterns:
+                    if path.match(ignore_pattern):
+                        should_ignore = True
+                        break
+                if not should_ignore:
+                    python_files.append(path)
+
+    # Remove duplicates and sort
+    python_files = sorted(set(python_files))
 
     if verbose:
-        print(f"Found {len(colight_files)} .colight.py files")
+        print(f"Found {len(python_files)} Python files")
 
     # Build each file
-    for colight_file in colight_files:
+    for python_file in python_files:
         try:
             # Calculate relative output path
-            rel_path = colight_file.relative_to(input_dir)
+            rel_path = python_file.relative_to(input_dir)
             output_file_rel = _get_output_path(rel_path, format)
             output_file = output_dir / output_file_rel
 
             build_file(
-                colight_file,
+                python_file,
                 output_file,
                 verbose=verbose,
                 format=format,
                 hide_statements=hide_statements,
                 hide_visuals=hide_visuals,
                 hide_code=hide_code,
+                colight_output_path=colight_output_path,
+                colight_embed_path=colight_embed_path,
             )
         except Exception as e:
-            print(f"Error building {colight_file}: {e}")
+            print(f"Error building {python_file}: {e}")
             if verbose:
                 import traceback
 

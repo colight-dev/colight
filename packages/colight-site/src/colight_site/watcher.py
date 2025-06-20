@@ -14,6 +14,8 @@ def watch_and_build(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    colight_output_path: str = None,
+    colight_embed_path: str = None,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")
@@ -28,6 +30,8 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
         )
     else:
         builder.build_directory(
@@ -38,6 +42,8 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
         )
 
     # Watch for changes
@@ -64,6 +70,8 @@ def watch_and_build(
                             hide_statements=hide_statements,
                             hide_visuals=hide_visuals,
                             hide_code=hide_code,
+                            colight_output_path=colight_output_path,
+                            colight_embed_path=colight_embed_path,
                         )
                         print(f"Rebuilt {input_path}")
                 else:
@@ -81,6 +89,8 @@ def watch_and_build(
                                 hide_statements=hide_statements,
                                 hide_visuals=hide_visuals,
                                 hide_code=hide_code,
+                                colight_output_path=colight_output_path,
+                                colight_embed_path=colight_embed_path,
                             )
                             print(f"Rebuilt {changed_file}")
             except Exception as e:
