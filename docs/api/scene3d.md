@@ -2,7 +2,7 @@
 
 ### Scene {: .api .api-member }
 
-A 3D scene visualization component using WebGPU.
+A 3D scene visual component using WebGPU.
 
 This class creates an interactive 3D scene that can contain multiple types of components:
 
@@ -11,7 +11,7 @@ This class creates an interactive 3D scene that can contain multiple types of co
 - Ellipsoid bounds (wireframe)
 - Cuboids
 
-The visualization supports:
+The component supports:
 
 - Orbit camera control (left mouse drag)
 - Pan camera control (shift + left mouse drag or middle mouse drag)
@@ -68,7 +68,7 @@ Parameters
 
 - `alpha` (Optional[NumberLike]): Default alpha value for all ellipsoids if alphas not provided
 
-- `fill_mode` (str): How the shape is drawn. One of:
+- `fill_mode` (str | None): How the shape is drawn. One of:
 
   - "Solid": Filled surface with solid color
 

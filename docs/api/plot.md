@@ -2442,6 +2442,44 @@ Returns
 
 - A Bylight component that renders the highlighted code block.
 
+## Other layout items
+
+### bitmap {: .api .api-member }
+
+Renders raw pixel data from an array.
+
+Parameters
+{: .api .api-section }
+
+- `pixels` (Union[list, np.ndarray, JSExpr]): Image data in one of these formats:
+
+       - Raw pixel data in RGB or RGBA format (flat array of bytes)
+
+       - 2D numpy array (grayscale image, values 0-1 or 0-255)
+
+       - 3D numpy array with shape (height, width, channels)
+
+- `width` (int | None): Width of the image in pixels. Required for flat arrays,
+
+       inferred from array shape for numpy arrays.
+
+- `height` (int | None): Height of the image in pixels. Required for flat arrays,
+
+        inferred from array shape for numpy arrays.
+
+- `interpolation` (str): How to interpolate pixels when scaling. Options:
+
+              - "nearest": Sharp pixels (default)
+
+              - "bilinear": Smooth interpolation
+
+              Similar to matplotlib's imshow interpolation.
+
+Returns
+{: .api .api-section }
+
+- A PlotSpec object representing the bitmap mark. (LayoutItem)
+
 ## Utility functions
 
 ### doc {: .api .api-member }
@@ -2538,9 +2576,9 @@ Parameters
 
 - `format` (str): Module format ('esm' or 'commonjs')
 
-ImpcolightaScript code can access:
+Imported JavaScript code can access:
 
-- `colight.imports`: Previous imports incolightent plot (only for CommonJS imports)
+- `colight.imports`: Previous imports in the current plot (only for CommonJS imports)
 - `React`, `d3`, `html` (for hiccup) and `colight.api` are defined globally
 
 Examples

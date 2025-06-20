@@ -32,7 +32,10 @@ def test_markdown_generation():
 
     colight_files = [None, pathlib.Path("test.colight")]
 
-    markdown = generator.generate_markdown(forms, colight_files, "Test Document")
+    path_context = {"basename": "test"}
+    markdown = generator.generate_markdown(
+        forms, colight_files, "Test Document", path_context=path_context
+    )
 
     assert "# Test Document" in markdown
     assert "This is a test" in markdown
@@ -40,7 +43,7 @@ def test_markdown_generation():
     assert "```python" in markdown
     assert "import numpy as np" in markdown
     assert "np.sin(x)" in markdown
-    assert "data-src=" in markdown and 'test.colight"' in markdown
+    assert "data-src=" in markdown and "test_colight/form-" in markdown
 
 
 def test_html_generation():
@@ -59,7 +62,10 @@ def test_html_generation():
 
     colight_files = [None, pathlib.Path("test.colight")]
 
-    html = generator.generate_html(forms, colight_files, "Test Document")
+    path_context = {"basename": "test"}
+    html = generator.generate_html(
+        forms, colight_files, "Test Document", path_context=path_context
+    )
 
     assert "<!DOCTYPE html>" in html
     assert "<title>Test Document</title>" in html
@@ -88,14 +94,18 @@ def test_hide_statements_flag():
     colight_files = [None, None, pathlib.Path("test.colight")]
 
     # Generate without hiding statements
-    markdown = generator.generate_markdown(forms, colight_files)
+    path_context = {"basename": "test"}
+    markdown = generator.generate_markdown(
+        forms, colight_files, path_context=path_context
+    )
     assert "import numpy as np" in markdown
     assert "x = np.linspace(0, 10, 100)" in markdown
     assert "np.sin(x)" in markdown
 
     # Generate with hide_statements=True
+    path_context = {"basename": "test"}
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_statements=True
+        forms, colight_files, path_context=path_context, hide_statements=True
     )
     assert "import numpy as np" not in markdown_hidden  # statement
     assert "x = np.linspace(0, 10, 100)" not in markdown_hidden  # statement
@@ -124,13 +134,20 @@ def test_hide_code_flag():
     colight_files = [None, pathlib.Path("test.colight")]
 
     # Generate without hiding code
-    markdown = generator.generate_markdown(forms, colight_files)
+    path_context = {"basename": "test"}
+    markdown = generator.generate_markdown(
+        forms, colight_files, path_context=path_context
+    )
     assert "```python" in markdown
     assert "import numpy as np" in markdown
     assert "np.sin(x)" in markdown
 
     # Generate with hide_code=True
-    markdown_hidden = generator.generate_markdown(forms, colight_files, hide_code=True)
+    path_context = {"basename": "test"}
+    path_context = {"basename": "test"}
+    markdown_hidden = generator.generate_markdown(
+        forms, colight_files, path_context=path_context, hide_code=True
+    )
     assert "```python" not in markdown_hidden
     assert "import numpy as np" not in markdown_hidden
     assert "np.sin(x)" not in markdown_hidden
@@ -156,13 +173,17 @@ def test_hide_visuals_flag():
     colight_files: List[Optional[pathlib.Path]] = [pathlib.Path("test.colight")]
 
     # Generate without hiding visuals
-    markdown = generator.generate_markdown(forms, colight_files)
+    path_context = {"basename": "test"}
+    markdown = generator.generate_markdown(
+        forms, colight_files, path_context=path_context
+    )
     assert "colight-embed" in markdown
-    assert "data-src=" in markdown and "test.colight" in markdown
+    assert "data-src=" in markdown and "test_colight/form-" in markdown
 
     # Generate with hide_visuals=True
+    path_context = {"basename": "test"}
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, hide_visuals=True
+        forms, colight_files, path_context=path_context, hide_visuals=True
     )
     assert "colight-embed" not in markdown_hidden
     assert "data-src=" not in markdown_hidden
@@ -201,7 +222,10 @@ def test_per_form_metadata_overrides():
     colight_files = [None, pathlib.Path("test.colight")]
 
     # Generate with global hide_code=False (should be overridden per-form)
-    markdown = generator.generate_markdown(forms, colight_files, hide_code=False)
+    path_context = {"basename": "test"}
+    markdown = generator.generate_markdown(
+        forms, colight_files, path_context=path_context, hide_code=False
+    )
 
     # First form should hide code due to per-form metadata
     assert "This form should hide its code" in markdown
@@ -246,8 +270,13 @@ y = x * 2
 
         colight_files: List[Optional[pathlib.Path]] = [None] * len(forms)
 
+        path_context = {"basename": "test"}
         markdown = generator.generate_markdown(
-            forms, colight_files, title="Test Document", **generator_options
+            forms,
+            colight_files,
+            title="Test Document",
+            path_context=path_context,
+            **generator_options,
         )
 
         # Check results

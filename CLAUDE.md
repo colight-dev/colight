@@ -13,7 +13,7 @@
 - **IMPORTANT**: Always use `uv run python` instead of `python` directly
 - Typecheck Python: `pyright` or `yarn pyright`
 - Format & lint: `pre-commit run --all-files`
-- Docs: `yarn watch:docs` to serve, `yarn build:docs` to build
+- Docs: `yarn docs:watch` to serve, `yarn docs:build` to build
 
 ## Code Style Guide
 

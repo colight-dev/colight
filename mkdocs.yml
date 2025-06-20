@@ -25,45 +25,45 @@ theme:
   logo: false
 nav:
   - Home: index.md
-  - Essential Reading: content/essential-reading.md
+  - Essential Reading: essential-reading
   - Scene3d: scene3d.py
   - Guides:
-      - Getting Started: content/guides/getting-started.md
-      - Data Analysis Workflow: content/guides/data-analysis-workflow.md
-      - Responsive Dashboards: content/guides/responsive-dashboards.md
+      - Getting Started: guides/getting-started.colight
+      - Data Analysis Workflow: guides/data-analysis-workflow.colight
+      - Responsive Dashboards: guides/responsive-dashboards.colight
   - The Basics:
-      - Layouts: system-guide/layouts.py
-      - State: system-guide/state.py
-      - HTML with Hiccup: system-guide/html-with-hiccup.py
-      - Color: learn-more/color.py
-      - JS Imports: system-guide/js-imports.py
+      - Layouts: system-guide/layouts
+      - State: system-guide/state
+      - HTML with Hiccup: system-guide/html-with-hiccup
+      - Color: learn-more/color
+      - JS Imports: system-guide/js-imports
       - Interactivity & Animation:
-          - Sliders: interactivity/sliders.py
-          - Animating Frames: interactivity/frames.py
-          - Mouse events: interactivity/events.py
-          - Conditional Rendering: learn-more/cond.py
-          - Tailing data: interactivity/tail.py
+          - Sliders: interactivity/sliders.colight
+          - Animating Frames: interactivity/frames
+          - Mouse events: interactivity/events
+          - Conditional Rendering: learn-more/cond
+          - Tailing data: interactivity/tail
   - Export:
-      - Save to File: export/save_to_file.py
-      - Images and Video: export/images_and_video.py
+      - Save to File: export/save_to_file
+      - Images and Video: export/images_and_video
   - Advanced:
-      - Python Event Loops: learn-more/python-event-loop.py
-      - Compare with Observable Plot: learn-more/vs-observable.py
-      - Plot Options: learn-more/plot-options.py
+      - Python Event Loops: learn-more/python-event-loop
+      - Compare with Observable Plot: learn-more/vs-observable
+      - Plot Options: learn-more/plot-options
   - Examples:
-      - Draw Density: examples/draw-density.py
-      - Live Editing Source Code: examples/live-edit-source.py
-      - Ellipse Mark: examples/ellipse-mark.py
-      - Histogram Mark: examples/histogram-mark.py
-      - Image Mark: examples/image-mark.py
-      - Timelines with barX: examples/barx-timeline.py
-      - Highlighting Code: examples/bylight.py
-      - Rendering LaTeX: examples/katex.py
-      - Render Pixel Data: examples/pixels.py
+      - Draw Density: examples/draw-density
+      - Live Editing Source Code: examples/live-edit-source
+      - Ellipse Mark: examples/ellipse-mark
+      - Histogram Mark: examples/histogram-mark
+      - Image Mark: examples/image-mark
+      - Timelines with barX: examples/barx-timeline
+      - Highlighting Code: examples/bylight
+      - Rendering LaTeX: examples/katex
+      - Render Pixel Data: examples/pixels
   - API Docs:
-      - Plot: api/plot.md
-      - Scene3D: api/scene3d.md
-  - How Do I...: learn-more/how-do-i.py
+      - Plot: api/plot
+      - Scene3D: api/scene3d
+  - How Do I...: learn-more/how-do-i
 
   - Changelog: CHANGELOG.md
 markdown_extensions:
@@ -82,13 +82,12 @@ plugins:
           output: api/scene3d.md
   - colight.docs.site_plugin:
       verbose: true
-      hide_code: false
-      include: ["*.py"]
-      ignore: ["llms.py", "data.py"]
+      format: markdown
+      include: ["*.py", "*.colight.py"]
+      ignore: ["llms.py", "data.py", "__init__.py"]
       file_options:
         "*.py":
           hide_statements: true
-          hide_code: true
   - mkdocs-jupyter:
       include: ["*.pyXXXXX"]
       ignore: ["llms.py", "*.colight.py"]

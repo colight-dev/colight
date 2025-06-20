@@ -132,7 +132,7 @@ def build_file(
 
     if final_format == "html":
         html_content = generator.generate_html(
-            forms, colight_files, title, output_path, **merged_options
+            forms, colight_files, title, output_path, path_context, **merged_options
         )
         generator.write_html_file(html_content, output_path)
     else:

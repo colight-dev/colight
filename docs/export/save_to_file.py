@@ -22,7 +22,7 @@ data = [
 p = Plot.barY(data, {"x": "category", "y": "value", "fill": "category"})
 
 # Save as HTML file
-p.save_html("my_visual.html")
+p.save_html("scratch/my_visual.html")
 
 # %% [markdown]
 #
@@ -38,7 +38,7 @@ raster_data = np.random.rand(50, 50)
 p = Plot.raster(raster_data)
 
 # Save as .colight file
-p.save_file("my_visual.colight")
+p.save_file("scratch/my_visual.colight")
 
 # %% [markdown]
 #
