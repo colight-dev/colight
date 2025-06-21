@@ -24,14 +24,14 @@ def _create_test_form(code: str, start_line: int) -> Form:
     return Form(markdown=[], node=node, start_line=start_line, metadata=FormMetadata())
 
 
-def test_embed_threshold():
+def test_inline_threshold():
     """Test that small files are embedded as script tags and large files as external references."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = pathlib.Path(tmpdir)
 
         # Create a generator with a low threshold for testing
-        generator = MarkdownGenerator(tmpdir_path, embed_threshold=100)
+        generator = MarkdownGenerator(tmpdir_path, inline_threshold=100)
 
         # Create test forms
         forms = [_create_test_form("x, y", 1), _create_test_form("data", 2)]
@@ -77,7 +77,7 @@ def test_embed_threshold():
         assert div_tags == 1  # One large file
 
 
-def test_default_embed_threshold():
+def test_default_inline_threshold():
     """Test default embed threshold of 50KB."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -86,17 +86,17 @@ def test_default_embed_threshold():
         # Create a generator with default threshold
         generator = MarkdownGenerator(tmpdir_path)  # Should use 50000 bytes default
 
-        assert generator.embed_threshold == 50000
+        assert generator.inline_threshold == 50000
 
 
-def test_embed_threshold_html_generation():
+def test_inline_threshold_html_generation():
     """Test that embed threshold works for HTML generation too."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = pathlib.Path(tmpdir)
 
         # Create a generator with a low threshold
-        generator = MarkdownGenerator(tmpdir_path, embed_threshold=100)
+        generator = MarkdownGenerator(tmpdir_path, inline_threshold=100)
 
         # Create test form
         forms = [_create_test_form("x", 1)]
@@ -121,7 +121,7 @@ def test_base64_encoding():
         tmpdir_path = pathlib.Path(tmpdir)
 
         # Create a generator with a high threshold
-        generator = MarkdownGenerator(tmpdir_path, embed_threshold=1000)
+        generator = MarkdownGenerator(tmpdir_path, inline_threshold=1000)
 
         # Create test form
         forms = [_create_test_form("x", 1)]

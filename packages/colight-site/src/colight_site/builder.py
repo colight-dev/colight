@@ -6,6 +6,7 @@ from typing import Optional, List
 from .parser import parse_colight_file
 from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
+from .constants import DEFAULT_INLINE_THRESHOLD
 
 
 def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
@@ -36,7 +37,7 @@ def build_file(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
-    embed_threshold: int = 50000,
+    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
 ):
     """Build a single Python file."""
     if not input_path.suffix == ".py":
@@ -124,7 +125,9 @@ def build_file(
 
     # Generate output
     generator = MarkdownGenerator(
-        colight_dir, embed_path_template=embed_template, embed_threshold=embed_threshold
+        colight_dir,
+        embed_path_template=embed_template,
+        inline_threshold=inline_threshold,
     )
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
@@ -178,7 +181,7 @@ def build_directory(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
-    embed_threshold: int = 50000,
+    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
     include_patterns: Optional[List[str]] = None,
     ignore_patterns: Optional[List[str]] = None,
 ):
@@ -235,7 +238,7 @@ def build_directory(
                 continue_on_error=continue_on_error,
                 colight_output_path=colight_output_path,
                 colight_embed_path=colight_embed_path,
-                embed_threshold=embed_threshold,
+                inline_threshold=inline_threshold,
             )
         except Exception as e:
             print(f"Error building {python_file}: {e}")

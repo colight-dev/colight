@@ -6,6 +6,7 @@ from typing import Optional
 
 from . import builder
 from . import watcher
+from .constants import DEFAULT_INLINE_THRESHOLD
 
 
 @click.group()
@@ -65,10 +66,10 @@ def main():
     help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
 )
 @click.option(
-    "--embed-threshold",
+    "--inline-threshold",
     type=int,
-    default=50000,
-    help="Embed .colight files smaller than this size (in bytes) as script tags (default: 50000)",
+    default=DEFAULT_INLINE_THRESHOLD,
+    help=f"Embed .colight files smaller than this size (in bytes) as script tags (default: {DEFAULT_INLINE_THRESHOLD})",
 )
 def build(
     input_path: pathlib.Path,
@@ -81,7 +82,7 @@ def build(
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
-    embed_threshold: int,
+    inline_threshold: int,
 ):
     """Build a .colight.py file into markdown/HTML."""
     # Create options dict
@@ -103,7 +104,7 @@ def build(
             format=format,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
-            embed_threshold=embed_threshold,
+            inline_threshold=inline_threshold,
             **options,
         )
         if verbose:
@@ -123,7 +124,7 @@ def build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
-            embed_threshold=embed_threshold,
+            inline_threshold=inline_threshold,
         )
         if verbose:
             click.echo(f"Built {input_path}/ -> {output}/")
@@ -180,10 +181,10 @@ def build(
     help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
 )
 @click.option(
-    "--embed-threshold",
+    "--inline-threshold",
     type=int,
-    default=50000,
-    help="Embed .colight files smaller than this size (in bytes) as script tags (default: 50000)",
+    default=DEFAULT_INLINE_THRESHOLD,
+    help=f"Embed .colight files smaller than this size (in bytes) as script tags (default: {DEFAULT_INLINE_THRESHOLD})",
 )
 def watch(
     input_path: pathlib.Path,
@@ -196,7 +197,7 @@ def watch(
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
-    embed_threshold: int,
+    inline_threshold: int,
 ):
     """Watch for changes and rebuild automatically."""
     click.echo(f"Watching {input_path} for changes...")
@@ -212,7 +213,7 @@ def watch(
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
-        embed_threshold=embed_threshold,
+        inline_threshold=inline_threshold,
     )
 
 

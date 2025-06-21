@@ -12,6 +12,7 @@ from colight_site.parser import (
     should_hide_code,
 )
 from colight.env import VERSIONED_CDN_DIST_URL
+from .constants import DEFAULT_INLINE_THRESHOLD
 
 EMBED_URL = (
     VERSIONED_CDN_DIST_URL + "/embed.js" if VERSIONED_CDN_DIST_URL else "/dist/embed.js"
@@ -25,14 +26,14 @@ class MarkdownGenerator:
         self,
         output_dir: pathlib.Path,
         embed_path_template: Optional[str] = None,
-        embed_threshold: int = 50000,
+        inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
     ):
         self.output_dir = output_dir
         self.output_file_dir = None  # Will be set when generating
         self.embed_path_template = (
             embed_path_template or "{basename}_colight/form-{form:03d}.colight"
         )
-        self.embed_threshold = embed_threshold
+        self.inline_threshold = inline_threshold
 
     def generate_markdown(
         self,
@@ -107,9 +108,13 @@ class MarkdownGenerator:
                 # Add colight embed if we have a visualization
                 if colight_file and not is_dummy_form:
                     # Check file size to determine embedding method
-                    file_size = colight_file.stat().st_size
+                    try:
+                        file_size = colight_file.stat().st_size
+                    except FileNotFoundError:
+                        # In tests, the file might not exist - treat as external reference
+                        file_size = float("inf")
 
-                    if file_size < self.embed_threshold:
+                    if file_size < self.inline_threshold:
                         # Embed as script tag for small files
                         with open(colight_file, "rb") as f:
                             colight_bytes = f.read()

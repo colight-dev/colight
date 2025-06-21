@@ -5,6 +5,7 @@ from typing import Optional
 from watchfiles import watch
 
 from . import builder
+from .constants import DEFAULT_INLINE_THRESHOLD
 
 
 def watch_and_build(
@@ -18,7 +19,7 @@ def watch_and_build(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
-    embed_threshold: int = 50000,
+    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")
@@ -36,7 +37,7 @@ def watch_and_build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
-            embed_threshold=embed_threshold,
+            inline_threshold=inline_threshold,
         )
     else:
         builder.build_directory(
@@ -50,7 +51,7 @@ def watch_and_build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
-            embed_threshold=embed_threshold,
+            inline_threshold=inline_threshold,
         )
 
     # Watch for changes
@@ -101,6 +102,7 @@ def watch_and_build(
                                 continue_on_error=continue_on_error,
                                 colight_output_path=colight_output_path,
                                 colight_embed_path=colight_embed_path,
+                                inline_threshold=inline_threshold,
                             )
                             if verbose:
                                 print(f"Rebuilt {changed_file}")

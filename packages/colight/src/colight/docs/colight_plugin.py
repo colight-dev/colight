@@ -43,9 +43,9 @@ class ColightMarkdownGenerator(MarkdownGenerator):
         self,
         output_dir: pathlib.Path,
         base_output_dir: str,
-        embed_threshold: int = 50000,
+        inline_threshold: int = 50000,
     ):
-        super().__init__(output_dir, embed_threshold=embed_threshold)
+        super().__init__(output_dir, inline_threshold=inline_threshold)
         self.base_output_dir = base_output_dir
 
     def _get_relative_path(
@@ -71,7 +71,7 @@ class ColightPlugin(BasePlugin):
         ("hide_visuals", Type(bool, default=False)),
         ("hide_code", Type(bool, default=False)),
         ("verbose", Type(bool, default=False)),
-        ("embed_threshold", Type(int, default=50000)),
+        ("inline_threshold", Type(int, default=50000)),
         ("file_options", DictOfItems(Type(dict), default={})),
     )
 
@@ -168,7 +168,7 @@ class ColightPlugin(BasePlugin):
             generator = ColightMarkdownGenerator(
                 colight_output_dir,
                 self.config["output_dir"],
-                self.config["embed_threshold"],
+                self.config["inline_threshold"],
             )
             title = src_path.stem.replace(".colight", "").replace("_", " ").title()
 

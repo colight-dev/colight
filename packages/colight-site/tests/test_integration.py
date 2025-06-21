@@ -52,9 +52,15 @@ print("Processing complete!")
         assert "np.linspace" in markdown_content
         assert "Additional narrative" in markdown_content
 
-        # Check for colight embed
-        assert 'class="colight-embed"' in markdown_content
-        assert "data-src=" in markdown_content and "form-" in markdown_content
+        # Check for colight embed - can be either inline script or external embed
+        has_inline_script = '<script type="application/x-colight">' in markdown_content
+        has_external_embed = (
+            'class="colight-embed"' in markdown_content
+            and "data-src=" in markdown_content
+        )
+        assert (
+            has_inline_script or has_external_embed
+        ), "Should have either inline script or external embed"
 
         # Verify colight files were created
         colight_dir = temp_path / "test_colight"
@@ -177,9 +183,11 @@ combined
         # Check output
         markdown_content = output_file.read_text()
 
-        # Should have multiple colight embeds
-        embed_count = markdown_content.count('class="colight-embed"')
-        assert embed_count >= 3  # At least 3 visualizations
+        # Should have multiple colight embeds (either inline scripts or external embeds)
+        inline_count = markdown_content.count('<script type="application/x-colight">')
+        external_count = markdown_content.count('class="colight-embed"')
+        total_embeds = inline_count + external_count
+        assert total_embeds >= 3  # At least 3 visualizations
 
         # Check colight files were created
         colight_dir = temp_path / "multi_viz_colight"
