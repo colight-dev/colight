@@ -23,7 +23,9 @@ def main():
     type=click.Path(path_type=pathlib.Path),
     help="Output file or directory",
 )
-@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option(
+    "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
+)
 @click.option(
     "--format",
     "-f",
@@ -45,6 +47,12 @@ def main():
     "--hide-code",
     is_flag=True,
     help="Hide code blocks",
+)
+@click.option(
+    "--continue-on-error",
+    type=bool,
+    default=True,
+    help="Continue building even if forms fail to execute (default: True)",
 )
 @click.option(
     "--colight-output-path",
@@ -64,6 +72,7 @@ def build(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
+    continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
 ):
@@ -73,6 +82,7 @@ def build(
         "hide_statements": hide_statements,
         "hide_visuals": hide_visuals,
         "hide_code": hide_code,
+        "continue_on_error": continue_on_error,
     }
 
     if input_path.is_file():
@@ -88,7 +98,8 @@ def build(
             colight_embed_path=colight_embed_path,
             **options,
         )
-        click.echo(f"Built {input_path} -> {output}")
+        if verbose:
+            click.echo(f"Built {input_path} -> {output}")
     else:
         # Directory
         if not output:
@@ -101,10 +112,12 @@ def build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
         )
-        click.echo(f"Built {input_path}/ -> {output}/")
+        if verbose:
+            click.echo(f"Built {input_path}/ -> {output}/")
 
 
 @main.command()
@@ -116,7 +129,9 @@ def build(
     help="Output directory",
     default="build",
 )
-@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option(
+    "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
+)
 @click.option(
     "--format",
     "-f",
@@ -140,6 +155,12 @@ def build(
     help="Hide code blocks",
 )
 @click.option(
+    "--continue-on-error",
+    type=bool,
+    default=True,
+    help="Continue building even if forms fail to execute (default: True)",
+)
+@click.option(
     "--colight-output-path",
     type=str,
     help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
@@ -157,6 +178,7 @@ def watch(
     hide_statements: bool,
     hide_visuals: bool,
     hide_code: bool,
+    continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
 ):
@@ -171,6 +193,7 @@ def watch(
         hide_statements=hide_statements,
         hide_visuals=hide_visuals,
         hide_code=hide_code,
+        continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
     )

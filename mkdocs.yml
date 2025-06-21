@@ -25,7 +25,7 @@ theme:
   logo: false
 nav:
   - Home: index.md
-  - Essential Reading: essential-reading
+  - Essential Reading: essential-reading.py
   - Scene3d: scene3d
   - Guides:
       - Getting Started: guides/getting-started.colight
@@ -81,7 +81,7 @@ plugins:
         - module: colight.scene3d
           output: api/scene3d.md
   - colight.docs.site_plugin:
-      verbose: true
+      verbose: false
       format: markdown
       include: ["*.py", "*.colight.py"]
       ignore: ["llms.py", "data.py", "__init__.py"]

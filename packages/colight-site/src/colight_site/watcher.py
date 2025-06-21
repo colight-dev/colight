@@ -15,6 +15,7 @@ def watch_and_build(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
 ):
@@ -31,6 +32,7 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
         )
@@ -43,6 +45,7 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
         )
@@ -71,10 +74,12 @@ def watch_and_build(
                             hide_statements=hide_statements,
                             hide_visuals=hide_visuals,
                             hide_code=hide_code,
+                            continue_on_error=continue_on_error,
                             colight_output_path=colight_output_path,
                             colight_embed_path=colight_embed_path,
                         )
-                        print(f"Rebuilt {input_path}")
+                        if verbose:
+                            print(f"Rebuilt {input_path}")
                 else:
                     # Rebuild affected files
                     for changed_file in colight_changes:
@@ -90,10 +95,12 @@ def watch_and_build(
                                 hide_statements=hide_statements,
                                 hide_visuals=hide_visuals,
                                 hide_code=hide_code,
+                                continue_on_error=continue_on_error,
                                 colight_output_path=colight_output_path,
                                 colight_embed_path=colight_embed_path,
                             )
-                            print(f"Rebuilt {changed_file}")
+                            if verbose:
+                                print(f"Rebuilt {changed_file}")
             except Exception as e:
                 print(f"Error during rebuild: {e}")
                 if verbose:

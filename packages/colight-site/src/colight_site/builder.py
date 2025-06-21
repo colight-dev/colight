@@ -33,6 +33,7 @@ def build_file(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
 ):
@@ -49,7 +50,7 @@ def build_file(
         if verbose:
             print(f"Found {len(forms)} forms")
             if file_metadata.pragma_tags:
-                print(f"File metadata: {file_metadata}")
+                print(f"  File metadata: {file_metadata}")
     except Exception as e:
         if verbose:
             print(f"Parse error: {e}")
@@ -69,7 +70,11 @@ def build_file(
     # For backward compatibility, create a directory for executor
     # This will be used as a base directory for relative paths
     colight_dir = output_path.parent / (output_path.stem + "_colight")
-    executor = SafeFormExecutor(colight_dir, output_path_template=output_template)
+    if verbose:
+        print(f"  Writing .colight files to: {colight_dir}")
+    executor = SafeFormExecutor(
+        colight_dir, output_path_template=output_template, verbose=verbose
+    )
 
     # Prepare path context for templates
     # Get relative path from build root (assumes we're building from a common root)
@@ -93,6 +98,7 @@ def build_file(
 
     # Execute forms and collect visualizations
     colight_files = []
+    execution_errors = []  # Track errors for reporting
     for i, form in enumerate(forms):
         try:
             result = executor.execute_form(form, str(input_path))
@@ -100,13 +106,20 @@ def build_file(
                 result, i, output_path=output_path, path_context=path_context
             )
             colight_files.append(colight_file)
+            execution_errors.append(None)
 
             if verbose and colight_file:
                 print(f"  Form {i}: saved visualization to {colight_file.name}")
         except Exception as e:
-            if verbose:
-                print(f"  Form {i}: execution failed: {e}")
-            colight_files.append(None)
+            error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
+            if continue_on_error:
+                if verbose:
+                    print(f"  {error_msg}")
+                colight_files.append(None)
+                execution_errors.append(error_msg)
+            else:
+                print(f"Error in {input_path}: {error_msg}")
+                raise
 
     # Generate output
     generator = MarkdownGenerator(colight_dir, embed_path_template=embed_template)
@@ -132,6 +145,7 @@ def build_file(
             output_path,
             path_context,
             pragma_tags=pragma_tags,
+            execution_errors=execution_errors,
         )
         generator.write_html_file(html_content, output_path)
     else:
@@ -142,6 +156,7 @@ def build_file(
             output_path,
             path_context,
             pragma_tags=pragma_tags,
+            execution_errors=execution_errors,
         )
         generator.write_markdown_file(markdown_content, output_path)
 
@@ -157,6 +172,7 @@ def build_directory(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
     include_patterns: Optional[List[str]] = None,
@@ -212,6 +228,7 @@ def build_directory(
                 hide_statements=hide_statements,
                 hide_visuals=hide_visuals,
                 hide_code=hide_code,
+                continue_on_error=continue_on_error,
                 colight_output_path=colight_output_path,
                 colight_embed_path=colight_embed_path,
             )

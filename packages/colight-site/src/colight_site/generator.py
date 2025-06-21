@@ -37,6 +37,7 @@ class MarkdownGenerator:
         output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
         pragma_tags: Optional[set[str]] = None,
+        execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
         """Generate complete Markdown document."""
         if pragma_tags is None:
@@ -89,8 +90,15 @@ class MarkdownGenerator:
                         lines.append("```")
                         lines.append("")
 
+            # Check for execution errors
+            if execution_errors and i < len(execution_errors) and execution_errors[i]:
+                # Display error message
+                lines.append("```")
+                lines.append(execution_errors[i])
+                lines.append("```")
+                lines.append("")
             # Skip visuals if hide_visuals is True
-            if not should_hide_visuals(resolved_tags):
+            elif not should_hide_visuals(resolved_tags):
                 # Add colight embed if we have a visualization
                 if colight_file and not is_dummy_form:
                     # Format the embed path template
@@ -197,6 +205,7 @@ class MarkdownGenerator:
         output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
         pragma_tags: Optional[set[str]] = None,
+        execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
         """Generate complete HTML document with embedded visualizations."""
         # First generate markdown content
@@ -207,6 +216,7 @@ class MarkdownGenerator:
             output_path,
             path_context,
             pragma_tags=pragma_tags,
+            execution_errors=execution_errors,
         )
 
         # Convert markdown to HTML

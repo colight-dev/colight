@@ -16,13 +16,17 @@ class FormExecutor:
     """Execute forms in a persistent namespace."""
 
     def __init__(
-        self, output_dir: pathlib.Path, output_path_template: Optional[str] = None
+        self,
+        output_dir: pathlib.Path,
+        output_path_template: Optional[str] = None,
+        verbose: bool = False,
     ):
         self.env: Dict[str, Any] = {}
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.form_counter = 0
         self.output_path_template = output_path_template or "form-{form:03d}.colight"
+        self.verbose = verbose
 
         # Setup basic imports
         self._setup_environment()
@@ -147,9 +151,11 @@ except ImportError:
             return output_file_path
 
         except Exception as e:
-            print(
-                f"Warning: Could not save Colight visualization: {e}", file=sys.stderr
-            )
+            if self.verbose:
+                print(
+                    f"Warning: Could not save Colight visualization: {e}",
+                    file=sys.stderr,
+                )
             return None
 
 

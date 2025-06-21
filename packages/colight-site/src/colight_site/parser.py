@@ -1,6 +1,7 @@
 """Parse .colight.py files using LibCST."""
 
 import libcst as cst
+from libcst.metadata import MetadataWrapper, PositionProvider
 from dataclasses import dataclass, field
 from typing import List, Union, Optional, Literal
 import pathlib
@@ -46,6 +47,20 @@ def should_hide_code(tags: set[str]) -> bool:
     if "show-code" in tags:
         return False
     return "hide-code" in tags
+
+
+def _strip_leading_comments(
+    node: Union[cst.SimpleStatementLine, cst.BaseCompoundStatement],
+) -> Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]:
+    """Create a copy of the node without leading comments."""
+    # Filter out comment lines, keeping only whitespace-only lines
+    new_leading_lines = []
+    for line in node.leading_lines:
+        if not line.comment:
+            new_leading_lines.append(line)
+
+    # Create a new node with filtered leading lines
+    return node.with_changes(leading_lines=new_leading_lines)
 
 
 def _get_formats_from_tags(tags: set[str]) -> set[str]:
@@ -158,7 +173,7 @@ class CombinedCode:
 
             if isinstance(stmt, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
                 # Strip leading comments since they're handled separately
-                node_without_comments = self._strip_leading_comments(stmt)
+                node_without_comments = _strip_leading_comments(stmt)
                 lines.append(cst.Module(body=[node_without_comments]).code.strip())
             else:
                 # For other node types, wrap in a SimpleStatementLine if it's an expression
@@ -168,21 +183,6 @@ class CombinedCode:
                 else:
                     lines.append(str(stmt).strip())
         return "\n".join(lines)
-
-    def _strip_leading_comments(
-        self, node: Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]
-    ) -> Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]:
-        """Create a copy of the node without leading comments."""
-        if isinstance(node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
-            # Filter out comment lines, keeping only whitespace-only lines
-            new_leading_lines = []
-            for line in node.leading_lines:
-                if not line.comment:
-                    new_leading_lines.append(line)
-
-            # Create a new node with filtered leading lines
-            return node.with_changes(leading_lines=new_leading_lines)
-        return node
 
 
 @dataclass
@@ -204,7 +204,7 @@ class Form:
         # Handle different node types properly for Module creation
         if isinstance(self.node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
             # Create a copy of the node without leading comments since they're already in markdown
-            node_without_comments = self._strip_leading_comments(self.node)
+            node_without_comments = _strip_leading_comments(self.node)
             return cst.Module(body=[node_without_comments]).code.strip()
         else:
             # For other node types, wrap in a SimpleStatementLine if it's an expression
@@ -213,21 +213,6 @@ class Form:
                 return cst.Module(body=[stmt]).code.strip()
             # For other cases, convert to string directly
             return str(self.node).strip()
-
-    def _strip_leading_comments(
-        self, node: Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]
-    ) -> Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]:
-        """Create a copy of the node without leading comments."""
-        if isinstance(node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
-            # Filter out comment lines, keeping only whitespace-only lines
-            new_leading_lines = []
-            for line in node.leading_lines:
-                if not line.comment:
-                    new_leading_lines.append(line)
-
-            # Create a new node with filtered leading lines
-            return node.with_changes(leading_lines=new_leading_lines)
-        return node
 
     @property
     def is_expression(self) -> bool:
@@ -373,36 +358,57 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
     # Parse with LibCST to get the AST
     module = cst.parse_module(source_code)
 
+    # Enable position tracking
+    wrapper = MetadataWrapper(module)
+    positions = wrapper.resolve(PositionProvider)
+
     # First, extract header comments
+    current_line = 1
     if hasattr(module, "header") and module.header:
         for line in module.header:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
                 if _is_pragma_comment(comment_text):
-                    elements.append(
-                        RawElement("pragma", comment_text, 1)
-                    )  # TODO: real line numbers
+                    elements.append(RawElement("pragma", comment_text, current_line))
                 else:
-                    elements.append(RawElement("comment", comment_text, 1))
+                    elements.append(RawElement("comment", comment_text, current_line))
             elif line.whitespace.value.strip() == "":
-                elements.append(RawElement("blank_line", "", 1))
+                elements.append(RawElement("blank_line", "", current_line))
+            current_line += 1
 
     # Then extract statements and their leading comments
     for stmt in module.body:
+        # Get the position of this statement
+        stmt_line = positions.get(stmt, None)
+        if stmt_line:
+            stmt_line_num = stmt_line.start.line
+        else:
+            stmt_line_num = current_line
+
         # Extract leading comments
         if hasattr(stmt, "leading_lines"):
+            comment_line = stmt_line_num - len(stmt.leading_lines)
             for line in stmt.leading_lines:
                 if line.comment:
                     comment_text = line.comment.value.lstrip("#").strip()
                     if _is_pragma_comment(comment_text):
-                        elements.append(RawElement("pragma", comment_text, 1))
+                        elements.append(
+                            RawElement("pragma", comment_text, comment_line)
+                        )
                     else:
-                        elements.append(RawElement("comment", comment_text, 1))
+                        elements.append(
+                            RawElement("comment", comment_text, comment_line)
+                        )
                 elif line.whitespace.value.strip() == "":
-                    elements.append(RawElement("blank_line", "", 1))
+                    elements.append(RawElement("blank_line", "", comment_line))
+                comment_line += 1
 
         # Add the code statement
-        elements.append(RawElement("code", stmt, 1))
+        elements.append(RawElement("code", stmt, stmt_line_num))
+
+        # Update current line for next iteration
+        if stmt_line:
+            current_line = stmt_line.end.line + 1
 
     return elements
 
@@ -432,7 +438,7 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
         current_markdown = []
         current_pragmas = []
         current_code = []
-        start_line = 1  # TODO: track real line numbers
+        start_line = None  # Track the line where this form starts
 
         # Collect comments and pragmas
         while i < len(elements) and elements[i].type in [
@@ -441,6 +447,8 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
             "blank_line",
         ]:
             elem = elements[i]
+            if start_line is None and elem.type != "blank_line":
+                start_line = elem.line_number
             if elem.type == "comment":
                 current_markdown.append(elem.content)
             elif elem.type == "pragma":
@@ -454,6 +462,8 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
         empty_comment_positions = []
         while i < len(elements):
             if elements[i].type == "code":
+                if start_line is None:
+                    start_line = elements[i].line_number
                 stmt = elements[i].content
                 if isinstance(
                     stmt, (cst.SimpleStatementLine, cst.BaseCompoundStatement)
@@ -475,6 +485,10 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
 
         # Create form
         if current_markdown or current_code:
+            # Default start line if we haven't found one yet
+            if start_line is None:
+                start_line = 1
+
             # If we have code, create a regular form
             if current_code:
                 forms.append(
