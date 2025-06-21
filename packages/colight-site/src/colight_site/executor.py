@@ -7,8 +7,9 @@ import sys
 import io
 import contextlib
 
-from .parser import Form
+from .parser import Form, CombinedCode
 from colight.inspect import inspect
+import libcst as cst
 
 
 class FormExecutor:
@@ -54,8 +55,38 @@ except ImportError:
             return None
 
         try:
-            # Try to parse as an expression first
-            if form.is_expression:
+            # Special handling for CombinedCode that ends with an expression
+            if form.is_expression and hasattr(form.node, "code_elements"):
+                # This is CombinedCode ending with an expression
+                # Execute all statements first, then evaluate the last expression
+                if isinstance(form.node, CombinedCode) and form.node.code_elements:
+                    # Execute all but the last element as statements
+                    for stmt in form.node.code_elements[:-1]:
+                        # Convert CST node to code
+                        stmt_code = cst.Module(body=[stmt]).code.strip()
+                        compiled = compile(stmt_code, filename, "exec")
+                        exec(compiled, self.env)
+
+                    # Evaluate the last element as an expression
+                    last_elem = form.node.code_elements[-1]
+                    # Extract just the expression from the last statement
+                    if (
+                        isinstance(last_elem, cst.SimpleStatementLine)
+                        and len(last_elem.body) == 1
+                    ):
+                        if isinstance(last_elem.body[0], cst.Expr):
+                            expr_code = cst.Module(body=[last_elem]).code.strip()
+                            parsed = ast.parse(expr_code, filename, mode="eval")
+                            compiled = compile(parsed, filename, "eval")
+                            result = eval(compiled, self.env)
+                            return result
+
+                # Fallback to original behavior
+                parsed = ast.parse(code, filename, mode="eval")
+                compiled = compile(parsed, filename, "eval")
+                result = eval(compiled, self.env)
+                return result
+            elif form.is_expression:
                 # Parse and compile as expression
                 parsed = ast.parse(code, filename, mode="eval")
                 compiled = compile(parsed, filename, "eval")

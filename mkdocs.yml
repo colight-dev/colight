@@ -26,7 +26,7 @@ theme:
 nav:
   - Home: index.md
   - Essential Reading: essential-reading
-  - Scene3d: scene3d.py
+  - Scene3d: scene3d
   - Guides:
       - Getting Started: guides/getting-started.colight
       - Data Analysis Workflow: guides/data-analysis-workflow.colight

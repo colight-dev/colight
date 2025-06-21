@@ -1,5 +1,4 @@
 # %% [markdown]
-# # Scene3D
 #
 # Scene3D builds on the same data and composition paradigms as Colight Plot but adds support for WebGPU–powered 3D primitives.
 #
