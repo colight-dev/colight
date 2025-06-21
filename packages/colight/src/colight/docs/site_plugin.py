@@ -6,6 +6,7 @@ similar to how mkdocs-jupyter works.
 
 import pathlib
 import traceback
+from functools import cached_property
 from typing import Optional
 
 from mkdocs.config import Config
@@ -31,58 +32,33 @@ except ImportError as e:
     raise ImportError(f"colight-site package is required: {e}")
 
 
-class ColightFiles(Files):
-    """Custom Files collection that handles .py to .md mapping."""
-
-    def __init__(self, files):
-        super().__init__(files)
-        self._py_to_md_map = {}
-
-    def add_py_mapping(self, py_path: str, md_path: str):
-        """Add a mapping from .py path to .md path."""
-        self._py_to_md_map[py_path] = md_path
-
-    def get_file_from_path(self, path: str) -> Optional[File]:
-        """Override to handle .py lookups that map to .md files."""
-        # First try the standard lookup
-        file = super().get_file_from_path(path)
-        if file:
-            return file
-
-        # If not found and it's a .py file, try the mapped .md version
-        if path.endswith(".py") and path in self._py_to_md_map:
-            md_path = self._py_to_md_map[path]
-            return super().get_file_from_path(md_path)
-
-        return None
-
-
 class ColightFile(File):
     """Custom File subclass for handling Python/Colight files."""
 
     def __init__(
         self, path: str, src_dir: str, dest_dir: str, use_directory_urls: bool
     ):
-        # Store original path before modification
-        self._original_src_path = path
-
-        # Change the source path to end with .md so MkDocs treats it as markdown
-        if path.endswith(".py"):
-            # Change to .md for MkDocs processing
-            modified_path = path[:-3] + ".md"
-        else:
-            modified_path = path
-
-        super().__init__(modified_path, src_dir, dest_dir, use_directory_urls)
+        # Keep the original path - don't change extension
+        super().__init__(path, src_dir, dest_dir, use_directory_urls)
         self._content = None
         self._content_bytes = None
         self.colight_files = []  # Store paths to generated .colight files
 
-    @property
+    def is_documentation_page(self) -> bool:
+        """Tell MkDocs this is a documentation page."""
+        return True
+
+    @cached_property
     def abs_src_path(self) -> str:
-        """Return the original source path for processing."""
-        # Use the original Python file path for reading
-        return str(pathlib.Path(self.src_dir) / self._original_src_path)
+        """Return the absolute source path."""
+        # Use the parent class's implementation but ensure it returns a string
+        parent_path = super().abs_src_path
+        if parent_path is None:
+            # Fallback if parent returns None
+            if self.src_dir:
+                return str(pathlib.Path(self.src_dir) / self.src_path)
+            return self.src_path
+        return str(parent_path)
 
     @property
     def content_string(self) -> str:
@@ -90,7 +66,11 @@ class ColightFile(File):
         if self._content is None:
             # This shouldn't happen as we process in on_files
             return ""
-        return self._content
+        # Ensure we always return a string
+        if isinstance(self._content, bytes):
+            return self._content.decode("utf-8")
+        # Cast to str to ensure correct type
+        return str(self._content)
 
     @content_string.setter
     def content_string(self, value: str):
@@ -131,11 +111,7 @@ class SitePlugin(BasePlugin):
 
     def should_include_file(self, file: File) -> bool:
         """Check if a file should be processed by this plugin."""
-        # For ColightFile instances, check the original path
-        if isinstance(file, ColightFile):
-            src_path = file._original_src_path
-        else:
-            src_path = file.src_path
+        src_path = file.src_path
 
         # Check if it's a Python file
         if not src_path.endswith(".py"):
@@ -164,31 +140,32 @@ class SitePlugin(BasePlugin):
 
     def on_files(self, files: Files, *, config: Config) -> Files:
         """Process Python files and convert them to ColightFile instances."""
-        new_files = ColightFiles([])
+        new_files = Files([])
 
         # Get the site directory from config
         self.site_dir = pathlib.Path(config["site_dir"])
 
+        if self.config["verbose"]:
+            print("[colight] Starting file processing...")
+
         for file in files:
             if self.should_include_file(file):
                 # Replace with our custom file class
+                # Handle potential None values
+                src_dir = file.src_dir or ""
+                dest_dir = file.dest_dir or ""
                 colight_file = ColightFile(
-                    file.src_path, file.src_dir, file.dest_dir, file.use_directory_urls
+                    file.src_path, src_dir, dest_dir, file.use_directory_urls
                 )
                 # Preserve any existing attributes
                 colight_file.page = file.page
                 colight_file.inclusion = file.inclusion
-
-                # Add mapping from .py to .md
-                new_files.add_py_mapping(file.src_path, colight_file.src_path)
 
                 # Process the file immediately
                 file_path = pathlib.Path(colight_file.abs_src_path)
 
                 if self.config["verbose"]:
                     print(f"[colight] Processing: {file.src_path}")
-                    print(f"[colight]   Original: {colight_file._original_src_path}")
-                    print(f"[colight]   Modified: {colight_file.src_path}")
                     print(f"[colight]   Dest: {colight_file.dest_path}")
 
                 try:
@@ -216,7 +193,7 @@ class SitePlugin(BasePlugin):
 
         return new_files
 
-    def on_page_read_source(self, page: Page, *, config: Config) -> Optional[str]:
+    def on_page_read_source(self, *, page: Page, config: Config) -> Optional[str]:
         """Return the pre-processed content for ColightFile instances."""
         # Only handle our custom ColightFile instances
         if isinstance(page.file, ColightFile):
