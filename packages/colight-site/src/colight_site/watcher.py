@@ -18,6 +18,7 @@ def watch_and_build(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
+    embed_threshold: int = 50000,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")
@@ -35,6 +36,7 @@ def watch_and_build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
+            embed_threshold=embed_threshold,
         )
     else:
         builder.build_directory(
@@ -48,6 +50,7 @@ def watch_and_build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
+            embed_threshold=embed_threshold,
         )
 
     # Watch for changes

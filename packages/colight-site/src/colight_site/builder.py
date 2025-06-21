@@ -36,6 +36,7 @@ def build_file(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
+    embed_threshold: int = 50000,
 ):
     """Build a single Python file."""
     if not input_path.suffix == ".py":
@@ -122,7 +123,9 @@ def build_file(
                 raise
 
     # Generate output
-    generator = MarkdownGenerator(colight_dir, embed_path_template=embed_template)
+    generator = MarkdownGenerator(
+        colight_dir, embed_path_template=embed_template, embed_threshold=embed_threshold
+    )
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
     # Merge file metadata with CLI options (CLI takes precedence)
@@ -175,6 +178,7 @@ def build_directory(
     continue_on_error: bool = True,
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
+    embed_threshold: int = 50000,
     include_patterns: Optional[List[str]] = None,
     ignore_patterns: Optional[List[str]] = None,
 ):
@@ -231,6 +235,7 @@ def build_directory(
                 continue_on_error=continue_on_error,
                 colight_output_path=colight_output_path,
                 colight_embed_path=colight_embed_path,
+                embed_threshold=embed_threshold,
             )
         except Exception as e:
             print(f"Error building {python_file}: {e}")

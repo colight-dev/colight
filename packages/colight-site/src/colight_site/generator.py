@@ -3,6 +3,7 @@
 import pathlib
 from typing import List, Optional, Dict
 import markdown
+import base64
 
 from colight_site.parser import (
     Form,
@@ -21,13 +22,17 @@ class MarkdownGenerator:
     """Generate Markdown from forms and their execution results."""
 
     def __init__(
-        self, output_dir: pathlib.Path, embed_path_template: Optional[str] = None
+        self,
+        output_dir: pathlib.Path,
+        embed_path_template: Optional[str] = None,
+        embed_threshold: int = 50000,
     ):
         self.output_dir = output_dir
         self.output_file_dir = None  # Will be set when generating
         self.embed_path_template = (
             embed_path_template or "{basename}_colight/form-{form:03d}.colight"
         )
+        self.embed_threshold = embed_threshold
 
     def generate_markdown(
         self,
@@ -101,12 +106,24 @@ class MarkdownGenerator:
             elif not should_hide_visuals(resolved_tags):
                 # Add colight embed if we have a visualization
                 if colight_file and not is_dummy_form:
-                    # Format the embed path template
-                    context = {**(path_context or {}), "form": i}
-                    embed_path = self.embed_path_template.format(**context)
-                    lines.append(
-                        f'<div class="colight-embed" data-src="{embed_path}"></div>'
-                    )
+                    # Check file size to determine embedding method
+                    file_size = colight_file.stat().st_size
+
+                    if file_size < self.embed_threshold:
+                        # Embed as script tag for small files
+                        with open(colight_file, "rb") as f:
+                            colight_bytes = f.read()
+                        base64_data = base64.b64encode(colight_bytes).decode("ascii")
+                        lines.append(
+                            f'<script type="application/x-colight">\n{base64_data}\n</script>'
+                        )
+                    else:
+                        # Use external reference for large files
+                        context = {**(path_context or {}), "form": i}
+                        embed_path = self.embed_path_template.format(**context)
+                        lines.append(
+                            f'<div class="colight-embed" data-src="{embed_path}"></div>'
+                        )
                     lines.append("")
 
         return "\n".join(lines)
@@ -220,7 +237,8 @@ class MarkdownGenerator:
         )
 
         # Convert markdown to HTML
-        md = markdown.Markdown(extensions=["codehilite", "fenced_code"])
+        # Use md_in_html extension to preserve raw HTML (like script tags)
+        md = markdown.Markdown(extensions=["codehilite", "fenced_code", "md_in_html"])
         html_content = md.convert(markdown_content)
 
         # Wrap in HTML template

@@ -7,7 +7,7 @@ This plugin integrates colight-site functionality into MkDocs, allowing
 import pathlib
 from typing import Optional, Dict, Any
 
-from mkdocs.config import Config
+from mkdocs.config.base import Config
 from mkdocs.config.config_options import Type, Choice, DictOfItems
 from mkdocs.plugins import BasePlugin
 from mkdocs.structure.files import File, Files
@@ -39,8 +39,13 @@ except ImportError as e:
 class ColightMarkdownGenerator(MarkdownGenerator):
     """Custom MarkdownGenerator for MkDocs integration."""
 
-    def __init__(self, output_dir: pathlib.Path, base_output_dir: str):
-        super().__init__(output_dir)
+    def __init__(
+        self,
+        output_dir: pathlib.Path,
+        base_output_dir: str,
+        embed_threshold: int = 50000,
+    ):
+        super().__init__(output_dir, embed_threshold=embed_threshold)
         self.base_output_dir = base_output_dir
 
     def _get_relative_path(
@@ -66,10 +71,11 @@ class ColightPlugin(BasePlugin):
         ("hide_visuals", Type(bool, default=False)),
         ("hide_code", Type(bool, default=False)),
         ("verbose", Type(bool, default=False)),
+        ("embed_threshold", Type(int, default=50000)),
         ("file_options", DictOfItems(Type(dict), default={})),
     )
 
-    def on_config(self, config: Config) -> Config:
+    def on_config(self, config: Config):  # pyright: ignore
         """Add source files to watch list during development."""
         if not hasattr(config, "watch"):
             setattr(config, "watch", [])
@@ -160,7 +166,9 @@ class ColightPlugin(BasePlugin):
 
             # Generate markdown content
             generator = ColightMarkdownGenerator(
-                colight_output_dir, self.config["output_dir"]
+                colight_output_dir,
+                self.config["output_dir"],
+                self.config["embed_threshold"],
             )
             title = src_path.stem.replace(".colight", "").replace("_", " ").title()
 

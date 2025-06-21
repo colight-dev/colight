@@ -64,6 +64,12 @@ def main():
     type=str,
     help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
 )
+@click.option(
+    "--embed-threshold",
+    type=int,
+    default=50000,
+    help="Embed .colight files smaller than this size (in bytes) as script tags (default: 50000)",
+)
 def build(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
@@ -75,6 +81,7 @@ def build(
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
+    embed_threshold: int,
 ):
     """Build a .colight.py file into markdown/HTML."""
     # Create options dict
@@ -96,6 +103,7 @@ def build(
             format=format,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
+            embed_threshold=embed_threshold,
             **options,
         )
         if verbose:
@@ -115,6 +123,7 @@ def build(
             continue_on_error=continue_on_error,
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
+            embed_threshold=embed_threshold,
         )
         if verbose:
             click.echo(f"Built {input_path}/ -> {output}/")
@@ -170,6 +179,12 @@ def build(
     type=str,
     help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
 )
+@click.option(
+    "--embed-threshold",
+    type=int,
+    default=50000,
+    help="Embed .colight files smaller than this size (in bytes) as script tags (default: 50000)",
+)
 def watch(
     input_path: pathlib.Path,
     output: pathlib.Path,
@@ -181,6 +196,7 @@ def watch(
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
+    embed_threshold: int,
 ):
     """Watch for changes and rebuild automatically."""
     click.echo(f"Watching {input_path} for changes...")
@@ -196,6 +212,7 @@ def watch(
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
+        embed_threshold=embed_threshold,
     )
 
 
