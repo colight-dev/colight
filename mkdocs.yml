@@ -74,13 +74,13 @@ markdown_extensions:
   - md_in_html
 plugins:
   - search
-  - colight.docs.api_plugin:
+  - colight.mkdocs.api_plugin:
       modules:
         - module: colight.plot
           output: api/plot.md
         - module: colight.scene3d
           output: api/scene3d.md
-  - colight.docs.site_plugin:
+  - colight.mkdocs.site_plugin:
       verbose: false
       format: markdown
       include: ["*.py", "*.colight.py"]

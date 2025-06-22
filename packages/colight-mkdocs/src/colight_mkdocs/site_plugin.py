@@ -15,20 +15,8 @@ from mkdocs.config.config_options import Type, DictOfItems, ListOfItems
 from mkdocs.structure.files import Files, File
 from mkdocs.structure.pages import Page
 
-# Import colight-site modules
-import sys
-
-colight_site_path = (
-    pathlib.Path(__file__).parent.parent.parent.parent.parent / "colight-site" / "src"
-)
-if colight_site_path.exists():
-    sys.path.insert(0, str(colight_site_path))
-
-try:
-    from colight_site import api
-    from colight_site.constants import DEFAULT_INLINE_THRESHOLD
-except ImportError as e:
-    raise ImportError(f"colight-site package is required: {e}")
+from colight_site import api
+from colight_site.constants import DEFAULT_INLINE_THRESHOLD
 
 
 class ColightFile(File):

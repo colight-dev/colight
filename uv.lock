@@ -11,12 +11,14 @@ resolution-markers = [
 [manifest]
 members = [
     "colight",
+    "colight-mkdocs",
     "colight-site",
 ]
 
 [manifest.dependency-groups]
 dev = [
     { name = "anthropic", specifier = ">=0.39.0" },
+    { name = "colight-mkdocs", editable = "packages/colight-mkdocs" },
     { name = "griffe", specifier = ">=1.5.1" },
     { name = "jax", specifier = ">=0.4.33" },
     { name = "jaxlib", specifier = ">=0.4.33" },
@@ -355,6 +357,33 @@ dev = [
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "watchfiles", specifier = ">=0.21.0" },
 ]
+
+[[package]]
+name = "colight-mkdocs"
+version = "2025.4.1"
+source = { editable = "packages/colight-mkdocs" }
+dependencies = [
+    { name = "colight" },
+    { name = "colight-site" },
+    { name = "griffe" },
+    { name = "mkdocs" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "colight", editable = "packages/colight" },
+    { name = "colight-site", editable = "packages/colight-site" },
+    { name = "griffe", specifier = ">=0.36" },
+    { name = "mkdocs", specifier = ">=1.5" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
 name = "colight-site"

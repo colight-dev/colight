@@ -5,44 +5,36 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "colight"
+name = "colight-mkdocs"
 version = "2025.4.1"
-description = ""
+description = "MkDocs plugins for Colight documentation"
 authors = [
     { name = "Matthew Huebert", email = "me@matt.is" },
 ]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "anywidget>=0.9.10",
-    "traitlets>=5.14.3",
-    "websockets>=15.0",
+    "mkdocs>=1.5",
+    "griffe>=0.36",
+    "colight",
+    "colight-site",
 ]
 
 [project.license]
 text = "MIT"
 
+[project.entry-points."mkdocs.plugins"]
+"colight.mkdocs.api_plugin" = "colight_mkdocs.api_plugin:APIDocPlugin"
+"colight.mkdocs.site_plugin" = "colight_mkdocs.site_plugin:SitePlugin"
 
 [dependency-groups]
 dev = [
-    "jax>=0.4.33; python_version<'3.13'",
-    "jaxlib>=0.4.33; python_version<'3.13'",
-    "watchfiles>=0.21.0",
-    "jupyter-client>=8.6.2",
-    "nbformat>=5.10.4",
-    "numpy>=1.22,<2.0.0",
     "pytest>=8.4.0",
-    "anthropic>=0.39.0",
-    "python-dotenv>=1.0.1",
-    "tomli-w>=1.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "src/colight",
-]
-artifacts = [
-    "src/colight/js/widget.mjs",
+    "src/colight_mkdocs",
 ]
 
 [tool.pyright]
