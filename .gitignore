@@ -16,7 +16,6 @@ scratch
 dist
 **/test-artifacts/**
 .colight-port
-docs/**_colight**
 **/**.colight
-docs/content/
 market-research/
+docs/api/
