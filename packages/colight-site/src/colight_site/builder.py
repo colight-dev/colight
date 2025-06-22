@@ -74,9 +74,7 @@ def build_file(
     colight_dir = output_path.parent / (output_path.stem + "_colight")
     if verbose:
         print(f"  Writing .colight files to: {colight_dir}")
-    executor = SafeFormExecutor(
-        colight_dir, output_path_template=output_template, verbose=verbose
-    )
+    executor = SafeFormExecutor(verbose=verbose)
 
     # Prepare path context for templates
     # Get relative path from build root (assumes we're building from a common root)
@@ -99,25 +97,55 @@ def build_file(
     }
 
     # Execute forms and collect visualizations
-    colight_files = []
+    colight_data = []  # Can be None, bytes, or Path
     execution_errors = []  # Track errors for reporting
     for i, form in enumerate(forms):
         try:
             result = executor.execute_form(form, str(input_path))
-            colight_file = executor.save_colight_visualization(
-                result, i, output_path=output_path, path_context=path_context
-            )
-            colight_files.append(colight_file)
-            execution_errors.append(None)
+            colight_bytes = executor.get_colight_bytes(result)
 
-            if verbose and colight_file:
-                print(f"  Form {i}: saved visualization to {colight_file.name}")
+            if colight_bytes is None:
+                colight_data.append(None)
+            elif len(colight_bytes) < inline_threshold:
+                # Small file - keep in memory for inline embedding
+                colight_data.append(colight_bytes)
+                if verbose:
+                    print(
+                        f"  Form {i}: visualization will be inlined ({len(colight_bytes)} bytes)"
+                    )
+            else:
+                # Large file - save to disk
+                # Format the output path template
+                context = {**path_context, "form": i}
+                formatted_path = output_template.format(**context)
+
+                # Resolve relative to output_path's parent or colight_dir
+                if formatted_path.startswith("./"):
+                    # Relative to the markdown file's location
+                    base_dir = output_path.parent
+                    formatted_path = formatted_path[2:]  # Remove ./
+                else:
+                    # Use the default colight_dir
+                    base_dir = colight_dir
+
+                output_file_path = base_dir / formatted_path
+                # Ensure parent directory exists
+                output_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Write bytes to file
+                output_file_path.write_bytes(colight_bytes)
+                colight_data.append(output_file_path)
+
+                if verbose:
+                    print(f"  Form {i}: saved visualization to {output_file_path.name}")
+
+            execution_errors.append(None)
         except Exception as e:
             error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
             if continue_on_error:
                 if verbose:
                     print(f"  {error_msg}")
-                colight_files.append(None)
+                colight_data.append(None)
                 execution_errors.append(error_msg)
             else:
                 print(f"Error in {input_path}: {error_msg}")
@@ -146,7 +174,7 @@ def build_file(
     if final_format == "html":
         html_content = generator.generate_html(
             forms,
-            colight_files,
+            colight_data,
             title,
             output_path,
             path_context,
@@ -157,7 +185,7 @@ def build_file(
     else:
         markdown_content = generator.generate_markdown(
             forms,
-            colight_files,
+            colight_data,
             title,
             output_path,
             path_context,

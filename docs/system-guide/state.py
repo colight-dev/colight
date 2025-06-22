@@ -1,5 +1,3 @@
-# %% tags=["hide_source"]
-
 import colight.plot as Plot
 from colight.plot import md
 
@@ -16,7 +14,7 @@ from colight.plot import md
 # - Reactive UI updates within JavaScript
 
 # ## State API
-# %% tags=["hide_source"]
+# %% hide-code
 Plot.Grid(
     ["div.col-span-2.bg-gray-100.font-bold.p-3", "python: plot definition"],
     md("`Plot.initialState(...)`"),

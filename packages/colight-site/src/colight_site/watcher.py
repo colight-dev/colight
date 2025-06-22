@@ -4,7 +4,7 @@ import pathlib
 from typing import Optional
 from watchfiles import watch
 
-from . import builder
+from . import api
 from .constants import DEFAULT_INLINE_THRESHOLD
 
 
@@ -26,7 +26,7 @@ def watch_and_build(
 
     # Build initially
     if input_path.is_file():
-        builder.build_file(
+        api.build_file(
             input_path,
             output_path,
             verbose=verbose,
@@ -40,7 +40,7 @@ def watch_and_build(
             inline_threshold=inline_threshold,
         )
     else:
-        builder.build_directory(
+        api.build_directory(
             input_path,
             output_path,
             verbose=verbose,
@@ -70,7 +70,7 @@ def watch_and_build(
             try:
                 if input_path.is_file():
                     if input_path in colight_changes:
-                        builder.build_file(
+                        api.build_file(
                             input_path,
                             output_path,
                             verbose=verbose,
@@ -91,7 +91,7 @@ def watch_and_build(
                             rel_path = changed_file.relative_to(input_path)
                             suffix = ".html" if format == "html" else ".md"
                             output_file = output_path / rel_path.with_suffix(suffix)
-                            builder.build_file(
+                            api.build_file(
                                 changed_file,
                                 output_file,
                                 verbose=verbose,

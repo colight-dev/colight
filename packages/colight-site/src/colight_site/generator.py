@@ -1,7 +1,7 @@
 """Generate Markdown and HTML output from executed forms."""
 
 import pathlib
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 import markdown
 import base64
 
@@ -38,7 +38,7 @@ class MarkdownGenerator:
     def generate_markdown(
         self,
         forms: List[Form],
-        colight_files: List[Optional[pathlib.Path]],
+        colight_data: List[Optional[Union[bytes, pathlib.Path]]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
@@ -57,7 +57,7 @@ class MarkdownGenerator:
             lines.append("")
 
         # Process each form
-        for i, (form, colight_file) in enumerate(zip(forms, colight_files)):
+        for i, (form, colight_item) in enumerate(zip(forms, colight_data)):
             # Check if this is a dummy form (markdown-only)
             is_dummy_form = self._is_dummy_form(form)
 
@@ -106,28 +106,42 @@ class MarkdownGenerator:
             # Skip visuals if hide_visuals is True
             elif not should_hide_visuals(resolved_tags):
                 # Add colight embed if we have a visualization
-                if colight_file and not is_dummy_form:
-                    # Check file size to determine embedding method
-                    try:
-                        file_size = colight_file.stat().st_size
-                    except FileNotFoundError:
-                        # In tests, the file might not exist - treat as external reference
-                        file_size = float("inf")
-
-                    if file_size < self.inline_threshold:
-                        # Embed as script tag for small files
-                        with open(colight_file, "rb") as f:
-                            colight_bytes = f.read()
-                        base64_data = base64.b64encode(colight_bytes).decode("ascii")
+                if colight_item and not is_dummy_form:
+                    if isinstance(colight_item, bytes):
+                        # Already in memory - embed as script tag
+                        base64_data = base64.b64encode(colight_item).decode("ascii")
                         lines.append(
                             f'<script type="application/x-colight">\n{base64_data}\n</script>'
                         )
+                    elif isinstance(colight_item, pathlib.Path):
+                        # It's a Path - check file size to determine embedding method
+                        try:
+                            file_size = colight_item.stat().st_size
+                        except FileNotFoundError:
+                            # In tests, the file might not exist - treat as external reference
+                            file_size = float("inf")
+
+                        if file_size < self.inline_threshold:
+                            # Small file - read and embed as script tag
+                            with open(colight_item, "rb") as f:
+                                colight_bytes = f.read()
+                            base64_data = base64.b64encode(colight_bytes).decode(
+                                "ascii"
+                            )
+                            lines.append(
+                                f'<script type="application/x-colight">\n{base64_data}\n</script>'
+                            )
+                        else:
+                            # Large file - use external reference
+                            context = {**(path_context or {}), "form": i}
+                            embed_path = self.embed_path_template.format(**context)
+                            lines.append(
+                                f'<div class="colight-embed" data-src="{embed_path}"></div>'
+                            )
                     else:
-                        # Use external reference for large files
-                        context = {**(path_context or {}), "form": i}
-                        embed_path = self.embed_path_template.format(**context)
-                        lines.append(
-                            f'<div class="colight-embed" data-src="{embed_path}"></div>'
+                        # Should not happen, but satisfies type checker
+                        raise TypeError(
+                            f"Unexpected type for colight_item: {type(colight_item)}"
                         )
                     lines.append("")
 
@@ -222,7 +236,7 @@ class MarkdownGenerator:
     def generate_html(
         self,
         forms: List[Form],
-        colight_files: List[Optional[pathlib.Path]],
+        colight_data: List[Optional[Union[bytes, pathlib.Path]]],
         title: Optional[str] = None,
         output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
@@ -233,7 +247,7 @@ class MarkdownGenerator:
         # First generate markdown content
         markdown_content = self.generate_markdown(
             forms,
-            colight_files,
+            colight_data,
             title,
             output_path,
             path_context,

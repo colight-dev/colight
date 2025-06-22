@@ -26,9 +26,11 @@ if colight_site_path.exists():
     sys.path.insert(0, str(colight_site_path))
 
 try:
-    from colight_site.parser import parse_colight_file, is_colight_file
-    from colight_site.executor import SafeFormExecutor
-    from colight_site.generator import MarkdownGenerator
+    from colight_site import api
+    from colight_site.parser import (
+        is_colight_file,
+    )  # Still need this for file detection
+    from colight_site.generator import MarkdownGenerator  # For custom subclass only
 except ImportError as e:
     raise ImportError(
         f"colight-site package is required for the colight MkDocs plugin: {e}. "
@@ -132,11 +134,8 @@ class ColightPlugin(BasePlugin):
             print(f"Processing {src_path} -> {output_path}")
 
         try:
-            # Parse the file
-            forms, file_metadata = parse_colight_file(src_path)
-
-            # Merge options: file-specific > plugin config > file metadata
-            merged_options = self._merge_options(file_metadata, file_options)
+            # Get file-specific options to override defaults
+            merged_options = file_options  # file_options already contains overrides
 
             # Setup output directory for colight files
             colight_output_dir = (
@@ -146,34 +145,50 @@ class ColightPlugin(BasePlugin):
             )
             colight_output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Setup executor
-            executor = SafeFormExecutor(colight_output_dir)
+            # Process the colight file using the public API
+            result = api.process_colight_file(
+                src_path,
+                output_dir=colight_output_dir,
+                inline_threshold=self.config["inline_threshold"],
+                format="markdown",
+                verbose=self.config["verbose"],
+                hide_statements=merged_options.get(
+                    "hide_statements", self.config["hide_statements"]
+                ),
+                hide_visuals=merged_options.get(
+                    "hide_visuals", self.config["hide_visuals"]
+                ),
+                hide_code=merged_options.get("hide_code", self.config["hide_code"]),
+            )
 
-            # Execute forms and collect visualizations
+            # Extract visualization files from the result
+            # For MkDocs, we need actual file paths, so save any inline data
             colight_files = []
-            for i, form in enumerate(forms):
-                try:
-                    result = executor.execute_form(form, str(src_path))
-                    colight_file = executor.save_colight_visualization(result, i)
+            for i, pf in enumerate(result.forms):
+                if isinstance(pf.visualization_data, pathlib.Path):
+                    colight_files.append(pf.visualization_data)
+                elif pf.visualization_data is not None:
+                    # It's bytes - save to disk for MkDocs compatibility
+                    colight_file = colight_output_dir / f"form-{i:03d}.colight"
+                    colight_file.write_bytes(pf.visualization_data)
                     colight_files.append(colight_file)
-
-                    if self.config["verbose"] and colight_file:
-                        print(f"  Form {i}: saved visualization to {colight_file.name}")
-                except Exception as e:
-                    if self.config["verbose"]:
-                        print(f"  Form {i}: execution failed: {e}")
+                else:
                     colight_files.append(None)
 
-            # Generate markdown content
+            # For MkDocs, we may need custom path handling, so use the custom generator
+            # to override how paths are generated in the markdown
             generator = ColightMarkdownGenerator(
                 colight_output_dir,
                 self.config["output_dir"],
                 self.config["inline_threshold"],
             )
-            title = src_path.stem.replace(".colight", "").replace("_", " ").title()
 
+            # Extract forms from the result
+            forms = [pf.form for pf in result.forms]
+
+            # Generate markdown without title (MkDocs handles titles)
             markdown_content = generator.generate_markdown(
-                forms, colight_files, title, output_path, **merged_options
+                forms, colight_files, title=None
             )
 
             # Write the generated markdown file

@@ -4,7 +4,7 @@ import click
 import pathlib
 from typing import Optional
 
-from . import builder
+from . import api
 from . import watcher
 from .constants import DEFAULT_INLINE_THRESHOLD
 
@@ -96,8 +96,8 @@ def build(
     if input_path.is_file():
         # Single file
         if not output:
-            output = builder._get_output_path(input_path, format)
-        builder.build_file(
+            output = api.get_output_path(input_path, format)
+        api.build_file(
             input_path,
             output,
             verbose=verbose,
@@ -113,7 +113,7 @@ def build(
         # Directory
         if not output:
             output = pathlib.Path("build")
-        builder.build_directory(
+        api.build_directory(
             input_path,
             output,
             verbose=verbose,
@@ -221,7 +221,7 @@ def watch(
 @click.argument("project_dir", type=click.Path(path_type=pathlib.Path))
 def init(project_dir: pathlib.Path):
     """Initialize a new colight-site project."""
-    builder.init_project(project_dir)
+    api.init_project(project_dir)
     click.echo(f"Initialized project in {project_dir}")
 
 

@@ -25,9 +25,8 @@ if colight_site_path.exists():
     sys.path.insert(0, str(colight_site_path))
 
 try:
-    from colight_site.parser import parse_colight_file
-    from colight_site.executor import SafeFormExecutor
-    from colight_site.generator import MarkdownGenerator
+    from colight_site import api
+    from colight_site.constants import DEFAULT_INLINE_THRESHOLD
 except ImportError as e:
     raise ImportError(f"colight-site package is required: {e}")
 
@@ -107,6 +106,7 @@ class SitePlugin(BasePlugin):
         ),
         ("colight_embed_path", Type(str, default="form-{form:03d}.colight")),
         ("file_options", DictOfItems(Type(dict), default={})),
+        ("inline_threshold", Type(int, default=DEFAULT_INLINE_THRESHOLD)),
     )
 
     def should_include_file(self, file: File) -> bool:
@@ -229,16 +229,6 @@ class SitePlugin(BasePlugin):
         **options,
     ) -> str:
         """Process a Python file and return markdown content."""
-        # Parse the file
-        forms, file_metadata = parse_colight_file(file_path)
-
-        # Skip the verbose logging here as colight_dir is not defined yet
-        if self.config["verbose"]:
-            print(f"[colight] Found {len(forms)} forms in {file_path.name}")
-
-        # Merge metadata with options
-        pragma_tags, formats = file_metadata.merge_with_cli_options(**options)
-        final_format = next(iter(formats), "markdown")
 
         # Write .colight files directly to the site directory
         # Calculate the destination path in the site directory
@@ -265,85 +255,35 @@ class SitePlugin(BasePlugin):
         if self.config["verbose"]:
             print(f"[colight]   Writing .colight files to: {colight_dir}")
 
-        # Setup executor
-        executor = SafeFormExecutor(
-            colight_dir, output_path_template=self.config["colight_output_path"]
+        # Process the colight file using the public API
+        result = api.process_colight_file(
+            file_path,
+            output_dir=colight_dir,
+            inline_threshold=self.config["inline_threshold"],
+            format=options.get("format", "markdown"),
+            verbose=self.config["verbose"],
+            hide_statements=options.get("hide_statements", False),
+            hide_visuals=options.get("hide_visuals", False),
+            hide_code=options.get("hide_code", False),
+            output_path_template=self.config["colight_output_path"],
+            embed_path_template=self.config["colight_embed_path"],
         )
 
-        # Prepare path context for template substitution
-        # For basename, remove .colight extension if present
-        basename = (
-            output_name.replace(".colight", "")
-            if output_name.endswith(".colight")
-            else output_name
-        )
-        path_context = {
-            "basename": basename,
-            "filename": file_path.name,
-            "reldir": str(rel_path.parent) if str(rel_path.parent) != "." else "",
-            "relpath": str(rel_path.with_suffix("")),
-            "abspath": str(file_path.absolute()),
-            "absdir": str(file_path.parent.absolute()),
-        }
-
-        # Execute forms and collect visualizations
-        colight_files = []
-        for i, form in enumerate(forms):
-            try:
-                result = executor.execute_form(form, str(file_path))
-                # Pass colight_dir as the output_path so relative paths work correctly
-                # The executor expects output_path to be the file being generated
-                # So we create a dummy path in the colight_dir
-                dummy_output_path = colight_dir / "index.md"
-                colight_output = executor.save_colight_visualization(
-                    result, i, output_path=dummy_output_path, path_context=path_context
+        # Track colight files for this file
+        for pf in result.forms:
+            if isinstance(pf.visualization_data, pathlib.Path):
+                colight_file.colight_files.append(str(pf.visualization_data))
+            elif pf.visualization_data is not None:
+                # Bytes were returned - we need to save them
+                colight_path = (
+                    colight_dir / f"form-{len(colight_file.colight_files):03d}.colight"
                 )
-                colight_files.append(colight_output)
-
-                if self.config["verbose"] and colight_output:
+                colight_path.write_bytes(pf.visualization_data)
+                colight_file.colight_files.append(str(colight_path))
+                if self.config["verbose"]:
                     print(
-                        f"[colight]   Form {i}: saved visualization to {colight_output.name}"
+                        f"[colight]   Saved inline visualization to {colight_path.name}"
                     )
 
-                # Store colight file paths in the file object
-                if colight_output:
-                    colight_file.colight_files.append(str(colight_output))
-
-            except Exception as e:
-                if self.config["verbose"]:
-                    print(f"[colight]   Form {i}: execution failed: {e}")
-                colight_files.append(None)
-
-        # Generate markdown content
-        # The embed path should be relative to the page location
-        # Since .colight files are in the same directory as the HTML, use simple paths
-        embed_path_template = self.config["colight_embed_path"]
-
-        generator = MarkdownGenerator(
-            colight_dir, embed_path_template=embed_path_template
-        )
-
-        title = file_path.stem.replace(".colight", "").replace("_", " ").title()
-
-        # Generate content based on format
-        if final_format == "html":
-            # For now, we'll generate markdown and let MkDocs convert it
-            content = generator.generate_markdown(
-                forms,
-                colight_files,
-                title,
-                file_path,
-                path_context,
-                pragma_tags=pragma_tags,
-            )
-        else:
-            content = generator.generate_markdown(
-                forms,
-                colight_files,
-                title,
-                file_path,
-                path_context,
-                pragma_tags=pragma_tags,
-            )
-
-        return content
+        # Return the markdown content from the API result
+        return result.markdown_content
