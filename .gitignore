@@ -17,5 +17,4 @@ dist
 **/test-artifacts/**
 .colight-port
 **/**.colight
-market-research/
 docs/api/
