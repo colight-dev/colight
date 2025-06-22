@@ -3,6 +3,9 @@ site_url: https://colight.dev
 repo_url: https://github.com/colight-dev/colight
 repo_name: colight-dev/colight
 edit_uri: tree/docs/docs/
+watch:
+  - mkdocs.yml
+  - docs
 theme:
   name: material
   custom_dir: docs/overrides
@@ -24,6 +27,10 @@ nav:
   - Home: index.md
   - Essential Reading: essential-reading.py
   - Scene3d: scene3d.py
+  - Guides:
+      - Getting Started: guides/getting-started.py
+      - Data Analysis Workflow: guides/data-analysis-workflow.py
+      - Responsive Dashboards: guides/responsive-dashboards.py
   - The Basics:
       - Layouts: system-guide/layouts.py
       - State: system-guide/state.py
@@ -67,18 +74,26 @@ markdown_extensions:
   - md_in_html
 plugins:
   - search
-  - colight.docs.plugin:
+  - colight.mkdocs.api_plugin:
       modules:
         - module: colight.plot
           output: api/plot.md
         - module: colight.scene3d
           output: api/scene3d.md
+  - colight.mkdocs.site_plugin:
+      verbose: false
+      format: markdown
+      include: ["*.py", "*.colight.py"]
+      ignore: ["llms.py", "data.py", "__init__.py"]
+      file_options:
+        "*.py":
+          hide_statements: true
   - mkdocs-jupyter:
-      include: ["*.py"]
-      ignore: ["llms.py"]
+      include: ["*.pyXXXXX"]
+      ignore: ["llms.py", "*.colight.py"]
       execute: true
       allow_errors: false
-      kernel_name: colight
+      kernel_name: python3
       include_requirejs: true
       include_source: True
       remove_tag_config:
@@ -92,9 +107,12 @@ extra_css:
   - stylesheets/custom.css
   - stylesheets/bylight.css
 extra_javascript:
+  - js/dist/embed.js
   - js/bylight.js
   - js/scroll-fix.js
   - js/command-k.js
-hooks:
-  - src/colight/scripts/css_modifier.py
-  - src/colight/scripts/tailwind_builder.py
+  - js/colight-loader.js
+hooks: []
+# Temporarily disabled hooks due to path issues
+# - packages/colight/src/colight/scripts/css_modifier.py
+# - packages/colight/src/colight/scripts/tailwind_builder.py

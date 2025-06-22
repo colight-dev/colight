@@ -1,24 +1,23 @@
 """Execute Python forms and capture Colight visualizations."""
 
 import ast
-import pathlib
 from typing import Any, Dict, Optional
 import sys
 import io
 import contextlib
 
-from .parser import Form
+from .parser import Form, CombinedCode
 from colight.inspect import inspect
+import libcst as cst
 
 
 class FormExecutor:
     """Execute forms in a persistent namespace."""
 
-    def __init__(self, output_dir: pathlib.Path):
+    def __init__(self, verbose: bool = False):
         self.env: Dict[str, Any] = {}
-        self.output_dir = output_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.form_counter = 0
+        self.verbose = verbose
 
         # Setup basic imports
         self._setup_environment()
@@ -51,8 +50,38 @@ except ImportError:
             return None
 
         try:
-            # Try to parse as an expression first
-            if form.is_expression:
+            # Special handling for CombinedCode that ends with an expression
+            if form.is_expression and hasattr(form.node, "code_elements"):
+                # This is CombinedCode ending with an expression
+                # Execute all statements first, then evaluate the last expression
+                if isinstance(form.node, CombinedCode) and form.node.code_elements:
+                    # Execute all but the last element as statements
+                    for stmt in form.node.code_elements[:-1]:
+                        # Convert CST node to code
+                        stmt_code = cst.Module(body=[stmt]).code.strip()
+                        compiled = compile(stmt_code, filename, "exec")
+                        exec(compiled, self.env)
+
+                    # Evaluate the last element as an expression
+                    last_elem = form.node.code_elements[-1]
+                    # Extract just the expression from the last statement
+                    if (
+                        isinstance(last_elem, cst.SimpleStatementLine)
+                        and len(last_elem.body) == 1
+                    ):
+                        if isinstance(last_elem.body[0], cst.Expr):
+                            expr_code = cst.Module(body=[last_elem]).code.strip()
+                            parsed = ast.parse(expr_code, filename, mode="eval")
+                            compiled = compile(parsed, filename, "eval")
+                            result = eval(compiled, self.env)
+                            return result
+
+                # Fallback to original behavior
+                parsed = ast.parse(code, filename, mode="eval")
+                compiled = compile(parsed, filename, "eval")
+                result = eval(compiled, self.env)
+                return result
+            elif form.is_expression:
                 # Parse and compile as expression
                 parsed = ast.parse(code, filename, mode="eval")
                 compiled = compile(parsed, filename, "eval")
@@ -69,27 +98,24 @@ except ImportError:
             print(f"Code: {code}", file=sys.stderr)
             raise
 
-    def save_colight_visualization(
-        self, value: Any, form_index: int
-    ) -> Optional[pathlib.Path]:
-        """Save a Colight visualization to a .colight file."""
+    def get_colight_bytes(self, value: Any) -> Optional[bytes]:
+        """Get Colight visualization as bytes."""
         if value is None:
             return None
-
-        output_path = self.output_dir / f"form-{form_index:03d}.colight"
 
         try:
             # Let inspect() handle all the complexity internally
             visual = inspect(value)
             if visual is None:
                 return None
-            visual.save_file(str(output_path))
-            return output_path
+            return visual.to_bytes()
 
         except Exception as e:
-            print(
-                f"Warning: Could not save Colight visualization: {e}", file=sys.stderr
-            )
+            if self.verbose:
+                print(
+                    f"Warning: Could not create Colight visualization: {e}",
+                    file=sys.stderr,
+                )
             return None
 
 

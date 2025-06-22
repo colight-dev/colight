@@ -70,13 +70,17 @@ class APIDocPlugin(BasePlugin):
                 dest_dir=getattr(config, "site_dir"),
                 use_directory_urls=getattr(config, "use_directory_urls"),
             )
-            files.remove(new_file)
+            # Only remove if it exists
+            try:
+                files.remove(new_file)
+            except ValueError:
+                pass  # File doesn't exist in collection yet
             files.append(new_file)
 
         return files
 
     def generate_docs(self, griffe_module, source_module) -> str:
-        content = [f"# {source_module.__name__} {{: .api .api-title }}\n"]
+        content = [f"<h1 class='api api-title'>{source_module.__name__}</h1>\n"]
 
         # Get the ordered members and groups from __all__
         all_defs = get_all_definition_with_comments(source_module)
@@ -103,7 +107,7 @@ class APIDocPlugin(BasePlugin):
             return []
 
         content = []
-        content.append(f"### {member_name} {{: .api .api-member }}\n")
+        content.append(f"<h3 class='api api-member'>{member_name}</h3>\n")
 
         if member.docstring:
             parsed = member.docstring.parsed
@@ -113,7 +117,7 @@ class APIDocPlugin(BasePlugin):
 
         if hasattr(member, "signature"):
             content.append(
-                f"```python\n{member.signature}\n``` {{: .api .api-signature }}\n"
+                f"<pre class='api api-signature'><code class='language-python'>{member.signature}</code></pre>\n"
             )
 
         content.append("\n")
@@ -134,33 +138,33 @@ class APIDocPlugin(BasePlugin):
                 content.extend(self._render_parameters_section(section))
 
             elif section.kind.lower() == "returns":
-                content.append("Returns\n{: .api .api-section }\n\n")
+                content.append("<h4 class='api api-section'>Returns</h4>\n\n")
                 for ret in section.value:
                     ret_type = f" ({ret.annotation})" if ret.annotation else ""
                     content.append(f"- {ret.description}{ret_type}\n")
 
             elif section.kind.lower() == "raises":
-                content.append("Raises\n{: .api .api-section }\n\n")
+                content.append("<h4 class='api api-section'>Raises</h4>\n\n")
                 for exc in section.value:
                     content.append(f"- `{exc.annotation}`: {exc.description}\n")
 
             elif section.kind.lower() == "examples":
-                content.append("Examples\n{: .api .api-section }\n\n")
+                content.append("<h4 class='api api-section'>Examples</h4>\n\n")
                 content.append(f"```python\n{section.value}\n```\n")
 
             elif section.kind.lower() == "notes":
-                content.append("Notes\n{: .api .api-section }\n\n")
+                content.append("<h4 class='api api-section'>Notes</h4>\n\n")
                 content.append(f"{section.value}\n")
 
             elif section.kind.lower() == "warnings":
-                content.append("Warnings\n{: .api .api-section }\n\n")
+                content.append("<h4 class='api api-section'>Warnings</h4>\n\n")
                 content.append(f"{section.value}\n")
 
         return content
 
     def _render_parameters_section(self, section) -> list[str]:
         content = []
-        content.append("Parameters\n{: .api .api-section }\n\n")
+        content.append("<h4 class='api api-section'>Parameters</h4>\n\n")
         for param in section.value:
             param_type = f" ({param.annotation})" if param.annotation else ""
             # Handle parameter description, checking if it contains newlines

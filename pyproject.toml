@@ -6,6 +6,8 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 colight = { workspace = true }
+colight-site = { workspace = true }
+colight-mkdocs = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
@@ -29,6 +31,7 @@ dev = [
     "tomli-w>=1.0.0",
     "pandas>=2.3.0",
     "pillow>=11.2.1",
+    "colight-mkdocs",
 ]
 
 # Workspace-wide tool configuration

@@ -1,17 +1,14 @@
-# %% [markdown]
-
 # The `colight.plot` module is an interface to the [Observable Plot](https://observablehq.com/plot/getting-started) library, with 100% coverage and a straightforward mapping between what you write in Python and how plots are typically written in JavaScript. The Python code you write produces a structured representation which is serialized and rendered in a browser environment. To use this library effectively, you will want to frequently refer to the [Observable Plot documentation](https://observablehq.com/plot/quickstart) to understand the API surface we're targeting.
 
 # ## Marks
-#
 # [Marks](https://observablehq.com/plot/features/marks) are the basic visual elements used to represent data. Common marks include `line`, `dot`, `bar`, and `text`.
 # Each mark type has its own set of properties that control its appearance and behavior. For example, with `line`, we can control the stroke, stroke width, and curve:
 
-# %%
 import colight.plot as Plot
 
+#
 six_points = [[1, 1], [2, 4], [1.5, 7], [3, 10], [2, 13], [4, 15]]
-
+#
 Plot.line(
     six_points,
     {
@@ -21,17 +18,12 @@ Plot.line(
     },
 )
 
-# %% [markdown]
 
-#
 # ## Composition
-#
-# We can layer multiple marks and add options to plots using the `+` operator. For example, here we compose a [line mark](bylight?match=Plot.line(...\)) with a [dot mark](bylight?match=Plot.dot(...\)), then add a [frame](bylight?match=Plot.frame(\)):
+# We can layer multiple marks and add options to plots using the `+` operator. For example, here we compose a [line mark](bylight?match=Plot.line(...\)) with a [dot mark](bylight?match=Plot.dot\(...\)), then add a [frame](bylight?match=Plot.frame(\)):
 
-# %%
 line_plot = Plot.line(six_points, {"stroke": "pink", "strokeWidth": 10})
 dot_plot = Plot.dot(six_points, {"fill": "purple"})
-
 line_plot + dot_plot + Plot.frame()
 
 # %% [markdown]
@@ -146,7 +138,7 @@ Plot.configure(display_as="widget")  # Set global rendering mode to widget
 # %% [markdown]
 # 2. Using a plot's [.display_as(...)](bylight) method:
 
-# %%
+# %% show-visuals
 categorical_data = [
     {"category": "A", "value": 10},
     {"category": "B", "value": 20},

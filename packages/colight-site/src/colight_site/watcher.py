@@ -1,9 +1,11 @@
 """File watching functionality for colight-site."""
 
 import pathlib
+from typing import Optional
 from watchfiles import watch
 
-from . import builder
+from . import api
+from .constants import DEFAULT_INLINE_THRESHOLD
 
 
 def watch_and_build(
@@ -14,13 +16,17 @@ def watch_and_build(
     hide_statements: bool = False,
     hide_visuals: bool = False,
     hide_code: bool = False,
+    continue_on_error: bool = True,
+    colight_output_path: Optional[str] = None,
+    colight_embed_path: Optional[str] = None,
+    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
 ):
     """Watch for changes and rebuild automatically."""
     print(f"Watching {input_path} for changes...")
 
     # Build initially
     if input_path.is_file():
-        builder.build_file(
+        api.build_file(
             input_path,
             output_path,
             verbose=verbose,
@@ -28,9 +34,13 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            continue_on_error=continue_on_error,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
+            inline_threshold=inline_threshold,
         )
     else:
-        builder.build_directory(
+        api.build_directory(
             input_path,
             output_path,
             verbose=verbose,
@@ -38,6 +48,10 @@ def watch_and_build(
             hide_statements=hide_statements,
             hide_visuals=hide_visuals,
             hide_code=hide_code,
+            continue_on_error=continue_on_error,
+            colight_output_path=colight_output_path,
+            colight_embed_path=colight_embed_path,
+            inline_threshold=inline_threshold,
         )
 
     # Watch for changes
@@ -56,7 +70,7 @@ def watch_and_build(
             try:
                 if input_path.is_file():
                     if input_path in colight_changes:
-                        builder.build_file(
+                        api.build_file(
                             input_path,
                             output_path,
                             verbose=verbose,
@@ -64,8 +78,12 @@ def watch_and_build(
                             hide_statements=hide_statements,
                             hide_visuals=hide_visuals,
                             hide_code=hide_code,
+                            continue_on_error=continue_on_error,
+                            colight_output_path=colight_output_path,
+                            colight_embed_path=colight_embed_path,
                         )
-                        print(f"Rebuilt {input_path}")
+                        if verbose:
+                            print(f"Rebuilt {input_path}")
                 else:
                     # Rebuild affected files
                     for changed_file in colight_changes:
@@ -73,7 +91,7 @@ def watch_and_build(
                             rel_path = changed_file.relative_to(input_path)
                             suffix = ".html" if format == "html" else ".md"
                             output_file = output_path / rel_path.with_suffix(suffix)
-                            builder.build_file(
+                            api.build_file(
                                 changed_file,
                                 output_file,
                                 verbose=verbose,
@@ -81,8 +99,13 @@ def watch_and_build(
                                 hide_statements=hide_statements,
                                 hide_visuals=hide_visuals,
                                 hide_code=hide_code,
+                                continue_on_error=continue_on_error,
+                                colight_output_path=colight_output_path,
+                                colight_embed_path=colight_embed_path,
+                                inline_threshold=inline_threshold,
                             )
-                            print(f"Rebuilt {changed_file}")
+                            if verbose:
+                                print(f"Rebuilt {changed_file}")
             except Exception as e:
                 print(f"Error during rebuild: {e}")
                 if verbose:

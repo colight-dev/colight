@@ -114,6 +114,11 @@ class LayoutItem:
         data, buffers = to_json_with_initialState(self, buffers=[])
         return format.create_file(data, buffers, path)
 
+    def to_bytes(self) -> bytes:
+        """Get the bytes representation of this visualization without saving to disk."""
+        data, buffers = to_json_with_initialState(self, buffers=[])
+        return format.create_bytes(data, buffers)
+
     def save_image(
         self, path, width=500, height=None, scale: float = 1.0, quality=90, debug=False
     ):

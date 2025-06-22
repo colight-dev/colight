@@ -52,27 +52,39 @@ print("Processing complete!")
         assert "np.linspace" in markdown_content
         assert "Additional narrative" in markdown_content
 
-        # Check for colight embed
-        assert 'class="colight-embed"' in markdown_content
-        assert "data-src=" in markdown_content and "form-" in markdown_content
+        # Check for colight embed - can be either inline script or external embed
+        has_inline_script = '<script type="application/x-colight">' in markdown_content
+        has_external_embed = (
+            'class="colight-embed"' in markdown_content
+            and "data-src=" in markdown_content
+        )
+        assert (
+            has_inline_script or has_external_embed
+        ), "Should have either inline script or external embed"
 
-        # Verify colight files were created
+        # Verify colight handling
         colight_dir = temp_path / "test_colight"
-        assert colight_dir.exists()
 
-        colight_files = list(colight_dir.glob("*.colight"))
-        assert len(colight_files) >= 1  # At least one visualization
+        # With the new optimization, small files are inlined and not saved to disk
+        if has_inline_script:
+            # Files were inlined - directory might not exist or be empty
+            pass  # This is expected behavior for small files
+        else:
+            # Files were saved to disk
+            assert colight_dir.exists()
+            colight_files = list(colight_dir.glob("*.colight"))
+            assert len(colight_files) >= 1  # At least one visualization
 
-        # Check first colight file content - it should be a binary .colight file
-        first_colight = colight_files[0]
-        file_content = first_colight.read_bytes()
-        assert file_content.startswith(b"COLIGHT\x00")  # Check magic bytes
+            # Check first colight file content - it should be a binary .colight file
+            first_colight = colight_files[0]
+            file_content = first_colight.read_bytes()
+            assert file_content.startswith(b"COLIGHT\x00")  # Check magic bytes
 
-        # The file should be parseable by the colight format module
-        from colight.format import parse_file
+            # The file should be parseable by the colight format module
+            from colight.format import parse_file
 
-        json_data, buffers = parse_file(first_colight)
-        assert "ast" in json_data  # Should have AST structure
+            json_data, buffers = parse_file(first_colight)
+            assert "ast" in json_data  # Should have AST structure
 
 
 def test_project_initialization():
@@ -177,14 +189,21 @@ combined
         # Check output
         markdown_content = output_file.read_text()
 
-        # Should have multiple colight embeds
-        embed_count = markdown_content.count('class="colight-embed"')
-        assert embed_count >= 3  # At least 3 visualizations
+        # Should have multiple colight embeds (either inline scripts or external embeds)
+        inline_count = markdown_content.count('<script type="application/x-colight">')
+        external_count = markdown_content.count('class="colight-embed"')
+        total_embeds = inline_count + external_count
+        assert total_embeds >= 3  # At least 3 visualizations
 
-        # Check colight files were created
+        # Check colight handling - with optimization, small files might be inlined
         colight_dir = temp_path / "multi_viz_colight"
-        colight_files = list(colight_dir.glob("*.colight"))
-        assert len(colight_files) >= 3
+        if colight_dir.exists():
+            # Small files are inlined, so we might have fewer files on disk
+            # The important thing is that we have the visualizations embedded
+            assert total_embeds >= 3  # Already checked above
+        else:
+            # All files were inlined - this is fine
+            assert inline_count >= 3
 
 
 def test_empty_and_comment_only_forms():

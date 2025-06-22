@@ -638,3 +638,133 @@ y = x * 2
             assert len(form.metadata.pragma_tags) == 0
 
         pathlib.Path(f.name).unlink()
+
+
+def test_combined_statements_ending_with_expression():
+    """Test that combined statements ending with an expression are treated as expressions."""
+    # Test case 1: Statement then expression - should be expression
+    content1 = """# Test statement then expression
+a = 1
+42
+"""
+
+    # Test case 2: Multiple statements then expression - should be expression
+    content2 = """# Test multiple statements then expression
+a = 1
+b = 2
+a + b
+"""
+
+    # Test case 3: Expression then statement - should be statement
+    content3 = """# Test expression then statement
+42
+a = 1
+"""
+
+    # Test case 4: Only statements - should be statement
+    content4 = """# Test only statements
+a = 1
+b = 2
+"""
+
+    test_cases = [
+        (content1, True, "Statement then expression"),
+        (content2, True, "Multiple statements then expression"),
+        (content3, False, "Expression then statement"),
+        (content4, False, "Only statements"),
+    ]
+
+    for content, expected_is_expression, description in test_cases:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".colight.py", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+            assert len(forms) >= 1, f"{description}: Expected at least one form"
+            form = forms[0]
+
+            assert form.is_expression == expected_is_expression, (
+                f"{description}: Expected is_expression={expected_is_expression}, "
+                f"got {form.is_expression}"
+            )
+            assert form.is_statement == (not expected_is_expression), (
+                f"{description}: Expected is_statement={not expected_is_expression}, "
+                f"got {form.is_statement}"
+            )
+
+            pathlib.Path(f.name).unlink()
+
+
+def test_empty_comment_continuation():
+    """Test that empty comments act as continuations within forms."""
+    # Test case 1: Empty comment continues the form
+    content1 = """#| show-code
+a = 1
+#
+42
+"""
+
+    # Test case 2: Non-empty comment breaks the form
+    content2 = """#| show-code
+a = 1
+# This is a comment
+42
+"""
+
+    # Test case 3: Multiple empty comments
+    content3 = """# Test multiple empty comments
+a = 1
+#
+b = 2
+#
+a + b
+"""
+
+    # Test case 4: Blank line breaks the form
+    content4 = """# Test blank line
+a = 1
+
+42
+"""
+
+    test_cases = [
+        (content1, 1, "a = 1\n\n42", True, "Empty comment continuation"),
+        (content2, 2, "a = 1", False, "Non-empty comment breaks form"),
+        (content3, 1, "a = 1\n\nb = 2\n\na + b", True, "Multiple empty comments"),
+        (content4, 2, "a = 1", False, "Blank line breaks form"),
+    ]
+
+    for (
+        content,
+        expected_forms,
+        expected_first_code,
+        expected_is_expr,
+        description,
+    ) in test_cases:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".colight.py", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+            assert (
+                len(forms) == expected_forms
+            ), f"{description}: Expected {expected_forms} forms, got {len(forms)}"
+
+            if forms:
+                first_form = forms[0]
+                assert first_form.code.strip() == expected_first_code, (
+                    f"{description}: Expected code {repr(expected_first_code)}, "
+                    f"got {repr(first_form.code.strip())}"
+                )
+                assert first_form.is_expression == expected_is_expr, (
+                    f"{description}: Expected is_expression={expected_is_expr}, "
+                    f"got {first_form.is_expression}"
+                )
+
+            pathlib.Path(f.name).unlink()
