@@ -908,10 +908,12 @@ def initialState(
     Returns:
         InitialState: An object that initializes the state variables when rendered.
 
-    Example:
-        >>> Plot.initialState({"count": 0, "name": "foo"})  # Initialize without sync
-        >>> Plot.initialState({"count": 0}, sync=True)  # Sync all variables
-        >>> Plot.initialState({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
+    Examples:
+        ```python
+        Plot.initialState({"count": 0, "name": "foo"})  # Initialize without sync
+        Plot.initialState({"count": 0}, sync=True)  # Sync all variables
+        Plot.initialState({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
+        ```
     """
 
     sync_set = set(values.keys()) if sync is True else (sync or set())
@@ -965,7 +967,9 @@ def Slider(
         Slider: A Slider component with the specified options.
 
     Example:
-        >>> Plot.Slider("frame", init=0, range=100, fps=30, label="Frame")
+    ```python
+    Plot.Slider("frame", init=0, range=100, fps=30, label="Frame")
+    ```
     """
 
     if range is None and rangeFrom is None:
@@ -1151,35 +1155,37 @@ def Import(
     - `React`, `d3`, `html` (for hiccup) and `colight.api` are defined globally
 
     Examples:
-        # CDN import with namespace alias
-        >>> Plot.Import(
-        ...     source="https://cdn.skypack.dev/lodash-es",
-        ...     alias="_",
-        ...     refer=["flattenDeep", "partition"],
-        ...     rename={"flattenDeep": "deepFlatten"}
-        ... )
+    ```python
+    # CDN import with namespace alias
+    Plot.Import(
+        source="https://cdn.skypack.dev/lodash-es",
+        alias="_",
+        refer=["flattenDeep", "partition"],
+        rename={"flattenDeep": "deepFlatten"}
+    )
 
-        # Local file import
-        >>> Plot.Import(
-        ...     source="path:src/app/utils.js",  # relative to working directory
-        ...     refer=["formatDate"]
-        ... )
+    # Local file import
+    Plot.Import(
+        source="path:src/app/utils.js",  # relative to working directory
+        refer=["formatDate"]
+    )
 
-        # Inline source with refer_all
-        >>> Plot.Import(
-        ...     source='''
-        ...     export const add = (a, b) => a + b;
-        ...     export const subtract = (a, b) => a - b;
-        ...     ''',
-        ...     refer_all=True,
-        ...     exclude=["subtract"]
-        ... )
+    # Inline source with refer_all
+    Plot.Import(
+        source='''
+        export const add = (a, b) => a + b;
+        export const subtract = (a, b) => a - b;
+        ''',
+        refer_all=True,
+        exclude=["subtract"]
+    )
 
-        # Default export handling
-        >>> Plot.Import(
-        ...     source="https://cdn.skypack.dev/d3-scale",
-        ...     default="createScale"
-        ... )
+    # Default export handling
+    Plot.Import(
+        source="https://cdn.skypack.dev/d3-scale",
+        default="createScale"
+    )
+    ```
     """
 
     # Create spec for the import
