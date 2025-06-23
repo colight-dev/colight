@@ -263,7 +263,7 @@ cube_xyzs = rotate_points(cube_xyz, n_frames=NUM_FRAMES)
 wall_xyzs = rotate_points(wall_xyz, n_frames=NUM_FRAMES)
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "camera": camera,
             "highlights": [],

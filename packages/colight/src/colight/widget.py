@@ -23,17 +23,17 @@ class CollectedState:
     # collect initial state while serializing data.
     def __init__(self):
         self.syncedKeys = set()
-        self.initialState = {}
-        self.initialStateJSON = {}
+        self.state = {}
+        self.stateJSON = {}
         self.listeners = {"py": {}, "js": {}}
         self.imports = []  # List of import specs
 
     def state_entry(self, state_key, value, sync=False, **kwargs):
         if sync:
             self.syncedKeys.add(state_key)
-        if state_key not in self.initialStateJSON:
-            self.initialState[state_key] = value
-            self.initialStateJSON[state_key] = to_json(value, **kwargs)
+        if state_key not in self.stateJSON:
+            self.state[state_key] = value
+            self.stateJSON[state_key] = to_json(value, **kwargs)
         return {"__type__": "ref", "state_key": state_key}
 
     def add_import(self, spec: dict):
@@ -195,7 +195,7 @@ def to_json(
     raise TypeError(f"Object of type {type(data)} is not JSON serializable")
 
 
-def to_json_with_initialState(
+def to_json_with_state(
     ast: Any,
     widget: "Widget | None" = None,
     buffers: List[bytes | bytearray | memoryview] | None = None,
@@ -206,7 +206,7 @@ def to_json_with_initialState(
     json = to_json(
         {
             "ast": ast,
-            "initialState": collected_state.initialStateJSON,
+            "state": collected_state.stateJSON,
             "syncedKeys": collected_state.syncedKeys,
             "listeners": collected_state.listeners["js"],
             "imports": collected_state.imports,
@@ -389,7 +389,7 @@ class WidgetState:
         self._listeners = collected_state.listeners["py"]
         self._syncedKeys = syncedKeys = collected_state.syncedKeys
 
-        for key, value in collected_state.initialState.items():
+        for key, value in collected_state.state.items():
             if key in syncedKeys and key not in self._state:
                 self._state[key] = value
 
@@ -398,7 +398,7 @@ class Widget(anywidget.AnyWidget):
     _esm = ANYWIDGET_PATH
     # CSS is now embedded in the JS bundle
     callback_registry: Dict[str, Callable] = {}
-    data = traitlets.Any().tag(sync=True, to_json=to_json_with_initialState)
+    data = traitlets.Any().tag(sync=True, to_json=to_json_with_state)
 
     def __init__(self, ast: Any):
         self.state = WidgetState(self)

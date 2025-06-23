@@ -134,7 +134,7 @@ class TestCollectedState(unittest.TestCase):
         # Test basic state entry
         entry = cs.state_entry("key1", "value1")
         self.assertEqual(entry, {"__type__": "ref", "state_key": "key1"})
-        self.assertEqual(cs.initialState["key1"], "value1")
+        self.assertEqual(cs.state["key1"], "value1")
 
         # Test synced state entry
         entry = cs.state_entry("key2", "value2", sync=True)

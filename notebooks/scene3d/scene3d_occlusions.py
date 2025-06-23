@@ -177,7 +177,7 @@ def create_demo_scene():
     scene = (
         (base_scene + controlled_camera & base_scene + controlled_camera)
         | base_scene
-        | Plot.initialState(
+        | Plot.State(
             {
                 "camera": {
                     "position": [

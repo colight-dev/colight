@@ -24,7 +24,7 @@ scene = PointCloud(
     "camera": js("$state.camera"),
     "onCameraChange": js("(camera) => $state.update({'camera': camera})"),
     "controls": ["fps"],
-} | Plot.initialState(
+} | Plot.State(
     {
         "camera": {
             "position": [4.421623, -0.563180, 1.317901],
@@ -37,7 +37,7 @@ scene = PointCloud(
 
 # Create a layout with the 3D scene and KaTeX formula
 p = (
-    Plot.initialState(
+    Plot.State(
         {
             "frame": 0,
             "grid_xyz": grid_xyz_frames,

@@ -38,7 +38,7 @@ points = numpy.random.rand(8)
     # Set the plot domain to [0,1]
     + Plot.domain([0, 1])
     # Initialize state with NumPy array and enable binary sync
-    | Plot.initialState({"points": points}, sync=True)
+    | Plot.State({"points": points}, sync=True)
     | ["div", js("`javascript type: ${Object.prototype.toString.call($state.points)}`")]
     # Print button shows we still have NumPy array in Python
     | [

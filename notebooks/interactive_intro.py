@@ -41,9 +41,9 @@ from colight.plot import md
     Plot.html(["div.text-center.text-lg.!&_code:bg-none", "State API"])
     | Plot.Grid(
         ["div.col-span-2.bg-gray-100.font-bold.p-3", "python: plot definition"],
-        md("`Plot.initialState(...)`"),
+        md("`Plot.State(...)`"),
         "Set initial state",
-        md("""`Plot.initialState({"foo": "bar"}, sync={"bar"})`"""),
+        md("""`Plot.State({"foo": "bar"}, sync={"bar"})`"""),
         md("""...and sync `"bar"` """),
         md("""`Plot.onChange({"x": lambda widget, event: _})`"""),
         md("""Run callback when "x" changes"""),

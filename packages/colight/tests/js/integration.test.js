@@ -30,7 +30,7 @@ describe("Colight Integration", () => {
 
     // Verify the data structure is what we expect for rendering
     expect(data.ast).toBeDefined();
-    expect(data.initialState).toBeDefined();
+    expect(data.state).toBeDefined();
     expect(data.syncedKeys).toBeDefined();
     expect(data.listeners).toBeDefined();
     expect(data.imports).toBeDefined();
@@ -77,7 +77,7 @@ describe("Colight Integration", () => {
     const { buffers } = data;
 
     // Since this is a raster plot, we should find raster-related structure
-    // Check both AST and initialState since raster data might be in state
+    // Check both AST and state since raster data might be in state
     const fullDataStr = JSON.stringify(data);
     expect(fullDataStr).toMatch(/raster|image|ndarray|PlotSpec/i);
 

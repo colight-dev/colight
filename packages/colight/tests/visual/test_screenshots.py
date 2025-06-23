@@ -28,7 +28,7 @@ ARTIFACTS_DIR.mkdir(exist_ok=True, parents=True)
 
 def basic_scene():
     return (
-        Plot.initialState({"test": "hello", "count": 3})
+        Plot.State({"test": "hello", "count": 3})
         | [
             "div",
             {"style": {"padding": "20px"}},
@@ -64,7 +64,7 @@ def test_basic_screenshot():
 def test_counter_plot():
     """Test more complex plot with state updates"""
     counter_plot = (
-        Plot.initialState({"count": 1})
+        Plot.State({"count": 1})
         | [
             "div.bg-yellow-200.p-4",
             {"onClick": Plot.js("(e) => $state.clicks = ($state.clicks || 0) + 1")},

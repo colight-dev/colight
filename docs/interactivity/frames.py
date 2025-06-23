@@ -33,7 +33,7 @@ Plot.Frames(
 # %%
 
 (
-    Plot.initialState({"frame": 0})
+    Plot.State({"frame": 0})
     | Plot.Frames(
         [
             Plot.html(["div.p-4.bg-gray-200", number])

@@ -195,7 +195,7 @@ export function clamp(value, min, max) {
   return value;
 }
 
-export class InitialState {
+export class State {
   render() {}
 }
 

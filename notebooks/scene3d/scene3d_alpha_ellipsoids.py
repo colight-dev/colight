@@ -85,7 +85,7 @@ def create_gaussian_ellipsoids_scene():
         half_sizes=np.array(half_sizes),
         colors=np.array(colors),
         alphas=np.array(alphas),
-    ) | Plot.initialState(get_default_camera())
+    ) | Plot.State(get_default_camera())
 
 
 def create_gaussian_cuboids_scene():
@@ -139,7 +139,7 @@ def create_gaussian_cuboids_scene():
         colors=np.array(colors),
         alphas=np.array(alphas),
         quaternions=np.array(quaternions),
-    ) | Plot.initialState(get_default_camera())
+    ) | Plot.State(get_default_camera())
 
 
 # Create and display both scenes
@@ -238,7 +238,7 @@ def create_animated_clusters_scene(
         )
         + {"controls": ["fps"]}
         | Plot.Slider("frame", 0, range=n_frames, fps="raf")
-        | Plot.initialState(
+        | Plot.State(
             {
                 "frame": 0,
                 "clusters": clusters_frames,

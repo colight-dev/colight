@@ -1,5 +1,5 @@
 # %% [markdown]
-# This example demonstrates how to create an interactive code editor with live evaluation and plotting. You'll see state management using `Plot.initialState`, `widget.state.update`, and `Plot.onChange`, as well as live code evaluation using Python's `exec`.
+# This example demonstrates how to create an interactive code editor with live evaluation and plotting. You'll see state management using `Plot.State`, `widget.state.update`, and `Plot.onChange`, as well as live code evaluation using Python's `exec`.
 
 # %%
 import jax
@@ -44,7 +44,7 @@ def noisy_jax_model(key, theta, sigma):
         theta,
     )"""
 
-initial_state = Plot.initialState(
+initial_state = Plot.State(
     {
         "samples": make_samples(key, thetas, sigma, noisy_jax_model),
         "thetas": thetas,

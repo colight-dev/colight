@@ -114,7 +114,7 @@ def create_demo_scene():
                 "fov": 45,
             }
         }
-        | Plot.initialState(
+        | Plot.State(
             {
                 "camera": {
                     "position": [

@@ -12,7 +12,7 @@ data = [
 ]
 
 (
-    Plot.initialState({"data": data})
+    Plot.State({"data": data})
     | Plot.text(
         Plot.js("$state.data"),
         {

@@ -7,7 +7,7 @@ import colight.format as format
 import colight.screenshots as screenshots
 from colight.env import CONFIG
 from colight.html import html_page, html_snippet
-from colight.widget import Widget, WidgetState, to_json_with_initialState
+from colight.widget import Widget, WidgetState, to_json_with_state
 
 
 def create_parent_dir(path: str) -> None:
@@ -111,12 +111,12 @@ class LayoutItem:
         return str(path)
 
     def save_file(self, path: str) -> str:
-        data, buffers = to_json_with_initialState(self, buffers=[])
+        data, buffers = to_json_with_state(self, buffers=[])
         return format.create_file(data, buffers, path)
 
     def to_bytes(self) -> bytes:
         """Get the bytes representation of this visualization without saving to disk."""
-        data, buffers = to_json_with_initialState(self, buffers=[])
+        data, buffers = to_json_with_state(self, buffers=[])
         return format.create_bytes(data, buffers)
 
     def save_image(

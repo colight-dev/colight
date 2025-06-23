@@ -1,7 +1,7 @@
 import colight.plot as Plot
 
 (
-    Plot.initialState({"count": 0})
+    Plot.State({"count": 0})
     | [
         "div.flex.flex-col.items-center.gap-4.p-8",
         [

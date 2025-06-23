@@ -893,9 +893,7 @@ def Frames(
         return Hiccup([_Frames, {"state_key": key, "frames": frames}])
 
 
-def initialState(
-    values: dict[str, Any], sync: Union[set[str], bool, None] = None
-) -> JSCall:
+def State(values: dict[str, Any], sync: Union[set[str], bool, None] = None) -> JSCall:
     """
     Initializes state variables in the Plot widget.
 
@@ -906,25 +904,26 @@ def initialState(
             If None or False, no variables are synced. Defaults to None.
 
     Returns:
-        InitialState: An object that initializes the state variables when rendered.
+        State: An object that initializes the state variables when rendered.
 
     Examples:
         ```python
-        Plot.initialState({"count": 0, "name": "foo"})  # Initialize without sync
-        Plot.initialState({"count": 0}, sync=True)  # Sync all variables
-        Plot.initialState({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
+        Plot.State({"count": 0, "name": "foo"})  # Initialize without sync
+        Plot.State({"count": 0}, sync=True)  # Sync all variables
+        Plot.State({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
         ```
     """
 
     sync_set = set(values.keys()) if sync is True else (sync or set())
 
     return JSCall(
-        "InitialState",
+        "State",
         [Ref(v, state_key=k, sync=(k in sync_set)) for k, v in values.items()],
     )
 
 
-initial_state = initialState
+initial_state = State
+state = State
 
 
 _Slider = JSRef("Slider")
@@ -1429,7 +1428,7 @@ __all__ = [
     "bitmap",
     # ## Utility functions
     "doc",
-    "initialState",
+    "State",
     "get_in",
     "dimensions",
     "Import",

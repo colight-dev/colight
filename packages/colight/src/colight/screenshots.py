@@ -90,7 +90,7 @@ class StudioContext(ChromeContext):
 
         self.load_studio_html()
 
-        data, buffers = widget.to_json_with_initialState(plot, buffers=[])
+        data, buffers = widget.to_json_with_state(plot, buffers=[])
         colight_data = format.create_bytes(data, buffers)
         colight_filename = f"plot_{self.id}.colight"
         self.server.add_served_file(colight_filename, colight_data)

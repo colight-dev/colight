@@ -206,7 +206,7 @@ def create_ripple_and_morph_scene():
     }
 
     layout = (
-        Plot.initialState(
+        Plot.State(
             {
                 "camera": camera,
                 "frame": 0,  # current frame in the animation

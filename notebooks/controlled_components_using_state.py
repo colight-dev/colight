@@ -31,7 +31,7 @@ showDotSource = """
 
 (
     Plot.Import(showDotSource, refer=["showDot"])
-    | Plot.initialState({"x": 100, "y": 100})
+    | Plot.State({"x": 100, "y": 100})
     | [
         js("showDot"),
         {

@@ -62,7 +62,7 @@ components = [
         },
     )
     | checkboxes
-    | Plot.initialState(
+    | Plot.State(
         {
             "layers": Plot.js("new Set(%1)", layers.keys()),
             "toggleLayer": Plot.js(

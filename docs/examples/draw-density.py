@@ -3,7 +3,7 @@
 #
 # This example demonstrates how to create an interactive density plot that generates random points following a normal distribution around clicked locations. It combines several key features:
 #
-# - State management with `Plot.initialState`
+# - State management with `Plot.State`
 # - Event handling with `Plot.events`
 # - Multiple layered marks (density plot and scatter plot)
 # - JavaScript-based point generation using Box-Muller transform
@@ -24,7 +24,7 @@ from colight.plot import js
 BUTTON = "div.border.rounded-md.p-5.text-center.font-bold.hover:bg-gray-200"
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "points": [],
             "handleMouse": js("(e) => $state.update(['points', 'append', [e.x, e.y]])"),
@@ -48,7 +48,7 @@ BUTTON = "div.border.rounded-md.p-5.text-center.font-bold.hover:bg-gray-200"
 # Create a scatter plot with interactive point generation
 # %%
 (
-    Plot.initialState({"points": []}, sync=True)
+    Plot.State({"points": []}, sync=True)
     | (
         Plot.density(js("$state.points"), fill="density")
         + Plot.colorScheme("Viridis")

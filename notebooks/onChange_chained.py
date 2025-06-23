@@ -6,7 +6,7 @@ from colight.plot import js
 
 
 (
-    Plot.initialState({"clicks": 0, "doubled": 0, "squared": 0})
+    Plot.State({"clicks": 0, "doubled": 0, "squared": 0})
     | Plot.onChange(
         {
             "clicks": lambda widget, event: setattr(
@@ -40,7 +40,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState({"clicks": 0, "doubled": 0, "squared": 0})
+    Plot.State({"clicks": 0, "doubled": 0, "squared": 0})
     | Plot.onChange(
         {
             "clicks": js("(e) => $state.doubled = e.value * 2"),
@@ -70,7 +70,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "clicks": 0,
             "doubled": js("$state.clicks * 2"),

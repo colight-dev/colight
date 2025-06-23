@@ -234,7 +234,7 @@ cuboid_centers = np.array(
 
 # Create interactive cubes with hover effect
 (
-    Plot.initialState({"hovered": 1})  # Middle cube initially selected
+    Plot.State({"hovered": 1})  # Middle cube initially selected
     | Cuboid(
         centers=cuboid_centers,
         color=[1.0, 1.0, 0.0],  # yellow

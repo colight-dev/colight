@@ -565,7 +565,7 @@ def flip_approx_loss(theta, sigma):
         theta,
     )"""
 
-    initialState = Plot.initialState(
+    state = Plot.State(
         (
             computeState(initial_val, initial_sigma)
             | {
@@ -581,7 +581,7 @@ def flip_approx_loss(theta, sigma):
     PRE = "pre.whitespace-pre-wrap.text-2xs.p-3.rounded-md.bg-gray-100.flex-1"
 
     return (
-        initialState
+        state
         | onChange
         | controls
         | [

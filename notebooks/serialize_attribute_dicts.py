@@ -56,4 +56,4 @@ points = jnp.array([[0.0, 0.0], [1.0, 1.0], [-1.0, 2.0]])
 colors = jnp.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])  # RGB colors
 colored_points = ColoredPoints(points=points, colors=colors)
 
-(Plot.initialState({"ColoredPoints": colored_points}) | colored_dots("ColoredPoints"))
+(Plot.State({"ColoredPoints": colored_points}) | colored_dots("ColoredPoints"))

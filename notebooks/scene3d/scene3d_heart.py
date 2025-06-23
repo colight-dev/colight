@@ -13,7 +13,7 @@ from colight.plot import js
 # %%
 # Create the scene with interactive controls
 (
-    Plot.initialState(
+    Plot.State(
         {
             "num_particles": 500000,
             "alpha": 1.0,

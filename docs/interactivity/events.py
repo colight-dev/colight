@@ -22,7 +22,7 @@ interactivity_warning = Plot.html(
 # %%
 
 (
-    Plot.initialState({"points": []})
+    Plot.State({"points": []})
     # setting $state.points in the `onDraw` callback,
     # which is passed an event containing a `point`, an `[x, y]` array.
     + Plot.events(
@@ -50,9 +50,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState(
-        {"all_points": [], "drawn_points": [], "clicked_points": []}, sync=True
-    )
+    Plot.State({"all_points": [], "drawn_points": [], "clicked_points": []}, sync=True)
     # Create drawing area and update points on draw
     | Plot.events(
         onDraw=js(

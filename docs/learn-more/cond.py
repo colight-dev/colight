@@ -15,7 +15,7 @@
 import colight.plot as Plot
 
 (
-    Plot.initialState({"count": 0})
+    Plot.State({"count": 0})
     | Plot.Column(
         [
             "button.p-3.bg-blue-100",
@@ -45,7 +45,7 @@ import colight.plot as Plot
 import colight.plot as Plot
 
 (
-    Plot.initialState({"selected": None})
+    Plot.State({"selected": None})
     | Plot.Column(
         [
             "div.p-3.bg-blue-100",
@@ -85,7 +85,7 @@ def detail_view(content):
 
 
 (
-    Plot.initialState({"detail": None})
+    Plot.State({"detail": None})
     | Plot.Column(
         ["div.p-3.bg-blue-100", {"onClick": detail_view("a")}, "A"],
         ["div.p-3.bg-pink-100", {"onClick": detail_view("b")}, "B"],
@@ -99,7 +99,7 @@ def detail_view(content):
 
 # %%
 (
-    Plot.initialState({"showEllipse": True})
+    Plot.State({"showEllipse": True})
     | Plot.dot([[1, 1], [2, 2]])
     + Plot.cond(Plot.js("$state.showEllipse"), Plot.ellipse([[1.5, 1.5, 0.5]]))
     | [

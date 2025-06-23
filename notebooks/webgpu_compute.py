@@ -194,7 +194,7 @@ fn main(
 (
     Plot.Import("path:notebooks/webgpu_compute.js", refer_all=True)
     | Plot.Slider("intendedPixelBlockSize", init=8, range=[2, 200])
-    | Plot.initialState(
+    | Plot.State(
         {
             "width": 640,
             "height": 480,

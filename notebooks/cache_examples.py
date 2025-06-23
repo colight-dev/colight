@@ -43,7 +43,7 @@ tailedWidget.state.update([tailedData, "concat", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 # %% initialize a variable
 # We should see '123' logged once.
-Plot.initialState({"foo": 123}) & Plot.js("console.log($state.foo) || $state.foo")
+Plot.State({"foo": 123}) & Plot.js("console.log($state.foo) || $state.foo")
 
 import colight.plot as Plot
 from IPython.display import display
@@ -51,15 +51,15 @@ from IPython.display import display
 p = Plot.new()
 display(p)
 
-p.reset(Plot.initialState({"foo": "foo"}) | Plot.js("$state.foo"))
+p.reset(Plot.State({"foo": "foo"}) | Plot.js("$state.foo"))
 
-p.reset(Plot.initialState({"blah": "blah"}) | Plot.js("$state.blah"))
+p.reset(Plot.State({"blah": "blah"}) | Plot.js("$state.blah"))
 
 # %%
 
 one = Plot.ref(Plot.js("$state.foo"))
 two = Plot.ref(Plot.js("$state.bar"))
-plot = Plot.new() | Plot.initialState({"foo": "FOO", "bar": "BAR"})
+plot = Plot.new() | Plot.State({"foo": "FOO", "bar": "BAR"})
 plot
 
 plot.reset(one)

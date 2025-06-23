@@ -200,5 +200,5 @@ Plot.Import(
         refer=["Counter"],
     )
     | Plot.js("Counter($state)")
-    | Plot.initialState({"count": 0})
+    | Plot.State({"count": 0})
 )

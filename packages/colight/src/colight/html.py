@@ -5,7 +5,7 @@ import uuid
 import colight.env as env
 from colight.format import create_bytes
 from colight.util import read_file
-from colight.widget import to_json_with_initialState
+from colight.widget import to_json_with_state
 
 
 def encode_string(s):
@@ -54,7 +54,7 @@ def get_script_content():
 
 def html_snippet(ast, id=None, dist_url=None):
     id = id or f"colight-widget-{uuid.uuid4().hex}"
-    data, buffers = to_json_with_initialState(ast, buffers=[])
+    data, buffers = to_json_with_state(ast, buffers=[])
 
     colight_data = create_bytes(data, buffers)
     colight_base64 = base64.b64encode(colight_data).decode("utf-8")

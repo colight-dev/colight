@@ -159,12 +159,12 @@ function setDeep(stateHandler, target, prop, value) {
 
 /**
  * Creates a reactive state store with optional sync capabilities
- * @param {Object.<string, any>} initialState
+ * @param {Object.<string, any>} state
  * @param {Object} experimental - The experimental interface for sync operations
  * @returns {Proxy} A proxied state store with reactive capabilities
  */
 export function createStateStore({
-  initialState,
+  state,
   syncedKeys,
   listeners = {},
   experimental,
@@ -172,7 +172,7 @@ export function createStateStore({
   evalEnv = {},
 }) {
   syncedKeys = new Set(syncedKeys);
-  const initialStateMap = mobx.observable.map(initialState, { deep: false });
+  const stateMap = mobx.observable.map(state, { deep: false });
   const computeds = {};
   const reactions = {};
   const readyState = new ReadyStateManager();
@@ -184,13 +184,13 @@ export function createStateStore({
     },
     set: (_target, key, value) => {
       const newValue =
-        typeof value === "function" ? value(initialStateMap.get(key)) : value;
+        typeof value === "function" ? value(stateMap.get(key)) : value;
       const updates = applyUpdates([[key, "reset", newValue]]);
       notifyPython(updates);
       return true;
     },
     ownKeys(_target) {
-      return Array.from(initialStateMap.keys());
+      return Array.from(stateMap.keys());
     },
     getOwnPropertyDescriptor(_target, key) {
       return {
@@ -256,7 +256,7 @@ export function createStateStore({
       for (const update of updates) {
         const [key, operation, payload] = update;
         const init = $state[key];
-        initialStateMap.set(key, applyUpdate($state, init, operation, payload));
+        stateMap.set(key, applyUpdate($state, init, operation, payload));
       }
     })();
 
@@ -296,11 +296,11 @@ export function createStateStore({
         return readyState.beginUpdate(label);
       },
       __evalEnv: evalEnv,
-      __backfill: function (initialState, syncedKeys) {
+      __backfill: function (state, syncedKeys) {
         syncedKeys = new Set(syncedKeys);
-        for (const [key, value] of Object.entries(initialState)) {
-          if (!initialStateMap.has(key)) {
-            initialStateMap.set(key, value);
+        for (const [key, value] of Object.entries(state)) {
+          if (!stateMap.has(key)) {
+            stateMap.set(key, value);
           }
           listenToComputed(key, value);
         }
@@ -313,7 +313,7 @@ export function createStateStore({
       __computed: function (key) {
         if (!(key in computeds)) {
           computeds[key] = mobx.computed(() => {
-            return $state.evaluate(initialStateMap.get(key));
+            return $state.evaluate(stateMap.get(key));
           });
         }
         return computeds[key].get();
@@ -342,7 +342,7 @@ export function createStateStore({
 }
 
 export function StateProvider(data) {
-  const { ast, syncedKeys, imports, initialState, model } = data;
+  const { ast, syncedKeys, imports, state, model } = data;
   const [evalEnv, setEnv] = useState(null);
 
   useEffect(() => {
@@ -365,11 +365,11 @@ export function StateProvider(data) {
     // wait for env to load (async)
     if (!evalEnv) return;
 
-    // when the widget is reset with a new ast/initialState, add missing entries
-    // to the initialState and then reset the current ast.
-    $state.__backfill(initialState, syncedKeys);
+    // when the widget is reset with a new ast/state, add missing entries
+    // to the state and then reset the current ast.
+    $state.__backfill(state, syncedKeys);
     setCurrentAst(ast);
-  }, [ast, initialState, $state]);
+  }, [ast, state, $state]);
 
   useEffect(() => {
     // if we have an AnyWidget model (ie. we are in widget model),

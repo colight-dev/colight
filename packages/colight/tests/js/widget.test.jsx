@@ -103,7 +103,7 @@ describe("Widget", () => {
   describe("useStateStore", () => {
     it("should initialize state", () => {
       const init = {
-        initialState: { count: 0 },
+        state: { count: 0 },
         syncedKeys: new Set(["count"]),
       };
       let result;
@@ -137,7 +137,7 @@ describe("Widget", () => {
       const data = {
         ast,
         model,
-        initialState: { count: 0 },
+        state: { count: 0 },
         syncedKeys: new Set(["count"]),
       };
 
@@ -152,7 +152,7 @@ describe("Widget", () => {
   });
 
   describe("state and Plot.js combination", () => {
-    it("should handle Plot.InitialState and Plot.js combination correctly", async () => {
+    it("should handle Plot.State and Plot.js combination correctly", async () => {
       const consoleSpy = vi.spyOn(console, "log");
 
       // Simulate the AST created by Python's `&` operator
@@ -161,7 +161,7 @@ describe("Widget", () => {
         {},
         {
           __type__: "function",
-          path: "InitialState",
+          path: "State",
           args: ["foo", { __type__: "ref", state_key: "foo" }],
         },
         {
@@ -172,7 +172,7 @@ describe("Widget", () => {
 
       const data = {
         ast,
-        initialState: { foo: 123 },
+        state: { foo: 123 },
         syncedKeys: new Set(["foo"]),
       };
 
@@ -195,7 +195,7 @@ describe("Widget", () => {
   describe("createStateStore", () => {
     it("should initialize with basic values", () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           count: 0,
           name: "Test",
         },
@@ -207,7 +207,7 @@ describe("Widget", () => {
 
     it("should update a value", () => {
       const $state = createStateStore({
-        initialState: { count: 0 },
+        state: { count: 0 },
         syncedKeys: new Set(["count"]),
       });
       $state.count = 1;
@@ -216,7 +216,7 @@ describe("Widget", () => {
 
     it("should handle computed values", () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           count: 0,
           doubleCount: js_expr("$state.count * 2"),
           countArray: js_expr("[$state.count, $state.count]"),
@@ -232,7 +232,7 @@ describe("Widget", () => {
 
     it("should handle references", () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           original: 10,
           reference: { __type__: "ref", state_key: "original" },
           c: 10,
@@ -246,7 +246,7 @@ describe("Widget", () => {
 
     it("should take computed properties as the initial value for updates", () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           firstValue: js_expr("1"),
           list: js_expr("[$state.firstValue, 2, 3]"),
         },
@@ -262,7 +262,7 @@ describe("Widget", () => {
 
     it('should apply "append" operation', () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           list: js_expr("[1, 2, 3]"),
         },
       });
@@ -273,7 +273,7 @@ describe("Widget", () => {
 
     it("should throw if circular reference is detected", () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           a: { __type__: "ref", state_key: "b" },
           b: { __type__: "ref", state_key: "a" },
           c: 10,
@@ -286,7 +286,7 @@ describe("Widget", () => {
 
     it('should demonstrate that during "update", ASTs are evaluated in order and not re-evaluated in a second pass', () => {
       const $state = createStateStore({
-        initialState: {
+        state: {
           a: 1,
           b: js_expr("$state.a + 1"),
         },
@@ -320,7 +320,7 @@ describe("Widget", () => {
     describe("deep property access", () => {
       it("should get deeply nested values", () => {
         const $state = createStateStore({
-          initialState: {
+          state: {
             nested: { a: { b: { c: 42 } } },
             array: [{ x: 1 }, { x: 2 }],
             typedArray: new Float32Array([1, 2, 3]),
@@ -335,7 +335,7 @@ describe("Widget", () => {
 
       it("should set deeply nested values", () => {
         const $state = createStateStore({
-          initialState: {
+          state: {
             nested: { a: { b: { c: 42 } } },
             array: [{ x: 1 }, { x: 2 }],
           },
@@ -351,7 +351,7 @@ describe("Widget", () => {
 
       it("should create intermediate objects when setting deep paths", () => {
         const $state = createStateStore({
-          initialState: {
+          state: {
             data: {},
           },
         });
@@ -363,7 +363,7 @@ describe("Widget", () => {
 
       it("should handle array paths with automatic array creation", () => {
         const $state = createStateStore({
-          initialState: {
+          state: {
             points: [],
           },
         });
@@ -377,7 +377,7 @@ describe("Widget", () => {
 
       it("should maintain reactivity with deep updates", () => {
         const $state = createStateStore({
-          initialState: {
+          state: {
             data: { value: 1 },
             computed: js_expr("$state.data.value * 2"),
           },

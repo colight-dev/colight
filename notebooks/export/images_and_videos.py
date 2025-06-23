@@ -40,7 +40,7 @@ dots.save_html(str(output_dir / "dots.html"))
 # %%
 
 ellipsoid_plot = (
-    Plot.initialState({})
+    Plot.State({})
     | Ellipsoid(
         [0, 0, 0, 1, 1, 1],  # Center position
         half_size=0.5,
@@ -83,7 +83,7 @@ dots.save_image(str(output_dir / "scatter.png"), width=400)
 
 # %%
 # Create a plot with state
-circle_plot = Plot.initialState({"count": 5}) | [
+circle_plot = Plot.State({"count": 5}) | [
     "div",
     {"style": {"padding": "20px", "backgroundColor": "#f0f0f0"}},
     ["h3", Plot.js("`Points: ${$state.count}`")],
@@ -123,7 +123,7 @@ for path in paths:
 
 # %%
 # Create a 3D scene with animated points
-animated_scene = Plot.initialState({"t": 0}) | Ellipsoid(
+animated_scene = Plot.State({"t": 0}) | Ellipsoid(
     Plot.js("""
             Array.from({length: 50}, (_, i) => {
                 const angle = i * Math.PI * 2 / 50;

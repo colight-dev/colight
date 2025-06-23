@@ -4,23 +4,23 @@
 # ## Contents
 # - Library Context
 # - Examples
-#   - Clickable Box Counter: demonstrates `initialState`, basic HTML/Tailwind, `Plot.js` state update.
-#   - Click and Drag Scatter Plot: demonstrates `initialState`, `Plot.dot`, `Plot.events`, `Plot.js` array updates, `renderChildEvents`, drag handling, layered plots (`+`), complex state object.
+#   - Clickable Box Counter: demonstrates `Plot.State`, basic HTML/Tailwind, `Plot.js` state update.
+#   - Click and Drag Scatter Plot: demonstrates `Plot.State`, `Plot.dot`, `Plot.events`, `Plot.js` array updates, `renderChildEvents`, drag handling, layered plots (`+`), complex state object.
 #   - Scatter Plot with LaTeX: demonstrates `Plot.dot`, `Plot.md` (LaTeX), layout operators (`&`), background styling.
 #   - Composable Plot with Legend: demonstrates `Plot.rect`, `Plot.ellipse`, `Plot.line`, `Plot.constantly`, `Plot.colorMap`, `Plot.colorLegend`, `Plot.aspectRatio`.
-#   - Animated Pixel Display: demonstrates `initialState`, `Plot.pixels`, `Plot.Slider` (animation), NumPy data, `Plot.js` state access.
-#   - Alphabet Slideshow: demonstrates `initialState`, HTML layout, complex `Plot.js` state updates, hover effects.
-#   - Live Python Code Editor: demonstrates `initialState`, `Plot.onChange` (Python callback), HTML forms, `Plot.js` state linkage, stdout capture.
+#   - Animated Pixel Display: demonstrates `Plot.State`, `Plot.pixels`, `Plot.Slider` (animation), NumPy data, `Plot.js` state access.
+#   - Alphabet Slideshow: demonstrates `Plot.State`, HTML layout, complex `Plot.js` state updates, hover effects.
+#   - Live Python Code Editor: demonstrates `Plot.State`, `Plot.onChange` (Python callback), HTML forms, `Plot.js` state linkage, stdout capture.
 #   - Civilizations Timeline: demonstrates `Plot.barX`, `Plot.text`, data mapping, sorting, `Plot.colorLegend`.
 #   - Plot Type Examples: demonstrates `Plot.Grid`, various plot types, `Plot.md` documentation.
-#   - Discoveries Timeline with Tooltips: `initialState`, `Plot.rect`, `Plot.dot`, `Plot.text`, `Plot.tip`, `Plot.pointer`, `Plot.js` options.
-#   - Animated Spring Motion: demonstrates `initialState`, `Plot.dot`, `Plot.Slider` (animation), NumPy data source, `Plot.js` state access.
-#   - Isotype Chart: demonstrates `initialState`, `Plot.text`, `Plot.js` emoji generation, faceting (`fy`), dynamic layout.
-#   - Pulsar Plot ("Unknown Pleasures"): demonstrates `initialState`, `Plot.line`, faceting (`fy`), dynamic layout, styling, domain manipulation.
-#   - Interactive Shape Playground: demonstrates `initialState`, `Plot.onChange`, `Plot.line`, `Plot.Slider` controls, NumPy data generation.
-#   - Tabbed View: demonstrates Custom components, `initialState`, HTML/Tailwind layout, `Plot.js` tab logic.
-#   - 3D Spiral Point Cloud: demonstrates `Scene`, `PointCloud`, `initialState`, NumPy 3D data, `Plot.js` hover interactions.
-#   - 3D Animated Spheres: demonstrates `Scene`, `Ellipsoid`, `initialState`, NumPy frame generation, `Plot.Slider` animation, synchronized camera state.
+#   - Discoveries Timeline with Tooltips: `Plot.State`, `Plot.rect`, `Plot.dot`, `Plot.text`, `Plot.tip`, `Plot.pointer`, `Plot.js` options.
+#   - Animated Spring Motion: demonstrates `Plot.State`, `Plot.dot`, `Plot.Slider` (animation), NumPy data source, `Plot.js` state access.
+#   - Isotype Chart: demonstrates `Plot.State`, `Plot.text`, `Plot.js` emoji generation, faceting (`fy`), dynamic layout.
+#   - Pulsar Plot ("Unknown Pleasures"): demonstrates `Plot.State`, `Plot.line`, faceting (`fy`), dynamic layout, styling, domain manipulation.
+#   - Interactive Shape Playground: demonstrates `Plot.State`, `Plot.onChange`, `Plot.line`, `Plot.Slider` controls, NumPy data generation.
+#   - Tabbed View: demonstrates Custom components, `Plot.State`, HTML/Tailwind layout, `Plot.js` tab logic.
+#   - 3D Spiral Point Cloud: demonstrates `Scene`, `PointCloud`, `Plot.State`, NumPy 3D data, `Plot.js` hover interactions.
+#   - 3D Animated Spheres: demonstrates `Scene`, `Ellipsoid`, `Plot.State`, NumPy frame generation, `Plot.Slider` animation, synchronized camera state.
 #   - Bitmap Component Examples: demonstrates `bitmap` component, NumPy pixel data formats (2D/3D), `Plot.Grid`.
 #
 # ## Library Context
@@ -28,7 +28,7 @@
 #
 # Layout components (Row, Column, Grid) allow flexible arrangement of elements and can be composed using & (Row) and | (Column) operators. HTML (via React) can be created using "hiccup in python", and tailwind css classes are supported.
 #
-# There is a "state" api across both Python and JavaScript. In Python one sets initial state by including `Plot.initialState({key: value})` as a layout item (can be anywhere), and `Plot.onChange({key: callback})` to invoke functions when state changes. These onChange Callbacks receive (widget, event) arguments where event contains `"value"`. In Python one reads state via `widget.key`, resets via `widget.key = foo`, set multiple values via `widget.update({key: value})` or pass `widget.update` any number of `[key, operation, payload]` lists where operation can be "append", "concat", "setAt", or "reset". In JavaScript one reads state via `$state.key`, write via `$state.key = foo`, and updates via `$state.update({key: value})` or pass $state.update any number of operations as in python, eg. `$state.update(["foo", "append", 1], ["bar", "concat", [1, 2]], ["baz", "setAt", [index, value]])`.
+# There is a "state" api across both Python and JavaScript. In Python one sets initial state by including `Plot.State({key: value})` as a layout item (can be anywhere), and `Plot.onChange({key: callback})` to invoke functions when state changes. These onChange Callbacks receive (widget, event) arguments where event contains `"value"`. In Python one reads state via `widget.key`, resets via `widget.key = foo`, set multiple values via `widget.update({key: value})` or pass `widget.update` any number of `[key, operation, payload]` lists where operation can be "append", "concat", "setAt", or "reset". In JavaScript one reads state via `$state.key`, write via `$state.key = foo`, and updates via `$state.update({key: value})` or pass $state.update any number of operations as in python, eg. `$state.update(["foo", "append", 1], ["bar", "concat", [1, 2]], ["baz", "setAt", [index, value]])`.
 #
 # The `Plot.Slider` component not only shows a slider but can also cycle a state variable through a range of values at a specified fps, eg. `Plot.Slider(key, init, [0, 10], fps=3)` will cycle `key` from 0-10 inclusive starting at `init`. `fps="ref"` is also valid and uses requestAnimationFrame instead of a numeric interval. Range can be list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n). Thus if one wants to show a series of 'frames' one can do `Plot.Slider("frame", range=len(frames))` to cycle through all the valid indexes of `frames`.
 # <examples>
@@ -40,7 +40,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState({"clicks": 0})
+    Plot.State({"clicks": 0})
     | [
         "div",
         {
@@ -58,7 +58,7 @@ from colight.plot import js
 import colight.plot as Plot
 
 (
-    Plot.initialState({"points": []})
+    Plot.State({"points": []})
     | Plot.dot((js("$state.points")))
     + Plot.events(
         {"onClick": js("(e) => $state.update(['points', 'append', [e.x, e.y]])")}
@@ -72,7 +72,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState({"points": []})
+    Plot.State({"points": []})
     | Plot.dot(
         (js("$state.points")),
         r=10,  # larger, easier to drag
@@ -94,7 +94,7 @@ from colight.plot import js
 # User: Nice work. Can we add a direction line to each point, and shift-drag to rotate each point?
 # Demonstrates: Complex state object, Plot.js logic (drag/rotate), layered plots (+).
 (
-    Plot.initialState({"points": []})
+    Plot.State({"points": []})
     | Plot.events(
         # one {x, y, angle} object per point
         {
@@ -151,7 +151,7 @@ from colight.plot import js
 # User: Nice work. Can we add a direction line to each point, and shift-drag to rotate each point?
 # Demonstrates: Complex state object, Plot.js logic (drag/rotate), layered plots (+).
 (
-    Plot.initialState({"points": []})
+    Plot.State({"points": []})
     | Plot.events(
         # one {x, y, angle} object per point
         {
@@ -299,7 +299,7 @@ height = 50
 data = generate_pixels(width=width, height=height, num_frames=60)
 
 (
-    Plot.initialState(
+    Plot.State(
         {"pixels": data, "width": width, "height": height, "frame": 0, "fps": 30}
     )
     | Plot.pixels(
@@ -326,7 +326,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState({"frame": 0, "letters": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
+    Plot.State({"frame": 0, "letters": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
     | [
         "div.flex.items-center.justify-center.font-bold.select-none",
         {
@@ -394,7 +394,7 @@ def evaluate(widget, _e):
 
 
 (
-    Plot.initialState({"result": "", "toEval": "", "source": initial_source})
+    Plot.State({"result": "", "toEval": "", "source": initial_source})
     | Plot.onChange({"toEval": evaluate})
     | Plot.html(
         [
@@ -490,7 +490,7 @@ cat_data = [{"category": c, "value": v} for c, v in zip(categories, values)]
 
 # Create a grid of common plot types
 (
-    Plot.initialState({"title": "Common Plot Types"})
+    Plot.State({"title": "Common Plot Types"})
     | Plot.Grid(
         # Line plot
         Plot.line(points) + Plot.title("Line"),
@@ -584,7 +584,7 @@ from docs.examples.data import discoveries
 import colight.plot as Plot
 
 (
-    Plot.initialState({"discoveries": discoveries})
+    Plot.State({"discoveries": discoveries})
     |
     # Background grid
     Plot.gridX(tickSpacing=50)
@@ -683,7 +683,7 @@ def generate_spring_motion(num_frames=60):
 frames = generate_spring_motion()
 
 (
-    Plot.initialState(
+    Plot.State(
         {"frames": frames, "frame": 0, "colors": ["#ff6b6b", "#4ecdc4", "#45b7d1"]}
     )
     | Plot.dot(
@@ -718,7 +718,7 @@ from docs.examples.data import pulsar_data
 import colight.plot as Plot
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "data": pulsar_data,
             # compute # of waves, we need it to determine layout
@@ -769,7 +769,7 @@ from docs.examples.data import pulsar_data
 import colight.plot as Plot
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "data": pulsar_data,
             # compute # of waves, we need it to determine layout
@@ -843,7 +843,7 @@ def updateState(widget, _):
 
 
 (
-    Plot.initialState({"shapes": generate_shapes(), "rotation": 0, "scale": 1.0})
+    Plot.State({"shapes": generate_shapes(), "rotation": 0, "scale": 1.0})
     | Plot.onChange({"rotation": updateState, "scale": updateState})
     | Plot.line(
         js("$state.shapes"),
@@ -893,7 +893,7 @@ def tabs_view(tabs, contents):
     """
     tab_container_class = "relative grid grid-cols-1 grid-rows-1 "
 
-    return Plot.initialState({"tab": tabs[0]}) | [
+    return Plot.State({"tab": tabs[0]}) | [
         "div",
         {},
         [
@@ -983,7 +983,7 @@ colors[:, 2] = np.clip(1.5 - abs(3.0 * hue - 4.5), 0, 1)  # Blue
 sizes = 0.01 + 0.02 * np.sin(t)
 
 (
-    Plot.initialState({"hover_point": None})
+    Plot.State({"hover_point": None})
     | Scene(
         PointCloud(
             centers,
@@ -1068,7 +1068,7 @@ camera = {
 }
 
 (
-    Plot.initialState(
+    Plot.State(
         {
             "frame": 0,
             "centers": centers.reshape(60, -1),  # Flatten to (n_frames, n_ellipsoids*3)

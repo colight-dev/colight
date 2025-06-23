@@ -5,7 +5,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState(
+    Plot.State(
         {"clicks": 0, "doubled": js("$state.clicks * 2"), "tripled": 0}, sync=True
     )
     | Plot.onChange(
@@ -37,7 +37,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState(
+    Plot.State(
         {"a": 0, "b": 0, "c": 0},
         sync=True,
     )

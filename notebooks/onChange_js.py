@@ -2,7 +2,7 @@ import colight.plot as Plot
 from colight.plot import js
 
 (
-    Plot.initialState({"position": None, "position_rounded": None})
+    Plot.State({"position": None, "position_rounded": None})
     | Plot.onChange(
         {
             "position": Plot.js("""
