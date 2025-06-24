@@ -104,10 +104,10 @@ class LayoutItem:
         else:
             return self.html()
 
-    def save_html(self, path: str, dist_url=None) -> str:
+    def save_html(self, path: str, dist_url=None, local=False) -> str:
         create_parent_dir(path)
         with open(path, "w") as f:
-            f.write(html_page(self.for_json(), dist_url=dist_url))
+            f.write(html_page(self.for_json(), dist_url=dist_url, local=local))
         return str(path)
 
     def save_file(self, path: str) -> str:
