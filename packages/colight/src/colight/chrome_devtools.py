@@ -196,6 +196,7 @@ class ChromeContext:
         debug=False,
         reuse=True,
         keep_alive: float = 1.0,
+        window_vars=None,
     ):
         self.id = f"chrome_{int(time.time() * 1000)}_{hash(str(port))}"  # Unique ID for this context
         self.port = port
@@ -205,6 +206,7 @@ class ChromeContext:
         self.debug = debug
         self.reuse = reuse
         self.keep_alive = keep_alive
+        self.window_vars = window_vars or {}
         self.chrome_process = None
         self.ws = None
         self.cmd_id = 0
@@ -555,6 +557,28 @@ class ChromeContext:
     def load_html(self, html, files=None):
         """Serve HTML content and optional files over localhost and load it in the page"""
         self.set_size()
+
+        # Inject window variables if provided
+        if self.window_vars:
+            # Create a script that sets window variables before anything else
+            window_vars_script = "<script>\n"
+            for key, value in self.window_vars.items():
+                window_vars_script += f"window.{key} = {json.dumps(value)};\n"
+            window_vars_script += "</script>\n"
+
+            # Insert the script at the beginning of the head tag, or right after <html> if no head
+            if "<head>" in html:
+                html = html.replace("<head>", f"<head>\n{window_vars_script}", 1)
+            elif "<html>" in html:
+                html = html.replace("<html>", f"<html>\n{window_vars_script}", 1)
+            else:
+                # If no html tag, prepend the script
+                html = window_vars_script + html
+
+            if self.debug:
+                print(
+                    f"[chrome_devtools.py] Injected window variables: {list(self.window_vars.keys())}"
+                )
 
         # Serve files using ColightHTTPServer
         if files:

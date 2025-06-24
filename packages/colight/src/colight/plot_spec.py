@@ -3,6 +3,7 @@ from typing import Any, Sequence, TypeAlias, Union
 
 from colight.env import CONFIG
 from colight.layout import JSRef, JSCall, LayoutItem
+from colight.protocols import Collector
 
 SpecInput: TypeAlias = Union[
     "PlotSpec",
@@ -13,13 +14,19 @@ SpecInput: TypeAlias = Union[
 ]
 
 
-class MarkSpec:
+class MarkSpec(Collector):
     def __init__(self, name, data, options):
         self._state_key = str(uuid.uuid4())
         self.ast = JSCall("MarkSpec", [name, data, options])
 
     def for_json(self) -> Any:
         return self.ast
+
+    def collect(self, collector, **kwargs):
+        """Collect state and return reference."""
+        return collector.state_entry(
+            state_key=self._state_key, value=self.for_json(), sync=False, **kwargs
+        )
 
 
 def flatten_layers(layers: Sequence[Any]) -> list[Any]:
