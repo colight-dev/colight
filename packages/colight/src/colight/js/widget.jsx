@@ -428,6 +428,74 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+function DraggableViewer({ data: initialData }) {
+  const [data, setData] = useState(initialData);
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleDrag = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      // Check if we're leaving the component entirely
+      if (!e.currentTarget.contains(e.relatedTarget)) {
+        setDragActive(false);
+      }
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+
+      // Check if it's a .colight file
+      if (file.name.endsWith(".colight")) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const parsedData = parseColightData(arrayBuffer);
+          setData(parsedData);
+        } catch (error) {
+          console.error("Error parsing .colight file:", error);
+          alert(`Error loading .colight file: ${error.message}`);
+        }
+      } else {
+        alert("Please drop a .colight file");
+      }
+    }
+  }, []);
+
+  return (
+    <div
+      className={tw(
+        `relative ${dragActive ? "ring-2 ring-blue-500 ring-opacity-50" : ""}`,
+      )}
+      onDragEnter={handleDrag}
+      onDragLeave={handleDrag}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
+      <Viewer {...data} />
+      {dragActive && (
+        <div
+          className={tw(
+            "absolute inset-0 bg-blue-500 bg-opacity-10 pointer-events-none flex items-center justify-center",
+          )}
+        >
+          <div className={tw("bg-white px-4 py-2 rounded shadow-lg")}>
+            <p className={tw("text-sm font-medium")}>Drop .colight file here</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Viewer(data) {
   injectCSS();
 
@@ -452,111 +520,6 @@ export function Viewer(data) {
     </div>
   );
 }
-
-function parseJSON(jsonString) {
-  if (jsonString === null) return null;
-  try {
-    return JSON.parse(jsonString);
-  } catch (error) {
-    console.error("Error parsing JSON:", jsonString);
-    console.error(error);
-    return error;
-  }
-}
-
-// TODO - file viewer with .colight format
-// function FileViewer() {
-//   const [data, setData] = useState(null);
-//   const [dragActive, setDragActive] = useState(false);
-
-//   const handleDrag = (e) => {
-//     e.preventDefault();
-//     e.stopPropagation();
-//     if (e.type === "dragenter" || e.type === "dragover") {
-//       setDragActive(true);
-//     } else if (e.type === "dragleave") {
-//       setDragActive(false);
-//     }
-//   };
-
-//   const handleDrop = (e) => {
-//     e.preventDefault();
-//     e.stopPropagation();
-//     setDragActive(false);
-//     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-//       handleFile(e.dataTransfer.files[0]);
-//     }
-//   };
-
-//   const handleChange = (e) => {
-//     e.preventDefault();
-//     if (e.target.files && e.target.files[0]) {
-//       handleFile(e.target.files[0]);
-//     }
-//   };
-
-//   const handleFile = (file) => {
-//     const reader = new FileReader();
-//     reader.onload = (e) => {
-//       const data = parseJSON(e.target.result);
-//       if (data instanceof Error) {
-//         alert("Error parsing JSON file. Please ensure it's a valid JSON.");
-//       } else {
-//         setData({
-//           ...data,
-//           size: estimateJSONSize(e.target.result),
-//         });
-//       }
-//     };
-//     reader.readAsText(file);
-//   };
-
-//   return (
-//     <div className={tw("p-3")}>
-//       <div
-//         className={tw(
-//           `border-2 border-dashed rounded-lg p-5 text-center ${
-//             dragActive ? "border-blue-500" : "border-gray-300"
-//           }`
-//         )}
-//         onDragEnter={handleDrag}
-//         onDragLeave={handleDrag}
-//         onDragOver={handleDrag}
-//         onDrop={handleDrop}
-//       >
-//         <label
-//           htmlFor="file-upload"
-//           className={tw(
-//             "text-sm inline-block px-3 py-2 mb-2 text-white bg-blue-600 rounded-full cursor-pointer hover:bg-blue-700"
-//           )}
-//         >
-//           Choose a JSON file
-//         </label>
-//         <input
-//           type="file"
-//           id="file-upload"
-//           accept=".json"
-//           onChange={handleChange}
-//           className={tw("hidden")}
-//         />
-//         <p className={tw("text-sm text-gray-600")}>
-//           or drag and drop a JSON file here
-//         </p>
-//       </div>
-//       {data && (
-//         <div className={tw("mt-4")}>
-//           <h2 className={tw("text-lg mb-3")}>Loaded JSON Data:</h2>
-//           <Viewer {...data} />
-//         </div>
-//       )}
-//     </div>
-//   );
-// }
-
-// export const renderFile = (element) => {
-//   const root = ReactDOM.createRoot(element);
-//   root.render(<FileViewer />);
-// };
 
 /**
  * Renders the Colight widget into a specified DOM element.
@@ -601,7 +564,7 @@ export const render = async (element, data, id) => {
   const root = ReactDOM.createRoot(el);
   el._ReactRoot = root;
   // Pass the original data (with placeholders) and the fully resolved buffers array
-  root.render(<Viewer {...data} id={id} />);
+  root.render(<DraggableViewer data={{ ...data, id }} />);
 };
 
 export { parseColightData, parseColightScript };

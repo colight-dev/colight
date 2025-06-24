@@ -32,12 +32,15 @@ def encode_buffers(buffers):
     return json.dumps(buffer_entries)
 
 
-def get_script_content():
+def get_script_content(dist_url=None, local=False):
     """Get the JS content either from CDN or local file"""
-    if env.VERSIONED_CDN_DIST_URL:
-        return (
-            f'import {{ render }} from "{env.VERSIONED_CDN_DIST_URL + "/widget.mjs"}";'
-        )
+
+    script_url = (
+        dist_url or env.VERSIONED_CDN_DIST_URL or env.UNVERSIONED_CDN_DIST_URL
+    ) + "/widget.mjs"
+
+    if not local:
+        return f'import {{ render, parseColightScript }} from "{script_url}";'
     else:  # It's a local Path
         # Create a blob URL for the module
         content = read_file(env.WIDGET_PATH)
@@ -47,22 +50,17 @@ def get_script_content():
             const decodedContent = atob(encodedContent);
             const moduleBlob = new Blob([decodedContent], {{ type: 'text/javascript' }});
             const moduleUrl = URL.createObjectURL(moduleBlob);
-            const {{ render }} = await import(moduleUrl);
+            const {{ render, parseColightScript }} = await import(moduleUrl);
             URL.revokeObjectURL(moduleUrl);
         """
 
 
-def html_snippet(ast, id=None, dist_url=None):
+def html_snippet(ast, id=None, dist_url=None, local=False):
     id = id or f"colight-widget-{uuid.uuid4().hex}"
     data, buffers = to_json_with_state(ast, buffers=[])
 
     colight_data = create_bytes(data, buffers)
     colight_base64 = base64.b64encode(colight_data).decode("utf-8")
-
-    # Get the appropriate script URL
-    script_url = (
-        dist_url or env.VERSIONED_CDN_DIST_URL or env.UNVERSIONED_CDN_DIST_URL
-    ) + "/widget.mjs"
 
     html_content = f"""
     <div class="bg-white p3" id="{id}"></div>
@@ -72,7 +70,7 @@ def html_snippet(ast, id=None, dist_url=None):
     </script>
 
     <script type="module">
-        import {{ render, parseColightScript }} from "{script_url}";;
+        {get_script_content(dist_url=dist_url, local=local)}
         const container = document.getElementById('{id}');
         const colightData = parseColightScript(container.nextElementSibling);
         render(container, colightData, '{id}');
@@ -82,7 +80,7 @@ def html_snippet(ast, id=None, dist_url=None):
     return html_content
 
 
-def html_page(ast, id=None, dist_url=None):
+def html_page(ast, id=None, dist_url=None, local=False):
     return f"""
     <!DOCTYPE html>
     <html>
@@ -91,7 +89,7 @@ def html_page(ast, id=None, dist_url=None):
         <title>Colight</title>
     </head>
     <body>
-        {html_snippet(ast, id, dist_url=dist_url)}
+        {html_snippet(ast, id, dist_url=dist_url, local=local)}
     </body>
     </html>
     """

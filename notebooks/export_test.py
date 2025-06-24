@@ -19,13 +19,21 @@ p = Plot.dot(
     {"x": np.random.rand(1000), "y": np.random.rand(1000)},
 )
 
+p_pink = Plot.dot(
+    {"x": np.random.rand(1000), "y": np.random.rand(1000)}, fill="pink"
+).save_file("scratch/dots_pink.colight")
+
+
 # Export with local embed
 print("Exporting to .colight with local development viewer...")
 colight_path = p.save_file("scratch/test_export.colight")
 example_path = create_embed_example(colight_path)
+html_path = p.save_html("scratch/test_export_html.html", local=True)
+
+p.save_file("scratch/dots.colight")
 
 print("Success! Files created:")
 print(f"- .colight file: {colight_path}")
-print(f"- Example HTML: {example_path}")
-print(f"\nOpen {example_path} in your browser to view the visual.")
+print(f"- Example HTML: {html_path}")
+print(f"\nOpen {html_path} in your browser to view the visual.")
 print("It should work directly with the file:// protocol, no server needed.")
