@@ -21,6 +21,7 @@ export const Slider = mobxReact.observer(function (options) {
   let {
     state_key,
     fps,
+    autoplay,
     label,
     loop = true,
     init,
@@ -71,7 +72,9 @@ export const Slider = mobxReact.observer(function (options) {
   const isAnimated =
     !GENERATING_VIDEO &&
     (fps === "raf" || (typeof fps === "number" && fps > 0));
-  const [isPlaying, setIsPlaying] = useState(isAnimated);
+  // If autoplay is not specified, default to true when fps is provided (legacy behavior)
+  const shouldAutoplay = autoplay !== undefined ? autoplay : isAnimated;
+  const [isPlaying, setIsPlaying] = useState(shouldAutoplay && isAnimated);
   const lastFrameTimeRef = useRef(performance.now());
   const frameCountRef = useRef(0);
   const lastLogTimeRef = useRef(performance.now());

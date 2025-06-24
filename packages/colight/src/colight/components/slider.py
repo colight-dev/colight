@@ -14,6 +14,7 @@ class Slider(LayoutItem, Collector):
         range: Optional[Union[int, float, List[Union[int, float]], JSExpr]] = None,
         rangeFrom: Any = None,
         fps: Optional[Union[int, str, JSExpr]] = None,
+        autoplay: Optional[Union[bool, JSExpr]] = None,
         step: Union[int, float, JSExpr] = 1,
         tail: Union[bool, JSExpr] = False,
         loop: Union[bool, JSExpr] = True,
@@ -33,6 +34,7 @@ class Slider(LayoutItem, Collector):
             range (Union[int, List[int]], optional):  A list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n).
             rangeFrom (Any, optional): Derive the range from the length of this (ref) argument.
             fps (int, optional): Frames per second for animation through the range. If > 0, enables animation.
+            autoplay (bool, optional): If True, animation starts automatically. Defaults to True when fps is provided.
             step (int, optional): Step size for the range. Defaults to 1.
             tail (bool, optional): If True, animation stops at the end of the range. Defaults to False.
             loop (bool, optional): If True, animation loops back to start when reaching the end. Defaults to True.
@@ -47,6 +49,7 @@ class Slider(LayoutItem, Collector):
         Example:
         ```python
         Plot.Slider("frame", init=0, range=100, fps=30, label="Frame")
+        Plot.Slider("frame", init=0, range=100, fps=30, autoplay=False, label="Frame")
         ```
         """
         super().__init__()
@@ -75,6 +78,7 @@ class Slider(LayoutItem, Collector):
             "range": range,
             "rangeFrom": rangeFrom,
             "fps": fps,
+            "autoplay": autoplay,
             "step": step,
             "tail": tail,
             "loop": loop,
