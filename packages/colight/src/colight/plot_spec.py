@@ -22,10 +22,10 @@ class MarkSpec(Collector):
     def for_json(self) -> Any:
         return self.ast
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Collect state and return reference."""
         return collector.state_entry(
-            state_key=self._state_key, value=self.for_json(), sync=False, **kwargs
+            state_key=self._state_key, value=self.for_json(), sync=False
         )
 
 

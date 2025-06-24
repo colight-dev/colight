@@ -26,8 +26,9 @@ class TestWidgetArrayHandling(unittest.TestCase):
     def test_numpy_array(self):
         # Test serialization of numpy arrays
         arr = np.array([[1, 2], [3, 4]], dtype=np.float32)
-        buffers = []
-        result = to_json(arr, buffers=buffers)
+        collected_state = CollectedState()
+        result = to_json(arr, collected_state=collected_state)
+        buffers = collected_state.buffers
 
         # Add check to ensure result is a dictionary
         assert isinstance(result, dict)
@@ -46,8 +47,9 @@ class TestWidgetArrayHandling(unittest.TestCase):
             "arr1": np.array([1, 2, 3]),
             "nested": {"arr2": np.array([[4, 5], [6, 7]])},
         }
-        buffers = []
-        result = to_json(data, buffers=buffers)
+        collected_state = CollectedState()
+        result = to_json(data, collected_state=collected_state)
+        buffers = collected_state.buffers
 
         self.assertEqual(len(buffers), 2)  # Should have 2 buffers
 
@@ -64,8 +66,9 @@ class TestWidgetArrayHandling(unittest.TestCase):
             return
         # Test handling of JAX arrays
         arr = jnp.array([[1, 2], [3, 4]])
-        buffers = []
-        result = to_json(arr, buffers=buffers)
+        collected_state = CollectedState()
+        result = to_json(arr, collected_state=collected_state)
+        buffers = collected_state.buffers
 
         assert isinstance(result, dict)
         self.assertEqual(len(buffers), 1)
@@ -81,8 +84,9 @@ class TestWidgetArrayHandling(unittest.TestCase):
 
         for dtype in dtypes:
             arr = np.array([1, 2, 3], dtype=dtype)
-            buffers = []
-            result = to_json(arr, buffers=buffers)
+            collected_state = CollectedState()
+            result = to_json(arr, collected_state=collected_state)
+            buffers = collected_state.buffers
 
             assert isinstance(result, dict)
             self.assertEqual(result["dtype"], dtype.__name__)
@@ -97,8 +101,9 @@ class TestWidgetArrayHandling(unittest.TestCase):
 
         # Test NaN in numpy array
         arr = np.array([1.0, np.nan, 3.0])
-        buffers = []
-        result = to_json(arr, buffers=buffers)
+        collected_state = CollectedState()
+        result = to_json(arr, collected_state=collected_state)
+        buffers = collected_state.buffers
 
         assert isinstance(result, dict)
         self.assertEqual(result["__type__"], "ndarray")

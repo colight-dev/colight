@@ -450,7 +450,7 @@ class Listener(LayoutItem, Collector):
     def for_json(self):
         return None
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Collect listeners and disappear from output."""
         collector.add_listeners(self._state_listeners)
         return None
@@ -484,13 +484,12 @@ class Ref(LayoutItem, Collector):
     def for_json(self):
         return unwrap_for_json(self.value)
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Collect state and return reference."""
         return collector.state_entry(
             state_key=self._state_key,
             value=self.for_json(),
             sync=self._state_sync,
-            **kwargs,
         )
 
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
@@ -579,12 +578,12 @@ class Marker(LayoutItem, Collector):
     def for_json(self):
         return None
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Process side effects and disappear from output."""
         # Import here to avoid circular import
         from colight.widget import to_json
 
-        to_json(self.effect_content, collected_state=collector, **kwargs)
+        to_json(self.effect_content, collected_state=collector)
         return None
 
 

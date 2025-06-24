@@ -93,7 +93,7 @@ class Slider(LayoutItem, Collector):
     def for_json(self):
         return Hiccup([_Slider, self.slider_options]).for_json()
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Collect animation metadata if animatable and return serialized slider."""
         # Store metadata when animatable (string key + fps)
         if isinstance(self.key, str) and self.fps is not None:
@@ -112,4 +112,4 @@ class Slider(LayoutItem, Collector):
 
         # Serialize the hiccup structure completely
         hiccup = Hiccup([_Slider, self.slider_options])
-        return to_json(hiccup, collected_state=collector, **kwargs)
+        return to_json(hiccup, collected_state=collector)

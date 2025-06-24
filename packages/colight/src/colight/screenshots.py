@@ -170,8 +170,9 @@ class StudioContext(ChromeContext):
             print("[StudioContext] Updating state")
         if not isinstance(state_updates, list):
             raise AssertionError("state_updates must be a list")
-        buffers = []
-        state_data = widget.to_json(state_updates, buffers=buffers)
+        collected_state = widget.CollectedState()
+        state_data = widget.to_json(state_updates, collected_state=collected_state)
+        buffers = collected_state.buffers
 
         # Convert buffers to base64 for passing to JavaScript (for state updates, not initial load)
         encoded_buffers = [

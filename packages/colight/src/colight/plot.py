@@ -1126,7 +1126,7 @@ class Import(LayoutItem, Collector):
     def for_json(self):
         return None
 
-    def collect(self, collector, **kwargs):
+    def collect(self, collector):
         """Collect imports and disappear from output."""
         for spec in self._state_imports:
             collector.add_import(spec)
