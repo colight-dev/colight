@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 import colight.plot_defs as plot_defs
 from colight.components.bitmap import bitmap
 from colight.env import configure
+from colight.protocols import Collector
 from colight.layout import (
     Column,
     Grid,
@@ -1022,16 +1023,7 @@ def dimensions(data, dimensions=[], leaves=None):
     return Dimensioned(data, dimensions)
 
 
-def Import(
-    source: str,
-    alias: Optional[str] = None,
-    default: Optional[str] = None,
-    refer: Optional[list[str]] = None,
-    refer_all: bool = False,
-    rename: Optional[dict[str, str]] = None,
-    exclude: Optional[list[str]] = None,
-    format: str = "esm",
-) -> LayoutItem:
+class Import(LayoutItem, Collector):
     """Import JavaScript code into the Colight environment.
 
     Args:
@@ -1085,44 +1077,60 @@ def Import(
     ```
     """
 
-    # Create spec for the import
-    spec: dict[str, Union[str, list[str], bool, dict[str, str]]] = {"format": format}
+    def __init__(
+        self,
+        source: str,
+        alias: Optional[str] = None,
+        default: Optional[str] = None,
+        refer: Optional[list[str]] = None,
+        refer_all: bool = False,
+        rename: Optional[dict[str, str]] = None,
+        exclude: Optional[list[str]] = None,
+        format: str = "esm",
+    ):
+        super().__init__()
 
-    # Handle source based on prefix
-    if source.startswith("path:"):
-        path = source[5:]  # Remove 'path:' prefix
-        try:
-            resolved_path = pathlib.Path.cwd() / path
-            with open(resolved_path) as f:
-                spec["source"] = f.read()
-        except Exception as e:
-            raise ValueError(f"Failed to load file at {path}: {e}")
-    else:
-        spec["source"] = source
+        # Create spec for the import
+        spec: dict[str, Union[str, list[str], bool, dict[str, str]]] = {
+            "format": format
+        }
 
-    if alias:
-        spec["alias"] = alias
-    if default:
-        spec["default"] = str(default)
-    if refer:
-        spec["refer"] = refer
-    if refer_all:
-        spec["refer_all"] = True
-    if rename:
-        spec["rename"] = rename
-    if exclude:
-        spec["exclude"] = exclude
+        # Handle source based on prefix
+        if source.startswith("path:"):
+            path = source[5:]  # Remove 'path:' prefix
+            try:
+                resolved_path = pathlib.Path.cwd() / path
+                with open(resolved_path) as f:
+                    spec["source"] = f.read()
+            except Exception as e:
+                raise ValueError(f"Failed to load file at {path}: {e}")
+        else:
+            spec["source"] = source
 
-    class RequireItem(LayoutItem):
-        def __init__(self, spec):
-            super().__init__()
-            # Store as a list of specs instead of dict
-            self._state_imports = [spec]
+        if alias:
+            spec["alias"] = alias
+        if default:
+            spec["default"] = str(default)
+        if refer:
+            spec["refer"] = refer
+        if refer_all:
+            spec["refer_all"] = True
+        if rename:
+            spec["rename"] = rename
+        if exclude:
+            spec["exclude"] = exclude
 
-        def for_json(self):
-            return None
+        # Store as a list of specs instead of dict
+        self._state_imports = [spec]
 
-    return RequireItem(spec)
+    def for_json(self):
+        return None
+
+    def collect(self, collector, **kwargs):
+        """Collect imports and disappear from output."""
+        for spec in self._state_imports:
+            collector.add_import(spec)
+        return None
 
 
 # Add this near the top of the file, after the imports

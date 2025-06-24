@@ -8,6 +8,7 @@ import colight.screenshots as screenshots
 from colight.env import CONFIG
 from colight.html import html_page, html_snippet
 from colight.widget import Widget, WidgetState, to_json_with_state
+from colight.protocols import Collector
 
 
 def create_parent_dir(path: str) -> None:
@@ -119,7 +120,14 @@ class LayoutItem:
         return format.create_bytes(data, buffers)
 
     def save_image(
-        self, path, width=500, height=None, scale: float = 1.0, quality=90, debug=False
+        self,
+        path,
+        width=500,
+        height=None,
+        scale: float = 1.0,
+        quality=90,
+        debug=False,
+        **kwargs,
     ):
         """Save the plot as an image using headless browser.
 
@@ -139,6 +147,7 @@ class LayoutItem:
             scale=scale,
             quality=quality,
             debug=debug,
+            **kwargs,
         )
         print(f"Image saved to {path}")
 
@@ -161,6 +170,7 @@ class LayoutItem:
         height=None,
         quality=90,
         debug=False,
+        **kwargs,
     ):
         """Save a sequence of images for different states of the plot.
 
@@ -188,11 +198,12 @@ class LayoutItem:
             height=height,
             quality=quality,
             debug=debug,
+            **kwargs,
         )
 
     def save_video(
         self,
-        filename,
+        path,
         state_updates=None,
         fps=None,
         width=500,
@@ -200,12 +211,14 @@ class LayoutItem:
         scale=2.0,
         hide_sliders=True,
         debug=False,
+        window_vars={},
+        **kwargs,
     ):
         """Save a sequence of states as a video.
 
         Args:
             state_updates: List of state updates to apply sequentially
-            filename: Path where the resulting video will be saved. Use .gif extension to save as GIF, otherwise saves as MP4
+            path: Path where the resulting video will be saved. Use .gif extension to save as GIF, otherwise saves as MP4
             fps: Frame rate (frames per second) for the video (default: 24)
             width: Width of the video in pixels (default: 500)
             height: Optional height of the video in pixels
@@ -217,7 +230,7 @@ class LayoutItem:
         """
         return screenshots.save_video(
             self,
-            filename,
+            path,
             state_updates,
             fps=fps,
             width=width,
@@ -226,8 +239,10 @@ class LayoutItem:
             window_vars={
                 "COLIGHT_GENERATING_VIDEO": True,
                 "COLIGHT_HIDE_SLIDERS": True if hide_sliders else False,
+                **window_vars,
             },
             debug=debug,
+            **kwargs,
         )
 
     def reset(self, other: "LayoutItem") -> None:
@@ -291,7 +306,7 @@ class JSRef(LayoutItem):
 
     def __getattr__(self, name: str) -> "JSRef":
         """Returns a reference to a nested property or method of the JavaScript object."""
-        if name.startswith("_state_"):
+        if name.startswith("_"):
             raise AttributeError(
                 f"'{self.__class__.__name__}' object has no attribute '{name}'"
             )
@@ -428,11 +443,16 @@ def unwrap_for_json(x):
     return x
 
 
-class Listener(LayoutItem):
+class Listener(LayoutItem, Collector):
     def __init__(self, listeners: dict):
         self._state_listeners = listeners
 
     def for_json(self):
+        return None
+
+    def collect(self, collector, **kwargs):
+        """Collect listeners and disappear from output."""
+        collector.add_listeners(self._state_listeners)
         return None
 
 
@@ -455,7 +475,7 @@ def onChange(callbacks):
     return Listener(callbacks)
 
 
-class Ref(LayoutItem):
+class Ref(LayoutItem, Collector):
     def __init__(self, value, state_key=None, sync=False):
         self._state_key = str(uuid.uuid1()) if state_key is None else state_key
         self._state_sync = sync
@@ -463,6 +483,15 @@ class Ref(LayoutItem):
 
     def for_json(self):
         return unwrap_for_json(self.value)
+
+    def collect(self, collector, **kwargs):
+        """Collect state and return reference."""
+        return collector.state_entry(
+            state_key=self._state_key,
+            value=self.for_json(),
+            sync=self._state_sync,
+            **kwargs,
+        )
 
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
         if hasattr(self.value, "_repr_mimebundle_"):
@@ -535,7 +564,7 @@ def Grid(*children, **kwargs):
 Grid.for_json = lambda: JSRef("Grid")  # allow Grid to be used in hiccup
 
 
-class Marker(LayoutItem):
+class Marker(LayoutItem, Collector):
     """A marker class that groups objects for side effects but doesn't render.
 
     Used to group objects that should be processed for their side effects
@@ -548,6 +577,14 @@ class Marker(LayoutItem):
         self.effect_content = items
 
     def for_json(self):
+        return None
+
+    def collect(self, collector, **kwargs):
+        """Process side effects and disappear from output."""
+        # Import here to avoid circular import
+        from colight.widget import to_json
+
+        to_json(self.effect_content, collected_state=collector, **kwargs)
         return None
 
 

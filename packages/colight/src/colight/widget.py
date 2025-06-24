@@ -9,6 +9,7 @@ import traitlets
 import warnings
 
 from colight.env import CONFIG, ANYWIDGET_PATH
+from colight.protocols import Collector
 
 
 class SubscriptableNamespace(SimpleNamespace):
@@ -75,11 +76,11 @@ def serialize_binary_data(
 
 
 def to_json(
-    data,
-    collected_state=None,
-    widget=None,
+    data: Any,
+    collected_state: Optional[CollectedState] = None,
+    widget: Optional["Widget"] = None,
     buffers: Optional[List[bytes | bytearray | memoryview]] = None,
-):
+) -> Any:
     # Handle NaN at top level
     if isinstance(data, float):
         if np.isnan(data):
@@ -108,27 +109,9 @@ def to_json(
         return {"__type__": "datetime", "value": data.isoformat()}
 
     # Handle state-related objects
-    if collected_state is not None:
-        if hasattr(data, "_state_imports"):
-            for spec in data._state_imports:
-                collected_state.add_import(spec)
-            return None
-        if hasattr(data, "_state_key"):
-            return collected_state.state_entry(
-                state_key=data._state_key,
-                value=data.for_json(),
-                sync=getattr(data, "_state_sync", False),
-                widget=widget,
-                collected_state=collected_state,
-            )
-        if hasattr(data, "_state_listeners"):
-            collected_state.add_listeners(data._state_listeners)
-            return None
-        if hasattr(data, "_state_animate_by"):
-            collected_state.animateBy.append(data._state_animate_by)
-        if hasattr(data, "_state_effect"):
-            to_json(data.effect_content, collected_state, widget, buffers)
-            return None
+    if collected_state is not None and isinstance(data, Collector):
+        # Collectors handle their own complete serialization
+        return data.collect(collected_state, widget=widget, buffers=buffers)
 
     # Handle numpy and jax arrays
     if isinstance(data, np.ndarray) or type(data).__name__ in (
@@ -221,11 +204,12 @@ def resolve_animate_by(collected_state):
         if metadata.get("rangeFrom") is not None:
             rangeFrom = metadata["rangeFrom"]
             # Determine the state key to look up
-            state_key = None
-            if hasattr(rangeFrom, "_state_key"):
-                state_key = rangeFrom._state_key
-            elif isinstance(rangeFrom, str):
+            if isinstance(rangeFrom, str):
                 state_key = rangeFrom
+            elif hasattr(rangeFrom, "_state_key"):
+                state_key = rangeFrom._state_key
+            else:
+                state_key = None
 
             # Look up the value in state and return range if it has length
             if state_key is not None:
@@ -272,8 +256,13 @@ def to_json_with_state(
     return json
 
 
-def entry_id(key):
-    return key if isinstance(key, str) else key._state_key
+def entry_id(key: Union[str, Any]) -> str:
+    if isinstance(key, str):
+        return key
+    elif hasattr(key, "_state_key"):
+        return key._state_key
+    else:
+        raise TypeError(f"Expected str or object with _state_key, got {type(key)}")
 
 
 def normalize_updates(
@@ -423,7 +412,7 @@ class WidgetState:
         # send all updates to JS regardless of sync status
         buffers: List[bytes | bytearray | memoryview] = []
 
-        json_updates = to_json(normalized_updates, widget=self, buffers=buffers)
+        json_updates = to_json(normalized_updates, widget=self._widget, buffers=buffers)
         self._widget.send(
             {"type": "update_state", "updates": json_updates}, buffers=buffers
         )

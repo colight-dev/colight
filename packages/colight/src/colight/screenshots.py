@@ -609,7 +609,7 @@ def save_video(
     state_updates: Optional[List[Dict]] = None,
     fps: Optional[int] = None,
     data: Optional[Any] = None,
-    buffers: Optional[List[bytes | bytearray | memoryview[int]]] = None,
+    buffers: Optional[List[bytes | bytearray | memoryview]] = None,
     width: int = 400,
     height: Optional[int] = None,
     scale: float = 1.0,

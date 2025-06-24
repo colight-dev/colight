@@ -5,11 +5,15 @@ import presetTypography from "@twind/preset-typography";
 import * as React from "react";
 const { useState, useEffect, useRef } = React;
 
-const twindConfig = Twind.defineConfig({
-  presets: [presetAutoprefix(), presetTailwind(), presetTypography()],
-});
+// Check if already initialized to prevent duplicate style insertion
+if (!(window as any).__TWIND_INSTANCE__) {
+  const twindConfig = Twind.defineConfig({
+    presets: [presetAutoprefix(), presetTailwind(), presetTypography()],
+  });
+  (window as any).__TWIND_INSTANCE__ = Twind.twind(twindConfig, Twind.cssom());
+}
 
-export const tw = Twind.twind(twindConfig, Twind.cssom());
+export const tw = (window as any).__TWIND_INSTANCE__;
 
 export const flatten = (data, dimensions) => {
   let leaves;

@@ -146,18 +146,25 @@ export function Row({ children, ...props }) {
 
   const { gap = 1, widths, height, width, className } = props;
 
-  const gridCols = widths
-    ? `grid-cols-[${widths.map(getGridValue).join("_")}]`
-    : `grid-cols-[${Array(children.length).fill("auto").join("_")}]`;
-
-  const classes = joinClasses(
-    "grid",
+  // Shared classes for both grid and flex
+  const sharedClasses = joinClasses(
     gap && `gap-${gap}`,
     height && `h-[${height}]`,
     width && `w-[${width}]`,
-    gridCols,
     className,
   );
+
+  let layoutClasses;
+  if (widths) {
+    // Use grid when widths are specified
+    const gridCols = `grid-cols-[${widths.map(getGridValue).join("_")}]`;
+    layoutClasses = joinClasses("grid", gridCols);
+  } else {
+    // Use flex when widths are not specified
+    layoutClasses = joinClasses("flex", "flex-row", "[&>*]:flex-1");
+  }
+
+  const classes = joinClasses(layoutClasses, sharedClasses);
 
   return (
     <div {...props} className={tw(classes)}>
@@ -182,20 +189,25 @@ export function Column({ children, ...props }) {
 
   const { gap = 1, heights, height, width, className } = props;
 
-  const gridRows = heights
-    ? `grid-rows-[${heights.map(getGridValue).join("_")}]`
-    : `grid-rows-[${Array(React.Children.count(children))
-        .fill("auto")
-        .join("_")}]`;
-
-  const classes = joinClasses(
-    "grid",
+  // Shared classes for both grid and flex
+  const sharedClasses = joinClasses(
     gap && `gap-${gap}`,
     height ? `h-[${height}]` : "h-fit",
     width && `w-[${width}]`,
-    gridRows,
     className,
   );
+
+  let layoutClasses;
+  if (heights) {
+    // Use grid when heights are specified
+    const gridRows = `grid-rows-[${heights.map(getGridValue).join("_")}]`;
+    layoutClasses = joinClasses("grid", gridRows);
+  } else {
+    // Use flex when heights are not specified
+    layoutClasses = joinClasses("flex", "flex-col");
+  }
+
+  const classes = joinClasses(layoutClasses, sharedClasses);
 
   return (
     <div {...props} className={tw(classes)}>

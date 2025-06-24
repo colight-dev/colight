@@ -145,7 +145,7 @@ animated_scene = (
 animated_scene
 
 video_path = animated_scene.save_video(
-    filename=str(output_dir / "points.mp4"), width=400, debug=True
+    path=str(output_dir / "points.mp4"), width=400, debug=True
 )
 # %%
 
@@ -155,12 +155,12 @@ animated_scene.save_html(str(output_dir / "points.html"))
 
 if shutil.which("ffmpeg"):
     video_path = (animated_scene | Plot.Slider("t", range=60, fps=30)).save_video(
-        filename=str(output_dir / "points.mp4"),
+        path=str(output_dir / "points.mp4"),
         width=800,
         height=600,
     )
     video_path = animated_scene.save_video(
-        filename=str(output_dir / "points.gif"),
+        path=str(output_dir / "points.gif"),
         width=800,
         height=600,
     )

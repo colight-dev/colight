@@ -109,7 +109,7 @@ def test_counter_plot():
         video_path = ARTIFACTS_DIR / "counter.mp4"
         counter_plot.save_video(
             state_updates=[{"count": i} for i in range(30)],  # 30 frames
-            filename=video_path,
+            path=video_path,
             fps=12,
             debug=True,
         )
