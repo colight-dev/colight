@@ -1,14 +1,12 @@
-# %% [markdown]
 # ## Saving Plots as Images and Videos
 #
 # This notebook shows how to save plots as static images and videos.
 
-# %%
 import colight.plot as Plot
 from colight.scene3d import Ellipsoid
 from pathlib import Path
 import numpy as np
-
+import shutil
 
 # Create output directory
 output_dir = Path("scratch/export_examples")
@@ -18,12 +16,8 @@ for file in output_dir.glob("*"):
     file.unlink()
 
 
-# %% [markdown]
 # ### Save as PDF
 #
-
-# %%
-
 # Create interesting pattern of points using numpy
 
 t = np.linspace(0, 4 * np.pi, 40)
@@ -122,53 +116,51 @@ for path in paths:
 # points in 3D space:
 
 # %%
+import colight.plot as Plot
+from colight.scene3d import Ellipsoid
+from pathlib import Path
+
+output_dir = Path("scratch/export_examples")
+
 # Create a 3D scene with animated points
-animated_scene = Plot.State({"t": 0}) | Ellipsoid(
-    Plot.js("""
+animated_scene = (
+    Plot.State({"t": 0})
+    | Plot.Slider("t", range=60, fps=30)
+    | Ellipsoid(
+        Plot.js("""
             Array.from({length: 50}, (_, i) => {
-                const angle = i * Math.PI * 2 / 50;
-                const x = Math.cos(angle + $state.t);
-                const y = Math.sin(angle + $state.t);
-                const z = Math.sin($state.t * 2 + i * 0.1);
+                const t = $state.t * 0.1;
+                const angle = i * Math.PI * 2 / 60;
+                const x = Math.cos(angle + t);
+                const y = Math.sin(angle + t);
+                const z = Math.sin(t * 2 + i * 0.1);
                 return [x, y, z];
             }).flat()
         """),
-    half_size=0.1,
-    color=Plot.js("""
-            (d, i) => {
-                const j = Math.floor(i / 3);
-                return [
-                    0.5 + 0.5 * Math.sin($state.t + j * 0.1),
-                    0.5 + 0.5 * Math.cos($state.t + j * 0.2),
-                    0.5 + 0.5 * Math.sin($state.t + j * 0.3)
-                ];
-            }
-        """),
+        half_size=0.1,
+        color=[1, 1, 1],
+    )
 )
 
-# Display the initial state
 animated_scene
 
-(animated_scene | Plot.Slider("t", range=60, fps=10)).save_html(
-    str(output_dir / "points.html")
+video_path = animated_scene.save_video(
+    filename=str(output_dir / "points.mp4"), width=400, debug=True
 )
+# %%
+
+animated_scene.save_html(str(output_dir / "points.html"))
 
 # %%
-# Save as video if ffmpeg is available
-import shutil
 
 if shutil.which("ffmpeg"):
-    video_path = animated_scene.save_video(
-        state_updates=[{"t": i * 0.1} for i in range(60)],
-        filename=str(output_dir / "points.mp4"),  # Convert Path to str
-        fps=30,
+    video_path = (animated_scene | Plot.Slider("t", range=60, fps=30)).save_video(
+        filename=str(output_dir / "points.mp4"),
         width=800,
         height=600,
     )
     video_path = animated_scene.save_video(
-        state_updates=[{"t": i * 0.1} for i in range(60)],
-        filename=str(output_dir / "points.gif"),  # Convert Path to str
-        fps=30,
+        filename=str(output_dir / "points.gif"),
         width=800,
         height=600,
     )

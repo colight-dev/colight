@@ -26,7 +26,8 @@ class CollectedState:
         self.state = {}
         self.stateJSON = {}
         self.listeners = {"py": {}, "js": {}}
-        self.imports = []  # List of import specs
+        self.imports = []
+        self.animateBy = []
 
     def state_entry(self, state_key, value, sync=False, **kwargs):
         if sync:
@@ -123,6 +124,11 @@ def to_json(
         if hasattr(data, "_state_listeners"):
             collected_state.add_listeners(data._state_listeners)
             return None
+        if hasattr(data, "_state_animate_by"):
+            collected_state.animateBy.append(data._state_animate_by)
+        if hasattr(data, "_state_effect"):
+            to_json(data.effect_content, collected_state, widget, buffers)
+            return None
 
     # Handle numpy and jax arrays
     if isinstance(data, np.ndarray) or type(data).__name__ in (
@@ -195,6 +201,49 @@ def to_json(
     raise TypeError(f"Object of type {type(data)} is not JSON serializable")
 
 
+def resolve_animate_by(collected_state):
+    """Resolve the actual range from metadata, handling rangeFrom cases"""
+
+    metadatas = collected_state.animateBy
+    out = []
+    for metadata in metadatas:
+        if metadata is None:
+            continue
+
+        range_val = None
+
+        if metadata.get("range") is not None:
+            range_val = metadata.get("range")
+            if isinstance(range_val, int):
+                range_val = [0, range_val - 1]
+            range_val = range_val
+
+        if metadata.get("rangeFrom") is not None:
+            rangeFrom = metadata["rangeFrom"]
+            # Determine the state key to look up
+            state_key = None
+            if hasattr(rangeFrom, "_state_key"):
+                state_key = rangeFrom._state_key
+            elif isinstance(rangeFrom, str):
+                state_key = rangeFrom
+
+            # Look up the value in state and return range if it has length
+            if state_key is not None:
+                value = collected_state.state.get(state_key)
+                if value is not None and hasattr(value, "__len__"):
+                    range_val = [0, len(value) - 1]
+        if range_val is not None:
+            out.append(
+                {
+                    "key": metadata["key"],
+                    "range": range_val,
+                    "fps": metadata["fps"],
+                    "step": metadata.get("step"),
+                }
+            )
+    return out
+
+
 def to_json_with_state(
     ast: Any,
     widget: "Widget | None" = None,
@@ -210,6 +259,7 @@ def to_json_with_state(
             "syncedKeys": collected_state.syncedKeys,
             "listeners": collected_state.listeners["js"],
             "imports": collected_state.imports,
+            "animateBy": resolve_animate_by(collected_state),
             **CONFIG,
         },
         buffers=buffers,

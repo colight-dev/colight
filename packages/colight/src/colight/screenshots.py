@@ -7,7 +7,7 @@ import json
 import time
 import subprocess  # Added import for subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colight.widget as widget
 import colight.format as format
@@ -23,21 +23,37 @@ class StudioContext(ChromeContext):
     It encapsulates behavior such as loading the Colight environment, rendering plots, and updating state.
     """
 
-    def __init__(self, plot=None, reuse=True, keep_alive: float = 1.0, **kwargs):
+    def __init__(
+        self,
+        plot=None,
+        data=None,
+        buffers=None,
+        reuse=True,
+        keep_alive: float = 1.0,
+        window_vars=None,
+        **kwargs,
+    ):
         """
         Initialize StudioContext with optional plot
 
         Args:
             plot: Optional plot to load on initialization
+            data: Pre-serialized plot data (optional)
+            buffers: Pre-serialized buffers (optional)
+            window_vars: Dict of variables to set on window object before loading content
             **kwargs: Additional arguments passed to ChromeContext
         """
         self._plot = plot
-        super().__init__(reuse=reuse, keep_alive=keep_alive, **kwargs)
+        self._data = data
+        self._buffers = buffers
+        super().__init__(
+            reuse=reuse, keep_alive=keep_alive, window_vars=window_vars, **kwargs
+        )
 
     def __enter__(self):
         context = super().__enter__()
         if self._plot is not None:
-            self.load_plot(self._plot)
+            self.load_plot(self._plot, data=self._data, buffers=self._buffers)
         return context
 
     def load_studio_html(self):
@@ -81,17 +97,27 @@ class StudioContext(ChromeContext):
         elif self.debug:
             print("Colight already loaded, skipping initialization")
 
-    def load_plot(self, plot, measure=True):
+    def load_plot(self, plot=None, data=None, buffers=None, measure=True):
         """
         Loads the plot in the Colight environment.
+
+        Args:
+            plot: The plot to load (required if data/buffers not provided)
+            data: Pre-serialized plot data (optional)
+            buffers: Pre-serialized buffers (optional)
+            measure: Whether to measure container size
         """
         if self.debug:
             print("[StudioContext] Loading plot into Colight")
 
         self.load_studio_html()
 
-        data, buffers = widget.to_json_with_state(plot, buffers=[])
-        colight_data = format.create_bytes(data, buffers)
+        # Use provided data/buffers if available, otherwise serialize
+        if data is not None and buffers is not None:
+            colight_data = format.create_bytes(data, buffers)
+        else:
+            data, buffers = widget.to_json_with_state(plot, buffers=[])
+            colight_data = format.create_bytes(data, buffers)
         colight_filename = f"plot_{self.id}.colight"
         self.server.add_served_file(colight_filename, colight_data)
         colight_url = f"http://localhost:{self.server_port}/{colight_filename}"
@@ -383,11 +409,11 @@ class StudioContext(ChromeContext):
                 f"-c:v gif -loop 0 \"{filename}\""
             )
         else:
-            # Fallback: generate MP4 video with libx264
+            # Generate MP4 video with libx264 - using yuv420p for QuickTime compatibility
             ffmpeg_cmd = (
                 f"ffmpeg {'-v error' if not self.debug else ''} -y "
-                f"-f image2pipe -vcodec png -r {fps} -i - "
-                f"-an -c:v libx264 -pix_fmt yuv420p \"{filename}\""
+                f"-f image2pipe -vcodec png -framerate {fps} -i - "
+                f"-an -c:v libx264 -pix_fmt yuv420p -crf 18 -preset slow \"{filename}\""
             )
 
         if self.debug:
@@ -432,6 +458,8 @@ def save_image(
     plot,
     output_path: Optional[Union[str, Path]] = None,
     state_update: Optional[Dict] = None,
+    data: Optional[Any] = None,
+    buffers: Optional[List[bytes]] = None,
     width: int = 400,
     height: Optional[int] = None,
     scale: float = 1.0,
@@ -439,6 +467,7 @@ def save_image(
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
+    window_vars: Optional[Dict[str, Any]] = None,
 ) -> Union[Path, bytes]:
     """
     Render the plot and capture an image.
@@ -447,23 +476,29 @@ def save_image(
         plot: The Colight plot widget
         output_path: Optional path to save the image; if not provided, returns PNG bytes
         state_update: Optional state update to apply before capture
+        data: Pre-serialized plot data (optional)
+        buffers: Pre-serialized buffers (optional)
         width: Width of the browser window
         height: Optional height of the browser window
         scale: Device scale factor
         quality: Image quality for WebP format (0-100, ignored for PNG)
         debug: Whether to print debug information
+        window_vars: Dict of variables to set on window object before loading content
 
     Returns:
         Path to saved image if output_path is provided, otherwise PNG bytes
     """
     with StudioContext(
         plot=plot,
+        data=data,
+        buffers=buffers,
         width=width,
         height=height,
         scale=scale,
         debug=debug,
         reuse=reuse,
         keep_alive=keep_alive,
+        window_vars=window_vars,
     ) as studio:
         return studio.save_image(output_path, state_update, quality)
 
@@ -474,6 +509,8 @@ def save_images(
     output_dir: Union[str, Path] = "./scratch/screenshots",
     filenames: Optional[List[str]] = None,
     filename_base: Optional[str] = "screenshot",
+    data: Optional[Any] = None,
+    buffers: Optional[List[bytes]] = None,
     width: int = 800,
     height: Optional[int] = None,
     scale: float = 1.0,
@@ -481,6 +518,7 @@ def save_images(
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
+    window_vars: Optional[Dict[str, Any]] = None,
 ) -> List[Path]:
     """
     Capture a sequence of images with state updates.
@@ -491,23 +529,29 @@ def save_images(
         output_dir: Directory where images will be saved
         filenames: Optional list of filenames for each image; if not provided, filenames will be auto-generated
         filename_base: Base name for generating filenames
+        data: Pre-serialized plot data (optional)
+        buffers: Pre-serialized buffers (optional)
         width: Width of the browser window
         height: Optional height of the browser window
         scale: Device scale factor
         quality: Image quality for WebP format (0-100, ignored for PNG)
         debug: Whether to print debug information
+        window_vars: Dict of variables to set on window object before loading content
 
     Returns:
         List of paths to the saved images
     """
     with StudioContext(
         plot=plot,
+        data=data,
+        buffers=buffers,
         width=width,
         height=height,
         scale=scale,
         debug=debug,
         reuse=reuse,
         keep_alive=keep_alive,
+        window_vars=window_vars,
     ) as studio:
         return studio.save_image_sequence(
             state_updates, output_dir, filenames, filename_base, quality
@@ -517,12 +561,15 @@ def save_images(
 def save_pdf(
     plot,
     output_path: Optional[Union[str, Path]] = None,
+    data: Optional[Any] = None,
+    buffers: Optional[List[bytes]] = None,
     width: int = 400,
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
+    window_vars: Optional[Dict[str, Any]] = None,
 ) -> Union[Path, bytes]:
     """
     Render the plot and capture a PDF of the page.
@@ -530,61 +577,127 @@ def save_pdf(
     Args:
         plot: The Colight plot widget
         output_path: Optional path to save the PDF; if not provided, returns PDF bytes
+        data: Pre-serialized plot data (optional)
+        buffers: Pre-serialized buffers (optional)
         width: Width of the browser window
         height: Optional height of the browser window
         scale: Device scale factor
         debug: Whether to print debug information
+        window_vars: Dict of variables to set on window object before loading content
 
     Returns:
         Path to saved PDF if output_path is provided, otherwise PDF bytes
     """
     with StudioContext(
         plot=plot,
+        data=data,
+        buffers=buffers,
         width=width,
         height=height,
         scale=scale,
         debug=debug,
         reuse=reuse,
         keep_alive=keep_alive,
+        window_vars=window_vars,
     ) as studio:
         return studio.save_pdf(output_path)
 
 
 def save_video(
     plot,
-    state_updates: List[Dict],
     filename: Union[str, Path],
-    fps: int = 24,
+    state_updates: Optional[List[Dict]] = None,
+    fps: Optional[int] = None,
+    data: Optional[Any] = None,
+    buffers: Optional[List[bytes | bytearray | memoryview[int]]] = None,
     width: int = 400,
     height: Optional[int] = None,
     scale: float = 1.0,
     debug: bool = False,
     reuse: bool = True,
     keep_alive: float = 1.0,
+    window_vars: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
-    Capture a series of states from a plot as a video.
+    Save a video of a plot animation.
+
+    If the plot contains a slider with fps specified, it will automatically be used
+    for animation. Otherwise, state_updates must be provided.
 
     Args:
         plot: The Colight plot widget
-        state_updates: List of state update dictionaries to apply sequentially
-        filename: Path where the resulting video will be saved
-        fps: Frame rate (frames per second) for the video
-        width: Width of the browser window
-        height: Optional height of the browser window
-        scale: Device scale factor
+        filename: Path where the resulting video will be saved (.mp4 or .gif)
+        state_updates: List of state update dictionaries to apply sequentially.
+                      Optional if the plot has a slider with fps specified.
+        fps: Frame rate for the video. If None and the plot has an animated slider,
+             uses the slider's fps. Otherwise defaults to 24.
+        data: Pre-serialized plot data (optional, for performance)
+        buffers: Pre-serialized buffers (optional, for performance)
+        width: Width of the browser window (default: 400)
+        height: Height of the browser window (optional)
+        scale: Device scale factor (default: 1.0)
         debug: Whether to print debug information
+        reuse: Whether to reuse existing browser instance
+        keep_alive: Time to keep browser alive after completion
+        window_vars: Dict of variables to set on window object before loading content
 
     Returns:
         Path to the saved video file
+
+    Examples:
+        # Automatic animation from slider
+        plot = Plot.dot(data, x="time", y="value") + Plot.Slider("time", range=100, fps=30)
+        save_video(plot, "animation.mp4")
+
+        # Manual state updates
+        save_video(plot, "custom.mp4", state_updates=[{"x": i} for i in range(10)])
+
+    Raises:
+        ValueError: If neither state_updates nor an animated slider is available
     """
+    # If state_updates not provided, try to use animateBy metadata
+    if state_updates is None:
+        # Ensure we have serialized data
+        if data is None or buffers is None:
+            data, buffers = widget.to_json_with_state(plot, buffers=[])
+
+        animateBy = data.get("animateBy") if data else None
+        if not animateBy:
+            raise ValueError(
+                "No state_updates provided and no animated slider found in plot"
+            )
+        # Check if there are multiple animated sliders
+        if len(animateBy) > 1:
+            raise ValueError(
+                f"Multiple animated sliders found ({len(animateBy)}). "
+                "Please provide explicit state_updates when using multiple sliders."
+            )
+
+        # Use the single animated slider
+        animateBy = animateBy[0]
+
+        # Generate state updates from metadata
+        (from_, to_) = animateBy["range"]
+
+        state_updates = [
+            {animateBy["key"]: i} for i in range(from_, to_ + 1, animateBy["step"])
+        ]
+
+        # Use fps from metadata if not provided
+        if fps is None:
+            fps = animateBy["fps"]
+
     with StudioContext(
         plot=plot,
+        data=data,
+        buffers=buffers,
         width=width,
         height=height,
         scale=scale,
         debug=debug,
         reuse=reuse,
         keep_alive=keep_alive,
+        window_vars=window_vars,
     ) as studio:
-        return studio.capture_video(state_updates, filename, fps)
+        out = studio.capture_video(state_updates, filename, fps or 24)
+        return out

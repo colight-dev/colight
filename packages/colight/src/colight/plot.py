@@ -18,10 +18,12 @@ from colight.layout import (
     LayoutItem,
     Ref,
     Row,
+    State,
     js,
     onChange,
     ref,
 )
+from colight.components.slider import Slider
 from colight.plot_defs import (
     area,
     areaX,
@@ -893,112 +895,8 @@ def Frames(
         return Hiccup([_Frames, {"state_key": key, "frames": frames}])
 
 
-def State(values: dict[str, Any], sync: Union[set[str], bool, None] = None) -> JSCall:
-    """
-    Initializes state variables in the Plot widget.
-
-    Args:
-        values (dict[str, Any]): A dictionary mapping state variable names to their initial values.
-        sync (Union[set[str], bool, None], optional): Controls which state variables are synced between Python and JavaScript.
-            If True, all variables are synced. If a set, only variables in the set are synced.
-            If None or False, no variables are synced. Defaults to None.
-
-    Returns:
-        State: An object that initializes the state variables when rendered.
-
-    Examples:
-        ```python
-        Plot.State({"count": 0, "name": "foo"})  # Initialize without sync
-        Plot.State({"count": 0}, sync=True)  # Sync all variables
-        Plot.State({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
-        ```
-    """
-
-    sync_set = set(values.keys()) if sync is True else (sync or set())
-
-    return JSCall(
-        "State",
-        [Ref(v, state_key=k, sync=(k in sync_set)) for k, v in values.items()],
-    )
-
-
 initial_state = State
 state = State
-
-
-_Slider = JSRef("Slider")
-
-
-def Slider(
-    key: Union[str, JSExpr],
-    init: Any = None,
-    range: Optional[Union[int, float, List[Union[int, float]], JSExpr]] = None,
-    rangeFrom: Any = None,
-    fps: Optional[Union[int, str, JSExpr]] = None,
-    step: Union[int, float, JSExpr] = 1,
-    tail: Union[bool, JSExpr] = False,
-    loop: Union[bool, JSExpr] = True,
-    label: Optional[Union[str, JSExpr]] = None,
-    showValue: Union[bool, JSExpr] = False,
-    controls: Optional[Union[List[str], JSExpr, bool]] = None,
-    className: Optional[str] = None,
-    style: Optional[Dict[str, Any]] = None,
-    **kwargs: Any,
-):
-    """
-    Creates a slider with reactive functionality, allowing for dynamic interaction and animation.
-
-    Args:
-        key (str): The key for the reactive variable in the state.
-        init (Any, optional): Initial value for the variable.
-        range (Union[int, List[int]], optional):  A list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n).
-        rangeFrom (Any, optional): Derive the range from the length of this (ref) argument.
-        fps (int, optional): Frames per second for animation through the range. If > 0, enables animation.
-        step (int, optional): Step size for the range. Defaults to 1.
-        tail (bool, optional): If True, animation stops at the end of the range. Defaults to False.
-        loop (bool, optional): If True, animation loops back to start when reaching the end. Defaults to True.
-        label (str, optional): Label for the slider.
-        showValue (bool, optional): If True, shows the current value immediately after the label.
-        controls (list, optional): List of controls to display, such as ["slider", "play", "fps"]. Defaults to ["slider"] if fps is not set, otherwise ["slider", "play"].
-        **kwargs: Additional keyword arguments.
-
-    Returns:
-        Slider: A Slider component with the specified options.
-
-    Example:
-    ```python
-    Plot.Slider("frame", init=0, range=100, fps=30, label="Frame")
-    ```
-    """
-
-    if range is None and rangeFrom is None:
-        raise ValueError("'range', or 'rangeFrom' must be defined")
-    if tail and rangeFrom is None:
-        raise ValueError("Slider: 'tail' can only be used when 'rangeFrom' is provided")
-
-    if init is None:
-        init = js(f"$state.{key}")
-    else:
-        init = Ref(init, state_key=key, sync=True)
-
-    slider_options = kwargs | {
-        "state_key": key,
-        "init": init,
-        "range": range,
-        "rangeFrom": rangeFrom,
-        "fps": fps,
-        "step": step,
-        "tail": tail,
-        "loop": loop,
-        "label": label,
-        "showValue": showValue,
-        "controls": controls,
-        "className": className,
-        "style": style,
-        "kind": "Slider",
-    }
-
-    return Hiccup([_Slider, slider_options])
 
 
 def renderChildEvents(options: dict[str, Any] = {}, **kwargs) -> JSRef:

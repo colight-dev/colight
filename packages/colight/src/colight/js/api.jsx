@@ -34,10 +34,13 @@ export const Slider = mobxReact.observer(function (options) {
     style,
   } = options;
 
+  const $state = useContext($StateContext);
+
   // Set default controls based on fps
   if (!controls) {
     controls = fps ? ["slider", "play"] : ["slider"];
   }
+
   controls = controls || [];
   if (options.showSlider === false) {
     controls = controls.filter((control) => control !== "slider");
@@ -48,6 +51,9 @@ export const Slider = mobxReact.observer(function (options) {
 
   let rangeMin, rangeMax;
   if (rangeFrom) {
+    if (typeof rangeFrom === "string") {
+      rangeFrom = $state[rangeFrom];
+    }
     // determine range dynamically based on last index of rangeFrom
     rangeMin = 0;
     rangeMax = rangeFrom.length - 1;
@@ -61,8 +67,10 @@ export const Slider = mobxReact.observer(function (options) {
 
   step = step || 1;
 
-  const $state = useContext($StateContext);
-  const isAnimated = fps === "raf" || (typeof fps === "number" && fps > 0);
+  const GENERATING_VIDEO = !!window.COLIGHT_GENERATING_VIDEO;
+  const isAnimated =
+    !GENERATING_VIDEO &&
+    (fps === "raf" || (typeof fps === "number" && fps > 0));
   const [isPlaying, setIsPlaying] = useState(isAnimated);
   const lastFrameTimeRef = useRef(performance.now());
   const frameCountRef = useRef(0);
@@ -138,7 +146,7 @@ export const Slider = mobxReact.observer(function (options) {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isPlaying, fps, updateFrameAndState]);
+  }, [isAnimated, isPlaying, fps, updateFrameAndState]);
 
   const handleSliderChange = useCallback(
     (value) => {
@@ -150,7 +158,7 @@ export const Slider = mobxReact.observer(function (options) {
 
   const togglePlayPause = useCallback(() => setIsPlaying((prev) => !prev), []);
 
-  if (controls.length === 0) return null;
+  if (controls.length === 0 || window.COLIGHT_HIDE_SLIDERS) return null;
 
   return (
     <div className={tw(joinClasses("text-xs", className))} style={style}>
@@ -193,10 +201,6 @@ export function clamp(value, min, max) {
   if (value < min) return min;
   if (value > max) return max;
   return value;
-}
-
-export class State {
-  render() {}
 }
 
 export class OnStateChange {

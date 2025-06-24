@@ -142,6 +142,8 @@ function flattenChildren(parentProps, children) {
 export function Row({ children, ...props }) {
   [children, props] = flattenChildren(props, children);
 
+  if (children.length == 1) return children[0];
+
   const { gap = 1, widths, height, width, className } = props;
 
   const gridCols = widths
@@ -176,6 +178,8 @@ export function Row({ children, ...props }) {
  */
 export function Column({ children, ...props }) {
   [children, props] = flattenChildren(props, children);
+  if (children.length == 1) return children[0];
+
   const { gap = 1, heights, height, width, className } = props;
 
   const gridRows = heights

@@ -107,7 +107,6 @@ class LayoutItem:
         create_parent_dir(path)
         with open(path, "w") as f:
             f.write(html_page(self.for_json(), dist_url=dist_url))
-        print(f"HTML saved to {path}")
         return str(path)
 
     def save_file(self, path: str) -> str:
@@ -193,12 +192,13 @@ class LayoutItem:
 
     def save_video(
         self,
-        state_updates,
         filename,
-        fps=24,
+        state_updates=None,
+        fps=None,
         width=500,
         height=None,
         scale=2.0,
+        hide_sliders=True,
         debug=False,
     ):
         """Save a sequence of states as a video.
@@ -217,12 +217,16 @@ class LayoutItem:
         """
         return screenshots.save_video(
             self,
-            state_updates,
             filename,
+            state_updates,
             fps=fps,
             width=width,
             height=height,
             scale=scale,
+            window_vars={
+                "COLIGHT_GENERATING_VIDEO": True,
+                "COLIGHT_HIDE_SLIDERS": True if hide_sliders else False,
+            },
             debug=debug,
         )
 
@@ -289,7 +293,7 @@ class JSRef(LayoutItem):
         """Returns a reference to a nested property or method of the JavaScript object."""
         if name.startswith("_state_"):
             raise AttributeError(
-                f"'{self.__class__.__name__}' object has no attribute {name}"
+                f"'{self.__class__.__name__}' object has no attribute '{name}'"
             )
         return JSRef(f"{self.path}.{name}")
 
@@ -529,3 +533,47 @@ def Grid(*children, **kwargs):
 
 
 Grid.for_json = lambda: JSRef("Grid")  # allow Grid to be used in hiccup
+
+
+class Marker(LayoutItem):
+    """A marker class that groups objects for side effects but doesn't render.
+
+    Used to group objects that should be processed for their side effects
+    (like state registration) but not included in the final JSON output.
+    """
+
+    def __init__(self, items):
+        super().__init__()
+        self._state_effect = True
+        self.effect_content = items
+
+    def for_json(self):
+        return None
+
+
+def State(values: dict[str, Any], sync: Union[set[str], bool, None] = None) -> Marker:
+    """
+    Initializes state variables in the Plot widget.
+
+    Args:
+        values (dict[str, Any]): A dictionary mapping state variable names to their initial values.
+        sync (Union[set[str], bool, None], optional): Controls which state variables are synced between Python and JavaScript.
+            If True, all variables are synced. If a set, only variables in the set are synced.
+            If None or False, no variables are synced. Defaults to None.
+
+    Returns:
+        State: An object that initializes the state variables when rendered.
+
+    Examples:
+        ```python
+        Plot.State({"count": 0, "name": "foo"})  # Initialize without sync
+        Plot.State({"count": 0}, sync=True)  # Sync all variables
+        Plot.State({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
+        ```
+    """
+
+    sync_set = set(values.keys()) if sync is True else (sync or set())
+
+    return Marker(
+        [Ref(v, state_key=k, sync=(k in sync_set)) for k, v in values.items()]
+    )
