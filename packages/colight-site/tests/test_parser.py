@@ -10,6 +10,7 @@ from colight_site.parser import (
     should_hide_statements,
     should_hide_visuals,
     should_hide_code,
+    should_hide_prose,
     _get_formats_from_tags,
 )
 
@@ -766,5 +767,102 @@ a = 1
                     f"{description}: Expected is_expression={expected_is_expr}, "
                     f"got {first_form.is_expression}"
                 )
+
+            pathlib.Path(f.name).unlink()
+
+
+def test_hide_prose_pragma():
+    """Test that hide-prose pragma works correctly."""
+    # Test hide-prose at file level
+    content1 = """# %% hide-prose
+
+# This prose should be hidden
+# It won't appear in the output
+
+import numpy as np
+
+# This comment should also be hidden
+x = np.array([1, 2, 3])
+"""
+
+    # Test show-prose overrides hide-prose
+    content2 = """# %% hide-prose
+
+# This prose is hidden by default
+
+import numpy as np
+
+# | show-prose
+# But this prose should be visible
+
+x = np.array([1, 2, 3])
+"""
+
+    # Test per-form hide-prose
+    content3 = """# This prose is visible
+
+import numpy as np
+
+# | hide-prose
+# This prose should be hidden
+
+x = np.array([1, 2, 3])
+
+# This prose is visible again
+y = x * 2
+"""
+
+    test_cases = [
+        (content1, "hide-prose at file level"),
+        (content2, "show-prose overrides hide-prose"),
+        (content3, "per-form hide-prose"),
+    ]
+
+    for content, description in test_cases:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".colight.py", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+            if description == "hide-prose at file level":
+                # File metadata should have hide-prose
+                assert should_hide_prose(metadata.pragma_tags) is True
+                # All forms should inherit this unless overridden
+                for form in forms:
+                    if not form.metadata.pragma_tags:  # No form-specific pragmas
+                        assert (
+                            should_hide_prose(
+                                form.metadata.resolve_with_defaults(
+                                    metadata.pragma_tags
+                                )
+                            )
+                            is True
+                        )
+
+            elif description == "show-prose overrides hide-prose":
+                # File metadata should have hide-prose
+                assert should_hide_prose(metadata.pragma_tags) is True
+                # Check the form with x = np.array - it should have show-prose
+                for form in forms:
+                    if "x = np.array" in form.code:
+                        assert (
+                            should_hide_prose(
+                                form.metadata.resolve_with_defaults(
+                                    metadata.pragma_tags
+                                )
+                            )
+                            is False
+                        )  # show-prose overrides
+
+            elif description == "per-form hide-prose":
+                # File metadata should not have hide-prose
+                assert should_hide_prose(metadata.pragma_tags) is False
+                # Check the form with x = np.array - it should have hide-prose
+                for form in forms:
+                    if "x = np.array" in form.code:
+                        assert should_hide_prose(form.metadata.pragma_tags) is True
 
             pathlib.Path(f.name).unlink()

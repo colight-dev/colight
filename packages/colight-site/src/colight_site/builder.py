@@ -2,11 +2,14 @@
 
 import pathlib
 from typing import Optional, List
+import subprocess
+import sys
 
 from .parser import parse_colight_file
 from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 from .constants import DEFAULT_INLINE_THRESHOLD
+from .pep723 import detect_pep723_metadata, parse_dependencies
 
 
 def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
@@ -38,14 +41,88 @@ def build_file(
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
     inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
+    in_subprocess: bool = False,
 ):
     """Build a single Python file."""
     if not input_path.suffix == ".py":
         raise ValueError(f"Not a Python file: {input_path}")
 
+    # Check if this is a PEP 723 file BEFORE doing any processing
+    file_content = input_path.read_text(encoding="utf-8")
+    pep723_metadata = detect_pep723_metadata(file_content)
+
+    # Skip PEP 723 handling if we're already in a subprocess
+    if pep723_metadata and not in_subprocess:
+        if verbose:
+            print("  Detected PEP 723 metadata - re-running with dependencies")
+
+        # Parse the dependencies from PEP 723 metadata
+        dependencies = parse_dependencies(pep723_metadata)
+
+        # Build the uv run command
+        # Get the absolute path to colight-site package
+        colight_site_root = pathlib.Path(__file__).parent.parent.parent.resolve()
+        cmd = [
+            "uv",
+            "run",
+            "--with-editable",
+            str(colight_site_root),  # colight-site package root
+        ]
+
+        # Add each PEP 723 dependency
+        for dep in dependencies:
+            cmd.extend(["--with", dep])
+
+        # Add the script flag and colight-site command
+        cmd.extend(
+            [
+                "--",
+                sys.executable,
+                "-m",
+                "colight_site.cli",
+                "build",
+                str(input_path),
+                "-o",
+                str(output_path),
+            ]
+        )
+
+        # Add all the flags
+        if verbose:
+            cmd.extend(["--verbose", "true"])
+        if format != "markdown":
+            cmd.extend(["--format", format])
+        if hide_statements:
+            cmd.append("--hide-statements")
+        if hide_visuals:
+            cmd.append("--hide-visuals")
+        if hide_code:
+            cmd.append("--hide-code")
+        if not continue_on_error:
+            cmd.extend(["--continue-on-error", "false"])
+        if colight_output_path:
+            cmd.extend(["--colight-output-path", colight_output_path])
+        if colight_embed_path:
+            cmd.extend(["--colight-embed-path", colight_embed_path])
+        if inline_threshold != DEFAULT_INLINE_THRESHOLD:
+            cmd.extend(["--inline-threshold", str(inline_threshold)])
+
+        # Add flag to indicate we're in a subprocess
+        cmd.append("--in-subprocess")
+
+        if verbose:
+            print(f"  Running: {' '.join(cmd)}")
+
+        # Run the command and let output pass through in real-time
+        result = subprocess.run(cmd)
+
+        # Return instead of sys.exit to allow tests to continue
+        # The subprocess has completed, so we just return to prevent further processing
+        return
+
+    # Not a PEP 723 file or already in PEP 723 environment - continue with normal execution
     if verbose:
         print(f"Building {input_path} -> {output_path}")
-
     try:
         # Parse the file
         forms, file_metadata = parse_colight_file(input_path)
@@ -210,22 +287,22 @@ def build_directory(
     colight_output_path: Optional[str] = None,
     colight_embed_path: Optional[str] = None,
     inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
-    include_patterns: Optional[List[str]] = None,
-    ignore_patterns: Optional[List[str]] = None,
+    include: Optional[List[str]] = None,
+    ignore: Optional[List[str]] = None,
 ):
     """Build all Python files in a directory matching the patterns."""
     if verbose:
         print(f"Building directory {input_dir} -> {output_dir}")
 
-    # Default to .colight.py files if no include patterns specified
-    if include_patterns is None:
-        include_patterns = ["*.colight.py"]
-    if ignore_patterns is None:
-        ignore_patterns = []
+    # Default to .py files if no include patterns specified
+    if include is None:
+        include = ["*.py"]
+    if ignore is None:
+        ignore = []
 
     # Find all Python files matching patterns
     python_files = []
-    for include_pattern in include_patterns:
+    for include_pattern in include:
         for path in input_dir.rglob(include_pattern):
             if path.suffix == ".py":
                 # Always ignore __pycache__ directories and __init__.py files
@@ -234,7 +311,7 @@ def build_directory(
 
                 # Check if file should be ignored by user patterns
                 should_ignore = False
-                for ignore_pattern in ignore_patterns:
+                for ignore_pattern in ignore:
                     if path.match(ignore_pattern):
                         should_ignore = True
                         break

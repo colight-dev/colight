@@ -33,6 +33,7 @@
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "bylight": "^1.0.5",
+    "concurrently": "^9.2.0",
     "d3": "^7.9.0",
     "esbuild-plugin-import-map": "^2.1.0",
     "gl-matrix": "^3.4.3",
@@ -59,7 +60,9 @@
     "test:site": "uv run python -m pytest packages/colight-site/tests",
     "test": "npm-run-all test:py test:js test:site",
     "pyright": "uv run pyright",
-    "serve-tests": "uv run livereload .",
+    "test-site": "conc 'yarn test-server' 'yarn test-site-watch'",
+    "test-server": "uv run -m colight_site.devserver",
+    "test-site-watch": "uv run python -m colight_site.cli watch -o test-artifacts/colight-site --verbose true -f html packages/colight-site/tests/examples",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },
   "files": [

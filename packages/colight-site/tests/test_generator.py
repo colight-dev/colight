@@ -283,3 +283,57 @@ y = x * 2
         assert "y = x * 2" not in markdown  # hidden by file-level hide-code
 
         pathlib.Path(f.name).unlink()
+
+
+def test_hide_prose_generation():
+    """Test that hide-prose pragma correctly hides markdown prose."""
+    import tempfile
+    from colight_site.parser import parse_colight_file
+
+    # Test content with hide-prose at file level
+    content = """# %% hide-prose
+
+# This is a title that should be hidden
+# This description should also be hidden
+
+import numpy as np
+
+# This comment should be hidden too
+x = np.array([1, 2, 3])
+
+# | show-prose
+# But this comment should be visible
+
+y = x * 2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
+        f.write(content)
+        f.flush()
+
+        # Parse the file
+        forms, metadata = parse_colight_file(pathlib.Path(f.name))
+
+        # Generate markdown
+        output_dir = artifacts_dir / "hide-prose-test"
+        generator = MarkdownGenerator(output_dir)
+
+        # No colight data for this test
+        colight_data = [None] * len(forms)
+
+        markdown = generator.generate_markdown(
+            forms, colight_data, pragma_tags=metadata.pragma_tags
+        )
+
+        # Check that prose is hidden/shown correctly
+        assert "This is a title that should be hidden" not in markdown
+        assert "This description should also be hidden" not in markdown
+        assert "This comment should be hidden too" not in markdown
+        assert "But this comment should be visible" in markdown
+
+        # Code should still be visible (hide-prose doesn't affect code)
+        assert "import numpy as np" in markdown
+        assert "x = np.array([1, 2, 3])" in markdown
+        assert "y = x * 2" in markdown
+
+        pathlib.Path(f.name).unlink()

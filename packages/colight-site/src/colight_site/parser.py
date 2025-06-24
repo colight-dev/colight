@@ -49,6 +49,14 @@ def should_hide_code(tags: set[str]) -> bool:
     return "hide-code" in tags
 
 
+def should_hide_prose(tags: set[str]) -> bool:
+    """Check if prose (markdown content) should be hidden based on tags."""
+    # show- tags override hide- tags
+    if "show-prose" in tags:
+        return False
+    return "hide-prose" in tags
+
+
 def _strip_leading_comments(
     node: Union[cst.SimpleStatementLine, cst.BaseCompoundStatement],
 ) -> Union[cst.SimpleStatementLine, cst.BaseCompoundStatement]:
@@ -364,16 +372,37 @@ def extract_raw_elements(source_code: str) -> List[RawElement]:
 
     # First, extract header comments
     current_line = 1
+    in_pep723_block = False
+
     if hasattr(module, "header") and module.header:
         for line in module.header:
             if line.comment:
                 comment_text = line.comment.value.lstrip("#").strip()
+
+                # Check for PEP 723 markers
+                if comment_text == "/// script":
+                    in_pep723_block = True
+                    current_line += 1
+                    continue
+                elif comment_text == "///" and in_pep723_block:
+                    in_pep723_block = False
+                    current_line += 1
+                    continue
+
+                # Skip content inside PEP 723 block
+                if in_pep723_block:
+                    current_line += 1
+                    continue
+
+                # Normal comment processing
                 if _is_pragma_comment(comment_text):
                     elements.append(RawElement("pragma", comment_text, current_line))
                 else:
                     elements.append(RawElement("comment", comment_text, current_line))
             elif line.whitespace.value.strip() == "":
-                elements.append(RawElement("blank_line", "", current_line))
+                # Skip blank lines in PEP 723 block
+                if not in_pep723_block:
+                    elements.append(RawElement("blank_line", "", current_line))
             current_line += 1
 
     # Then extract statements and their leading comments

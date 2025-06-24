@@ -49,6 +49,10 @@ except ImportError:
         if not code.strip():
             return None
 
+        # Set __file__ in the environment if we have a real filename
+        if filename != "<string>":
+            self.env["__file__"] = filename
+
         try:
             # Special handling for CombinedCode that ends with an expression
             if form.is_expression and hasattr(form.node, "code_elements"):

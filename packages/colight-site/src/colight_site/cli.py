@@ -71,6 +71,12 @@ def main():
     default=DEFAULT_INLINE_THRESHOLD,
     help=f"Embed .colight files smaller than this size (in bytes) as script tags (default: {DEFAULT_INLINE_THRESHOLD})",
 )
+@click.option(
+    "--in-subprocess",
+    is_flag=True,
+    hidden=True,
+    help="Internal flag to indicate we're already in a PEP 723 subprocess",
+)
 def build(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
@@ -83,6 +89,7 @@ def build(
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
     inline_threshold: int,
+    in_subprocess: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
     # Create options dict
@@ -105,6 +112,7 @@ def build(
             colight_output_path=colight_output_path,
             colight_embed_path=colight_embed_path,
             inline_threshold=inline_threshold,
+            in_subprocess=in_subprocess,
             **options,
         )
         if verbose:
@@ -186,6 +194,19 @@ def build(
     default=DEFAULT_INLINE_THRESHOLD,
     help=f"Embed .colight files smaller than this size (in bytes) as script tags (default: {DEFAULT_INLINE_THRESHOLD})",
 )
+@click.option(
+    "--include",
+    type=str,
+    multiple=True,
+    default=["*.py"],
+    help="File patterns to include (default: *.py). Can be specified multiple times.",
+)
+@click.option(
+    "--ignore",
+    type=str,
+    multiple=True,
+    help="File patterns to ignore. Can be specified multiple times.",
+)
 def watch(
     input_path: pathlib.Path,
     output: pathlib.Path,
@@ -198,6 +219,8 @@ def watch(
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
     inline_threshold: int,
+    include: tuple,
+    ignore: tuple,
 ):
     """Watch for changes and rebuild automatically."""
     click.echo(f"Watching {input_path} for changes...")
@@ -214,6 +237,8 @@ def watch(
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
         inline_threshold=inline_threshold,
+        include=list(include) if include else None,
+        ignore=list(ignore) if ignore else None,
     )
 
 
