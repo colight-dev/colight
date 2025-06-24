@@ -9,9 +9,11 @@ except ImportError:
 
 from colight.widget import (
     to_json,
+    CollectedState,
+)
+from colight.binary_serialization import (
     deserialize_buffer_entry,
     replace_buffers,
-    CollectedState,
     serialize_binary_data,
 )
 
@@ -20,7 +22,8 @@ class TestWidgetArrayHandling(unittest.TestCase):
     def test_numpy_scalar(self):
         # Test handling of 0-d numpy arrays (scalars)
         scalar = np.array(42)
-        result = to_json(scalar)
+        collected_state = CollectedState()
+        result = to_json(scalar, collected_state=collected_state)
         self.assertEqual(result, 42)
 
     def test_numpy_array(self):
