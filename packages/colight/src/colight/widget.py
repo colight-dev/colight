@@ -10,6 +10,56 @@ import warnings
 
 from colight.env import CONFIG, ANYWIDGET_PATH
 from colight.protocols import Collector
+from colight.binary_serialization import serialize_binary_data, replace_buffers
+from colight.state_operations import entry_id, normalize_updates, apply_updates
+
+
+# Serialization registry
+SKIP = object()  # Sentinel value for "skip this serializer"
+_SERIALIZERS: List[Callable] = []
+
+
+def list_serializers() -> List[str]:
+    """List registered serializer names in order."""
+    return [getattr(s, "_serializer_name", s.__name__) for s in _SERIALIZERS]
+
+
+def register_serializer(
+    name: Optional[str] = None,
+    before: Optional[str] = None,
+    after: Optional[str] = None,
+):
+    """Decorator to register a custom serializer with optional positioning.
+
+    Args:
+        name: Name for this serializer (defaults to function name)
+        before: Insert before the serializer with this name
+        after: Insert after the serializer with this name
+    """
+
+    def decorator(func: Callable) -> Callable:
+        func._serializer_name = name or func.__name__
+
+        if before or after:
+            # Find insertion point at registration time (one-time cost)
+            insert_idx = None
+            for i, serializer in enumerate(_SERIALIZERS):
+                if before and getattr(serializer, "_serializer_name", None) == before:
+                    insert_idx = i
+                    break
+                elif after and getattr(serializer, "_serializer_name", None) == after:
+                    insert_idx = i + 1
+                    break
+
+            if insert_idx is not None:
+                _SERIALIZERS.insert(insert_idx, func)
+            else:
+                _SERIALIZERS.append(func)
+        else:
+            _SERIALIZERS.append(func)
+        return func
+
+    return decorator
 
 
 class SubscriptableNamespace(SimpleNamespace):
@@ -22,20 +72,22 @@ class SubscriptableNamespace(SimpleNamespace):
 
 class CollectedState:
     # collect initial state while serializing data.
-    def __init__(self):
+    def __init__(self, buffers=None, widget=None):
         self.syncedKeys = set()
         self.state = {}
         self.stateJSON = {}
         self.listeners = {"py": {}, "js": {}}
         self.imports = []
         self.animateBy = []
+        self.buffers = buffers or []
+        self.widget = widget
 
-    def state_entry(self, state_key, value, sync=False, **kwargs):
+    def state_entry(self, state_key, value, sync=False):
         if sync:
             self.syncedKeys.add(state_key)
         if state_key not in self.stateJSON:
             self.state[state_key] = value
-            self.stateJSON[state_key] = to_json(value, **kwargs)
+            self.stateJSON[state_key] = to_json(value, collected_state=self)
         return {"__type__": "ref", "state_key": state_key}
 
     def add_import(self, spec: dict):
@@ -60,26 +112,86 @@ class CollectedState:
         return None
 
 
-def serialize_binary_data(
-    buffers: Optional[List[bytes | bytearray | memoryview]], entry
-):
-    if buffers is None:
-        return entry
+@register_serializer()
+def serialize_collector(data: Any, collected_state: Optional[CollectedState]) -> Any:
+    """Serializer for Collector protocol objects."""
+    if not isinstance(data, Collector):
+        return SKIP
+    assert collected_state is not None
+    return data.collect(collected_state)
 
-    buffers.append(entry["data"])
-    index = len(buffers) - 1
-    return {
-        **entry,
-        "__buffer_index__": index,
-        "data": None,
-    }
+
+@register_serializer()
+def serialize_for_json(data: Any, collected_state: Optional[CollectedState]) -> Any:
+    """Serializer for objects with for_json() method."""
+    if not hasattr(data, "for_json"):
+        return SKIP
+    return to_json(data.for_json(), collected_state=collected_state)
+
+
+@register_serializer()
+def serialize_callable(data: Any, collected_state: Optional[CollectedState]) -> Any:
+    """Serializer for callable objects."""
+    if not callable(data):
+        return SKIP
+    assert collected_state is not None
+    if collected_state and collected_state.widget:
+        id = str(uuid.uuid4())
+        collected_state.widget.callback_registry[id] = data
+        return {"__type__": "callback", "id": id}
+    warnings.warn(
+        "Callback encountered but no widget context available - callback will be elided",
+        UserWarning,
+    )
+    return None
+
+
+@register_serializer()
+def serialize_numpy_array(data: Any, collected_state: Optional[CollectedState]) -> Any:
+    """Serializer for numpy and jax arrays."""
+    if not (
+        isinstance(data, np.ndarray)
+        or type(data).__name__
+        in (
+            "DeviceArray",
+            "Array",
+            "ArrayImpl",
+        )
+    ):
+        return SKIP
+
+    assert collected_state is not None
+    try:
+        if data.ndim == 0:  # It's a scalar
+            return data.item()
+    except AttributeError:
+        pass
+
+    bytes_data = data.tobytes()
+    return serialize_binary_data(
+        collected_state.buffers,
+        {
+            "__type__": "ndarray",
+            "data": bytes_data,
+            "dtype": str(data.dtype),
+            "shape": data.shape,
+        },
+    )
+
+
+@register_serializer()
+def serialize_attributes_dict(
+    data: Any, collected_state: Optional[CollectedState]
+) -> Any:
+    """Serializer for objects with attributes_dict() method."""
+    if not (hasattr(data, "attributes_dict") and callable(data.attributes_dict)):
+        return SKIP
+    return to_json(data.attributes_dict(), collected_state=collected_state)
 
 
 def to_json(
     data: Any,
     collected_state: Optional[CollectedState] = None,
-    widget: Optional["Widget"] = None,
-    buffers: Optional[List[bytes | bytearray | memoryview]] = None,
 ) -> Any:
     # Handle NaN at top level
     if isinstance(data, float):
@@ -97,88 +209,35 @@ def to_json(
 
     # Handle binary data
     if isinstance(data, (bytes, bytearray, memoryview)):
-        if buffers is not None:
-            # Store binary data in buffers and return reference
-            buffer_index = len(buffers)
-            buffers.append(data)
-            return {"__type__": "buffer", "index": buffer_index}
-        return data
+        assert collected_state is not None
+        # Store binary data in buffers and return reference
+        buffer_index = len(collected_state.buffers)
+        collected_state.buffers.append(data)
+        return {"__type__": "buffer", "index": buffer_index}
 
     # Handle datetime objects early since isinstance check is fast
     if isinstance(data, (datetime.date, datetime.datetime)):
         return {"__type__": "datetime", "value": data.isoformat()}
 
-    # Handle state-related objects
-    if collected_state is not None and isinstance(data, Collector):
-        # Collectors handle their own complete serialization
-        return data.collect(collected_state, widget=widget, buffers=buffers)
-
-    # Handle numpy and jax arrays
-    if isinstance(data, np.ndarray) or type(data).__name__ in (
-        "DeviceArray",
-        "Array",
-        "ArrayImpl",
-    ):
-        try:
-            if data.ndim == 0:  # It's a scalar
-                return data.item()
-        except AttributeError:
-            pass
-
-        bytes_data = data.tobytes()
-        return serialize_binary_data(
-            buffers,
-            {
-                "__type__": "ndarray",
-                "data": bytes_data,
-                "dtype": str(data.dtype),
-                "shape": data.shape,
-            },
-        )
-
-    # Handle objects with custom serialization
-    if hasattr(data, "for_json") and callable(data.for_json):
-        return to_json(
-            data.for_json(),
-            collected_state=collected_state,
-            widget=widget,
-            buffers=buffers,
-        )
-
-    # Handle objects with attributes_dict method
-    if hasattr(data, "attributes_dict") and callable(data.attributes_dict):
-        return to_json(
-            data.attributes_dict(),
-            collected_state=collected_state,
-            widget=widget,
-            buffers=buffers,
-        )
+    # Use extensible serializer system for complex types
+    for serializer in _SERIALIZERS:
+        result = serializer(data, collected_state)
+        if result is not SKIP:
+            return result
 
     # Handle containers
     if isinstance(data, dict):
-        # if "__type__" in data and data["__type__"] == "ndarray":
-        #     raise ValueError("Found __type__ in dict - this indicates double serialization")
-        return {
-            k: to_json(v, collected_state, widget, buffers) for k, v in data.items()
-        }
+        return {k: to_json(v, collected_state) for k, v in data.items()}
 
     if isinstance(data, (list, tuple)):
-        return [to_json(x, collected_state, widget, buffers) for x in data]
+        return [to_json(x, collected_state) for x in data]
 
     if isinstance(data, Iterable):
         if not hasattr(data, "__len__") and not hasattr(data, "__getitem__"):
             warnings.warn(
                 "Potentially exhaustible iterator encountered: generator", UserWarning
             )
-        return [to_json(x, collected_state, widget, buffers) for x in data]
-
-    # Handle callable objects
-    if callable(data):
-        if widget is not None:
-            id = str(uuid.uuid4())
-            widget.callback_registry[id] = data
-            return {"__type__": "callback", "id": id}
-        return None
+        return [to_json(x, collected_state) for x in data]
 
     # Raise error for unsupported types
     raise TypeError(f"Object of type {type(data)} is not JSON serializable")
@@ -233,8 +292,8 @@ def to_json_with_state(
     widget: "Widget | None" = None,
     buffers: List[bytes | bytearray | memoryview] | None = None,
 ) -> Union[Any, Tuple[Any, List[bytes | bytearray | memoryview]]]:
-    collected_state = CollectedState()
-    ast = to_json(ast, widget=widget, collected_state=collected_state, buffers=buffers)
+    collected_state = CollectedState(widget=widget, buffers=buffers or [])
+    ast = to_json(ast, collected_state=collected_state)
 
     json = to_json(
         {
@@ -246,118 +305,11 @@ def to_json_with_state(
             "animateBy": resolve_animate_by(collected_state),
             **CONFIG,
         },
-        buffers=buffers,
     )
 
     if widget is not None:
         widget.state.init_state(collected_state)
-    if buffers is not None:
-        return json, buffers
-    return json
-
-
-def entry_id(key: Union[str, Any]) -> str:
-    if isinstance(key, str):
-        return key
-    elif hasattr(key, "_state_key"):
-        return key._state_key
-    else:
-        raise TypeError(f"Expected str or object with _state_key, got {type(key)}")
-
-
-def normalize_updates(
-    updates: Iterable[Union[List[Any], Dict[str, Any]]],
-) -> List[List[Any]]:
-    out = []
-    for entry in updates:
-        if isinstance(entry, dict):
-            for key, value in entry.items():
-                out.append([entry_id(key), "reset", value])
-        else:
-            out.append([entry_id(entry[0]), entry[1], entry[2]])
-    return out
-
-
-def apply_updates(state: Dict[str, Any], updates: List[List[Any]]) -> None:
-    for name, operation, payload in updates:
-        if operation == "append":
-            if name not in state:
-                state[name] = []
-            state[name] = state[name] + [payload]
-        elif operation == "concat":
-            if name not in state:
-                state[name] = []
-            state[name] = state[name] + list(payload)
-        elif operation == "reset":
-            state[name] = payload
-        elif operation == "setAt":
-            index, value = payload
-            if name not in state:
-                state[name] = []
-            state[name] = state[name][:index] + [value] + state[name][index + 1 :]
-        else:
-            raise ValueError(f"Unknown operation: {operation}")
-
-
-def deserialize_buffer_entry(data: dict, buffers: List[bytes]) -> Any:
-    """Parse a buffer entry, converting to numpy array if needed."""
-    buffer_idx = data["__buffer_index__"]
-    if "__type__" in data and data["__type__"] == "ndarray":
-        # Convert buffer to numpy array
-        buffer = buffers[buffer_idx]
-        dtype = data.get("dtype", "float64")
-        shape = data.get("shape", [len(buffer)])
-        return np.frombuffer(buffer, dtype=dtype).reshape(shape)
-    return buffers[buffer_idx]
-
-
-def replace_buffers(data: Any, buffers: List[bytes]) -> Any:
-    """Replace buffer indices with actual buffer data in a nested data structure."""
-    if not buffers:
-        return data
-
-    # Fast path for direct buffer reference
-    if isinstance(data, dict):
-        if "__buffer_index__" in data:
-            return deserialize_buffer_entry(data, buffers)
-
-        # Process dictionary values in-place
-        for k, v in data.items():
-            if isinstance(v, dict) and "__buffer_index__" in v:
-                data[k] = deserialize_buffer_entry(v, buffers)
-            elif isinstance(v, (dict, list, tuple)):
-                data[k] = replace_buffers(v, buffers)
-        return data
-
-    # Fast path for non-container types
-    if not isinstance(data, (dict, list, tuple)):
-        return data
-
-    if isinstance(data, list):
-        # Mutate list in-place
-        for i, x in enumerate(data):
-            if isinstance(x, dict) and "__buffer_index__" in x:
-                data[i] = deserialize_buffer_entry(x, buffers)
-            elif isinstance(x, (dict, list, tuple)):
-                data[i] = replace_buffers(x, buffers)
-        return data
-
-    # Handle tuples
-    result = list(data)
-    modified = False
-    for i, x in enumerate(data):
-        if isinstance(x, dict) and "__buffer_index__" in x:
-            result[i] = deserialize_buffer_entry(x, buffers)
-            modified = True
-        elif isinstance(x, (dict, list, tuple)):
-            new_val = replace_buffers(x, buffers)
-            if new_val is not x:
-                result[i] = new_val
-                modified = True
-
-    if modified:
-        return tuple(result)
-    return data
+    return json, collected_state.buffers
 
 
 class WidgetState:
@@ -410,11 +362,11 @@ class WidgetState:
         apply_updates(self._state, synced_updates)
 
         # send all updates to JS regardless of sync status
-        buffers: List[bytes | bytearray | memoryview] = []
-
-        json_updates = to_json(normalized_updates, widget=self._widget, buffers=buffers)
+        collected_state = CollectedState(widget=self._widget)
+        json_updates = to_json(normalized_updates, collected_state=collected_state)
         self._widget.send(
-            {"type": "update_state", "updates": json_updates}, buffers=buffers
+            {"type": "update_state", "updates": json_updates},
+            buffers=collected_state.buffers,
         )
 
         self.notify_listeners(synced_updates)

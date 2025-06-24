@@ -17,12 +17,11 @@ class Collector:
     determine their own serialization behavior.
     """
 
-    def collect(self, collector: "CollectedState", **kwargs) -> Any:
+    def collect(self, collector: "CollectedState") -> Any:
         """Collect state information and return final serialized representation.
 
         Args:
             collector: The CollectedState instance to add state information to
-            **kwargs: Additional arguments (widget, buffers, etc.)
 
         Returns:
             The final serialized form of this object. Common return values:
