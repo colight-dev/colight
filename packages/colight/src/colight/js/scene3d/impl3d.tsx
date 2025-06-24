@@ -1510,9 +1510,7 @@ export function SceneInner({
   }, [handleCameraUpdate]);
 
   return (
-    <div
-      style={{ width: "100%", border: "1px solid #ccc", position: "relative" }}
-    >
+    <div style={{ width: "100%", position: "relative" }}>
       <canvas ref={canvasRef} style={{ border: "none", ...style }} />
     </div>
   );

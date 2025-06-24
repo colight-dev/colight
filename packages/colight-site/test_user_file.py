@@ -3,7 +3,7 @@
 from colight_site.parser import parse_colight_file
 from colight_site.generator import MarkdownGenerator
 import pathlib
-from typing import List, Optional
+from typing import List, Optional, Union
 
 file_path = pathlib.Path("tests/examples/01_basic_numpy.colight.py")
 
@@ -22,13 +22,12 @@ for i, form in enumerate(forms):
 output_dir = pathlib.Path("/tmp")
 generator = MarkdownGenerator(output_dir)
 
-merged_options = metadata.merge_with_cli_options()
-generator_options = {k: v for k, v in merged_options.items() if k != "format"}
+pragma_tags, formats = metadata.merge_with_cli_options()
 
-colight_files: List[Optional[pathlib.Path]] = [None] * len(forms)
+colight_files: List[Optional[Union[bytes, pathlib.Path]]] = [None] * len(forms)
 
 markdown = generator.generate_markdown(
-    forms, colight_files, title="Test", **generator_options
+    forms, colight_files, title="Test", pragma_tags=pragma_tags
 )
 
 print("\n=== Generated Markdown ===")

@@ -2,7 +2,7 @@
 
 import pathlib
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Union
 from pathlib import Path
 from colight_site.generator import MarkdownGenerator
 from colight_site.parser import Form, FormMetadata
@@ -46,7 +46,7 @@ def test_inline_threshold():
         # Write large file (> 100 bytes)
         large_file.write_bytes(b"COLIGHT\x00" + b"\x00" * 200)  # 208 bytes
 
-        colight_files: List[Optional[Path]] = [small_file, large_file]
+        colight_files: List[Optional[Union[bytes, Path]]] = [small_file, large_file]
 
         # Generate markdown
         markdown_content = generator.generate_markdown(

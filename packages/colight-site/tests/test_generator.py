@@ -1,7 +1,7 @@
 """Test the generator module."""
 
 import pathlib
-from typing import List, Optional
+from typing import List, Optional, Union
 from colight_site.generator import MarkdownGenerator
 from colight_site.parser import Form
 import libcst as cst
@@ -169,7 +169,9 @@ def test_hide_visuals_flag():
         Form(markdown=["Visualize"], node=expr_stmt, start_line=1),
     ]
 
-    colight_files: List[Optional[pathlib.Path]] = [pathlib.Path("test.colight")]
+    colight_files: List[Optional[Union[bytes, pathlib.Path]]] = [
+        pathlib.Path("test.colight")
+    ]
 
     # Generate without hiding visuals
     path_context = {"basename": "test"}
@@ -264,7 +266,7 @@ y = x * 2
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # Use the file metadata tags directly
-        colight_files: List[Optional[pathlib.Path]] = [None] * len(forms)
+        colight_files: List[Optional[Union[bytes, pathlib.Path]]] = [None] * len(forms)
 
         path_context = {"basename": "test"}
         markdown = generator.generate_markdown(
