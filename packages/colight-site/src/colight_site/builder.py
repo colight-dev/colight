@@ -3,7 +3,6 @@
 import pathlib
 from typing import Optional, List
 import subprocess
-import sys
 
 from .parser import parse_colight_file
 from .executor import SafeFormExecutor
@@ -77,7 +76,7 @@ def build_file(
         cmd.extend(
             [
                 "--",
-                sys.executable,
+                "python",
                 "-m",
                 "colight_site.cli",
                 "build",
