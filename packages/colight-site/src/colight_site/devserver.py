@@ -29,8 +29,9 @@ class HtmlFallbackMiddleware:
                     html_file = root / f"{relative_path}.html"
 
                     if html_file.exists():
-                        environ["PATH_INFO"] = f"{path}.html"
-                        break
+                        redirect_url = f"{path}.html"
+                        start_response("302 Found", [("Location", redirect_url)])
+                        return [b""]
 
         # Check for root path and redirect to index.html
         elif path == "/" or path == "":
@@ -38,8 +39,8 @@ class HtmlFallbackMiddleware:
                 if mount == "/":
                     index_file = root / "index.html"
                     if index_file.exists():
-                        environ["PATH_INFO"] = "/index.html"
-                        break
+                        start_response("302 Found", [("Location", "/index.html")])
+                        return [b""]
 
         return self.app(environ, start_response)
 

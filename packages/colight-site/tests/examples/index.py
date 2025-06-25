@@ -21,7 +21,7 @@ Plot.html(
                     "li.mb-2",
                     [
                         "a.text-blue-600.hover:underline",
-                        {"href": f"{name.replace('.py', '.html')}"},
+                        {"href": f"{name.replace('.py', '')}"},
                         name,
                     ],
                 ]
