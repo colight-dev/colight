@@ -7,6 +7,7 @@ from typing import Optional
 from . import api
 from . import watcher
 from .constants import DEFAULT_INLINE_THRESHOLD
+from .builder import BuildConfig
 
 
 @click.group()
@@ -35,19 +36,9 @@ def main():
     help="Output format",
 )
 @click.option(
-    "--hide-statements",
-    is_flag=True,
-    help="Hide statements, only show expressions",
-)
-@click.option(
-    "--hide-visuals",
-    is_flag=True,
-    help="Hide visuals, only show code",
-)
-@click.option(
-    "--hide-code",
-    is_flag=True,
-    help="Hide code blocks",
+    "--pragma",
+    type=str,
+    help="Comma-separated pragma tags (e.g., 'hide-statements,hide-visuals')",
 )
 @click.option(
     "--continue-on-error",
@@ -82,9 +73,7 @@ def build(
     output: Optional[pathlib.Path],
     verbose: bool,
     format: str,
-    hide_statements: bool,
-    hide_visuals: bool,
-    hide_code: bool,
+    pragma: Optional[str],
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
@@ -92,48 +81,35 @@ def build(
     in_subprocess: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
-    # Create options dict
-    options = {
-        "hide_statements": hide_statements,
-        "hide_visuals": hide_visuals,
-        "hide_code": hide_code,
-        "continue_on_error": continue_on_error,
-    }
+    # Parse pragma tags from comma-separated string
+    pragma_tags = set()
+    if pragma:
+        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
+
+    # Create BuildConfig from CLI args
+    config = BuildConfig(
+        verbose=verbose,
+        formats={format},
+        pragma_tags=pragma_tags,
+        continue_on_error=continue_on_error,
+        colight_output_path=colight_output_path,
+        colight_embed_path=colight_embed_path,
+        inline_threshold=inline_threshold,
+        in_subprocess=in_subprocess,
+    )
 
     if input_path.is_file():
         # Single file
         if not output:
             output = api.get_output_path(input_path, format)
-        api.build_file(
-            input_path,
-            output,
-            verbose=verbose,
-            format=format,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-            in_subprocess=in_subprocess,
-            **options,
-        )
+        api.build_file(input_path, output, config=config)
         if verbose:
             click.echo(f"Built {input_path} -> {output}")
     else:
         # Directory
         if not output:
             output = pathlib.Path("build")
-        api.build_directory(
-            input_path,
-            output,
-            verbose=verbose,
-            format=format,
-            hide_statements=hide_statements,
-            hide_visuals=hide_visuals,
-            hide_code=hide_code,
-            continue_on_error=continue_on_error,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-        )
+        api.build_directory(input_path, output, config=config)
         if verbose:
             click.echo(f"Built {input_path}/ -> {output}/")
 
@@ -158,19 +134,9 @@ def build(
     help="Output format",
 )
 @click.option(
-    "--hide-statements",
-    is_flag=True,
-    help="Hide statements, only show expressions",
-)
-@click.option(
-    "--hide-visuals",
-    is_flag=True,
-    help="Hide visuals, only show code",
-)
-@click.option(
-    "--hide-code",
-    is_flag=True,
-    help="Hide code blocks",
+    "--pragma",
+    type=str,
+    help="Comma-separated pragma tags (e.g., 'hide-statements,hide-visuals')",
 )
 @click.option(
     "--continue-on-error",
@@ -212,9 +178,7 @@ def watch(
     output: pathlib.Path,
     verbose: bool,
     format: str,
-    hide_statements: bool,
-    hide_visuals: bool,
-    hide_code: bool,
+    pragma: Optional[str],
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
@@ -225,18 +189,27 @@ def watch(
     """Watch for changes and rebuild automatically."""
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
-    watcher.watch_and_build(
-        input_path,
-        output,
+
+    # Parse pragma tags from comma-separated string
+    pragma_tags = set()
+    if pragma:
+        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
+
+    # Create BuildConfig from CLI args
+    config = BuildConfig(
         verbose=verbose,
-        format=format,
-        hide_statements=hide_statements,
-        hide_visuals=hide_visuals,
-        hide_code=hide_code,
+        formats={format},
+        pragma_tags=pragma_tags,
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
         inline_threshold=inline_threshold,
+    )
+
+    watcher.watch_and_build(
+        input_path,
+        output,
+        config=config,
         include=list(include) if include else None,
         ignore=list(ignore) if ignore else None,
     )

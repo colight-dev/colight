@@ -72,12 +72,18 @@ def process_colight_file(
     forms, file_metadata = parse_colight_file(input_path)
 
     # Merge metadata with options
-    pragma_tags, formats = file_metadata.merge_with_cli_options(
-        hide_statements=hide_statements,
-        hide_visuals=hide_visuals,
-        hide_code=hide_code,
-        format=format,
-    )
+    pragma_tags = file_metadata.pragma_tags.copy()
+
+    # Add CLI options to pragma tags
+    if hide_statements:
+        pragma_tags.add("hide-statements")
+    if hide_visuals:
+        pragma_tags.add("hide-visuals")
+    if hide_code:
+        pragma_tags.add("hide-code")
+
+    # Formats come from CLI only now
+    formats = {format}
 
     # Setup defaults
     if output_dir is None:

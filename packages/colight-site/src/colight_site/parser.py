@@ -10,14 +10,15 @@ import re
 
 def _extract_pragma_tags(text: str) -> set[str]:
     """Extract all pragma tags from text using a single regex pattern."""
-    # Single comprehensive pattern to match all our tag types
-    tags = set(re.findall(r"\b(?:hide|show|format)-\w+\b", text.lower()))
+    # Pattern to match hide/show tags (no format tags)
+    # Also matches hide-all-* for file-level pragmas
+    tags = set(re.findall(r"\b(?:hide|show)(?:-all)?-\w+\b", text.lower()))
 
     # Normalize to consistent forms
     normalized = set()
     for tag in tags:
         # Convert singular to plural for consistency
-        if tag.endswith(("statement", "visual")):
+        if tag.endswith(("statement", "visual")) and not tag.startswith("hide-all"):
             normalized.add(tag + "s")
         else:
             normalized.add(tag)
@@ -30,7 +31,7 @@ def should_hide_statements(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-statements" in tags:
         return False
-    return "hide-statements" in tags
+    return "hide-statements" in tags or "hide-all-statements" in tags
 
 
 def should_hide_visuals(tags: set[str]) -> bool:
@@ -38,7 +39,7 @@ def should_hide_visuals(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-visuals" in tags:
         return False
-    return "hide-visuals" in tags
+    return "hide-visuals" in tags or "hide-all-visuals" in tags
 
 
 def should_hide_code(tags: set[str]) -> bool:
@@ -46,7 +47,7 @@ def should_hide_code(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-code" in tags:
         return False
-    return "hide-code" in tags
+    return "hide-code" in tags or "hide-all-code" in tags
 
 
 def should_hide_prose(tags: set[str]) -> bool:
@@ -54,7 +55,7 @@ def should_hide_prose(tags: set[str]) -> bool:
     # show- tags override hide- tags
     if "show-prose" in tags:
         return False
-    return "hide-prose" in tags
+    return "hide-prose" in tags or "hide-all-prose" in tags
 
 
 def _strip_leading_comments(
@@ -71,25 +72,16 @@ def _strip_leading_comments(
     return node.with_changes(leading_lines=new_leading_lines)
 
 
-def _get_formats_from_tags(tags: set[str]) -> set[str]:
-    """Extract formats from pragma tags."""
-    formats = set()
-    if "format-html" in tags:
-        formats.add("html")
-    if "format-markdown" in tags:
-        formats.add("markdown")
-    return formats
-
-
 def _is_pragma_comment(comment_text: str) -> bool:
     """Check if a comment is a pragma comment.
 
-    Only accepts comments starting with | or %% as pragma starters.
+    Accepts comments starting with | or %% as pragma starters.
+    Handles variations like #|, # |, #%%, # %%
     """
-    # Remove leading whitespace
+    # Remove leading whitespace after stripping
     text = comment_text.strip()
 
-    # Only check for explicit pragma starters: | or %%
+    # Check for pragma starters
     return text.startswith("|") or text.startswith("%%")
 
 
@@ -126,37 +118,6 @@ class FileMetadata:
     """Metadata extracted from file-level pragma annotations."""
 
     pragma_tags: set[str] = field(default_factory=set)
-
-    def merge_with_cli_options(
-        self,
-        hide_statements: bool = False,
-        hide_visuals: bool = False,
-        hide_code: bool = False,
-        format: Optional[str] = None,
-    ) -> tuple[set[str], set[str]]:
-        """Merge file metadata with CLI options. CLI options take precedence."""
-        # Start with file metadata tags
-        result_tags = self.pragma_tags.copy()
-
-        # CLI options override/add to file metadata
-        if hide_statements:
-            result_tags.add("hide-statements")
-        if hide_visuals:
-            result_tags.add("hide-visuals")
-        if hide_code:
-            result_tags.add("hide-code")
-
-        # Get formats from file metadata
-        result_formats = _get_formats_from_tags(self.pragma_tags)
-
-        # CLI format option overrides file metadata formats
-        if format:
-            result_formats = {format}
-        elif not result_formats:
-            # Default to markdown if no format specified
-            result_formats = {"markdown"}
-
-        return result_tags, result_formats
 
 
 class CombinedCode:
@@ -446,22 +407,9 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
     """Step 2: Group elements into forms with clear rules."""
     forms = []
 
-    # Skip file-level pragmas at the beginning
-    # File-level pragmas are those at the top followed by at least one empty line
+    # Start from the beginning - no need to skip file-level pragmas
+    # since they're identified by hide-all-* prefix
     i = 0
-
-    # Count consecutive pragmas at the beginning
-    while i < len(elements) and elements[i].type == "pragma":
-        i += 1
-
-    # Check if these pragmas are followed by a blank line
-    if i > 0 and i < len(elements) and elements[i].type == "blank_line":
-        # These are file-level pragmas, skip past the blank line
-        i += 1
-    else:
-        # No blank line after pragmas, so they're not file-level
-        # Reset to beginning
-        i = 0
 
     while i < len(elements):
         current_markdown = []
@@ -545,26 +493,23 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
 
 
 def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
-    """Extract file-level metadata from elements at the start."""
+    """Extract file-level metadata from elements.
+
+    File-level pragmas use hide-all-* prefix and can appear anywhere before code.
+    """
     metadata = FileMetadata()
 
-    # File-level pragmas are those at the top followed by at least one empty line
-    i = 0
-
-    # Collect consecutive pragmas at the beginning
-    pragma_contents = []
-    while i < len(elements) and elements[i].type == "pragma":
-        if isinstance(elements[i].content, str):
-            pragma_contents.append(elements[i].content)
-        i += 1
-
-    # Check if these pragmas are followed by a blank line
-    if i < len(elements) and elements[i].type == "blank_line":
-        # These are file-level pragmas
-        for pragma_content in pragma_contents:
-            content = _extract_pragma_content(pragma_content)
+    # Look for hide-all-* pragmas anywhere before the first code element
+    for elem in elements:
+        if elem.type == "code":
+            # Stop when we hit code
+            break
+        elif elem.type == "pragma" and isinstance(elem.content, str):
+            content = _extract_pragma_content(elem.content)
             tags = _extract_pragma_tags(content)
-            metadata.pragma_tags.update(tags)
+            # Only keep hide-all-* tags for file metadata
+            file_level_tags = {tag for tag in tags if tag.startswith("hide-all-")}
+            metadata.pragma_tags.update(file_level_tags)
 
     return metadata
 

@@ -61,7 +61,7 @@
     "test": "npm-run-all test:py test:js test:site",
     "pyright": "uv run pyright",
     "test-site": "conc 'yarn test-server' 'yarn test-site-watch'",
-    "test-server": "uv run -m colight_site.devserver",
+    "test-server": "uv run -m colight_site.server_live",
     "test-site-watch": "uv run python -m colight_site.cli watch -o test-artifacts/colight-site --verbose true -f html packages/colight-site/tests/examples",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },

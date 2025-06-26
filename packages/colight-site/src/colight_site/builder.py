@@ -3,12 +3,102 @@
 import pathlib
 from typing import Optional, List
 import subprocess
+from dataclasses import dataclass, field
 
 from .parser import parse_colight_file
 from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .pep723 import detect_pep723_metadata, parse_dependencies
+
+
+@dataclass
+class BuildConfig:
+    """Configuration for building a colight file."""
+
+    verbose: bool = False
+    pragma_tags: set[str] = field(default_factory=set)
+    formats: set[str] = field(default_factory=lambda: {"markdown"})
+    continue_on_error: bool = True
+    colight_output_path: Optional[str] = None
+    colight_embed_path: Optional[str] = None
+    inline_threshold: int = DEFAULT_INLINE_THRESHOLD
+    in_subprocess: bool = False
+
+    @property
+    def format(self) -> str:
+        """Get the primary format (for backward compatibility)."""
+        return next(iter(self.formats))
+
+    @property
+    def hide_statements(self) -> bool:
+        """Check if statements should be hidden."""
+        return "hide-statements" in self.pragma_tags
+
+    @property
+    def hide_visuals(self) -> bool:
+        """Check if visuals should be hidden."""
+        return "hide-visuals" in self.pragma_tags
+
+    @property
+    def hide_code(self) -> bool:
+        """Check if code should be hidden."""
+        return "hide-code" in self.pragma_tags
+
+    def to_cli_args(self) -> List[str]:
+        """Convert config to CLI arguments."""
+        args = []
+
+        if self.verbose:
+            args.extend(["--verbose", "true"])
+
+        # Convert pragma_tags to comma-separated list
+        if self.pragma_tags:
+            args.extend(["--pragma", ",".join(sorted(self.pragma_tags))])
+
+        # Use the first format (CLI only supports one)
+        format = next(iter(self.formats))
+        if format != "markdown":
+            args.extend(["--format", format])
+
+        if not self.continue_on_error:
+            args.extend(["--continue-on-error", "false"])
+
+        if self.colight_output_path:
+            args.extend(["--colight-output-path", self.colight_output_path])
+
+        if self.colight_embed_path:
+            args.extend(["--colight-embed-path", self.colight_embed_path])
+
+        if self.inline_threshold != DEFAULT_INLINE_THRESHOLD:
+            args.extend(["--inline-threshold", str(self.inline_threshold)])
+
+        if self.in_subprocess:
+            args.append("--in-subprocess")
+
+        return args
+
+    @classmethod
+    def from_config_and_kwargs(
+        cls, config: Optional["BuildConfig"] = None, **kwargs
+    ) -> "BuildConfig":
+        """Create a BuildConfig from an optional existing config and kwargs."""
+        if config is None:
+            return cls(**kwargs)
+
+        # Merge config with kwargs
+        config_dict = {
+            "verbose": config.verbose,
+            "pragma_tags": config.pragma_tags.copy(),
+            "formats": config.formats.copy(),
+            "continue_on_error": config.continue_on_error,
+            "colight_output_path": config.colight_output_path,
+            "colight_embed_path": config.colight_embed_path,
+            "inline_threshold": config.inline_threshold,
+            "in_subprocess": config.in_subprocess,
+        }
+        config_dict.update(kwargs)
+        return cls(**config_dict)
 
 
 def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
@@ -31,18 +121,19 @@ def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
 def build_file(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
-    verbose: bool = False,
-    format: str = "markdown",
-    hide_statements: bool = False,
-    hide_visuals: bool = False,
-    hide_code: bool = False,
-    continue_on_error: bool = True,
-    colight_output_path: Optional[str] = None,
-    colight_embed_path: Optional[str] = None,
-    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
-    in_subprocess: bool = False,
+    config: Optional[BuildConfig] = None,
+    **kwargs,
 ):
-    """Build a single Python file."""
+    """Build a single Python file.
+
+    Args:
+        input_path: Path to the Python file to build
+        output_path: Path where the output will be written
+        config: BuildConfig object with build settings
+        **kwargs: Additional keyword arguments to override config values
+    """
+    # Create config from provided config or kwargs
+    config = BuildConfig.from_config_and_kwargs(config, **kwargs)
     if not input_path.suffix == ".py":
         raise ValueError(f"Not a Python file: {input_path}")
 
@@ -51,16 +142,16 @@ def build_file(
     pep723_metadata = detect_pep723_metadata(file_content)
 
     # Skip PEP 723 handling if we're already in a subprocess
-    if pep723_metadata and not in_subprocess:
-        if verbose:
+    if pep723_metadata and not config.in_subprocess:
+        if config.verbose:
             print("  Detected PEP 723 metadata - re-running with dependencies")
 
         # Parse the dependencies from PEP 723 metadata
         dependencies = parse_dependencies(pep723_metadata)
 
         # Build the uv run command
-        # Get the absolute path to colight-site package
-        colight_site_root = pathlib.Path(__file__).parent.parent.parent.resolve()
+        # Get the colight-site package root (3 levels up from builder.py)
+        colight_site_root = pathlib.Path(__file__).parent.parent.parent
         cmd = [
             "uv",
             "run",
@@ -86,30 +177,11 @@ def build_file(
             ]
         )
 
-        # Add all the flags
-        if verbose:
-            cmd.extend(["--verbose", "true"])
-        if format != "markdown":
-            cmd.extend(["--format", format])
-        if hide_statements:
-            cmd.append("--hide-statements")
-        if hide_visuals:
-            cmd.append("--hide-visuals")
-        if hide_code:
-            cmd.append("--hide-code")
-        if not continue_on_error:
-            cmd.extend(["--continue-on-error", "false"])
-        if colight_output_path:
-            cmd.extend(["--colight-output-path", colight_output_path])
-        if colight_embed_path:
-            cmd.extend(["--colight-embed-path", colight_embed_path])
-        if inline_threshold != DEFAULT_INLINE_THRESHOLD:
-            cmd.extend(["--inline-threshold", str(inline_threshold)])
+        # Add all CLI arguments from config
+        config.in_subprocess = True  # Mark that subprocess will be in subprocess mode
+        cmd.extend(config.to_cli_args())
 
-        # Add flag to indicate we're in a subprocess
-        cmd.append("--in-subprocess")
-
-        if verbose:
+        if config.verbose:
             print(f"  Running: {' '.join(cmd)}")
 
         # Run the command and let output pass through in real-time
@@ -120,17 +192,17 @@ def build_file(
         return
 
     # Not a PEP 723 file or already in PEP 723 environment - continue with normal execution
-    if verbose:
+    if config.verbose:
         print(f"Building {input_path} -> {output_path}")
     try:
         # Parse the file
         forms, file_metadata = parse_colight_file(input_path)
-        if verbose:
+        if config.verbose:
             print(f"Found {len(forms)} forms")
             if file_metadata.pragma_tags:
                 print(f"  File metadata: {file_metadata}")
     except Exception as e:
-        if verbose:
+        if config.verbose:
             print(f"Parse error: {e}")
         # Create a minimal output file with error message
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,16 +213,18 @@ def build_file(
     # Setup execution environment
     # Default templates if not provided
     output_template = (
-        colight_output_path or "./{basename}_colight/form-{form:03d}.colight"
+        config.colight_output_path or "./{basename}_colight/form-{form:03d}.colight"
     )
-    embed_template = colight_embed_path or "{basename}_colight/form-{form:03d}.colight"
+    embed_template = (
+        config.colight_embed_path or "{basename}_colight/form-{form:03d}.colight"
+    )
 
     # For backward compatibility, create a directory for executor
     # This will be used as a base directory for relative paths
     colight_dir = output_path.parent / (output_path.stem + "_colight")
-    if verbose:
+    if config.verbose:
         print(f"  Writing .colight files to: {colight_dir}")
-    executor = SafeFormExecutor(verbose=verbose)
+    executor = SafeFormExecutor(verbose=config.verbose)
 
     # Prepare path context for templates
     # Get relative path from build root (assumes we're building from a common root)
@@ -182,10 +256,10 @@ def build_file(
 
             if colight_bytes is None:
                 colight_data.append(None)
-            elif len(colight_bytes) < inline_threshold:
+            elif len(colight_bytes) < config.inline_threshold:
                 # Small file - keep in memory for inline embedding
                 colight_data.append(colight_bytes)
-                if verbose:
+                if config.verbose:
                     print(
                         f"  Form {i}: visualization will be inlined ({len(colight_bytes)} bytes)"
                     )
@@ -212,14 +286,14 @@ def build_file(
                 output_file_path.write_bytes(colight_bytes)
                 colight_data.append(output_file_path)
 
-                if verbose:
+                if config.verbose:
                     print(f"  Form {i}: saved visualization to {output_file_path.name}")
 
             execution_errors.append(None)
         except Exception as e:
             error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
-            if continue_on_error:
-                if verbose:
+            if config.continue_on_error:
+                if config.verbose:
                     print(f"  {error_msg}")
                 colight_data.append(None)
                 execution_errors.append(error_msg)
@@ -231,17 +305,18 @@ def build_file(
     generator = MarkdownGenerator(
         colight_dir,
         embed_path_template=embed_template,
-        inline_threshold=inline_threshold,
+        inline_threshold=config.inline_threshold,
     )
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
 
-    # Merge file metadata with CLI options (CLI takes precedence)
-    pragma_tags, formats = file_metadata.merge_with_cli_options(
-        hide_statements=hide_statements,
-        hide_visuals=hide_visuals,
-        hide_code=hide_code,
-        format=format,
-    )
+    # Merge file metadata with config (config takes precedence)
+    # Start with file metadata tags
+    merged_pragma_tags = file_metadata.pragma_tags.copy()
+    # Config tags override file metadata
+    merged_pragma_tags.update(config.pragma_tags)
+
+    # Use formats from config only (no file-level format pragma)
+    formats = config.formats
 
     # For now, use the first format (single output)
     # TODO: In the future, we could generate multiple formats
@@ -254,7 +329,7 @@ def build_file(
             title,
             output_path,
             path_context,
-            pragma_tags=pragma_tags,
+            pragma_tags=merged_pragma_tags,
             execution_errors=execution_errors,
         )
         generator.write_html_file(html_content, output_path)
@@ -265,32 +340,37 @@ def build_file(
             title,
             output_path,
             path_context,
-            pragma_tags=pragma_tags,
+            pragma_tags=merged_pragma_tags,
             execution_errors=execution_errors,
         )
         generator.write_markdown_file(markdown_content, output_path)
 
-    if verbose:
+    if config.verbose:
         print(f"Generated {output_path}")
 
 
 def build_directory(
     input_dir: pathlib.Path,
     output_dir: pathlib.Path,
-    verbose: bool = False,
-    format: str = "markdown",
-    hide_statements: bool = False,
-    hide_visuals: bool = False,
-    hide_code: bool = False,
-    continue_on_error: bool = True,
-    colight_output_path: Optional[str] = None,
-    colight_embed_path: Optional[str] = None,
-    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
+    config: Optional[BuildConfig] = None,
     include: Optional[List[str]] = None,
     ignore: Optional[List[str]] = None,
+    **kwargs,
 ):
-    """Build all Python files in a directory matching the patterns."""
-    if verbose:
+    """Build all Python files in a directory matching the patterns.
+
+    Args:
+        input_dir: Directory containing Python files to build
+        output_dir: Directory where output will be written
+        config: BuildConfig object with build settings
+        include: List of glob patterns to include
+        ignore: List of glob patterns to ignore
+        **kwargs: Additional keyword arguments to override config values
+    """
+    # Create config from provided config or kwargs
+    config = BuildConfig.from_config_and_kwargs(config, **kwargs)
+
+    if config.verbose:
         print(f"Building directory {input_dir} -> {output_dir}")
 
     # Default to .py files if no include patterns specified
@@ -320,7 +400,7 @@ def build_directory(
     # Remove duplicates and sort
     python_files = sorted(set(python_files))
 
-    if verbose:
+    if config.verbose:
         print(f"Found {len(python_files)} Python files")
 
     # Build each file
@@ -328,25 +408,17 @@ def build_directory(
         try:
             # Calculate relative output path
             rel_path = python_file.relative_to(input_dir)
-            output_file_rel = _get_output_path(rel_path, format)
+            output_file_rel = _get_output_path(rel_path, config.format)
             output_file = output_dir / output_file_rel
 
             build_file(
                 python_file,
                 output_file,
-                verbose=verbose,
-                format=format,
-                hide_statements=hide_statements,
-                hide_visuals=hide_visuals,
-                hide_code=hide_code,
-                continue_on_error=continue_on_error,
-                colight_output_path=colight_output_path,
-                colight_embed_path=colight_embed_path,
-                inline_threshold=inline_threshold,
+                config=config,
             )
         except Exception as e:
             print(f"Error building {python_file}: {e}")
-            if verbose:
+            if config.verbose:
                 import traceback
 
                 traceback.print_exc()

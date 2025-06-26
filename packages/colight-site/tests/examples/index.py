@@ -1,9 +1,8 @@
-# | hide-code
+# | hide-all-code
 
 import os
 import glob
 import colight.plot as Plot
-
 
 py_files = glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))
 py_files = [f for f in py_files if os.path.basename(f) != "index.py"]

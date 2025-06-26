@@ -6,64 +6,79 @@ from watchfiles import watch
 import fnmatch
 
 from . import api
-from .constants import DEFAULT_INLINE_THRESHOLD
+from .builder import BuildConfig
 
 
 def watch_and_build(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
-    verbose: bool = False,
-    format: str = "markdown",
-    hide_statements: bool = False,
-    hide_visuals: bool = False,
-    hide_code: bool = False,
-    continue_on_error: bool = True,
-    colight_output_path: Optional[str] = None,
-    colight_embed_path: Optional[str] = None,
-    inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
+    config: Optional[BuildConfig] = None,
     include: Optional[List[str]] = None,
     ignore: Optional[List[str]] = None,
+    **kwargs,
 ):
-    """Watch for changes and rebuild automatically."""
+    """Watch for changes and rebuild automatically.
+
+    Args:
+        input_path: Path to watch (file or directory)
+        output_path: Where to write output
+        config: BuildConfig object with build settings
+        include: List of glob patterns to include
+        ignore: List of glob patterns to ignore
+        **kwargs: Additional keyword arguments to override config values
+    """
+    # Create config from provided config or kwargs
+    if config is None:
+        # Handle legacy kwargs that might have individual flags
+        if (
+            "hide_statements" in kwargs
+            or "hide_visuals" in kwargs
+            or "hide_code" in kwargs
+        ):
+            pragma_tags = set()
+            if kwargs.pop("hide_statements", False):
+                pragma_tags.add("hide-statements")
+            if kwargs.pop("hide_visuals", False):
+                pragma_tags.add("hide-visuals")
+            if kwargs.pop("hide_code", False):
+                pragma_tags.add("hide-code")
+            kwargs["pragma_tags"] = pragma_tags
+
+        # Handle format -> formats conversion
+        if "format" in kwargs and "formats" not in kwargs:
+            kwargs["formats"] = {kwargs.pop("format")}
+
+        config = BuildConfig(**kwargs)
+    else:
+        # If config provided but kwargs also given, create new config with overrides
+        if kwargs:
+            config_dict = {
+                "verbose": config.verbose,
+                "pragma_tags": config.pragma_tags.copy(),
+                "formats": config.formats.copy(),
+                "continue_on_error": config.continue_on_error,
+                "colight_output_path": config.colight_output_path,
+                "colight_embed_path": config.colight_embed_path,
+                "inline_threshold": config.inline_threshold,
+                "in_subprocess": config.in_subprocess,
+            }
+            config_dict.update(kwargs)
+            config = BuildConfig(**config_dict)
     # Default include pattern
     if include is None:
         include = ["*.py"]
 
     print(f"Watching {input_path} for changes...")
-    if verbose:
+    if config.verbose:
         print(f"Include patterns: {include}")
         if ignore:
             print(f"Ignore patterns: {ignore}")
 
     # Build initially
     if input_path.is_file():
-        api.build_file(
-            input_path,
-            output_path,
-            verbose=verbose,
-            format=format,
-            hide_statements=hide_statements,
-            hide_visuals=hide_visuals,
-            hide_code=hide_code,
-            continue_on_error=continue_on_error,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-        )
+        api.build_file(input_path, output_path, config=config)
     else:
-        api.build_directory(
-            input_path,
-            output_path,
-            verbose=verbose,
-            format=format,
-            hide_statements=hide_statements,
-            hide_visuals=hide_visuals,
-            hide_code=hide_code,
-            continue_on_error=continue_on_error,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-        )
+        api.build_directory(input_path, output_path, config=config)
 
     # Helper function to check if file matches patterns
     def matches_patterns(
@@ -106,7 +121,7 @@ def watch_and_build(
         }
 
         if matching_changes:
-            if verbose:
+            if config.verbose:
                 print(
                     f"Changes detected: {', '.join(str(f) for f in matching_changes)}"
                 )
@@ -120,67 +135,30 @@ def watch_and_build(
             try:
                 if input_path.is_file():
                     if input_path in matching_changes:
-                        api.build_file(
-                            input_path,
-                            output_path,
-                            verbose=verbose,
-                            format=format,
-                            hide_statements=hide_statements,
-                            hide_visuals=hide_visuals,
-                            hide_code=hide_code,
-                            continue_on_error=continue_on_error,
-                            colight_output_path=colight_output_path,
-                            colight_embed_path=colight_embed_path,
-                        )
-                        if verbose:
+                        api.build_file(input_path, output_path, config=config)
+                        if config.verbose:
                             print(f"Rebuilt {input_path}")
                 else:
                     # Rebuild affected files
                     for changed_file in matching_changes:
-                        # Debug logging
-                        print(f"DEBUG: Checking changed file: {changed_file}")
-                        print(f"DEBUG: Input path: {input_path}")
-                        print(f"DEBUG: Input path absolute: {input_path.absolute()}")
-                        print(
-                            f"DEBUG: Changed file absolute: {changed_file.absolute()}"
-                        )
-                        print(
-                            f"DEBUG: Is relative to? {changed_file.is_relative_to(input_path)}"
-                        )
-
                         # Try with absolute paths
                         try:
-                            is_relative_abs = changed_file.absolute().is_relative_to(
+                            changed_file.absolute().is_relative_to(
                                 input_path.absolute()
-                            )
-                            print(
-                                f"DEBUG: Is relative to (absolute paths)? {is_relative_abs}"
                             )
                         except Exception as e:
                             print(f"DEBUG: Error checking relative paths: {e}")
 
                         if changed_file.is_relative_to(input_path.resolve()):
                             rel_path = changed_file.relative_to(input_path.resolve())
-                            suffix = ".html" if format == "html" else ".md"
+                            suffix = ".html" if config.format == "html" else ".md"
                             output_file = output_path / rel_path.with_suffix(suffix)
-                            api.build_file(
-                                changed_file,
-                                output_file,
-                                verbose=verbose,
-                                format=format,
-                                hide_statements=hide_statements,
-                                hide_visuals=hide_visuals,
-                                hide_code=hide_code,
-                                continue_on_error=continue_on_error,
-                                colight_output_path=colight_output_path,
-                                colight_embed_path=colight_embed_path,
-                                inline_threshold=inline_threshold,
-                            )
-                            if verbose:
+                            api.build_file(changed_file, output_file, config=config)
+                            if config.verbose:
                                 print(f"Rebuilt {changed_file}")
             except Exception as e:
                 print(f"Error during rebuild: {e}")
-                if verbose:
+                if config.verbose:
                     import traceback
 
                     traceback.print_exc()

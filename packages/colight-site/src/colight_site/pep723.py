@@ -1,10 +1,7 @@
 """Support for PEP 723 inline script metadata."""
 
 import re
-import tempfile
-import subprocess
-import pathlib
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 
 def detect_pep723_metadata(content: str) -> Optional[str]:
@@ -21,39 +18,34 @@ def detect_pep723_metadata(content: str) -> Optional[str]:
     # # ]
     # # ///
 
-    # Look for the start marker
-    lines = content.split("\n")
-    start_idx = None
+    # Use a regex to find the first PEP 723 metadata block.
+    # The `(?m)` flag enables multi-line mode, so `^` matches the start of a line.
+    # The `(?s)` flag (re.DOTALL) allows `.` to match newlines.
+    match = re.search(
+        r"^[ \t]*# /// script\n(.*?)\n[ \t]*# ///[ \t]*$",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
 
-    for i, line in enumerate(lines):
-        if line.strip() == "# /// script":
-            start_idx = i
-            break
-
-    if start_idx is None:
+    if not match:
         return None
 
-    # Look for the end marker
-    end_idx = None
-    for i in range(start_idx + 1, len(lines)):
-        if lines[i].strip() == "# ///":
-            end_idx = i
-            break
-
-    if end_idx is None:
-        return None
-
-    # Extract metadata content (remove comment markers)
+    metadata_block = match.group(1)
     metadata_lines = []
-    for i in range(start_idx + 1, end_idx):
-        line = lines[i]
-        # Remove leading '# ' if present
+
+    # Process the captured metadata content.
+    for line in metadata_block.split("\n"):
+        # Per PEP 723, lines must be empty or start with "# ".
         if line.startswith("# "):
             metadata_lines.append(line[2:])
+        elif line.strip() == "":
+            # The spec allows empty lines.
+            metadata_lines.append("")
         elif line.strip() == "#":
+            # Allow lines with only a # as a comment.
             metadata_lines.append("")
         else:
-            # Invalid format
+            # Invalid line format within the block.
             return None
 
     return "\n".join(metadata_lines)
@@ -74,51 +66,3 @@ def parse_dependencies(metadata: str) -> List[str]:
     deps = re.findall(r'["\']([^"\']+)["\']', deps_str)
 
     return deps
-
-
-def run_with_pep723_env(
-    file_path: pathlib.Path, python_code: str, verbose: bool = False
-) -> Tuple[subprocess.CompletedProcess, pathlib.Path]:
-    """
-    Run a Python file with PEP 723 dependencies using uv.
-
-    Returns the completed process and the temporary file path used.
-    """
-    # Create a temporary file with the Python code
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, dir=file_path.parent
-    ) as tmp_file:
-        tmp_file.write(python_code)
-        tmp_path = pathlib.Path(tmp_file.name)
-
-    try:
-        # Run with uv run --script
-        cmd = ["uv", "run", "--script", str(tmp_path)]
-
-        if verbose:
-            print(f"Running with PEP 723 dependencies: {cmd}")
-
-        # Run the command
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=file_path.parent
-        )
-
-        return result, tmp_path
-
-    except Exception:
-        # Clean up temp file on error
-        tmp_path.unlink(missing_ok=True)
-        raise
-
-
-def execute_pep723_code(
-    code: str, env: dict, filename: str = "<pep723>", verbose: bool = False
-) -> None:
-    """
-    Execute code that was run in a PEP 723 environment.
-
-    This is used to execute individual forms after the initial
-    PEP 723 setup has been done.
-    """
-    # Execute directly in the provided environment
-    exec(compile(code, filename, "exec"), env)

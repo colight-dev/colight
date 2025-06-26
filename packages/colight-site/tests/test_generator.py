@@ -246,7 +246,7 @@ def test_show_code_overrides_hide_code():
     import tempfile
     from colight_site.parser import parse_colight_file
 
-    content = """#| hide-statements hide-code
+    content = """#| hide-all-statements hide-all-code
 
 # First form - should hide code due to file-level flags
 import numpy as np
@@ -291,7 +291,7 @@ def test_hide_prose_generation():
     from colight_site.parser import parse_colight_file
 
     # Test content with hide-prose at file level
-    content = """# %% hide-prose
+    content = """# %% hide-all-prose
 
 # This is a title that should be hidden
 # This description should also be hidden
@@ -319,7 +319,7 @@ y = x * 2
         generator = MarkdownGenerator(output_dir)
 
         # No colight data for this test
-        colight_data = [None] * len(forms)
+        colight_data: List[Optional[Union[bytes, pathlib.Path]]] = [None] * len(forms)
 
         markdown = generator.generate_markdown(
             forms, colight_data, pragma_tags=metadata.pragma_tags
