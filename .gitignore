@@ -18,3 +18,4 @@ dist
 .colight-port
 **/**.colight
 docs/api/
+.colight_cache

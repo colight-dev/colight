@@ -10,6 +10,7 @@ from colight_site.parser import (
     should_hide_statements,
     should_hide_visuals,
     should_hide_code,
+    should_hide_prose,
 )
 from colight.env import VERSIONED_CDN_DIST_URL
 from .constants import DEFAULT_INLINE_THRESHOLD
@@ -64,8 +65,8 @@ class MarkdownGenerator:
             # Resolve form-specific settings: per-form metadata overrides file/CLI defaults
             resolved_tags = form.metadata.resolve_with_defaults(pragma_tags)
 
-            # Always add markdown content from comments (separated by blank lines)
-            if form.markdown:
+            # Add markdown content from comments unless hide_prose is set
+            if form.markdown and not should_hide_prose(resolved_tags):
                 markdown_content = self._process_markdown_lines(form.markdown)
                 if markdown_content.strip():
                     lines.append(markdown_content)

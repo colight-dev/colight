@@ -19,7 +19,8 @@ dependencies = [
     "watchfiles>=0.21.0",
     "colight",
     "markdown>=3.5",
-    "livereload>=2.7.1",
+    "websockets>=12.0",
+    "werkzeug>=3.1.3",
 ]
 
 [project.license]
@@ -31,6 +32,7 @@ colight-site = "colight_site.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [tool.hatch.build.targets.wheel]
