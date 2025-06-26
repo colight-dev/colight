@@ -4,12 +4,7 @@ import * as React from "react";
 import * as ReactDOM from "react-dom/client";
 import * as api from "./api";
 import widgetCSS from "../widget.css";
-import {
-  evaluate,
-  createEvalEnv,
-  collectBuffers,
-  replaceBuffers,
-} from "./eval";
+import { evaluate, loadImports, collectBuffers, replaceBuffers } from "./eval";
 import { $StateContext } from "./context";
 import { useCellUnmounted, tw } from "./utils";
 import { ReadyStateManager } from "./ready";
@@ -159,23 +154,18 @@ function setDeep(stateHandler, target, prop, value) {
 
 /**
  * Creates a reactive state store with optional sync capabilities
- * @param {Object.<string, any>} state
- * @param {Object} experimental - The experimental interface for sync operations
- * @returns {Proxy} A proxied state store with reactive capabilities
+ * @param {Object} data - The data object containing state, experimental interface, and buffers
+ * @returns {Promise<Proxy>} A promise that resolves to a proxied state store with reactive capabilities
  */
-export function createStateStore({
-  state,
-  syncedKeys,
-  listeners = {},
-  experimental,
-  buffers,
-  evalEnv = {},
-}) {
-  syncedKeys = new Set(syncedKeys);
-  const stateMap = mobx.observable.map(state, { deep: false });
+export async function createStateStore(data) {
+  data = { syncedKeys: [], imports: [], listeners: {}, ...data };
+  const experimental = data.experimental;
+  const buffers = data.buffers;
+  const stateMap = mobx.observable.map(data.state, { deep: false });
   const computeds = {};
   const reactions = {};
   const readyState = new ReadyStateManager();
+  const evalEnv = { colight: { api } };
 
   const stateHandler = {
     get(target, key) {
@@ -207,7 +197,7 @@ export function createStateStore({
 
   function notifyPython(updates) {
     if (!experimental || !updates) return;
-    updates = updates.filter(([key]) => syncedKeys.has(key));
+    updates = updates.filter(([key]) => $state.__syncedKeys.has(key));
     if (!updates.length) return;
 
     // if we're already in a transaction, just add to it.
@@ -231,13 +221,24 @@ export function createStateStore({
     reactions[key]?.(); // clean up existing reaction, if it exists.
     const isComputed =
       value?.constructor === Object && value.__type__ === "js_source";
-    if (syncedKeys.has(key) && isComputed) {
+    if ($state.__syncedKeys.has(key) && isComputed) {
       reactions[key] = mobx.reaction(
         () => $state[key],
         (value) => notifyPython([[key, "reset", value]]),
         { fireImmediately: true },
       );
     }
+  };
+
+  // notify js listeners when updates occur
+  const notifyJs = (updates) => {
+    updates.forEach(([key]) => {
+      const keyListeners = $state.__listeners[key];
+      if (keyListeners) {
+        const value = $state[key];
+        keyListeners.forEach((callback) => callback({ value }));
+      }
+    });
   };
 
   const applyUpdates = (updates) => {
@@ -275,17 +276,6 @@ export function createStateStore({
     return null;
   };
 
-  // notify js listeners when updates occur
-  const notifyJs = (updates) => {
-    updates.forEach(([key]) => {
-      const keyListeners = listeners[key];
-      if (keyListeners) {
-        const value = $state[key];
-        keyListeners.forEach((callback) => callback({ value }));
-      }
-    });
-  };
-
   const $state = new Proxy(
     {
       evaluate: (ast) => evaluate(ast, $state, experimental, buffers),
@@ -296,14 +286,38 @@ export function createStateStore({
         return readyState.beginUpdate(label);
       },
       __evalEnv: evalEnv,
+      __listeners: {},
+      __syncedKeys: new Set(),
       __backfill: function (state, syncedKeys) {
-        syncedKeys = new Set(syncedKeys);
+        syncedKeys.forEach((key) => $state.__syncedKeys.add(key));
         for (const [key, value] of Object.entries(state)) {
           if (!stateMap.has(key)) {
             stateMap.set(key, value);
           }
           listenToComputed(key, value);
         }
+      },
+      __mergeListeners: function (listeners) {
+        for (const [key, fns] of Object.entries(listeners)) {
+          if (!$state.__listeners[key]) {
+            $state.__listeners[key] = [];
+          }
+          $state.__listeners[key].push(...fns);
+        }
+      },
+
+      __updateEnvironment: async function ({
+        imports,
+        listeners,
+        state,
+        syncedKeys,
+        updateEntries,
+      }) {
+        // load imports
+        Object.assign(evalEnv, await loadImports(imports));
+        $state.__backfill(state, syncedKeys);
+        $state.__mergeListeners($state.evaluate(listeners));
+        await $state.applyUpdateEntries(updateEntries);
       },
 
       __resolveRef: function (node) {
@@ -324,6 +338,18 @@ export function createStateStore({
         applyUpdates(normalizeUpdates(updates));
       }),
 
+      applyUpdateEntries: async (entries) => {
+        if (!entries) return;
+        for (const { data } of entries) {
+          await $state.__updateEnvironment(data);
+        }
+        mobx.runInAction(() => {
+          entries.forEach(({ data, buffers }) => {
+            $state.updateWithBuffers(data.ast, buffers);
+          });
+        });
+      },
+
       update: (...updates) => {
         updates = applyUpdates(normalizeUpdates(updates));
         notifyPython(updates);
@@ -336,60 +362,50 @@ export function createStateStore({
     },
   );
 
-  listeners = $state.evaluate(listeners);
+  await $state.__updateEnvironment(data);
 
   return $state;
 }
 
 export function StateProvider(data) {
-  const { ast, syncedKeys, imports, state, model } = data;
-  const [evalEnv, setEnv] = useState(null);
-
-  useEffect(() => {
-    createEvalEnv(imports || []).then(setEnv);
-  }, [imports]);
-
-  const $state = useMemo(
-    () =>
-      evalEnv &&
-      createStateStore({
-        ...data,
-        evalEnv,
-      }),
-    [evalEnv],
-  );
-
+  const id = data.id;
+  const [$state, setCurrentState] = useState(null);
   const [currentAst, setCurrentAst] = useState(null);
 
   useEffect(() => {
-    // wait for env to load (async)
-    if (!evalEnv) return;
+    (async () => {
+      setCurrentState(await createStateStore(data));
+    })();
+    return;
+  }, [id]);
 
-    // when the widget is reset with a new ast/state, add missing entries
-    // to the state and then reset the current ast.
-    $state.__backfill(state, syncedKeys);
-    setCurrentAst(ast);
-  }, [ast, state, $state]);
+  useEffect(() => {
+    if ($state) {
+      setCurrentAst(data.ast);
+    }
+    return;
+  }, [$state, data.ast]);
 
   useEffect(() => {
     // if we have an AnyWidget model (ie. we are in widget model),
     // listen for `update_state` events.
-    if ($state && model) {
+    if ($state && data.model) {
       const cb = (msg, buffers) => {
         if (msg.type === "update_state") {
           $state.updateWithBuffers(msg.updates, buffers);
         }
       };
-      model.on("msg:custom", cb);
-      return () => model.off("msg:custom", cb);
+      data.model.on("msg:custom", cb);
+      return () => data.model.off("msg:custom", cb);
     }
-  }, [model, $state]);
+  }, [$state, data.model]);
 
   useEffect(() => {
     if (currentAst) {
-      globals.colight.instances[data.id] = $state;
+      globals.colight.instances[id] = $state;
+      return () => delete globals.colight.instances[id];
     }
-  }, [!!currentAst]);
+  }, [id, currentAst]);
 
   if (!currentAst) return;
 
@@ -429,7 +445,7 @@ class ErrorBoundary extends React.Component {
 }
 
 function DraggableViewer({ data: initialData }) {
-  const [data, setData] = useState(initialData);
+  const [currentData, setCurrentData] = useState(initialData);
   const [dragActive, setDragActive] = useState(false);
 
   const handleDrag = useCallback((e) => {
@@ -446,29 +462,43 @@ function DraggableViewer({ data: initialData }) {
     }
   }, []);
 
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
+  const handleDrop = useCallback(
+    async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        const file = e.dataTransfer.files[0];
 
-      // Check if it's a .colight file
-      if (file.name.endsWith(".colight")) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const parsedData = parseColightData(arrayBuffer);
-          setData(parsedData);
-        } catch (error) {
-          console.error("Error parsing .colight file:", error);
-          alert(`Error loading .colight file: ${error.message}`);
+        // Check if it's a .colight file
+        if (file.name.endsWith(".colight")) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const parsedData = parseColightData(arrayBuffer);
+
+            // Check if this is an update-only file
+            if (!parsedData.ast && parsedData.updateEntries) {
+              const $state = globals.colight.instances[currentData.id];
+              if (currentData && currentData.id && $state) {
+                $state.applyUpdateEntries(parsedData.updateEntries);
+              } else {
+                alert("No visualization loaded to apply updates to");
+              }
+            } else {
+              setCurrentData(parsedData);
+            }
+          } catch (error) {
+            console.error("Error parsing .colight file:", error);
+            alert(`Error loading .colight file: ${error.message}`);
+          }
+        } else {
+          alert("Please drop a .colight file");
         }
-      } else {
-        alert("Please drop a .colight file");
       }
-    }
-  }, []);
+    },
+    [currentData],
+  );
 
   return (
     <div
@@ -480,7 +510,7 @@ function DraggableViewer({ data: initialData }) {
       onDragOver={handleDrag}
       onDrop={handleDrop}
     >
-      <Viewer {...data} />
+      <Viewer {...currentData} />
       {dragActive && (
         <div
           className={tw(
@@ -533,7 +563,7 @@ export function Viewer(data) {
  * @param {string} id - A unique identifier for the widget instance.
  */
 export const render = async (element, data, id) => {
-  id = id || `widget-${Math.random().toString(36).substring(2, 15)}`;
+  id = id || data.id;
 
   // If element is a string, treat it as an ID and find/create the element
   const el =

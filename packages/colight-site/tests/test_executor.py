@@ -128,7 +128,8 @@ def test_colight_visualization_bytes():
         # The file should be parseable by the colight format module
         from colight.format import parse_file
 
-        json_data, buffers = parse_file(temp_path)
+        json_data, buffers, update_entries = parse_file(temp_path)
+        assert json_data is not None
         assert "ast" in json_data  # Should have AST structure
         assert "display_as" in json_data  # Should have display preferences
     finally:

@@ -83,7 +83,8 @@ print("Processing complete!")
             # The file should be parseable by the colight format module
             from colight.format import parse_file
 
-            json_data, buffers = parse_file(first_colight)
+            json_data, buffers, _ = parse_file(first_colight)
+            assert json_data is not None
             assert "ast" in json_data  # Should have AST structure
 
 

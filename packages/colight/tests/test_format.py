@@ -33,9 +33,10 @@ def test_colight_file():
     assert magic == MAGIC_BYTES
 
     # Parse using our parser
-    json_data, buffers = parse_file(result_path)
+    json_data, buffers, updates = parse_file(result_path)
 
     # Verify buffer layout
+    assert json_data is not None
     assert "bufferLayout" in json_data
     assert "offsets" in json_data["bufferLayout"]
     assert "lengths" in json_data["bufferLayout"]

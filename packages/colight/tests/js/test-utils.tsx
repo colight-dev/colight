@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { $StateContext } from "../../src/colight/js/context";
 import { createStateStore } from "../../src/colight/js/widget";
 
@@ -13,10 +13,17 @@ export function withBlankState<P extends object>(
   initialState: Record<string, any> = {},
 ) {
   return function WrappedComponent(props: P) {
-    const $state = createStateStore({
-      initialState,
-      syncedKeys: new Set(),
-    });
+    const [$state, set$State] = useState<any>(null);
+
+    useEffect(() => {
+      createStateStore({
+        state: initialState,
+      }).then(set$State);
+    }, []);
+
+    if (!$state) {
+      return null; // or a loading indicator
+    }
 
     return (
       <$StateContext.Provider value={$state}>

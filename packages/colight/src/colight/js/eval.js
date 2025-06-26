@@ -17,7 +17,7 @@ window.React = api.React;
 // moduleCache is on window so that multiple copies of this script can share it
 window.moduleCache = window.moduleCache || new Map();
 
-export async function createEvalEnv(imports) {
+export async function loadImports(imports) {
   const envImports = {};
 
   // Helper to evaluate non-ESM code in a controlled scope
@@ -122,7 +122,7 @@ export async function createEvalEnv(imports) {
       console.error(`Spec:`, spec);
     }
   }
-  return { colight: { api }, ...envImports };
+  return envImports;
 }
 
 export function evaluate(node, $state, experimental, buffers) {

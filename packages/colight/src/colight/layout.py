@@ -17,15 +17,14 @@ def create_parent_dir(path: str) -> None:
 
 
 class HTML:
-    def __init__(self, ast):
-        self.ast = ast
-        self.id = f"colight-widget-{uuid.uuid4().hex}"
+    def __init__(self, layout_item):
+        self.layout_item = layout_item
 
-    def set_ast(self, ast):
-        self.ast = ast
+    def set_ast(self, layout_item):
+        self.layout_item = layout_item
 
     def _repr_mimebundle_(self, **kwargs):
-        html_content = html_snippet(self.ast, self.id)
+        html_content = html_snippet(self.layout_item)
         return {"text/html": html_content}, {}
 
 
@@ -34,6 +33,12 @@ class LayoutItem:
         self._html: HTML | None = None
         self._widget: Widget | None = None
         self._display_as: str | None = None
+        self._id: str | None = None
+
+    def get_id(self) -> str:
+        if self._id is None:
+            self._id = f"colight-widget-{uuid.uuid4().hex}"
+        return self._id
 
     def display_as(self, display_as) -> Self:
         if display_as not in ["html", "widget"]:

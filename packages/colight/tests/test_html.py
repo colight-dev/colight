@@ -26,16 +26,14 @@ def test_html_snippet():
 def test_html_page():
     """Test that html_page generates a full HTML page"""
 
-    id = "colight-test"
-
-    html = html_page(p, id)
+    html = html_page(p)
 
     # Basic checks
     assert "<!DOCTYPE html>" in html
     assert "<html>" in html
     assert "<head>" in html
     assert "<body>" in html
-    assert html_snippet(p, id) in html
+    assert html_snippet(p) in html
 
 
 def test_html_file():
