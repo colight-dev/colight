@@ -31,10 +31,10 @@ def test_generate_artifacts_for_inspection():
     # Use the existing build_directory function to generate both markdown and HTML
     # Don't bypass PEP 723 - let it run properly with uv
     print("Building markdown files...")
-    build_directory(examples_dir, artifacts_dir, verbose=True, format="markdown")
+    build_directory(examples_dir, artifacts_dir, verbose=True, formats={"markdown"})
 
     print("Building HTML files...")
-    build_directory(examples_dir, artifacts_dir, verbose=True, format="html")
+    build_directory(examples_dir, artifacts_dir, verbose=True, formats={"html"})
 
     print(f"\nGenerated test artifacts in: {artifacts_dir}")
     print("Files created:")

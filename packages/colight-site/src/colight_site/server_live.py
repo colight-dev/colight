@@ -71,17 +71,34 @@ class LiveReloadMiddleware:
         self.ws_port = ws_port
         self.reload_script = f"""<script>
 (function() {{
-    const ws = new WebSocket('ws://127.0.0.1:{ws_port}');
-    ws.onmessage = function(event) {{
-        const data = JSON.parse(event.data);
-        if (data.type === 'reload') {{
-            window.location.reload();
-        }}
-    }};
-    ws.onclose = function() {{
-        console.log('LiveReload connection closed. Retrying in 1s...');
-        setTimeout(() => window.location.reload(), 1000);
-    }};
+    let reloadScheduled = false;
+    
+    function connect() {{
+        const ws = new WebSocket('ws://127.0.0.1:{ws_port}');
+        
+        ws.onopen = function() {{
+            console.log('LiveReload connected');
+        }};
+        
+        ws.onmessage = function(event) {{
+            const data = JSON.parse(event.data);
+            if (data.type === 'reload' && !reloadScheduled) {{
+                reloadScheduled = true;
+                window.location.reload();
+            }}
+        }};
+        
+        ws.onerror = function(error) {{
+            console.log('LiveReload connection error:', error);
+        }};
+        
+        ws.onclose = function() {{
+            console.log('LiveReload disconnected. Reconnecting in 2s...');
+            setTimeout(connect, 2000);
+        }};
+    }}
+    
+    connect();
 }})();
 </script>
 """

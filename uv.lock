@@ -369,6 +369,8 @@ dependencies = [
     { name = "libcst" },
     { name = "markdown" },
     { name = "watchfiles" },
+    { name = "websockets" },
+    { name = "werkzeug" },
 ]
 
 [package.dev-dependencies]
@@ -384,6 +386,8 @@ requires-dist = [
     { name = "libcst", specifier = ">=1.4" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "watchfiles", specifier = ">=0.21.0" },
+    { name = "websockets", specifier = ">=12.0" },
+    { name = "werkzeug", specifier = ">=3.1.3" },
 ]
 
 [package.metadata.requires-dev]
