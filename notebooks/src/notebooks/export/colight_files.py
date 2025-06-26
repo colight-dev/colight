@@ -1,4 +1,5 @@
 import colight.plot as Plot
+import colight.format as format
 from colight.plot import js
 from colight.scene3d import PointCloud
 from notebooks.scene3d.scene3d_ripple import create_ripple_grid
@@ -42,6 +43,7 @@ p = (
             "frame": 0,
             "grid_xyz": grid_xyz_frames,
             "grid_rgb": grid_rgb,
+            "title": ".colight example",
         }
     )
     | Plot.Slider("frame", range=n_frames, fps=30)
@@ -58,8 +60,16 @@ where:
 - $\phi(t)$ is the time-dependent phase
         """)
     )
+    | Plot.html(["h1", Plot.js("$state.title")])
 )
 
 colight_path = p.save_file("scratch/embed_example.colight")
 create_embed_example(colight_path)
 print(f"✓ Created .colight file at: {colight_path}")
+
+p.save_html("scratch/embed_example.html", local=True)
+
+format.save_updates(
+    "scratch/embed_update.colight",
+    [[{"title": Plot.js("`My new title ${Math.random()}`")}]],
+)
