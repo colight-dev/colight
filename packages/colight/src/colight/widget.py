@@ -288,16 +288,18 @@ def resolve_animate_by(collected_state):
 
 
 def to_json_with_state(
-    ast: Any,
+    layout_item: Any,
     widget: "Widget | None" = None,
     buffers: List[bytes | bytearray | memoryview] | None = None,
 ) -> Union[Any, Tuple[Any, List[bytes | bytearray | memoryview]]]:
     collected_state = CollectedState(widget=widget, buffers=buffers or [])
-    ast = to_json(ast, collected_state=collected_state)
+    id = layout_item.get_id() if hasattr(layout_item, "get_id") else None
+    ast = to_json(layout_item, collected_state=collected_state)
 
     json = to_json(
         {
             "ast": ast,
+            "id": id,
             "state": collected_state.stateJSON,
             "syncedKeys": collected_state.syncedKeys,
             "listeners": collected_state.listeners["js"],

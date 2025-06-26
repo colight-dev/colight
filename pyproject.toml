@@ -2,12 +2,13 @@
 # This file provides shared tooling configuration but is not a buildable package
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "notebooks"]
 
 [tool.uv.sources]
 colight = { workspace = true }
 colight-site = { workspace = true }
 colight-mkdocs = { workspace = true }
+notebooks = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
@@ -28,6 +29,7 @@ dev = [
     "anthropic>=0.39.0",
     "python-dotenv>=1.0.1",
     "tomli-w>=1.0.0",
+    "toml>=0.10.2",
     "pandas>=2.3.0",
     "pillow>=11.2.1",
     "colight-mkdocs",
@@ -38,11 +40,12 @@ dev = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests", "docs",]
-exclude = [ "notebooks",]
+include = [ "packages/*/src", "packages/*/tests", "docs", "notebooks",]
+exclude = []
 typeCheckingMode = "standard"
 reportUnusedExpression = false
 reportFunctionMemberAccess = false
+reportCallIssue = false
 
 [tool.ruff.lint]
 ignore = [ "E402",]

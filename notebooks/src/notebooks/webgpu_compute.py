@@ -192,7 +192,7 @@ fn main(
 }
 
 (
-    Plot.Import("path:notebooks/webgpu_compute.js", refer_all=True)
+    Plot.Import("path:webgpu_compute.js", refer_all=True)
     | Plot.Slider("intendedPixelBlockSize", init=8, range=[2, 200])
     | Plot.State(
         {
@@ -274,4 +274,4 @@ fn main(
             },
         ],
     ]
-).save_html("notebooks/webgpu.html")
+).save_html("webgpu.html")

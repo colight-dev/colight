@@ -2,7 +2,7 @@ from colight.scene3d import Ellipsoid
 import pickle
 import colight.plot as Plot
 
-with open("./notebooks/scene3d/banana_gaussians.pkl", "rb") as f:
+with open("./banana_gaussians.pkl", "rb") as f:
     banana_gaussians = pickle.load(f)
 
 

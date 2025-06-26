@@ -1,6 +1,5 @@
 import base64
 import json
-import uuid
 
 import colight.env as env
 from colight.format import create_bytes
@@ -55,9 +54,9 @@ def get_script_content(dist_url=None, local=False):
         """
 
 
-def html_snippet(ast, id=None, dist_url=None, local=False):
-    id = id or f"colight-widget-{uuid.uuid4().hex}"
-    data, buffers = to_json_with_state(ast, buffers=[])
+def html_snippet(layout_item, dist_url=None, local=False):
+    id = layout_item.get_id()
+    data, buffers = to_json_with_state(layout_item, buffers=[])
 
     colight_data = create_bytes(data, buffers)
     colight_base64 = base64.b64encode(colight_data).decode("utf-8")
@@ -80,7 +79,7 @@ def html_snippet(ast, id=None, dist_url=None, local=False):
     return html_content
 
 
-def html_page(ast, id=None, dist_url=None, local=False):
+def html_page(layout_item, dist_url=None, local=False):
     return f"""
     <!DOCTYPE html>
     <html>
@@ -89,7 +88,7 @@ def html_page(ast, id=None, dist_url=None, local=False):
         <title>Colight</title>
     </head>
     <body>
-        {html_snippet(ast, id, dist_url=dist_url, local=local)}
+        {html_snippet(layout_item, dist_url=dist_url, local=local)}
     </body>
     </html>
     """

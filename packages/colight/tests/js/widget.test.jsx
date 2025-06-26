@@ -14,7 +14,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const emptyState = { __evalEnv: {} };
+// Helper function to create state store synchronously for tests
+async function createTestStateStore(data) {
+  return await createStateStore(data);
+}
+
+const emptyState = {
+  __evalEnv: {},
+};
 
 describe("Widget", () => {
   describe("evaluate", () => {
@@ -101,19 +108,13 @@ describe("Widget", () => {
   });
 
   describe("useStateStore", () => {
-    it("should initialize state", () => {
+    it("should initialize state", async () => {
       const init = {
         state: { count: 0 },
-        syncedKeys: new Set(["count"]),
+        syncedKeys: ["count"],
       };
-      let result;
-      function TestHook() {
-        result = createStateStore(init);
-        return null;
-      }
-      render(<TestHook />);
-      expect(result).toBeDefined();
-      const $state = result;
+      const $state = await createTestStateStore(init);
+      expect($state).toBeDefined();
       expect($state.count).toEqual(0);
     });
   });
@@ -193,8 +194,8 @@ describe("Widget", () => {
   };
 
   describe("createStateStore", () => {
-    it("should initialize with basic values", () => {
-      const $state = createStateStore({
+    it("should initialize with basic values", async () => {
+      const $state = await createTestStateStore({
         state: {
           count: 0,
           name: "Test",
@@ -205,8 +206,8 @@ describe("Widget", () => {
       expect($state.name).toBe("Test");
     });
 
-    it("should update a value", () => {
-      const $state = createStateStore({
+    it("should update a value", async () => {
+      const $state = await createTestStateStore({
         state: { count: 0 },
         syncedKeys: new Set(["count"]),
       });
@@ -214,8 +215,8 @@ describe("Widget", () => {
       expect($state.count).toBe(1);
     });
 
-    it("should handle computed values", () => {
-      const $state = createStateStore({
+    it("should handle computed values", async () => {
+      const $state = await createTestStateStore({
         state: {
           count: 0,
           doubleCount: js_expr("$state.count * 2"),
@@ -230,8 +231,8 @@ describe("Widget", () => {
       expect($state.countArray).toEqual([2, 2]);
     });
 
-    it("should handle references", () => {
-      const $state = createStateStore({
+    it("should handle references", async () => {
+      const $state = await createTestStateStore({
         state: {
           original: 10,
           reference: { __type__: "ref", state_key: "original" },
@@ -244,8 +245,8 @@ describe("Widget", () => {
       expect($state.reference).toBe(20);
     });
 
-    it("should take computed properties as the initial value for updates", () => {
-      const $state = createStateStore({
+    it("should take computed properties as the initial value for updates", async () => {
+      const $state = await createTestStateStore({
         state: {
           firstValue: js_expr("1"),
           list: js_expr("[$state.firstValue, 2, 3]"),
@@ -260,8 +261,8 @@ describe("Widget", () => {
       expect($state.list).toEqual([10, 2, 3, 10]);
     });
 
-    it('should apply "append" operation', () => {
-      const $state = createStateStore({
+    it('should apply "append" operation', async () => {
+      const $state = await createTestStateStore({
         state: {
           list: js_expr("[1, 2, 3]"),
         },
@@ -271,8 +272,8 @@ describe("Widget", () => {
       expect($state.list).toEqual([1, 2, 3, 4]);
     });
 
-    it("should throw if circular reference is detected", () => {
-      const $state = createStateStore({
+    it("should throw if circular reference is detected", async () => {
+      const $state = await createTestStateStore({
         state: {
           a: { __type__: "ref", state_key: "b" },
           b: { __type__: "ref", state_key: "a" },
@@ -284,8 +285,8 @@ describe("Widget", () => {
       expect($state.c).toBe(10);
     });
 
-    it('should demonstrate that during "update", ASTs are evaluated in order and not re-evaluated in a second pass', () => {
-      const $state = createStateStore({
+    it('should demonstrate that during "update", ASTs are evaluated in order and not re-evaluated in a second pass', async () => {
+      const $state = await createTestStateStore({
         state: {
           a: 1,
           b: js_expr("$state.a + 1"),
@@ -318,8 +319,8 @@ describe("Widget", () => {
     });
 
     describe("deep property access", () => {
-      it("should get deeply nested values", () => {
-        const $state = createStateStore({
+      it("should get deeply nested values", async () => {
+        const $state = await createTestStateStore({
           state: {
             nested: { a: { b: { c: 42 } } },
             array: [{ x: 1 }, { x: 2 }],
@@ -333,8 +334,8 @@ describe("Widget", () => {
         expect($state["typedArray.1"]).toBe(2);
       });
 
-      it("should set deeply nested values", () => {
-        const $state = createStateStore({
+      it("should set deeply nested values", async () => {
+        const $state = await createTestStateStore({
           state: {
             nested: { a: { b: { c: 42 } } },
             array: [{ x: 1 }, { x: 2 }],
@@ -349,8 +350,8 @@ describe("Widget", () => {
         expect($state.array[0].x).toBe(10);
       });
 
-      it("should create intermediate objects when setting deep paths", () => {
-        const $state = createStateStore({
+      it("should create intermediate objects when setting deep paths", async () => {
+        const $state = await createTestStateStore({
           state: {
             data: {},
           },
@@ -361,8 +362,8 @@ describe("Widget", () => {
         expect($state.data.deeply.nested.value).toBe(42);
       });
 
-      it("should handle array paths with automatic array creation", () => {
-        const $state = createStateStore({
+      it("should handle array paths with automatic array creation", async () => {
+        const $state = await createTestStateStore({
           state: {
             points: [],
           },
@@ -375,8 +376,8 @@ describe("Widget", () => {
         expect($state["points.0.x"]).toBe(10);
       });
 
-      it("should maintain reactivity with deep updates", () => {
-        const $state = createStateStore({
+      it("should maintain reactivity with deep updates", async () => {
+        const $state = await createTestStateStore({
           state: {
             data: { value: 1 },
             computed: js_expr("$state.data.value * 2"),
