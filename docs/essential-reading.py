@@ -1,3 +1,5 @@
+# # Essential Reading
+
 # The `colight.plot` module is an interface to the [Observable Plot](https://observablehq.com/plot/getting-started) library, with 100% coverage and a straightforward mapping between what you write in Python and how plots are typically written in JavaScript. The Python code you write produces a structured representation which is serialized and rendered in a browser environment. To use this library effectively, you will want to frequently refer to the [Observable Plot documentation](https://observablehq.com/plot/quickstart) to understand the API surface we're targeting.
 
 # ## Marks

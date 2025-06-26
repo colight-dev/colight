@@ -46,7 +46,9 @@ function preloadKatexFonts() {
 function loadKatexResources($state) {
   if (katexResourcesPromise) return katexResourcesPromise;
 
-  finishKatexUpdate = $state.beginUpdate("api/katex-resources");
+  finishKatexUpdate = $state
+    ? $state.beginUpdate("api/katex-resources")
+    : () => {};
 
   // Preload fonts first
   preloadKatexFonts();

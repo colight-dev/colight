@@ -185,7 +185,7 @@ class ApiMiddleware:
             response = Response(response_data, mimetype="application/json")
             return response(environ, start_response)
 
-        # Handle /api/content/<path> endpoint
+        # Handle /api/content/<path> endpoint (legacy HTML)
         if path.startswith("/api/content/"):
             file_path = path[13:]  # Remove /api/content/
 
@@ -221,6 +221,37 @@ class ApiMiddleware:
 
             # File not found
             response = Response("File not found", status=404)
+            return response(environ, start_response)
+
+        # Handle /api/document/<path> endpoint (new JSON)
+        if path.startswith("/api/document/"):
+            file_path = path[14:]  # Remove /api/document/
+
+            # Find source file
+            source_file = self._find_source_file(file_path + ".html")
+            if source_file:
+                try:
+                    # Generate JSON directly from source
+                    from .json_generator import JsonFormGenerator
+
+                    generator = JsonFormGenerator(config=self.config)
+                    json_content = generator.generate_json(source_file)
+
+                    response = Response(json_content, mimetype="application/json")
+                    return response(environ, start_response)
+                except Exception as e:
+                    error_data = json.dumps({"error": str(e), "type": "build_error"})
+                    response = Response(
+                        error_data, status=500, mimetype="application/json"
+                    )
+                    return response(environ, start_response)
+
+            # File not found
+            response = Response(
+                json.dumps({"error": "File not found", "type": "not_found"}),
+                status=404,
+                mimetype="application/json",
+            )
             return response(environ, start_response)
 
         # Not an API request, pass through
@@ -553,11 +584,25 @@ class LiveServer:
         # Set up roots - only serve dist directory for JS/CSS
         roots = {}
 
-        # Serve dist directory if it exists (for live.js)
-        dist_dir = pathlib.Path("dist").resolve()
-        if dist_dir.exists():
+        # Find dist directory - check both current dir and project root
+        possible_dist_dirs = [
+            pathlib.Path("dist"),  # If run from root
+            pathlib.Path(__file__).parent.parent.parent.parent.parent
+            / "dist",  # If run from packages/colight-site
+        ]
+
+        dist_dir = None
+        for path in possible_dist_dirs:
+            resolved = path.resolve()
+            if resolved.exists() and resolved.is_dir():
+                dist_dir = resolved
+                break
+
+        if dist_dir:
             roots["/dist"] = str(dist_dir)
             print(f"Serving assets from {dist_dir}")
+        else:
+            print("WARNING: Could not find dist directory for assets")
 
         # Base app that serves static files
         app = SharedDataMiddleware(

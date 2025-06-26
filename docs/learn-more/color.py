@@ -1,3 +1,4 @@
+# | hide-code
 import colight.plot as Plot
 
 # ## Color Schemes
