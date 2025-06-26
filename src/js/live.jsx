@@ -38,6 +38,8 @@ const LiveServerApp = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const searchInputRef = useRef(null);
   const wsRef = useRef(null);
+  const currentFileRef = useRef(null);
+  const pinnedRef = useRef(false);
 
   // Load file list
   const loadFiles = async () => {
@@ -49,6 +51,15 @@ const LiveServerApp = () => {
       console.error("Failed to load files:", error);
     }
   };
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    currentFileRef.current = currentFile;
+  }, [currentFile]);
+
+  useEffect(() => {
+    pinnedRef.current = pinned;
+  }, [pinned]);
 
   // Load file content
   const loadFile = async (path) => {
@@ -88,9 +99,9 @@ const LiveServerApp = () => {
 
         if (data.type === "file-changed" && data.path) {
           // If viewing this file, reload its content
-          if (currentFile === data.path) {
+          if (currentFileRef.current === data.path) {
             loadFile(data.path);
-          } else if (!pinned) {
+          } else if (!pinnedRef.current) {
             // Auto-navigate to changed file
             loadFile(data.path);
           }
@@ -118,7 +129,7 @@ const LiveServerApp = () => {
         wsRef.current.close();
       }
     };
-  }, [currentFile, pinned]);
+  }, []); // No dependencies - only connect once
 
   // Initial load
   useEffect(() => {

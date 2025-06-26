@@ -5,7 +5,7 @@ import json
 import pathlib
 import threading
 import webbrowser
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Dict
 import fnmatch
 
 import websockets
@@ -16,6 +16,62 @@ from watchfiles import awatch
 
 import colight_site.api as api
 from colight_site.builder import BuildConfig
+
+
+def _get_metadata_path(html_path: pathlib.Path) -> pathlib.Path:
+    """Get the metadata file path for an HTML file."""
+    return html_path.with_suffix(".meta.json")
+
+
+def _save_build_metadata(
+    html_path: pathlib.Path, source_path: pathlib.Path, config: BuildConfig
+) -> None:
+    """Save build metadata for caching."""
+    metadata = {
+        "source_mtime": source_path.stat().st_mtime,
+        "pragma_tags": sorted(list(config.pragma_tags)),
+        "source_path": str(source_path),
+    }
+
+    meta_path = _get_metadata_path(html_path)
+    meta_path.write_text(json.dumps(metadata, indent=2))
+
+
+def _load_build_metadata(html_path: pathlib.Path) -> Optional[Dict]:
+    """Load build metadata if it exists."""
+    meta_path = _get_metadata_path(html_path)
+    if meta_path.exists():
+        try:
+            return json.loads(meta_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+    return None
+
+
+def _should_rebuild_with_metadata(
+    source_path: pathlib.Path, html_path: pathlib.Path, config: BuildConfig
+) -> bool:
+    """Check if rebuild is needed considering metadata."""
+    if not html_path.exists():
+        return True
+
+    metadata = _load_build_metadata(html_path)
+    if not metadata:
+        # No metadata, fall back to mtime check
+        return source_path.stat().st_mtime > html_path.stat().st_mtime
+
+    # Check if source file changed
+    current_mtime = source_path.stat().st_mtime
+    if current_mtime > metadata.get("source_mtime", 0):
+        return True
+
+    # Check if pragma tags changed
+    current_pragmas = sorted(list(config.pragma_tags))
+    cached_pragmas = metadata.get("pragma_tags", [])
+    if current_pragmas != cached_pragmas:
+        return True
+
+    return False
 
 
 class SpaMiddleware:
@@ -142,12 +198,14 @@ class ApiMiddleware:
             if source_file:
                 output_file = self._get_output_path(source_file)
 
-                if self._should_rebuild(source_file, output_file):
+                if _should_rebuild_with_metadata(source_file, output_file, self.config):
                     try:
                         # Ensure output directory exists
                         output_file.parent.mkdir(parents=True, exist_ok=True)
                         # Build the file
                         api.build_file(source_file, output_file, config=self.config)
+                        # Save metadata
+                        _save_build_metadata(output_file, source_file, self.config)
                     except Exception as e:
                         error_html = f'<div style="color: red; white-space: pre-wrap; padding: 20px; font-family: monospace;">Build Error:\n{str(e)}</div>'
                         response = Response(
@@ -208,17 +266,6 @@ class ApiMiddleware:
             return self.output_path / rel_path.with_suffix(".html")
         except ValueError:
             return self.output_path / source_file.with_suffix(".html").name
-
-    def _should_rebuild(
-        self, source_file: pathlib.Path, output_file: pathlib.Path
-    ) -> bool:
-        """Check if a rebuild is needed."""
-        if not output_file.exists():
-            return True
-
-        source_mtime = source_file.stat().st_mtime
-        output_mtime = output_file.stat().st_mtime
-        return source_mtime > output_mtime
 
     def _matches_patterns(self, file_path: pathlib.Path) -> bool:
         """Check if file matches include/ignore patterns."""
@@ -337,17 +384,6 @@ class OnDemandMiddleware:
             # Fallback if not relative
             return self.output_path / source_file.with_suffix(".html").name
 
-    def _should_rebuild(
-        self, source_file: pathlib.Path, output_file: pathlib.Path
-    ) -> bool:
-        """Check if a rebuild is needed."""
-        if not output_file.exists():
-            return True
-
-        source_mtime = source_file.stat().st_mtime
-        output_mtime = output_file.stat().st_mtime
-        return source_mtime > output_mtime
-
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
         default_ignore = [
@@ -426,7 +462,7 @@ class OnDemandMiddleware:
                 print(f"Output file will be: {output_file}")
 
             # Build if needed
-            if self._should_rebuild(source_file, output_file):
+            if _should_rebuild_with_metadata(source_file, output_file, self.config):
                 try:
                     print(f"Building {source_file} -> {output_file}")
 
@@ -435,6 +471,8 @@ class OnDemandMiddleware:
 
                     # Build the file
                     api.build_file(source_file, output_file, config=self.config)
+                    # Save metadata
+                    _save_build_metadata(output_file, source_file, self.config)
 
                     if self.config.verbose:
                         print(f"Built {source_file} successfully")
