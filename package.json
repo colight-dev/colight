@@ -32,6 +32,7 @@
     "@twind/preset-typography": "^1.0.7",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
+    "@mui/base": "5.0.0-beta.61",
     "bylight": "^1.0.5",
     "concurrently": "^9.2.0",
     "d3": "^7.9.0",
@@ -63,6 +64,7 @@
     "test-site": "uv run python -m colight_site.cli watch-serve packages/colight-site/tests/examples",
     "test-server": "uv run -m colight_site.server_live",
     "test-site-watch": "uv run python -m colight_site.cli watch -o test-artifacts/colight-site --verbose true -f html packages/colight-site/tests/examples",
+    "cli": "uv run python -m colight_site.cli ",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },
   "files": [

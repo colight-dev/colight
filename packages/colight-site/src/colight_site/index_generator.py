@@ -72,26 +72,27 @@ def matches_patterns(
     """Check if file matches include patterns and doesn't match ignore patterns."""
     file_str = str(file_path)
 
+    # First check ignore patterns - check all parts of the path
+    if ignore_patterns:
+        for part in file_path.parts:
+            for pattern in ignore_patterns:
+                if fnmatch.fnmatch(part, pattern):
+                    return False
+
+        # Also check the full path
+        for pattern in ignore_patterns:
+            if fnmatch.fnmatch(file_str, pattern) or fnmatch.fnmatch(
+                file_path.name, pattern
+            ):
+                return False
+
     # Check if file matches any include pattern
     matches_include = any(
         fnmatch.fnmatch(file_str, pattern) or fnmatch.fnmatch(file_path.name, pattern)
         for pattern in include_patterns
     )
 
-    if not matches_include:
-        return False
-
-    # Check if file matches any ignore pattern
-    if ignore_patterns:
-        matches_ignore = any(
-            fnmatch.fnmatch(file_str, pattern)
-            or fnmatch.fnmatch(file_path.name, pattern)
-            for pattern in ignore_patterns
-        )
-        if matches_ignore:
-            return False
-
-    return True
+    return matches_include
 
 
 def build_file_tree(

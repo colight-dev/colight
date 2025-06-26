@@ -40,8 +40,6 @@ class MarkdownGenerator:
         self,
         forms: List[Form],
         colight_data: List[Optional[Union[bytes, pathlib.Path]]],
-        title: Optional[str] = None,
-        output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
         pragma_tags: Optional[set[str]] = None,
         execution_errors: Optional[List[Optional[str]]] = None,
@@ -52,10 +50,10 @@ class MarkdownGenerator:
 
         lines = []
 
-        # Add title if provided
-        if title:
-            lines.append(f"# {title}")
-            lines.append("")
+        # Skip automatic title generation - let content speak for itself
+        # if title:
+        #     lines.append(f"# {title}")
+        #     lines.append("")
 
         # Process each form
         for i, (form, colight_item) in enumerate(zip(forms, colight_data)):
@@ -249,9 +247,7 @@ class MarkdownGenerator:
         markdown_content = self.generate_markdown(
             forms,
             colight_data,
-            title,
-            output_path,
-            path_context,
+            path_context=path_context,
             pragma_tags=pragma_tags,
             execution_errors=execution_errors,
         )

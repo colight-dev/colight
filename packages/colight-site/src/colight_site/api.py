@@ -146,7 +146,6 @@ def process_colight_file(
     markdown_content = generator.generate_markdown(
         forms_list,
         colight_data,
-        title,
         pragma_tags=pragma_tags,
         execution_errors=errors,
     )

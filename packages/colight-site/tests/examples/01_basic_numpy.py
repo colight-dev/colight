@@ -1,6 +1,5 @@
 # | hide-statements
 
-
 # Basic NumPy Visualization
 
 # This example demonstrates simple data visualization with numpy.

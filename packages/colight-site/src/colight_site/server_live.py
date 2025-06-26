@@ -66,10 +66,17 @@ class HtmlFallbackMiddleware:
 class LiveReloadMiddleware:
     """Middleware to inject live reload script into HTML responses."""
 
-    def __init__(self, app, ws_port):
+    def __init__(self, app, ws_port, use_live_js=False):
         self.app = app
         self.ws_port = ws_port
-        self.reload_script = f"""<script>
+        self.use_live_js = use_live_js
+
+        if use_live_js:
+            # For LiveServer, inject the enhanced live.js script
+            self.reload_script = """<script src="/dist/live.js"></script>"""
+        else:
+            # For watch-serve, use the simple inline script
+            self.reload_script = f"""<script>
 (function() {{
     let reloadScheduled = false;
     

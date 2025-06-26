@@ -337,9 +337,7 @@ def build_file(
         markdown_content = generator.generate_markdown(
             forms,
             colight_data,
-            title,
-            output_path,
-            path_context,
+            path_context=path_context,
             pragma_tags=merged_pragma_tags,
             execution_errors=execution_errors,
         )

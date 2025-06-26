@@ -15,7 +15,10 @@ class FormExecutor:
     """Execute forms in a persistent namespace."""
 
     def __init__(self, verbose: bool = False):
-        self.env: Dict[str, Any] = {}
+        self.env: Dict[str, Any] = {
+            "__name__": "__main__",
+            "__builtins__": __builtins__,
+        }
         self.form_counter = 0
         self.verbose = verbose
 

@@ -49,7 +49,19 @@ const embedConfigESM = {
   outfile: 'dist/embed.mjs',
 };
 
-const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM]
+// LiveServer build (IIFE format for embedding in HTML pages)
+const liveConfig = {
+  ...commonOptions,
+  format: 'iife',
+  entryPoints: ['src/js/live.jsx'],
+  outfile: 'dist/live.js',
+  plugins: [],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production')
+  }
+};
+
+const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch

@@ -1,4 +1,4 @@
-# Multiple Visualizations
+# # Multiple Visualizations
 # This example shows several different types of data.
 
 import numpy as np

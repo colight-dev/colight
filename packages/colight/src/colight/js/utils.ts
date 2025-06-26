@@ -15,6 +15,8 @@ if (!(window as any).__TWIND_INSTANCE__) {
 
 export const tw = (window as any).__TWIND_INSTANCE__;
 
+tw("prose");
+
 export const flatten = (data, dimensions) => {
   let leaves;
   if (
