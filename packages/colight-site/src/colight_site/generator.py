@@ -5,12 +5,13 @@ from typing import List, Optional, Dict, Union
 import markdown
 import base64
 
+from .pragma import parse_pragma_arg
 from colight_site.parser import (
     Form,
-    should_hide_statements,
-    should_hide_visuals,
-    should_hide_code,
-    should_hide_prose,
+    should_show_statements,
+    should_show_visuals,
+    should_show_code,
+    should_show_prose,
 )
 from colight.env import VERSIONED_CDN_DIST_URL
 from .constants import DEFAULT_INLINE_THRESHOLD
@@ -41,59 +42,47 @@ class MarkdownGenerator:
         forms: List[Form],
         colight_data: List[Optional[Union[bytes, pathlib.Path]]],
         path_context: Optional[Dict[str, str]] = None,
-        pragma_tags: Optional[set[str]] = None,
+        pragma: Optional[set[str] | str] = None,
         execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
         """Generate complete Markdown document."""
-        if pragma_tags is None:
-            pragma_tags = set()
+        
+        pragma = parse_pragma_arg(pragma)
 
         lines = []
 
-        # Skip automatic title generation - let content speak for itself
-        # if title:
-        #     lines.append(f"# {title}")
-        #     lines.append("")
-
         # Process each form
         for i, (form, colight_item) in enumerate(zip(forms, colight_data)):
-            # Check if this is a dummy form (markdown-only)
-            is_dummy_form = self._is_dummy_form(form)
-
             # Resolve form-specific settings: per-form metadata overrides file/CLI defaults
-            resolved_tags = form.metadata.resolve_with_defaults(pragma_tags)
-
-            # Add markdown content from comments unless hide_prose is set
-            if form.markdown and not should_hide_prose(resolved_tags):
-                markdown_content = self._process_markdown_lines(form.markdown)
-                if markdown_content.strip():
-                    lines.append(markdown_content)
-                    lines.append("")
-
-            # Determine if we should show the code block
-            # If this form explicitly has show-code, it overrides hide_statements
-            explicit_show_code = "show-code" in resolved_tags
-
-            if explicit_show_code:
-                # show-code pragma overrides both hide_code and hide_statements for this form
-                show_code_block = True
-            else:
-                # Normal logic: skip if hide_code is True OR if hide_statements is True and this is a statement
-                show_code_block = not should_hide_code(resolved_tags) and not (
-                    should_hide_statements(resolved_tags) and form.is_statement
-                )
-
-            if show_code_block:
-                # Add code block (but skip dummy forms and literals)
-                if not is_dummy_form:
-                    code = form.code.strip()
-                    show_code = code and not form.is_literal
-
-                    if show_code:
-                        lines.append("```python")
-                        lines.append(code)
-                        lines.append("```")
-                        lines.append("")
+            resolved_tags = form.metadata.resolve_with_defaults(pragma)
+            
+            # Process elements in order
+            for elem in form.elements:
+                if elem.type == "prose":
+                    # Show prose unless hidden (using resolved tags)
+                    if should_show_prose(resolved_tags):
+                        prose_text = elem.content if isinstance(elem.content, str) else ""
+                        markdown_content = self._process_markdown_lines(prose_text.split("\n"))
+                        if markdown_content.strip():
+                            lines.append(markdown_content)
+                            lines.append("")
+                            
+                elif elem.type in ("statement", "expression"):
+                    # Check visibility based on element type and resolved tags
+                    show_element = False
+                    if elem.type == "statement":
+                        show_element = should_show_code(resolved_tags) and should_show_statements(resolved_tags)
+                    elif elem.type == "expression":
+                        show_element = should_show_code(resolved_tags)
+                    
+                    if show_element:
+                        code = elem.get_code().strip()
+                        # Skip literals and empty code
+                        if code and not (elem.type == "expression" and form.is_literal):
+                            lines.append("```python")
+                            lines.append(code)
+                            lines.append("```")
+                            lines.append("")
 
             # Check for execution errors
             if execution_errors and i < len(execution_errors) and execution_errors[i]:
@@ -102,10 +91,9 @@ class MarkdownGenerator:
                 lines.append(execution_errors[i])
                 lines.append("```")
                 lines.append("")
-            # Skip visuals if hide_visuals is True
-            elif not should_hide_visuals(resolved_tags):
-                # Add colight embed if we have a visualization
-                if colight_item and not is_dummy_form:
+            # Add visual only if last element is an expression and visuals are shown
+            elif (should_show_visuals(resolved_tags) and colight_item and not form.is_dummy_form 
+                  and form.last_element and form.last_element.type == "expression"):
                     if isinstance(colight_item, bytes):
                         # Already in memory - embed as script tag
                         base64_data = base64.b64encode(colight_item).decode("ascii")
@@ -237,9 +225,8 @@ class MarkdownGenerator:
         forms: List[Form],
         colight_data: List[Optional[Union[bytes, pathlib.Path]]],
         title: Optional[str] = None,
-        output_path: Optional[pathlib.Path] = None,
         path_context: Optional[Dict[str, str]] = None,
-        pragma_tags: Optional[set[str]] = None,
+        pragma: Optional[set[str] | str] = None,
         execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
         """Generate complete HTML document with embedded visualizations."""
@@ -248,7 +235,7 @@ class MarkdownGenerator:
             forms,
             colight_data,
             path_context=path_context,
-            pragma_tags=pragma_tags,
+            pragma=pragma,
             execution_errors=execution_errors,
         )
 

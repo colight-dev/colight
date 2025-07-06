@@ -3,8 +3,39 @@
 import pathlib
 from typing import List, Optional, Union
 from colight_site.generator import MarkdownGenerator
-from colight_site.parser import Form
+from colight_site.parser import Form, FormElement, FormMetadata
 import libcst as cst
+
+
+def create_test_form(prose: List[str], code: str, start_line: int = 1) -> Form:
+    """Helper to create forms for testing."""
+    elements = []
+    
+    # Add prose element if present
+    if prose:
+        prose_elem = FormElement(
+            type="prose",
+            content="\n".join(prose),
+            line_number=start_line
+        )
+        elements.append(prose_elem)
+    
+    # Add code element if present
+    if code:
+        stmt = cst.parse_statement(code)
+        # Determine if it's an expression or statement
+        is_expr = (isinstance(stmt, cst.SimpleStatementLine) and 
+                   len(stmt.body) == 1 and 
+                   isinstance(stmt.body[0], cst.Expr))
+        
+        code_elem = FormElement(
+            type="expression" if is_expr else "statement",
+            content=stmt,
+            line_number=start_line + len(prose) + 1
+        )
+        elements.append(code_elem)
+    
+    return Form(elements=elements, metadata=FormMetadata(), start_line=start_line)
 
 # Get paths
 test_dir = pathlib.Path(__file__).parent
@@ -22,22 +53,18 @@ def test_markdown_generation():
     generator = MarkdownGenerator(output_dir)
 
     # Create mock forms
-    import_stmt = cst.parse_statement("import numpy as np")
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
     forms = [
-        Form(markdown=["This is a test"], node=import_stmt, start_line=1),
-        Form(markdown=["Create visualization"], node=expr_stmt, start_line=3),
+        create_test_form(["This is a test"], "import numpy as np", 1),
+        create_test_form(["Create visualization"], "np.sin(x)", 3),
     ]
 
     colight_files = [None, pathlib.Path("test.colight")]
 
     path_context = {"basename": "test"}
     markdown = generator.generate_markdown(
-        forms, colight_files, "Test Document", path_context=path_context
+        forms, colight_files, path_context=path_context
     )
 
-    assert "# Test Document" in markdown
     assert "This is a test" in markdown
     assert "Create visualization" in markdown
     assert "```python" in markdown
@@ -52,26 +79,22 @@ def test_html_generation():
     generator = MarkdownGenerator(output_dir)
 
     # Create mock forms
-    import_stmt = cst.parse_statement("import numpy as np")
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
     forms = [
-        Form(markdown=["This is a test"], node=import_stmt, start_line=1),
-        Form(markdown=["Create visualization"], node=expr_stmt, start_line=3),
+        create_test_form(["This is a test"], "import numpy as np", 1),
+        create_test_form(["Create visualization"], "np.sin(x)", 3),
     ]
 
     colight_files = [None, pathlib.Path("test.colight")]
 
     path_context = {"basename": "test"}
     html = generator.generate_html(
-        forms, colight_files, "Test Document", path_context=path_context
+        forms, colight_files, title="Test Document", path_context=path_context
     )
 
     assert "<!DOCTYPE html>" in html
     assert "<title>Test Document</title>" in html
     assert "colight-embed" in html
     assert "embed.js" in html
-    assert "<h1>Test Document</h1>" in html
     assert "<p>This is a test</p>" in html
 
 
@@ -81,14 +104,10 @@ def test_hide_statements_flag():
     generator = MarkdownGenerator(output_dir)
 
     # Create forms with both statements and expressions
-    import_stmt = cst.parse_statement("import numpy as np")
-    assign_stmt = cst.parse_statement("x = np.linspace(0, 10, 100)")
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
     forms = [
-        Form(markdown=["Import libraries"], node=import_stmt, start_line=1),
-        Form(markdown=["Create data"], node=assign_stmt, start_line=2),
-        Form(markdown=["Visualize"], node=expr_stmt, start_line=3),
+        create_test_form(["Import libraries"], "import numpy as np", 1),
+        create_test_form(["Create data"], "x = np.linspace(0, 10, 100)", 2),
+        create_test_form(["Visualize"], "np.sin(x)", 3),
     ]
 
     colight_files = [None, None, pathlib.Path("test.colight")]
@@ -105,7 +124,7 @@ def test_hide_statements_flag():
     # Generate with hide_statements=True
     path_context = {"basename": "test"}
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, path_context=path_context, pragma_tags={"hide-statements"}
+        forms, colight_files, path_context=path_context, pragma={"hide-statements"}
     )
     assert "import numpy as np" not in markdown_hidden  # statement
     assert "x = np.linspace(0, 10, 100)" not in markdown_hidden  # statement
@@ -123,12 +142,9 @@ def test_hide_code_flag():
     generator = MarkdownGenerator(output_dir)
 
     # Create forms
-    import_stmt = cst.parse_statement("import numpy as np")
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
     forms = [
-        Form(markdown=["Import libraries"], node=import_stmt, start_line=1),
-        Form(markdown=["Visualize"], node=expr_stmt, start_line=2),
+        create_test_form(["Import libraries"], "import numpy as np", 1),
+        create_test_form(["Visualize"], "np.sin(x)", 2),
     ]
 
     colight_files = [None, pathlib.Path("test.colight")]
@@ -145,7 +161,7 @@ def test_hide_code_flag():
     # Generate with hide_code=True
     path_context = {"basename": "test"}
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, path_context=path_context, pragma_tags={"hide-code"}
+        forms, colight_files, path_context=path_context, pragma={"hide-code"}
     )
     assert "```python" not in markdown_hidden
     assert "import numpy as np" not in markdown_hidden
@@ -163,10 +179,8 @@ def test_hide_visuals_flag():
     generator = MarkdownGenerator(output_dir)
 
     # Create forms
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
     forms = [
-        Form(markdown=["Visualize"], node=expr_stmt, start_line=1),
+        create_test_form(["Visualize"], "np.sin(x)", 1),
     ]
 
     colight_files: List[Optional[Union[bytes, pathlib.Path]]] = [
@@ -184,7 +198,7 @@ def test_hide_visuals_flag():
     # Generate with hide_visuals=True
     path_context = {"basename": "test"}
     markdown_hidden = generator.generate_markdown(
-        forms, colight_files, path_context=path_context, pragma_tags={"hide-visuals"}
+        forms, colight_files, path_context=path_context, pragma={"hide-visuals"}
     )
     assert "colight-embed" not in markdown_hidden
     assert "data-src=" not in markdown_hidden
@@ -199,26 +213,13 @@ def test_per_form_metadata_overrides():
     generator = MarkdownGenerator(output_dir)
 
     # Create forms with per-form metadata
-    import libcst as cst
-    from colight_site.parser import FormMetadata
-
-    import_stmt = cst.parse_statement("import numpy as np")
-    expr_stmt = cst.parse_statement("np.sin(x)")
-
-    forms = [
-        Form(
-            markdown=["This form should hide its code"],
-            node=import_stmt,
-            start_line=1,
-            metadata=FormMetadata(pragma_tags={"hide-code"}),  # Override to hide code
-        ),
-        Form(
-            markdown=["This form should show its code"],
-            node=expr_stmt,
-            start_line=2,
-            metadata=FormMetadata(pragma_tags={"show-code"}),  # Override to show code
-        ),
-    ]
+    form1 = create_test_form(["This form should hide its code"], "import numpy as np", 1)
+    form1.metadata.pragma = {"hide-code"}
+    
+    form2 = create_test_form(["This form should show its code"], "np.sin(x)", 2)
+    form2.metadata.pragma = {"show-code"}
+    
+    forms = [form1, form2]
 
     colight_files = [None, pathlib.Path("test.colight")]
 
@@ -272,9 +273,8 @@ y = x * 2
         markdown = generator.generate_markdown(
             forms,
             colight_files,
-            title="Test Document",
             path_context=path_context,
-            pragma_tags=metadata.pragma_tags,
+            pragma=metadata.pragma,
         )
 
         # Check results
@@ -322,7 +322,7 @@ y = x * 2
         colight_data: List[Optional[Union[bytes, pathlib.Path]]] = [None] * len(forms)
 
         markdown = generator.generate_markdown(
-            forms, colight_data, pragma_tags=metadata.pragma_tags
+            forms, colight_data, pragma=metadata.pragma
         )
 
         # Check that prose is hidden/shown correctly

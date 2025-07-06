@@ -22,7 +22,7 @@ Plot.line(
 
 
 # ## Composition
-# We can layer multiple marks and add options to plots using the `+` operator. For example, here we compose a [line mark](bylight?match=Plot.line(...\)) with a [dot mark](bylight?match=Plot.dot\(...\)), then add a [frame](bylight?match=Plot.frame(\)):
+# We can layer multiple marks and add options to plots using the `+` operator. For example, here we compose a [line mark](bylight?match=Plot.line\(...\)) with a [dot mark](bylight?match=Plot.dot\(...\)), then add a [frame](bylight?match=Plot.frame\(\)):
 
 line_plot = Plot.line(six_points, {"stroke": "pink", "strokeWidth": 10})
 dot_plot = Plot.dot(six_points, {"fill": "purple"})
@@ -76,7 +76,7 @@ Plot.dot(object_data, x="X", y="Y", fill="CATEGORY", r=20)
 # There are a few ways to specify channel values in Observable Plot:
 #
 # 1. A [string](bylight?match="X","Y","CATEGORY") is used to specify a property name in the data object. If it matches, that property's value is used. Otherwise, it's treated as a literal value.
-# 2. A [function](bylight?match=Plot.js(...\)) will receive two arguments, `(data, index)`, and should return the desired value for the channel. We use `Plot.js` to insert a JavaScript source string - this function is evaluated within the rendering environment, and not in python.
+# 2. A [function](bylight?match=Plot.js\(...\)) will receive two arguments, `(data, index)`, and should return the desired value for the channel. We use `Plot.js` to insert a JavaScript source string - this function is evaluated within the rendering environment, and not in python.
 # 3. An [array](bylight?match=[...]) provides explicit values for each data point. It should have the same length as the list passed in the first (data) position.
 # 4. [Other values](bylight?match=8,None) will be used as a constant for all data points.
 

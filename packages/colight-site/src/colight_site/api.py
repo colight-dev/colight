@@ -8,44 +8,43 @@ from .parser import parse_colight_file, is_colight_file, Form
 from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 from .constants import DEFAULT_INLINE_THRESHOLD
+from .pragma import parse_pragma_arg
 from . import builder  # For internal use only
 
 
 @dataclass
-class ProcessedForm:
+class EvaluatedForm:
     """Result of processing a single form."""
 
     form: Form
-    visualization_data: Optional[
+    visual_data: Optional[
         Union[bytes, pathlib.Path]
     ]  # bytes if inlined, Path if saved
     error: Optional[str] = None
 
 
 @dataclass
-class ProcessingResult:
-    """Result of processing a .colight.py file."""
+class EvaluatedPython:
+    """Result of processing a python file."""
 
-    forms: List[ProcessedForm]
+    forms: List[EvaluatedForm]
     markdown_content: str
     html_content: Optional[str] = None
 
 
-def process_colight_file(
+def evaluate_python(
     input_path: pathlib.Path,
     *,
     output_dir: Optional[pathlib.Path] = None,
     inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
     format: str = "markdown",
     verbose: bool = False,
-    hide_statements: bool = False,
-    hide_visuals: bool = False,
-    hide_code: bool = False,
+    pragma: Optional[set[str] | str] = None,
     embed_path_template: Optional[str] = None,
     output_path_template: Optional[str] = None,
-) -> ProcessingResult:
+) -> EvaluatedPython:
     """
-    Process a .colight.py file and return the results.
+    Process a python file and return the results.
 
     This is the main public API for processing colight files. It handles:
     - Parsing the file
@@ -66,21 +65,11 @@ def process_colight_file(
         output_path_template: Template for saving .colight files
 
     Returns:
-        ProcessingResult with all processed data
+        EvaluatedPython with all processed data
     """
     # Parse the file
     forms, file_metadata = parse_colight_file(input_path)
-
-    # Merge metadata with options
-    pragma_tags = file_metadata.pragma_tags.copy()
-
-    # Add CLI options to pragma tags
-    if hide_statements:
-        pragma_tags.add("hide-statements")
-    if hide_visuals:
-        pragma_tags.add("hide-visuals")
-    if hide_code:
-        pragma_tags.add("hide-code")
+    pragma = file_metadata.pragma.union(parse_pragma_arg(pragma))
 
     # Formats come from CLI only now
     formats = {format}
@@ -105,10 +94,10 @@ def process_colight_file(
             colight_bytes = executor.get_colight_bytes(result)
 
             if colight_bytes is None:
-                processed_forms.append(ProcessedForm(form, None))
+                processed_forms.append(EvaluatedForm(form, None))
             elif len(colight_bytes) < inline_threshold:
                 # Keep in memory for inlining
-                processed_forms.append(ProcessedForm(form, colight_bytes))
+                processed_forms.append(EvaluatedForm(form, colight_bytes))
                 if verbose:
                     print(
                         f"  Form {i}: visualization will be inlined ({len(colight_bytes)} bytes)"
@@ -118,13 +107,13 @@ def process_colight_file(
                 output_dir.mkdir(parents=True, exist_ok=True)
                 colight_path = output_dir / output_path_template.format(form=i)
                 colight_path.write_bytes(colight_bytes)
-                processed_forms.append(ProcessedForm(form, colight_path))
+                processed_forms.append(EvaluatedForm(form, colight_path))
                 if verbose:
                     print(f"  Form {i}: saved visualization to {colight_path.name}")
 
         except Exception as e:
             error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
-            processed_forms.append(ProcessedForm(form, None, error=error_msg))
+            processed_forms.append(EvaluatedForm(form, None, error=error_msg))
             if verbose:
                 print(f"  {error_msg}")
 
@@ -137,7 +126,7 @@ def process_colight_file(
 
     # Extract data for generator
     forms_list = [pf.form for pf in processed_forms]
-    colight_data = [pf.visualization_data for pf in processed_forms]
+    colight_data = [pf.visual_data for pf in processed_forms]
     errors = [pf.error for pf in processed_forms]
 
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
@@ -146,7 +135,7 @@ def process_colight_file(
     markdown_content = generator.generate_markdown(
         forms_list,
         colight_data,
-        pragma_tags=pragma_tags,
+        pragma=pragma,
         execution_errors=errors,
     )
 
@@ -157,11 +146,11 @@ def process_colight_file(
             forms_list,
             colight_data,
             title,
-            pragma_tags=pragma_tags,
+            pragma=pragma,
             execution_errors=errors,
         )
 
-    return ProcessingResult(
+    return EvaluatedPython(
         forms=processed_forms,
         markdown_content=markdown_content,
         html_content=html_content,
@@ -196,10 +185,10 @@ def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
 # Re-export commonly used functions
 __all__ = [
     # Core API
-    "process_colight_file",
+    "evaluate_python",
     "is_colight_file",
-    "ProcessedForm",
-    "ProcessingResult",
+    "EvaluatedForm",
+    "EvaluatedPython",
     # CLI convenience functions
     "build_file",
     "build_directory",

@@ -9,6 +9,7 @@ from . import api
 from . import watcher
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .builder import BuildConfig
+from .pragma import parse_pragma_arg
 
 
 @click.group()
@@ -74,7 +75,7 @@ def build(
     output: Optional[pathlib.Path],
     verbose: bool,
     format: str,
-    pragma: Optional[str],
+    pragma: Optional[set[str] | str],
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
@@ -82,16 +83,13 @@ def build(
     in_subprocess: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
-    # Parse pragma tags from comma-separated string
-    pragma_tags = set()
-    if pragma:
-        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
+    
 
     # Create BuildConfig from CLI args
     config = BuildConfig(
         verbose=verbose,
         formats={format},
-        pragma_tags=pragma_tags,
+        pragma=parse_pragma_arg(pragma),
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
@@ -179,7 +177,7 @@ def watch(
     output: pathlib.Path,
     verbose: bool,
     format: str,
-    pragma: Optional[str],
+    pragma: Optional[str | set[str]],
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
@@ -191,16 +189,11 @@ def watch(
     click.echo(f"Watching {input_path} for changes...")
     click.echo(f"Output: {output}")
 
-    # Parse pragma tags from comma-separated string
-    pragma_tags = set()
-    if pragma:
-        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
-
     # Create BuildConfig from CLI args
     config = BuildConfig(
         verbose=verbose,
         formats={format},
-        pragma_tags=pragma_tags,
+        pragma=parse_pragma_arg(pragma),
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
@@ -296,7 +289,7 @@ def watch_serve(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
     verbose: bool,
-    pragma: Optional[str],
+    pragma: Optional[str | set[str]],
     continue_on_error: bool,
     colight_output_path: Optional[str],
     colight_embed_path: Optional[str],
@@ -316,16 +309,11 @@ def watch_serve(
     click.echo(f"Output: {output}")
     click.echo(f"Server: http://{host}:{port}")
 
-    # Parse pragma tags from comma-separated string
-    pragma_tags = set()
-    if pragma:
-        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
-
     # Create BuildConfig from CLI args
     config = BuildConfig(
         verbose=verbose,
         formats={"html"},  # Always HTML for serving
-        pragma_tags=pragma_tags,
+        pragma=parse_pragma_arg(pragma),
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,
@@ -437,17 +425,12 @@ def live(
     click.echo(f"Starting LiveServer for {input_path}")
     click.echo(f"Cache directory: {output}")
     click.echo(f"Server: http://{host}:{port}")
-
-    # Parse pragma tags from comma-separated string
-    pragma_tags = set()
-    if pragma:
-        pragma_tags = {tag.strip() for tag in pragma.split(",") if tag.strip()}
-
+    
     # Create BuildConfig from CLI args
     config = BuildConfig(
         verbose=verbose,
         formats={"html"},  # Always HTML for serving
-        pragma_tags=pragma_tags,
+        pragma=parse_pragma_arg(pragma),
         continue_on_error=continue_on_error,
         colight_output_path=colight_output_path,
         colight_embed_path=colight_embed_path,

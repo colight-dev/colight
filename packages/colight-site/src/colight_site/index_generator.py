@@ -32,7 +32,7 @@ def generate_index_html(
 
     config = BuildConfig(
         formats={"html"},
-        pragma_tags={"hide-all-code"},  # Hide the code that generates the index
+        pragma={"hide-all-code"},  # Hide the code that generates the index
         verbose=False,
     )
 

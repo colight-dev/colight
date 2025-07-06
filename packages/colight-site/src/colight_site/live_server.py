@@ -29,7 +29,7 @@ def _save_build_metadata(
     """Save build metadata for caching."""
     metadata = {
         "source_mtime": source_path.stat().st_mtime,
-        "pragma_tags": sorted(list(config.pragma_tags)),
+        "pragma": sorted(list(config.pragma)),
         "source_path": str(source_path),
     }
 
@@ -66,8 +66,8 @@ def _should_rebuild_with_metadata(
         return True
 
     # Check if pragma tags changed
-    current_pragmas = sorted(list(config.pragma_tags))
-    cached_pragmas = metadata.get("pragma_tags", [])
+    current_pragmas = sorted(list(config.pragma))
+    cached_pragmas = metadata.get("pragma", [])
     if current_pragmas != cached_pragmas:
         return True
 

@@ -5,10 +5,10 @@ from typing import Any, Dict, Optional
 import sys
 import io
 import contextlib
+import libcst as cst
 
 from .parser import Form, CombinedCode
 from colight.inspect import inspect
-import libcst as cst
 
 
 class FormExecutor:
@@ -47,62 +47,51 @@ except ImportError:
         """Execute a form and return its result if it's an expression."""
         self.form_counter += 1
 
-        # Get the code to execute
-        code = form.code
-        if not code.strip():
-            return None
-
         # Set __file__ in the environment if we have a real filename
         if filename != "<string>":
             self.env["__file__"] = filename
 
         try:
-            # Special handling for CombinedCode that ends with an expression
-            if form.is_expression and hasattr(form.node, "code_elements"):
-                # This is CombinedCode ending with an expression
-                # Execute all statements first, then evaluate the last expression
-                if isinstance(form.node, CombinedCode) and form.node.code_elements:
-                    # Execute all but the last element as statements
-                    for stmt in form.node.code_elements[:-1]:
-                        # Convert CST node to code
-                        stmt_code = cst.Module(body=[stmt]).code.strip()
-                        compiled = compile(stmt_code, filename, "exec")
-                        exec(compiled, self.env)
-
-                    # Evaluate the last element as an expression
-                    last_elem = form.node.code_elements[-1]
-                    # Extract just the expression from the last statement
-                    if (
-                        isinstance(last_elem, cst.SimpleStatementLine)
-                        and len(last_elem.body) == 1
-                    ):
-                        if isinstance(last_elem.body[0], cst.Expr):
-                            expr_code = cst.Module(body=[last_elem]).code.strip()
-                            parsed = ast.parse(expr_code, filename, mode="eval")
-                            compiled = compile(parsed, filename, "eval")
-                            result = eval(compiled, self.env)
-                            return result
-
-                # Fallback to original behavior
-                parsed = ast.parse(code, filename, mode="eval")
-                compiled = compile(parsed, filename, "eval")
-                result = eval(compiled, self.env)
-                return result
-            elif form.is_expression:
-                # Parse and compile as expression
-                parsed = ast.parse(code, filename, mode="eval")
-                compiled = compile(parsed, filename, "eval")
-                result = eval(compiled, self.env)
-                return result
-            else:
-                # Execute as statement
-                compiled = compile(code, filename, "exec")
-                exec(compiled, self.env)
-                return None
+            result = None
+            
+            # Execute each code element in order
+            for elem in form.elements:
+                if elem.type in ("statement", "expression"):
+                    # Special handling for CombinedCode elements
+                    if isinstance(elem.content, CombinedCode) and elem.type == "expression" and elem == form.last_element:
+                        # This is CombinedCode ending with an expression
+                        # Execute all statements first, then evaluate the last expression
+                        code_elements = elem.content.code_elements
+                        if code_elements:
+                            # Execute all but the last element as statements
+                            for stmt in code_elements[:-1]:
+                                stmt_code = cst.Module(body=[stmt]).code.strip()
+                                if stmt_code:
+                                    exec(compile(stmt_code, filename, "exec"), self.env)
+                            
+                            # Evaluate the last element as an expression
+                            last_elem = code_elements[-1]
+                            if isinstance(last_elem, cst.SimpleStatementLine) and len(last_elem.body) == 1:
+                                if isinstance(last_elem.body[0], cst.Expr):
+                                    expr_code = cst.Module(body=[last_elem]).code.strip()
+                                    result = eval(compile(expr_code, filename, 'eval'), self.env)
+                    else:
+                        # Normal code element
+                        code = elem.get_code().strip()
+                        if not code:
+                            continue
+                        
+                        if elem.type == "expression" and elem == form.last_element:
+                            # This is the last element and it's an expression - evaluate it
+                            result = eval(compile(code, filename, 'eval'), self.env)
+                        else:
+                            # Execute as a statement
+                            exec(compile(code, filename, 'exec'), self.env)
+            
+            return result
 
         except Exception as e:
             print(f"Error executing form {self.form_counter}: {e}", file=sys.stderr)
-            print(f"Code: {code}", file=sys.stderr)
             raise
 
     def get_colight_bytes(self, value: Any) -> Optional[bytes]:

@@ -33,21 +33,6 @@ def watch_and_build(
     """
     # Create config from provided config or kwargs
     if config is None:
-        # Handle legacy kwargs that might have individual flags
-        if (
-            "hide_statements" in kwargs
-            or "hide_visuals" in kwargs
-            or "hide_code" in kwargs
-        ):
-            pragma_tags = set()
-            if kwargs.pop("hide_statements", False):
-                pragma_tags.add("hide-statements")
-            if kwargs.pop("hide_visuals", False):
-                pragma_tags.add("hide-visuals")
-            if kwargs.pop("hide_code", False):
-                pragma_tags.add("hide-code")
-            kwargs["pragma_tags"] = pragma_tags
-
         # Handle format -> formats conversion
         if "format" in kwargs and "formats" not in kwargs:
             kwargs["formats"] = {kwargs.pop("format")}
@@ -58,7 +43,7 @@ def watch_and_build(
         if kwargs:
             config_dict = {
                 "verbose": config.verbose,
-                "pragma_tags": config.pragma_tags.copy(),
+                "pragma": config.pragma.copy(),
                 "formats": config.formats.copy(),
                 "continue_on_error": config.continue_on_error,
                 "colight_output_path": config.colight_output_path,
@@ -196,21 +181,6 @@ def watch_build_and_serve(
     """
     # Create config from provided config or kwargs
     if config is None:
-        # Handle legacy kwargs that might have individual flags
-        if (
-            "hide_statements" in kwargs
-            or "hide_visuals" in kwargs
-            or "hide_code" in kwargs
-        ):
-            pragma_tags = set()
-            if kwargs.pop("hide_statements", False):
-                pragma_tags.add("hide-statements")
-            if kwargs.pop("hide_visuals", False):
-                pragma_tags.add("hide-visuals")
-            if kwargs.pop("hide_code", False):
-                pragma_tags.add("hide-code")
-            kwargs["pragma_tags"] = pragma_tags
-
         # Handle format -> formats conversion
         if "format" in kwargs and "formats" not in kwargs:
             kwargs["formats"] = {kwargs.pop("format")}
@@ -225,7 +195,7 @@ def watch_build_and_serve(
         if kwargs:
             config_dict = {
                 "verbose": config.verbose,
-                "pragma_tags": config.pragma_tags.copy(),
+                "pragma": config.pragma.copy(),
                 "formats": config.formats.copy(),
                 "continue_on_error": config.continue_on_error,
                 "colight_output_path": config.colight_output_path,

@@ -57,7 +57,7 @@ async def animate(duration=5):
 future = asyncio.ensure_future(animate())
 
 # %% [markdown]
-# We use the [reset method](bylight?dir=up&match=basic_plot.reset) of a plot to update its content in-place, inside an [async function](bylight?dir=up&match=async+def) containing a `while` loop, using [sleep](bylight?dir=up&match=asyncio.sleep(...\)) to control the frame rate. To avoid interference with Jupyter comms, we use [ensure_future](bylight?dir=up&match=asyncio.ensure_future(...\)) to run the function in a new thread.
+# We use the [reset method](bylight?dir=up&match=basic_plot.reset) of a plot to update its content in-place, inside an [async function](bylight?dir=up&match=async+def) containing a `while` loop, using [sleep](bylight?dir=up&match=asyncio.sleep\(...\)) to control the frame rate. To avoid interference with Jupyter comms, we use [ensure_future](bylight?dir=up&match=asyncio.ensure_future\(...\)) to run the function in a new thread.
 #
 # Let's make it interactive, using [ipywidgets](bylight?match=import...as+widgets,/widgets.FloatSlider/) sliders to control frequency and amplitude:
 

@@ -259,14 +259,14 @@ class SitePlugin(BasePlugin):
 
         # Track colight files for this file
         for pf in result.forms:
-            if isinstance(pf.visualization_data, pathlib.Path):
-                colight_file.colight_files.append(str(pf.visualization_data))
-            elif pf.visualization_data is not None:
+            if isinstance(pf.visual_data, pathlib.Path):
+                colight_file.colight_files.append(str(pf.visual_data))
+            elif pf.visual_data is not None:
                 # Bytes were returned - we need to save them
                 colight_path = (
                     colight_dir / f"form-{len(colight_file.colight_files):03d}.colight"
                 )
-                colight_path.write_bytes(pf.visualization_data)
+                colight_path.write_bytes(pf.visual_data)
                 colight_file.colight_files.append(str(colight_path))
                 if self.config["verbose"]:
                     print(

@@ -8,7 +8,7 @@
 - Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
 - Run Python tests: `yarn test:py` or `uv run pytest packages/colight/tests/`
-- Run colight-site tests: `yarn test:colight-site` or `uv run pytest packages/colight-site/tests/`
+- Run colight-site tests: `yarn test:site` or `uv run pytest packages/colight-site/tests/`
 - Run single Python test: `uv run pytest packages/colight/tests/test_file.py::test_function`
 - **IMPORTANT**: Always use `uv run python` instead of `python` directly
 - Typecheck Python: `pyright` or `yarn pyright`

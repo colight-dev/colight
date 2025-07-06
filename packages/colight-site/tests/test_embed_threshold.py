@@ -5,7 +5,7 @@ import tempfile
 from typing import List, Optional, Union
 from pathlib import Path
 from colight_site.generator import MarkdownGenerator
-from colight_site.parser import Form, FormMetadata
+from colight_site.parser import Form, FormMetadata, FormElement
 import libcst as cst
 import re
 
@@ -20,8 +20,12 @@ def _create_test_form(code: str, start_line: int) -> Form:
         node = module.body[0]
     else:
         node = cst.SimpleStatementLine([])
+    
+    # Create FormElement for the code
+    elem_type = "expression" if isinstance(node, cst.SimpleStatementLine) and len(node.body) == 1 and isinstance(node.body[0], cst.Expr) else "statement"
+    element = FormElement(type=elem_type, content=node, line_number=start_line)
 
-    return Form(markdown=[], node=node, start_line=start_line, metadata=FormMetadata())
+    return Form(elements=[element], start_line=start_line, metadata=FormMetadata())
 
 
 def test_inline_threshold():
@@ -50,7 +54,7 @@ def test_inline_threshold():
 
         # Generate markdown
         markdown_content = generator.generate_markdown(
-            forms, colight_files, title="Test", path_context={"basename": "test"}
+            forms, colight_files, path_context={"basename": "test"}
         )
 
         # Check that small file is embedded as script tag
@@ -133,7 +137,7 @@ def test_base64_encoding():
 
         # Generate markdown
         markdown_content = generator.generate_markdown(
-            forms, [test_file], title="Test", path_context={"basename": "test"}
+            forms, [test_file], path_context={"basename": "test"}
         )
 
         # Extract the base64 content

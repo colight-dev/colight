@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import "../../packages/colight/src/colight/js/embed.js"; // Import Colight embed script
 import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
+import "./bylight.js"
 
 // ========== Utility Functions ==========
 
@@ -34,23 +35,39 @@ const getDisplayName = (path) => {
 
 // ========== Content Rendering Components ==========
 
-const ContentItem = ({ item, pragmaTags }) => {
-  const showCode =
-    !pragmaTags.includes("hide-code") &&
-    !(pragmaTags.includes("hide-statements") && item.isStatement);
-  const showVisual = !pragmaTags.includes("hide-visuals");
-  const showProse = !pragmaTags.includes("hide-prose");
+const ElementRenderer = ({ element }) => {
+  // Skip if element shouldn't be shown
+  if (!element.show) return null;
 
-  switch (item.type) {
-    case "markdown":
-      return showProse ? md({ className: "mb-4" }, item.value) : null;
+  switch (element.type) {
+    case "prose":
+      return md({ className: "mb-4" }, element.value);
 
-    case "code":
-      return showCode ? (
-        <pre className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}>
-          <code className="language-python">{item.value}</code>
-        </pre>
-      ) : null;
+    case "statement":
+    case "expression":
+      return (
+        <>
+          <pre className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}>
+            <code className="language-python">{element.value}</code>
+          </pre>
+          {/* Render visual if it's an expression with visual data */}
+          {element.type === "expression" && element.visual && element.showVisual && (
+            <div className={tw("mb-4")}>
+              {element.visual.format === "inline" ? (
+                <script type="application/x-colight" data-size={element.visual.size}>
+                  {element.visual.data}
+                </script>
+              ) : (
+                <div
+                  className="colight-embed"
+                  data-src={element.visual.path}
+                  data-size={element.visual.size}
+                /> 
+              )}
+            </div>
+          )}
+        </>
+      );
 
     case "error":
       return (
@@ -59,26 +76,7 @@ const ContentItem = ({ item, pragmaTags }) => {
             "bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4",
           )}
         >
-          <pre>{item.value}</pre>
-        </div>
-      );
-
-    case "visual":
-      if (!showVisual) return null;
-
-      return (
-        <div className={tw("mb-4")}>
-          {item.format === "inline" ? (
-            <script type="application/x-colight" data-size={item.size}>
-              {item.data}
-            </script>
-          ) : (
-            <div
-              className="colight-embed"
-              data-src={item.path}
-              data-size={item.size}
-            />
-          )}
+          <pre>{element.value}</pre>
         </div>
       );
 
@@ -88,23 +86,33 @@ const ContentItem = ({ item, pragmaTags }) => {
 };
 
 const FormRenderer = ({ form }) => {
-  if (!form.content || form.content.length === 0) return null;
+  if (!form.elements || form.elements.length === 0) return null;
 
   return (
     <div
-      className={tw(`form-${form.id} ${form.pragmaTags.join(" ")}`)}
+      className={tw(`form-${form.id} ${form.pragma.join(" ")}`)}
       data-line={form.line}
       data-form-id={form.id}
-      data-end-type={form.endType}
+      data-has-expression={form.hasExpression}
+      data-shows-visual={form.showsVisual}
     >
-      {form.content.map((item, idx) => (
-        <ContentItem key={idx} item={item} pragmaTags={form.pragmaTags} />
+      {form.elements.map((element, idx) => (
+        <ElementRenderer key={idx} element={element} />
       ))}
     </div>
   );
 };
 
 const DocumentRenderer = ({ doc }) => {
+
+  const docRef = useRef();
+
+  useEffect(() => {
+    if (docRef.current) {
+      window.bylight({target: docRef.current})
+    }
+  }, [docRef.current])
+
   useEffect(() => {
     // Initialize Colight visualizations after render
     setTimeout(() => {
@@ -118,7 +126,7 @@ const DocumentRenderer = ({ doc }) => {
   if (!doc) return null;
 
   return (
-    <div className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}>
+    <div className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")} ref={docRef}>
       {doc.forms.map((form) => (
         <FormRenderer key={form.id} form={form} />
       ))}

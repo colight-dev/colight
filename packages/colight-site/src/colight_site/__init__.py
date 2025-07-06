@@ -4,10 +4,10 @@ __version__ = "2025.4.1"
 
 # Re-export the public API for easy access
 from .api import (
-    process_colight_file,
+    evaluate_python,
     is_colight_file,
-    ProcessedForm,
-    ProcessingResult,
+    EvaluatedForm,
+    EvaluatedPython,
     build_file,
     build_directory,
     init_project,
@@ -17,10 +17,10 @@ from .api import (
 __all__ = [
     "__version__",
     # Core API
-    "process_colight_file",
+    "evaluate_python",
     "is_colight_file",
-    "ProcessedForm",
-    "ProcessingResult",
+    "EvaluatedForm",
+    "EvaluatedPython",
     # CLI convenience functions
     "build_file",
     "build_directory",

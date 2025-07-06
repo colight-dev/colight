@@ -45,7 +45,6 @@ print("Processing complete!")
         markdown_content = output_file.read_text()
 
         # Check markdown structure
-        assert "# Test" in markdown_content
         assert "Data Visualization Example" in markdown_content
         assert "```python" in markdown_content
         assert "import numpy as np" in markdown_content

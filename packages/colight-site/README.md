@@ -42,10 +42,10 @@ Control the output format and visibility of content using pragma comments:
 
 ### File-level pragmas
 
-Place at the beginning of the file, followed by a blank line:
+Begin with `hide-all-`, at the beginning of the file:
 
 ```python
-# %% hide-code
+# | hide-all-code
 
 # Your content here...
 ```
@@ -61,9 +61,9 @@ x = np.array([1, 2, 3])
 
 ### Available pragmas
 
-- `hide-code` / `show-code` - Hide or show all code blocks
+- `hide-code` / `show-code` - Hide or show code blocks
 - `hide-statements` / `show-statements` - Hide or show Python statements (imports, assignments)
-- `hide-visuals` / `show-visuals` - Hide or show Colight visualizations
+- `hide-visuals` / `show-visuals` - Hide or show results/visuals
 - `hide-prose` / `show-prose` - Hide or show markdown prose (comments)
 - `format-html` - Output in HTML format
 - `format-markdown` - Output in Markdown format

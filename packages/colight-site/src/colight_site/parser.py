@@ -3,12 +3,12 @@
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 from dataclasses import dataclass, field
-from typing import List, Union, Optional, Literal
+from typing import List, Union, Optional, Literal, Tuple
 import pathlib
 import re
 
 
-def _extract_pragma_tags(text: str) -> set[str]:
+def _extract_pragma(text: str) -> set[str]:
     """Extract all pragma tags from text using a single regex pattern."""
     # Pattern to match hide/show tags (no format tags)
     # Also matches hide-all-* for file-level pragmas
@@ -26,36 +26,36 @@ def _extract_pragma_tags(text: str) -> set[str]:
     return normalized
 
 
-def should_hide_statements(tags: set[str]) -> bool:
-    """Check if statements should be hidden based on tags."""
+def should_show_statements(tags: set[str]) -> bool:
+    """Check if statements should be shown based on tags."""
     # show- tags override hide- tags
     if "show-statements" in tags:
-        return False
-    return "hide-statements" in tags or "hide-all-statements" in tags
+        return True
+    return not ("hide-statements" in tags or "hide-all-statements" in tags)
 
 
-def should_hide_visuals(tags: set[str]) -> bool:
-    """Check if visuals should be hidden based on tags."""
+def should_show_visuals(tags: set[str]) -> bool:
+    """Check if visuals should be shown based on tags."""
     # show- tags override hide- tags
     if "show-visuals" in tags:
-        return False
-    return "hide-visuals" in tags or "hide-all-visuals" in tags
+        return True
+    return not ("hide-visuals" in tags or "hide-all-visuals" in tags)
 
 
-def should_hide_code(tags: set[str]) -> bool:
-    """Check if code should be hidden based on tags."""
+def should_show_code(tags: set[str]) -> bool:
+    """Check if code should be shown based on tags."""
     # show- tags override hide- tags
     if "show-code" in tags:
-        return False
-    return "hide-code" in tags or "hide-all-code" in tags
+        return True
+    return not ("hide-code" in tags or "hide-all-code" in tags)
 
 
-def should_hide_prose(tags: set[str]) -> bool:
-    """Check if prose (markdown content) should be hidden based on tags."""
+def should_show_prose(tags: set[str]) -> bool:
+    """Check if prose (markdown content) should be shown based on tags."""
     # show- tags override hide- tags
     if "show-prose" in tags:
-        return False
-    return "hide-prose" in tags or "hide-all-prose" in tags
+        return True
+    return not ("hide-prose" in tags or "hide-all-prose" in tags)
 
 
 def _strip_leading_comments(
@@ -82,7 +82,7 @@ def _is_pragma_comment(comment_text: str) -> bool:
     text = comment_text.strip()
 
     # Check for pragma starters
-    return text.startswith("|") or text.startswith("%%")
+    return text.startswith("|") or text.startswith("%")
 
 
 def _extract_pragma_content(comment_text: str) -> str:
@@ -102,22 +102,60 @@ def _extract_pragma_content(comment_text: str) -> str:
 
 
 @dataclass
+class FormElement:
+    """A single element within a form."""
+    
+    type: Literal["prose", "statement", "expression"]
+    content: Union[str, cst.CSTNode, List[cst.CSTNode], "CombinedCode"]  # str for prose, CSTNode(s) for code
+    line_number: int
+    
+    def get_code(self) -> str:
+        """Get the source code for this element."""
+        if self.type == "prose":
+            return self.content if isinstance(self.content, str) else ""
+        
+        # Handle CombinedCode specially
+        if isinstance(self.content, CombinedCode):
+            return self.content.code()
+        
+        # Handle code elements
+        if isinstance(self.content, list):
+            # Multiple statements combined
+            lines = []
+            for node in self.content:
+                if isinstance(node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
+                    stripped = _strip_leading_comments(node)
+                    lines.append(cst.Module(body=[stripped]).code.strip())
+                else:
+                    lines.append(str(node).strip())
+            return "\n".join(lines)
+        elif isinstance(self.content, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
+            stripped = _strip_leading_comments(self.content)
+            return cst.Module(body=[stripped]).code.strip()
+        elif isinstance(self.content, cst.BaseExpression):
+            stmt = cst.SimpleStatementLine([cst.Expr(self.content)])
+            return cst.Module(body=[stmt]).code.strip()
+        else:
+            return str(self.content).strip()
+
+
+@dataclass
 class FormMetadata:
     """Metadata extracted from per-form pragma annotations."""
 
-    pragma_tags: set[str] = field(default_factory=set)
+    pragma: set[str] = field(default_factory=set)
 
     def resolve_with_defaults(self, default_tags: set[str]) -> set[str]:
         """Resolve form metadata with default tags."""
         # Form-specific tags override defaults
-        return self.pragma_tags if self.pragma_tags else default_tags
+        return self.pragma if self.pragma else default_tags
 
 
 @dataclass
 class FileMetadata:
     """Metadata extracted from file-level pragma annotations."""
 
-    pragma_tags: set[str] = field(default_factory=set)
+    pragma: set[str] = field(default_factory=set)
 
 
 class CombinedCode:
@@ -154,147 +192,187 @@ class CombinedCode:
         return "\n".join(lines)
 
 
+def _is_expression_node(node: Union[cst.CSTNode, cst.BaseExpression]) -> bool:
+    """Check if a node represents an expression."""
+    if isinstance(node, cst.SimpleStatementLine):
+        if len(node.body) == 1 and isinstance(node.body[0], cst.Expr):
+            return True
+    elif isinstance(node, cst.BaseExpression):
+        return True
+    return False
+
+
+def _is_literal_value(node: cst.BaseExpression) -> bool:
+    """Check if a CST node represents a literal value."""
+    # Simple literals
+    if isinstance(
+        node, (cst.Integer, cst.Float, cst.SimpleString, cst.FormattedString)
+    ):
+        return True
+
+    # Boolean literals (Name nodes for True/False)
+    if isinstance(node, cst.Name) and node.value in ("True", "False", "None"):
+        return True
+
+    # Unary operations on numeric literals (e.g., -42, +3.14)
+    if isinstance(node, cst.UnaryOperation):
+        if isinstance(node.operator, (cst.Minus, cst.Plus)):
+            return _is_literal_value(node.expression)
+        return False
+
+    # Literal collections (lists, tuples, sets, dicts with only literal contents)
+    if isinstance(node, cst.List):
+        return all(
+            _is_literal_value(elem.value)
+            for elem in node.elements
+            if isinstance(elem, cst.Element)
+        )
+
+    if isinstance(node, cst.Tuple):
+        return all(
+            _is_literal_value(elem.value)
+            for elem in node.elements
+            if isinstance(elem, cst.Element)
+        )
+
+    if isinstance(node, cst.Set):
+        return all(
+            _is_literal_value(elem.value)
+            for elem in node.elements
+            if isinstance(elem, cst.Element)
+        )
+
+    if isinstance(node, cst.Dict):
+        return all(
+            _is_literal_value(elem.key) and _is_literal_value(elem.value)
+            for elem in node.elements
+            if isinstance(elem, cst.DictElement) and elem.key is not None
+        )
+
+    # Bytes literals and concatenated strings
+    if isinstance(node, cst.ConcatenatedString):
+        return all(
+            isinstance(part, (cst.SimpleString, cst.FormattedString))
+            for part in [node.left, node.right]
+        )
+
+    return False
+
+
 @dataclass
 class Form:
-    """A form represents a comment block + code statement."""
+    """A form represents a group of related content (prose, statements, expressions)."""
 
-    markdown: List[str]
-    node: Union[cst.CSTNode, CombinedCode]
-    start_line: int
+    elements: List[FormElement]
     metadata: FormMetadata = field(default_factory=FormMetadata)
+    start_line: int = 1
+
+    @property
+    def last_element(self) -> Optional[FormElement]:
+        """Get the last element in the form."""
+        return self.elements[-1] if self.elements else None
+    
+    def should_show_element(self, element: FormElement) -> bool:
+        """Determine if element should be shown based on form pragma."""
+        pragma = self.metadata.pragma
+        
+        if element.type == "prose":
+            return should_show_prose(pragma)
+        elif element.type == "statement":
+            # Show statements if both code and statements are shown
+            return should_show_code(pragma) and should_show_statements(pragma)
+        elif element.type == "expression":
+            # Show expressions if code is shown (NOT affected by hide-statements)
+            return should_show_code(pragma)
+        
+        return True
+    
+    def should_show_visual(self) -> bool:
+        """Check if visuals should be shown for expressions in this form."""
+        return should_show_visuals(self.metadata.pragma)
+
+    @property
+    def markdown(self) -> List[str]:
+        """Get markdown content for backward compatibility."""
+        lines = []
+        for elem in self.elements:
+            if elem.type == "prose" and isinstance(elem.content, str):
+                lines.extend(elem.content.split("\n"))
+        return lines
+    
+    def get_all_code(self) -> str:
+        """Get all code content as a string (for testing/debugging only)."""
+        code_parts = []
+        for elem in self.elements:
+            if elem.type in ("statement", "expression"):
+                code = elem.get_code()
+                if code:
+                    code_parts.append(code)
+        return "\n".join(code_parts)
 
     @property
     def code(self) -> str:
-        """Get the source code for this form's node."""
-        # Handle CombinedCode specially
-        if isinstance(self.node, CombinedCode):
-            return self.node.code()
-
-        # Handle different node types properly for Module creation
-        if isinstance(self.node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
-            # Create a copy of the node without leading comments since they're already in markdown
-            node_without_comments = _strip_leading_comments(self.node)
-            return cst.Module(body=[node_without_comments]).code.strip()
-        else:
-            # For other node types, wrap in a SimpleStatementLine if it's an expression
-            if isinstance(self.node, cst.BaseExpression):
-                stmt = cst.SimpleStatementLine([cst.Expr(self.node)])
-                return cst.Module(body=[stmt]).code.strip()
-            # For other cases, convert to string directly
-            return str(self.node).strip()
+        """DEPRECATED: Use elements directly or get_all_code() for testing."""
+        return self.get_all_code()
 
     @property
     def is_expression(self) -> bool:
-        """Check if this form is a standalone expression."""
-        # For CombinedCode, check if the last code element is an expression
-        if isinstance(self.node, CombinedCode):
-            if self.node.code_elements:
-                last_stmt = self.node.code_elements[-1]
-                if isinstance(last_stmt, cst.SimpleStatementLine):
-                    if len(last_stmt.body) == 1:
-                        return isinstance(last_stmt.body[0], cst.Expr)
-            return False
-
-        if isinstance(self.node, cst.SimpleStatementLine):
-            if len(self.node.body) == 1:
-                return isinstance(self.node.body[0], cst.Expr)
-        return False
+        """Check if the last element is an expression (backward compatibility)."""
+        last = self.last_element
+        return last is not None and last.type == "expression"
 
     @property
     def is_statement(self) -> bool:
-        """Check if this form is a statement (not a standalone expression)."""
-        # If it's not a dummy form and not an expression, it's a statement
-        return not self.is_dummy_form and not self.is_expression
-
-    @property
-    def is_literal(self) -> bool:
-        """Check if this form contains only literal values."""
-        if not self.is_expression:
-            return False
-
-        if isinstance(self.node, cst.SimpleStatementLine) and len(self.node.body) == 1:
-            expr = self.node.body[0]
-            if isinstance(expr, cst.Expr):
-                return self._is_literal_value(expr.value)
-        return False
-
-    def _is_literal_value(self, node: cst.BaseExpression) -> bool:
-        """Check if a CST node represents a literal value."""
-        # Simple literals
-        if isinstance(
-            node, (cst.Integer, cst.Float, cst.SimpleString, cst.FormattedString)
-        ):
-            return True
-
-        # Boolean literals (Name nodes for True/False)
-        if isinstance(node, cst.Name) and node.value in ("True", "False", "None"):
-            return True
-
-        # Unary operations on numeric literals (e.g., -42, +3.14)
-        if isinstance(node, cst.UnaryOperation):
-            if isinstance(node.operator, (cst.Minus, cst.Plus)):
-                return self._is_literal_value(node.expression)
-            return False
-
-        # Literal collections (lists, tuples, sets, dicts with only literal contents)
-        if isinstance(node, cst.List):
-            return all(
-                self._is_literal_value(elem.value)
-                for elem in node.elements
-                if isinstance(elem, cst.Element)
-            )
-
-        if isinstance(node, cst.Tuple):
-            return all(
-                self._is_literal_value(elem.value)
-                for elem in node.elements
-                if isinstance(elem, cst.Element)
-            )
-
-        if isinstance(node, cst.Set):
-            return all(
-                self._is_literal_value(elem.value)
-                for elem in node.elements
-                if isinstance(elem, cst.Element)
-            )
-
-        if isinstance(node, cst.Dict):
-            return all(
-                self._is_literal_value(elem.key) and self._is_literal_value(elem.value)
-                for elem in node.elements
-                if isinstance(elem, cst.DictElement) and elem.key is not None
-            )
-
-        # Bytes literals and concatenated strings
-        if isinstance(node, cst.ConcatenatedString):
-            return all(
-                isinstance(part, (cst.SimpleString, cst.FormattedString))
-                for part in [node.left, node.right]
-            )
-
-        return False
+        """Check if the last element is a statement (backward compatibility)."""
+        last = self.last_element
+        return last is not None and last.type == "statement"
 
     @property
     def is_dummy_form(self) -> bool:
-        """Check if this form is a dummy form (markdown-only with pass statement)."""
-        # Check if the node is a SimpleStatementLine with a single Pass statement
-        if isinstance(self.node, cst.SimpleStatementLine):
-            if len(self.node.body) == 1 and isinstance(self.node.body[0], cst.Pass):
-                return True
+        """Check if this form has no real code content."""
+        for elem in self.elements:
+            if elem.type in ("statement", "expression"):
+                # Check if it's a pass statement
+                if isinstance(elem.content, cst.SimpleStatementLine):
+                    if len(elem.content.body) == 1 and isinstance(elem.content.body[0], cst.Pass):
+                        continue
+                return False
+        return True
 
-        # Check if it's a CombinedCode with only dummy pass statements
-        if isinstance(self.node, CombinedCode):
-            for stmt in self.node.code_elements:
-                if isinstance(stmt, cst.SimpleStatementLine):
-                    if len(stmt.body) == 1 and isinstance(stmt.body[0], cst.Pass):
-                        continue  # This is a dummy pass
-                    else:
-                        return False  # Has real code
-                else:
-                    return False  # Has real code
-            return True  # All statements are dummy passes
-
+    @property
+    def is_literal(self) -> bool:
+        """Check if the last element is a literal expression."""
+        last = self.last_element
+        if last is None or last.type != "expression":
+            return False
+            
+        node = last.content
+        if isinstance(node, cst.SimpleStatementLine) and len(node.body) == 1:
+            expr = node.body[0]
+            if isinstance(expr, cst.Expr):
+                return _is_literal_value(expr.value)
+        elif isinstance(node, cst.BaseExpression):
+            return _is_literal_value(node)
         return False
+
+    @property
+    def node(self) -> Union[cst.CSTNode, "CombinedCode", None]:
+        """Get the code node for backward compatibility."""
+        code_elements = [elem for elem in self.elements if elem.type in ("statement", "expression")]
+        if not code_elements:
+            # Return a dummy pass statement for forms with no code
+            return cst.SimpleStatementLine([cst.Pass()])
+        elif len(code_elements) == 1:
+            return code_elements[0].content
+        else:
+            # Multiple code elements - return CombinedCode
+            nodes = []
+            for elem in code_elements:
+                if isinstance(elem.content, list):
+                    nodes.extend(elem.content)
+                else:
+                    nodes.append(elem.content)
+            return CombinedCode(nodes)
 
 
 # New clean parser implementation
@@ -491,13 +569,12 @@ def group_into_forms(elements: List[RawElement]) -> List[RawForm]:
 
     return forms
 
-
 def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
     """Extract file-level metadata from elements.
 
     File-level pragmas use hide-all-* prefix and can appear anywhere before code.
     """
-    metadata = FileMetadata()
+    pragma = set()
 
     # Look for hide-all-* pragmas anywhere before the first code element
     for elem in elements:
@@ -506,12 +583,20 @@ def parse_file_metadata_clean(elements: List[RawElement]) -> FileMetadata:
             break
         elif elem.type == "pragma" and isinstance(elem.content, str):
             content = _extract_pragma_content(elem.content)
-            tags = _extract_pragma_tags(content)
+            tags = _extract_pragma(content)
             # Only keep hide-all-* tags for file metadata
             file_level_tags = {tag for tag in tags if tag.startswith("hide-all-")}
-            metadata.pragma_tags.update(file_level_tags)
+            pragma.update(file_level_tags)
 
-    return metadata
+    return FileMetadata(pragma)
+
+
+def _classify_code_node(node: cst.CSTNode) -> Literal["statement", "expression"]:
+    """Classify a code node as statement or expression."""
+    if isinstance(node, cst.SimpleStatementLine):
+        if len(node.body) == 1 and isinstance(node.body[0], cst.Expr):
+            return "expression"
+    return "statement"
 
 
 def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
@@ -524,24 +609,90 @@ def apply_metadata_clean(raw_forms: List[RawForm]) -> List[Form]:
         for pragma in raw_form.pragma_comments:
             if isinstance(pragma, str):
                 pragma_content = _extract_pragma_content(pragma)
-                tags = _extract_pragma_tags(pragma_content)
-                form_metadata.pragma_tags.update(tags)
+                tags = _extract_pragma(pragma_content)
+                form_metadata.pragma.update(tags)
 
-        # Convert code statements to proper node
-        if len(raw_form.code_statements) == 1:
-            node = raw_form.code_statements[0]
-        else:
-            # Multiple statements - need to combine them
-            node = CombinedCode(
-                raw_form.code_statements, raw_form.empty_comment_positions
+        # Build elements list
+        elements = []
+        
+        # Add prose element if present
+        if raw_form.markdown_lines:
+            prose_content = "\n".join(raw_form.markdown_lines)
+            prose_elem = FormElement(
+                type="prose",
+                content=prose_content,
+                line_number=raw_form.start_line
             )
+            elements.append(prose_elem)
+        
+        # Add code elements
+        if raw_form.code_statements:
+            # Determine if we should group statements or keep them separate
+            # For now, group consecutive statements of the same type
+            if len(raw_form.code_statements) == 1:
+                # Single statement - classify and add
+                stmt = raw_form.code_statements[0]
+                elem_type = _classify_code_node(stmt)
+                code_elem = FormElement(
+                    type=elem_type,
+                    content=stmt,
+                    line_number=raw_form.start_line + len(raw_form.markdown_lines) + 1
+                )
+                elements.append(code_elem)
+            else:
+                # Multiple statements - check if we can group them
+                all_statements = all(
+                    _classify_code_node(stmt) == "statement" 
+                    for stmt in raw_form.code_statements
+                )
+                
+                if all_statements:
+                    # All are statements - group them
+                    # Use CombinedCode if we have empty comment positions to preserve
+                    if raw_form.empty_comment_positions:
+                        combined = CombinedCode(raw_form.code_statements, raw_form.empty_comment_positions)
+                        code_elem = FormElement(
+                            type="statement",
+                            content=combined,
+                            line_number=raw_form.start_line + len(raw_form.markdown_lines) + 1
+                        )
+                    else:
+                        code_elem = FormElement(
+                            type="statement",
+                            content=raw_form.code_statements,
+                            line_number=raw_form.start_line + len(raw_form.markdown_lines) + 1
+                        )
+                    elements.append(code_elem)
+                else:
+                    # Mixed types or expressions - need to preserve empty comment positions
+                    if raw_form.empty_comment_positions:
+                        # Use CombinedCode to preserve blank lines
+                        combined = CombinedCode(raw_form.code_statements, raw_form.empty_comment_positions)
+                        # Determine type based on last statement
+                        last_type = _classify_code_node(raw_form.code_statements[-1])
+                        code_elem = FormElement(
+                            type=last_type,  # Use the type of the last element
+                            content=combined,
+                            line_number=raw_form.start_line + len(raw_form.markdown_lines) + 1
+                        )
+                        elements.append(code_elem)
+                    else:
+                        # No empty comments - add separately
+                        line_offset = raw_form.start_line + len(raw_form.markdown_lines) + 1
+                        for i, stmt in enumerate(raw_form.code_statements):
+                            elem_type = _classify_code_node(stmt)
+                            code_elem = FormElement(
+                                type=elem_type,
+                                content=stmt,
+                                line_number=line_offset + i
+                            )
+                            elements.append(code_elem)
 
-        # Create final form
+        # Create final form with elements
         form = Form(
-            markdown=raw_form.markdown_lines,
-            node=node,
-            start_line=raw_form.start_line,
+            elements=elements,
             metadata=form_metadata,
+            start_line=raw_form.start_line
         )
         forms.append(form)
 

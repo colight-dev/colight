@@ -6,10 +6,9 @@ import pathlib
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 
-from .parser import Form, parse_colight_file
+from .parser import Form, parse_colight_file, should_show_prose, should_show_code, should_show_statements, should_show_visuals
 from .executor import SafeFormExecutor
 from .builder import BuildConfig
-
 
 @dataclass
 class JsonFormGenerator:
@@ -22,8 +21,7 @@ class JsonFormGenerator:
         # Parse the file
         forms, file_metadata = parse_colight_file(source_path)
 
-        # Merge pragma tags
-        combined_pragma_tags = self.config.pragma_tags.union(file_metadata.pragma_tags)
+        pragma = self.config.pragma | file_metadata.pragma
 
         # Execute forms
         executor = SafeFormExecutor(verbose=self.config.verbose)
@@ -34,13 +32,13 @@ class JsonFormGenerator:
                 result = executor.execute_form(form, str(source_path))
                 colight_bytes = executor.get_colight_bytes(result)
                 form_results.append(
-                    {"value": result, "visual_data": colight_bytes, "error": None}
+                    {"value": result, "result": colight_bytes, "error": None}
                 )
             except Exception as e:
                 form_results.append(
                     {
                         "value": None,
-                        "visual_data": None,
+                        "result": None,
                         "error": f"{type(e).__name__}: {e}",
                     }
                 )
@@ -49,7 +47,7 @@ class JsonFormGenerator:
         doc = {
             "file": str(source_path.name),
             "metadata": {
-                "pragma_tags": sorted(list(combined_pragma_tags)),
+                "pragma": sorted(list(pragma)),
                 "title": source_path.stem,
             },
             "forms": [],
@@ -67,61 +65,66 @@ class JsonFormGenerator:
         self, form: Form, result: Dict[str, Any], form_id: int
     ) -> Optional[Dict[str, Any]]:
         """Convert a single form to JSON representation."""
-        # Resolve pragma tags
-        form_tags = form.metadata.resolve_with_defaults(self.config.pragma_tags)
+        
+        form_tags = form.metadata.resolve_with_defaults(self.config.pragma)
 
-        # Build content array
-        content = []
-
-        # Add markdown content if present
-        markdown_text = "\n".join(form.markdown).strip()
-        if markdown_text:
-            content.append({"type": "markdown", "value": markdown_text})
-
-        # Skip code generation for dummy forms
-        if not form.is_dummy_form:
-            # Get the code for this form
-            code = form.code.strip()
-
-            if code:
-                # Keep all code together in a single block
-                content.append(
-                    {
-                        "type": "code",
-                        "value": code,
-                        "isStatement": form.is_statement,
-                        "isExpression": form.is_expression,
-                    }
-                )
+        # Build elements array with visibility flags
+        elements = []
+        
+        # Process each element in order
+        for elem in form.elements:
+            elem_data = {"type": elem.type}
+            
+            if elem.type == "prose":
+                prose_text = elem.content if isinstance(elem.content, str) else ""
+                elem_data["value"] = prose_text.strip()
+                elem_data["show"] = should_show_prose(form_tags)
+                
+            elif elem.type in ("statement", "expression"):
+                code = elem.get_code().strip()
+                elem_data["value"] = code
+                
+                # Determine visibility
+                if elem.type == "statement":
+                    elem_data["show"] = should_show_code(form_tags) and should_show_statements(form_tags)
+                else:  # expression
+                    elem_data["show"] = should_show_code(form_tags)
+            
+            # Skip empty elements
+            if elem_data.get("value"):
+                elements.append(elem_data)
+        
+        # Add visual data to last element if it's an expression
+        if (form.last_element and form.last_element.type == "expression" 
+            and result["result"] is not None and should_show_visuals(form_tags)):
+            # Find the last expression element in our elements array
+            for i in range(len(elements) - 1, -1, -1):
+                if elements[i]["type"] == "expression":
+                    visual_item = self._serialize_visual(result["result"])
+                    if visual_item:
+                        elements[i]["visual"] = visual_item
+                        elements[i]["showVisual"] = True
+                    break
 
         # Add error if present
         if result["error"]:
-            content.append({"type": "error", "value": str(result["error"])})
-
-        # Add visual if present and it's an expression
-        if form.is_expression and result["visual_data"] is not None:
-            visual_item = self._serialize_visual(result["visual_data"])
-            if visual_item:
-                content.append(visual_item)
+            elements.append({
+                "type": "error", 
+                "value": str(result["error"]),
+                "show": True
+            })
 
         # Skip empty forms
-        if not content:
+        if not elements:
             return None
-
-        # Determine end type
-        if form.is_dummy_form:
-            end_type = "markdown"
-        elif form.is_expression:
-            end_type = "expression"
-        else:
-            end_type = "statement"
 
         return {
             "id": form_id,
             "line": form.start_line,
-            "pragmaTags": sorted(list(form_tags)),
-            "content": content,
-            "endType": end_type,
+            "pragma": sorted(list(form_tags)),
+            "elements": elements,
+            "hasExpression": form.is_expression,
+            "showsVisual": form.is_expression and should_show_visuals(form_tags)
         }
 
     def _serialize_visual(self, visual_bytes: bytes) -> Optional[Dict[str, Any]]:

@@ -7,10 +7,10 @@ from colight_site.parser import (
     is_colight_file,
     parse_file_metadata,
     FileMetadata,
-    should_hide_statements,
-    should_hide_visuals,
-    should_hide_code,
-    should_hide_prose,
+    should_show_statements,
+    should_show_visuals,
+    should_show_code,
+    should_show_prose,
 )
 
 
@@ -122,9 +122,9 @@ def test_parse_file_metadata_basic():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert "hide-all-statements" in metadata.pragma_tags
-    assert "hide-all-visuals" not in metadata.pragma_tags
-    assert "hide-all-code" not in metadata.pragma_tags
+    assert "hide-all-statements" in metadata.pragma
+    assert "hide-all-visuals" not in metadata.pragma
+    assert "hide-all-code" not in metadata.pragma
 
 
 def test_parse_file_metadata_multiple_options():
@@ -134,9 +134,9 @@ def test_parse_file_metadata_multiple_options():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert should_hide_statements(metadata.pragma_tags) is True
-    assert should_hide_visuals(metadata.pragma_tags) is True
-    assert should_hide_code(metadata.pragma_tags) is False
+    assert should_show_statements(metadata.pragma) is False
+    assert should_show_visuals(metadata.pragma) is False
+    assert should_show_code(metadata.pragma) is True
 
 
 def test_parse_file_metadata_combined_flags():
@@ -146,9 +146,9 @@ def test_parse_file_metadata_combined_flags():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert should_hide_statements(metadata.pragma_tags) is True
-    assert should_hide_visuals(metadata.pragma_tags) is False
-    assert should_hide_code(metadata.pragma_tags) is True
+    assert should_show_statements(metadata.pragma) is False
+    assert should_show_visuals(metadata.pragma) is True
+    assert should_show_code(metadata.pragma) is False
 
 
 def test_parse_file_metadata_no_pragmas():
@@ -157,9 +157,9 @@ def test_parse_file_metadata_no_pragmas():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert should_hide_statements(metadata.pragma_tags) is False
-    assert should_hide_visuals(metadata.pragma_tags) is False
-    assert should_hide_code(metadata.pragma_tags) is False
+    assert should_show_statements(metadata.pragma) is True
+    assert should_show_visuals(metadata.pragma) is True
+    assert should_show_code(metadata.pragma) is True
 
 
 def test_parse_file_metadata_unknown_options():
@@ -169,27 +169,27 @@ def test_parse_file_metadata_unknown_options():
 import numpy as np
 """
     metadata = parse_file_metadata(source)
-    assert should_hide_statements(metadata.pragma_tags) is True
+    assert should_show_statements(metadata.pragma) is False
 
 
 def test_file_metadata_merge_with_cli():
     """Test merging file metadata with CLI options."""
-    metadata = FileMetadata(pragma_tags={"hide-all-statements"})
+    metadata = FileMetadata(pragma={"hide-all-statements"})
 
     # Test that metadata contains the expected tags
-    assert should_hide_statements(metadata.pragma_tags) is True
-    assert should_hide_visuals(metadata.pragma_tags) is False
-    assert should_hide_code(metadata.pragma_tags) is False
+    assert should_show_statements(metadata.pragma) is False
+    assert should_show_visuals(metadata.pragma) is True
+    assert should_show_code(metadata.pragma) is True
 
 
 def test_file_metadata_cli_overrides():
     """Test that CLI flags work correctly."""
-    metadata = FileMetadata(pragma_tags={"hide-all-visuals"})
+    metadata = FileMetadata(pragma={"hide-all-visuals"})
 
     # Test that metadata contains the expected tags
-    assert should_hide_statements(metadata.pragma_tags) is False
-    assert should_hide_code(metadata.pragma_tags) is False
-    assert should_hide_visuals(metadata.pragma_tags) is True
+    assert should_show_statements(metadata.pragma) is True
+    assert should_show_code(metadata.pragma) is True
+    assert should_show_visuals(metadata.pragma) is False
 
 
 def test_parse_colight_file_with_metadata():
@@ -212,7 +212,7 @@ x = np.linspace(0, 10, 100)
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # Check that metadata was parsed correctly
-        assert should_hide_statements(metadata.pragma_tags) is True
+        assert should_show_statements(metadata.pragma) is False
 
         # Check that forms were still parsed correctly
         assert len(forms) >= 1
@@ -241,7 +241,7 @@ x = np.linspace(0, 10, 100)
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # Check that metadata was parsed correctly
-        assert should_hide_statements(metadata.pragma_tags) is True
+        assert should_show_statements(metadata.pragma) is False
 
         # Check that pragma comments are not in any form's markdown
         all_markdown = []
@@ -267,7 +267,7 @@ import numpy as np
 """
     metadata = parse_file_metadata(source)
     # File-level metadata should have hide-all-statements
-    assert should_hide_statements(metadata.pragma_tags) is True
+    assert should_show_statements(metadata.pragma) is False
 
 
 def test_per_form_pragma_parsing():
@@ -303,7 +303,7 @@ y = np.sin(x)
                 break
 
         assert form_with_hide_code is not None
-        assert should_hide_code(form_with_hide_code.metadata.pragma_tags) is True
+        assert should_show_code(form_with_hide_code.metadata.pragma) is False
 
         # Find form with show-visuals
         form_with_show_visuals = None
@@ -313,7 +313,7 @@ y = np.sin(x)
                 break
 
         assert form_with_show_visuals is not None
-        assert should_hide_visuals(form_with_show_visuals.metadata.pragma_tags) is False
+        assert should_show_visuals(form_with_show_visuals.metadata.pragma) is True
 
         pathlib.Path(f.name).unlink()
 
@@ -323,7 +323,7 @@ def test_form_metadata_resolve_with_defaults():
     from colight_site.parser import FormMetadata
 
     # Test with some overrides
-    metadata = FormMetadata(pragma_tags={"hide-code", "show-visuals"})
+    metadata = FormMetadata(pragma={"hide-code", "show-visuals"})
     default_tags = {"hide-statements", "hide-visuals"}
     resolved = metadata.resolve_with_defaults(default_tags)
 
@@ -351,9 +351,9 @@ x = np.array([1, 2, 3])
 
         # File metadata should only include the top-level pragma
         assert (
-            should_hide_statements(metadata.pragma_tags) is True
+            should_show_statements(metadata.pragma) is False
         )  # from file-level flags
-        assert should_hide_code(metadata.pragma_tags) is True  # from file-level flags
+        assert should_show_code(metadata.pragma) is False  # from file-level flags
 
         # Find forms
         import_form = None
@@ -368,11 +368,11 @@ x = np.array([1, 2, 3])
         assert array_form is not None
 
         # Import form inherits file-level metadata
-        assert "hide-all-statements" in import_form.metadata.pragma_tags
-        assert "hide-all-code" in import_form.metadata.pragma_tags
+        assert "hide-all-statements" in import_form.metadata.pragma
+        assert "hide-all-code" in import_form.metadata.pragma
 
         # Array form should have the hide-visuals pragma from its per-form annotation
-        assert "hide-visuals" in array_form.metadata.pragma_tags
+        assert "hide-visuals" in array_form.metadata.pragma
 
         pathlib.Path(f.name).unlink()
 
@@ -407,7 +407,7 @@ y = x * 2
                 import_form = form
                 break
         assert import_form is not None
-        assert should_hide_code(import_form.metadata.pragma_tags) is True
+        assert should_show_code(import_form.metadata.pragma) is False
 
         # Third form should have hide_statements=True from | pragma
         y_form = None
@@ -416,7 +416,7 @@ y = x * 2
                 y_form = form
                 break
         assert y_form is not None
-        assert should_hide_statements(y_form.metadata.pragma_tags) is True
+        assert should_show_statements(y_form.metadata.pragma) is False
 
         pathlib.Path(f.name).unlink()
 
@@ -455,14 +455,14 @@ z = y + 1
 
         # Check that liberal matching worked
         assert import_form is not None
-        assert should_hide_code(import_form.metadata.pragma_tags) is True
+        assert should_show_code(import_form.metadata.pragma) is False
 
         assert x_form is not None
-        assert should_hide_visuals(x_form.metadata.pragma_tags) is False  # show-visuals
+        assert should_show_visuals(x_form.metadata.pragma) is True  # show-visuals
 
         # File-level metadata from file-level flags
-        assert should_hide_statements(metadata.pragma_tags) is True
-        assert should_hide_code(metadata.pragma_tags) is True
+        assert should_show_statements(metadata.pragma) is False
+        assert should_show_code(metadata.pragma) is False
 
         pathlib.Path(f.name).unlink()
 
@@ -482,8 +482,8 @@ x = np.array([1, 2, 3])
     metadata = parse_file_metadata(content)
 
     # Both old and new formats should be parsed
-    assert should_hide_statements(metadata.pragma_tags) is True
-    assert should_hide_visuals(metadata.pragma_tags) is True
+    assert should_show_statements(metadata.pragma) is False
+    assert should_show_visuals(metadata.pragma) is False
 
 
 def test_case_insensitive_matching():
@@ -503,7 +503,7 @@ x = np.array([1, 2, 3])
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # File-level hide_code should be in file metadata
-        assert should_hide_code(metadata.pragma_tags) is True
+        assert should_show_code(metadata.pragma) is False
 
         # Find forms and check metadata
         import_form = None
@@ -518,7 +518,7 @@ x = np.array([1, 2, 3])
         assert import_form is not None
 
         assert x_form is not None
-        assert should_hide_visuals(x_form.metadata.pragma_tags) is False  # show-visuals
+        assert should_show_visuals(x_form.metadata.pragma) is True  # show-visuals
 
         pathlib.Path(f.name).unlink()
 
@@ -563,19 +563,19 @@ z = y + 1
         # Check that both singular and plural forms work
         assert import_form is not None
         assert (
-            should_hide_statements(import_form.metadata.pragma_tags) is True
+            should_show_statements(import_form.metadata.pragma) is False
         )  # hide-statement
 
         assert x_form is not None
         assert (
-            should_hide_statements(x_form.metadata.pragma_tags) is True
+            should_show_statements(x_form.metadata.pragma) is False
         )  # hide-statements
 
         assert y_form is not None
-        assert should_hide_visuals(y_form.metadata.pragma_tags) is False  # show-visual
+        assert should_show_visuals(y_form.metadata.pragma) is True  # show-visual
 
         assert z_form is not None
-        assert should_hide_visuals(z_form.metadata.pragma_tags) is False  # show-visuals
+        assert should_show_visuals(z_form.metadata.pragma) is True  # show-visuals
 
         pathlib.Path(f.name).unlink()
 
@@ -599,13 +599,13 @@ y = x * 2
         forms, metadata = parse_colight_file(pathlib.Path(f.name))
 
         # File metadata should be defaults (no pragmas detected)
-        assert should_hide_statements(metadata.pragma_tags) is False
-        assert should_hide_visuals(metadata.pragma_tags) is False
-        assert should_hide_code(metadata.pragma_tags) is False
+        assert should_show_statements(metadata.pragma) is True
+        assert should_show_visuals(metadata.pragma) is True
+        assert should_show_code(metadata.pragma) is True
 
         # All form metadata should be empty (no pragmas detected)
         for form in forms:
-            assert len(form.metadata.pragma_tags) == 0
+            assert len(form.metadata.pragma) == 0
 
         pathlib.Path(f.name).unlink()
 
@@ -798,40 +798,40 @@ y = x * 2
 
             if description == "hide-prose at file level":
                 # File metadata should have hide-all-prose
-                assert should_hide_prose(metadata.pragma_tags) is True
+                assert should_show_prose(metadata.pragma) is False
                 # All forms should inherit this unless overridden
                 for form in forms:
-                    if not form.metadata.pragma_tags:  # No form-specific pragmas
+                    if not form.metadata.pragma:  # No form-specific pragmas
                         assert (
-                            should_hide_prose(
+                            should_show_prose(
                                 form.metadata.resolve_with_defaults(
-                                    metadata.pragma_tags
+                                    metadata.pragma
                                 )
                             )
-                            is True
+                            is False
                         )
 
             elif description == "show-prose overrides hide-prose":
                 # File metadata should have hide-all-prose
-                assert should_hide_prose(metadata.pragma_tags) is True
+                assert should_show_prose(metadata.pragma) is False
                 # Check the form with x = np.array - it should have show-prose
                 for form in forms:
                     if "x = np.array" in form.code:
                         assert (
-                            should_hide_prose(
+                            should_show_prose(
                                 form.metadata.resolve_with_defaults(
-                                    metadata.pragma_tags
+                                    metadata.pragma
                                 )
                             )
-                            is False
+                            is True
                         )  # show-prose overrides
 
             elif description == "per-form hide-prose":
                 # File metadata should not have hide-all-prose
-                assert should_hide_prose(metadata.pragma_tags) is False
+                assert should_show_prose(metadata.pragma) is True
                 # Check the form with x = np.array - it should have hide-prose
                 for form in forms:
                     if "x = np.array" in form.code:
-                        assert should_hide_prose(form.metadata.pragma_tags) is True
+                        assert should_show_prose(form.metadata.pragma) is False
 
             pathlib.Path(f.name).unlink()

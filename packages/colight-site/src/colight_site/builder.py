@@ -10,14 +10,14 @@ from .executor import SafeFormExecutor
 from .generator import MarkdownGenerator
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .pep723 import detect_pep723_metadata, parse_dependencies
-
+from .pragma import parse_pragma_arg
 
 @dataclass
 class BuildConfig:
     """Configuration for building a colight file."""
 
     verbose: bool = False
-    pragma_tags: set[str] = field(default_factory=set)
+    pragma: set[str] = field(default_factory=set)
     formats: set[str] = field(default_factory=lambda: {"markdown"})
     continue_on_error: bool = True
     colight_output_path: Optional[str] = None
@@ -33,17 +33,17 @@ class BuildConfig:
     @property
     def hide_statements(self) -> bool:
         """Check if statements should be hidden."""
-        return "hide-statements" in self.pragma_tags
+        return "hide-statements" in self.pragma
 
     @property
     def hide_visuals(self) -> bool:
         """Check if visuals should be hidden."""
-        return "hide-visuals" in self.pragma_tags
+        return "hide-visuals" in self.pragma
 
     @property
     def hide_code(self) -> bool:
         """Check if code should be hidden."""
-        return "hide-code" in self.pragma_tags
+        return "hide-code" in self.pragma
 
     def to_cli_args(self) -> List[str]:
         """Convert config to CLI arguments."""
@@ -52,9 +52,9 @@ class BuildConfig:
         if self.verbose:
             args.extend(["--verbose", "true"])
 
-        # Convert pragma_tags to comma-separated list
-        if self.pragma_tags:
-            args.extend(["--pragma", ",".join(sorted(self.pragma_tags))])
+        # Convert pragma to comma-separated list
+        if self.pragma:
+            args.extend(["--pragma", ",".join(sorted(self.pragma))])
 
         # Use the first format (CLI only supports one)
         format = next(iter(self.formats))
@@ -89,7 +89,7 @@ class BuildConfig:
         # Merge config with kwargs
         config_dict = {
             "verbose": config.verbose,
-            "pragma_tags": config.pragma_tags.copy(),
+            "pragma": parse_pragma_arg(config.pragma),
             "formats": config.formats.copy(),
             "continue_on_error": config.continue_on_error,
             "colight_output_path": config.colight_output_path,
@@ -199,7 +199,7 @@ def build_file(
         forms, file_metadata = parse_colight_file(input_path)
         if config.verbose:
             print(f"Found {len(forms)} forms")
-            if file_metadata.pragma_tags:
+            if file_metadata.pragma:
                 print(f"  File metadata: {file_metadata}")
     except Exception as e:
         if config.verbose:
@@ -308,12 +308,7 @@ def build_file(
         inline_threshold=config.inline_threshold,
     )
     title = input_path.stem.replace(".colight", "").replace("_", " ").title()
-
-    # Merge file metadata with config (config takes precedence)
-    # Start with file metadata tags
-    merged_pragma_tags = file_metadata.pragma_tags.copy()
-    # Config tags override file metadata
-    merged_pragma_tags.update(config.pragma_tags)
+    merged_pragma = file_metadata.pragma.union(config.pragma)
 
     # Use formats from config only (no file-level format pragma)
     formats = config.formats
@@ -326,10 +321,9 @@ def build_file(
         html_content = generator.generate_html(
             forms,
             colight_data,
-            title,
-            output_path,
-            path_context,
-            pragma_tags=merged_pragma_tags,
+            title=title,
+            path_context=path_context,
+            pragma=merged_pragma,
             execution_errors=execution_errors,
         )
         generator.write_html_file(html_content, output_path)
@@ -338,7 +332,7 @@ def build_file(
             forms,
             colight_data,
             path_context=path_context,
-            pragma_tags=merged_pragma_tags,
+            pragma=merged_pragma,
             execution_errors=execution_errors,
         )
         generator.write_markdown_file(markdown_content, output_path)

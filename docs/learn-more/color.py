@@ -15,11 +15,11 @@ import colight.plot as Plot
 )
 
 # %% [markdown]
-# Here, the `x` and `fill` channels both use [Plot.identity](bylight?in=-1) to use the corresponding value in the provided [range](bylight?in=-1&match=range(...\)).
+# Here, the `x` and `fill` channels both use [Plot.identity](bylight?in=-1) to use the corresponding value in the provided [range](bylight?in=-1&match=range\(...\)).
 #
 # ### Custom color interpolation
 #
-# You can also create custom color scales by specifying a range and an [interpolation function](bylight?match=Plot.js(...\)):
+# You can also create custom color scales by specifying a range and an [interpolation function](bylight?match=Plot.js\(...\)):
 
 # %%
 (
