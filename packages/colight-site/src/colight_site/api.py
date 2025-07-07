@@ -4,22 +4,21 @@ import pathlib
 from typing import Optional, List, Union
 from dataclasses import dataclass
 
-from .parser import parse_colight_file, is_colight_file, Form
-from .executor import SafeFormExecutor
-from .generator import MarkdownGenerator
+from .parser import parse_colight_file, is_colight_file
+from .executor import DocumentExecutor
+from .generator import MarkdownGenerator, HTMLGenerator
+from .model import Block
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .pragma import parse_pragma_arg
 from . import builder  # For internal use only
 
 
 @dataclass
-class EvaluatedForm:
-    """Result of processing a single form."""
+class EvaluatedBlock:
+    """Result of processing a single block."""
 
-    form: Form
-    visual_data: Optional[
-        Union[bytes, pathlib.Path]
-    ]  # bytes if inlined, Path if saved
+    block: Block
+    visual_data: Optional[Union[bytes, pathlib.Path]]  # bytes if inlined, Path if saved
     error: Optional[str] = None
 
 
@@ -27,7 +26,7 @@ class EvaluatedForm:
 class EvaluatedPython:
     """Result of processing a python file."""
 
-    forms: List[EvaluatedForm]
+    blocks: List[EvaluatedBlock]
     markdown_content: str
     html_content: Optional[str] = None
 
@@ -68,54 +67,56 @@ def evaluate_python(
         EvaluatedPython with all processed data
     """
     # Parse the file
-    forms, file_metadata = parse_colight_file(input_path)
-    pragma = file_metadata.pragma.union(parse_pragma_arg(pragma))
+    document = parse_colight_file(input_path)
 
-    # Formats come from CLI only now
-    formats = {format}
+    # Parse pragma if provided
+    if pragma:
+        pragma_tags = parse_pragma_arg(pragma)
+        # Merge with document tags
+        from .model import TagSet
+
+        document.tags = document.tags | TagSet(frozenset(pragma_tags))
 
     # Setup defaults
     if output_dir is None:
         output_dir = input_path.parent / (input_path.stem + "_colight")
 
     if embed_path_template is None:
-        embed_path_template = f"{input_path.stem}_colight/form-{{form:03d}}.colight"
+        embed_path_template = f"{input_path.stem}_colight/block-{{block:03d}}.colight"
 
     if output_path_template is None:
-        output_path_template = "form-{form:03d}.colight"
+        output_path_template = "block-{block:03d}.colight"
 
-    # Execute forms
-    executor = SafeFormExecutor(verbose=verbose)
-    processed_forms = []
+    # Execute document
+    executor = DocumentExecutor(verbose=verbose)
+    results, _ = executor.execute(document, str(input_path))
 
-    for i, form in enumerate(forms):
-        try:
-            result = executor.execute_form(form, str(input_path))
-            colight_bytes = executor.get_colight_bytes(result)
+    # Process results into EvaluatedBlocks
+    processed_blocks = []
 
-            if colight_bytes is None:
-                processed_forms.append(EvaluatedForm(form, None))
-            elif len(colight_bytes) < inline_threshold:
-                # Keep in memory for inlining
-                processed_forms.append(EvaluatedForm(form, colight_bytes))
-                if verbose:
-                    print(
-                        f"  Form {i}: visualization will be inlined ({len(colight_bytes)} bytes)"
-                    )
-            else:
-                # Save to disk
-                output_dir.mkdir(parents=True, exist_ok=True)
-                colight_path = output_dir / output_path_template.format(form=i)
-                colight_path.write_bytes(colight_bytes)
-                processed_forms.append(EvaluatedForm(form, colight_path))
-                if verbose:
-                    print(f"  Form {i}: saved visualization to {colight_path.name}")
-
-        except Exception as e:
-            error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
-            processed_forms.append(EvaluatedForm(form, None, error=error_msg))
+    for i, (block, result) in enumerate(zip(document.blocks, results)):
+        if result.error:
+            error_msg = f"Block {i} (line {block.start_line}): {result.error.strip()}"
+            processed_blocks.append(EvaluatedBlock(block, None, error=error_msg))
             if verbose:
                 print(f"  {error_msg}")
+        elif result.colight_bytes is None:
+            processed_blocks.append(EvaluatedBlock(block, None))
+        elif len(result.colight_bytes) < inline_threshold:
+            # Keep in memory for inlining
+            processed_blocks.append(EvaluatedBlock(block, result.colight_bytes))
+            if verbose:
+                print(
+                    f"  Block {i}: visualization will be inlined ({len(result.colight_bytes)} bytes)"
+                )
+        else:
+            # Save to disk
+            output_dir.mkdir(parents=True, exist_ok=True)
+            colight_path = output_dir / output_path_template.format(block=i)
+            colight_path.write_bytes(result.colight_bytes)
+            processed_blocks.append(EvaluatedBlock(block, colight_path))
+            if verbose:
+                print(f"  Block {i}: saved visualization to {colight_path.name}")
 
     # Generate output
     generator = MarkdownGenerator(
@@ -123,35 +124,23 @@ def evaluate_python(
         embed_path_template=embed_path_template,
         inline_threshold=inline_threshold,
     )
-
-    # Extract data for generator
-    forms_list = [pf.form for pf in processed_forms]
-    colight_data = [pf.visual_data for pf in processed_forms]
-    errors = [pf.error for pf in processed_forms]
-
-    title = input_path.stem.replace(".colight", "").replace("_", " ").title()
-
     # Generate markdown
-    markdown_content = generator.generate_markdown(
-        forms_list,
-        colight_data,
-        pragma=pragma,
-        execution_errors=errors,
-    )
+    path_context = {"basename": input_path.stem}
+    markdown_content = generator.generate(document, results, path_context)
 
     # Generate HTML if requested
     html_content = None
-    if format == "html" or "html" in formats:
-        html_content = generator.generate_html(
-            forms_list,
-            colight_data,
-            title,
-            pragma=pragma,
-            execution_errors=errors,
+    if format == "html":
+        title = input_path.stem.replace(".colight", "").replace("_", " ").title()
+        html_generator = HTMLGenerator(
+            output_dir,
+            embed_path_template=embed_path_template,
+            inline_threshold=inline_threshold,
         )
+        html_content = html_generator.generate(document, results, title, path_context)
 
     return EvaluatedPython(
-        forms=processed_forms,
+        blocks=processed_blocks,
         markdown_content=markdown_content,
         html_content=html_content,
     )
@@ -187,7 +176,7 @@ __all__ = [
     # Core API
     "evaluate_python",
     "is_colight_file",
-    "EvaluatedForm",
+    "EvaluatedBlock",
     "EvaluatedPython",
     # CLI convenience functions
     "build_file",

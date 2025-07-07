@@ -6,7 +6,7 @@ __version__ = "2025.4.1"
 from .api import (
     evaluate_python,
     is_colight_file,
-    EvaluatedForm,
+    EvaluatedBlock,
     EvaluatedPython,
     build_file,
     build_directory,
@@ -19,7 +19,7 @@ __all__ = [
     # Core API
     "evaluate_python",
     "is_colight_file",
-    "EvaluatedForm",
+    "EvaluatedBlock",
     "EvaluatedPython",
     # CLI convenience functions
     "build_file",

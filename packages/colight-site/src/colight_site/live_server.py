@@ -5,7 +5,7 @@ import json
 import pathlib
 import threading
 import webbrowser
-from typing import Optional, List, Set, Dict
+from typing import Optional, List, Set, Dict, Any
 import fnmatch
 
 import websockets
@@ -559,7 +559,7 @@ class LiveServer:
         self.ws_port = ws_port
         self.open_url = open_url
 
-        self.connections: Set[websockets.WebSocketServerProtocol] = set()
+        self.connections: Set[Any] = set()  # WebSocket connections
         self._http_server = None
         self._http_thread = None
         self._stop_event = asyncio.Event()

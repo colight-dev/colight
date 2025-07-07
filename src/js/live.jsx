@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import "../../packages/colight/src/colight/js/embed.js"; // Import Colight embed script
 import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
-import "./bylight.js"
+import "./bylight.js";
 
 // ========== Utility Functions ==========
 
@@ -47,37 +47,18 @@ const ElementRenderer = ({ element }) => {
     case "expression":
       return (
         <>
-          <pre className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}>
+          <pre
+            className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}
+          >
             <code className="language-python">{element.value}</code>
           </pre>
           {/* Render visual if it's an expression with visual data */}
-          {element.type === "expression" && element.visual && element.showVisual && (
+          {element.type === "expression" && element.visual && (
             <div className={tw("mb-4")}>
-              {element.visual.format === "inline" ? (
-                <script type="application/x-colight" data-size={element.visual.size}>
-                  {element.visual.data}
-                </script>
-              ) : (
-                <div
-                  className="colight-embed"
-                  data-src={element.visual.path}
-                  data-size={element.visual.size}
-                /> 
-              )}
+              <script type="application/x-colight">{element.visual}</script>
             </div>
           )}
         </>
-      );
-
-    case "error":
-      return (
-        <div
-          className={tw(
-            "bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4",
-          )}
-        >
-          <pre>{element.value}</pre>
-        </div>
       );
 
     default:
@@ -85,33 +66,39 @@ const ElementRenderer = ({ element }) => {
   }
 };
 
-const FormRenderer = ({ form }) => {
-  if (!form.elements || form.elements.length === 0) return null;
+const BlockRenderer = ({ block }) => {
+  if (!block.elements || block.elements.length === 0) return null;
 
   return (
     <div
-      className={tw(`form-${form.id} ${form.pragma.join(" ")}`)}
-      data-line={form.line}
-      data-form-id={form.id}
-      data-has-expression={form.hasExpression}
-      data-shows-visual={form.showsVisual}
+      className={tw(`block-${block.id}`)}
+      data-block-id={block.id}
+      data-shows-visual={block.showsVisual}
     >
-      {form.elements.map((element, idx) => (
+      {block.elements.map((element, idx) => (
         <ElementRenderer key={idx} element={element} />
       ))}
+      {block.error && (
+        <div
+          className={tw(
+            "bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4",
+          )}
+        >
+          <pre>{block.error}</pre>
+        </div>
+      )}
     </div>
   );
 };
 
 const DocumentRenderer = ({ doc }) => {
-
   const docRef = useRef();
 
   useEffect(() => {
     if (docRef.current) {
-      window.bylight({target: docRef.current})
+      window.bylight({ target: docRef.current });
     }
-  }, [docRef.current])
+  }, [docRef.current]);
 
   useEffect(() => {
     // Initialize Colight visualizations after render
@@ -126,9 +113,12 @@ const DocumentRenderer = ({ doc }) => {
   if (!doc) return null;
 
   return (
-    <div className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")} ref={docRef}>
-      {doc.forms.map((form) => (
-        <FormRenderer key={form.id} form={form} />
+    <div
+      className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
+      ref={docRef}
+    >
+      {doc.blocks.map((block) => (
+        <BlockRenderer key={block.id} block={block} />
       ))}
     </div>
   );
@@ -419,7 +409,7 @@ const LiveServerApp = () => {
       console.error("Failed to load file:", error);
       setDocumentData({
         error: error.message,
-        forms: [],
+        blocks: [],
       });
     } finally {
       setLoading(false);

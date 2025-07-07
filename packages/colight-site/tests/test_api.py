@@ -32,18 +32,20 @@ x  # Visualize
 
         # Check result structure
         assert isinstance(result, api.EvaluatedPython)
-        assert len(result.forms) == 2  # Import and combined assignment+expression
+        assert (
+            len(result.blocks) == 3
+        )  # Prose, import, and combined prose+assignment+expression
         assert result.markdown_content is not None
         assert "Test API" in result.markdown_content
 
         # Check that visualization was processed
-        viz_form = result.forms[1]  # The combined form
-        assert viz_form.visual_data is not None
+        viz_block = result.blocks[2]  # The block with assignment and expression
+        assert viz_block.visual_data is not None
 
         # Since we set a low threshold, it should be saved as a file
-        assert isinstance(viz_form.visual_data, pathlib.Path)
-        assert viz_form.visual_data.exists()
-        assert viz_form.visual_data.name == "form-001.colight"
+        assert isinstance(viz_block.visual_data, pathlib.Path)
+        assert viz_block.visual_data.exists()
+        assert viz_block.visual_data.name == "block-002.colight"
 
 
 def test_evaluate_python_with_inline():
@@ -66,10 +68,10 @@ x
         )
 
         # Check that visualization was inlined
-        viz_form = result.forms[0]  # The single combined form
-        assert viz_form.visual_data is not None
-        assert isinstance(viz_form.visual_data, bytes)
-        assert viz_form.visual_data.startswith(b"COLIGHT\x00")
+        viz_block = result.blocks[0]  # The single combined block
+        assert viz_block.visual_data is not None
+        assert isinstance(viz_block.visual_data, bytes)
+        assert viz_block.visual_data.startswith(b"COLIGHT\x00")
 
         # Check markdown has inline script
         assert '<script type="application/x-colight">' in result.markdown_content

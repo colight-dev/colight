@@ -168,7 +168,8 @@ def generate_python_code(tree: Dict, input_path: pathlib.Path) -> str:
     # Format the items as Python list literals
     items_code = ",\n            ".join(items)
 
-    code = f"""# | hide-all-code
+    if items:
+        code = f"""# | hide-all-code
 
 import colight.plot as Plot
 
@@ -181,6 +182,20 @@ Plot.html(
             "ul.list-disc.pl-6",
             {items_code}
         ],
+    ]
+)
+"""
+    else:
+        # Handle empty directory
+        code = """# | hide-all-code
+
+import colight.plot as Plot
+
+Plot.html(
+    [
+        "div.p-6",
+        ["h1.text-2xl.font-bold.mb-6", "Colight Examples Directory"],
+        ["p.mb-4", "No colight files found in this directory."],
     ]
 )
 """

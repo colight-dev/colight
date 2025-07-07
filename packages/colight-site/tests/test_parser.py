@@ -1,837 +1,361 @@
-"""Test the parser module."""
+"""Tests for the new parser implementation."""
 
-import pathlib
-import tempfile
+import textwrap
 from colight_site.parser import (
-    parse_colight_file,
-    is_colight_file,
-    parse_file_metadata,
-    FileMetadata,
-    should_show_statements,
-    should_show_visuals,
-    should_show_code,
-    should_show_prose,
+    lex,
+    group_blocks,
+    build_document,
+    parse_document,
+    RawBlock,
+    # New typed elements
+    CodeLine,
+    CommentLine,
+    PragmaLine,
+    BlankLine,
 )
-
-
-def test_is_colight_file():
-    """Test colight file detection."""
-    assert is_colight_file(pathlib.Path("example.colight.py"))
-    assert is_colight_file(pathlib.Path("test.colight.py"))
-    assert not is_colight_file(pathlib.Path("regular.py"))
-    assert not is_colight_file(pathlib.Path("test.txt"))
-
-
-def test_parse_simple_colight_file():
-    """Test parsing a simple colight file."""
-    content = """# This is a title
-# Some description
-
-import numpy as np
-
-# Create data
-x = np.linspace(0, 10, 100)
-
-# This creates a visualization
-np.sin(x)
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Should have 3 forms (better grouping with new parser)
-        assert len(forms) == 3
-
-        # First form: import with title comments
-        assert "import numpy as np" in forms[0].code
-        assert len(forms[0].markdown) > 0
-        assert "This is a title" in forms[0].markdown[0]
-
-        # Second form: assignment with "Create data" comment
-        assert "x = np.linspace" in forms[1].code
-        assert "Create data" in forms[1].markdown[0]
-
-        # Third form: expression with "This creates a visualization" comment
-        assert "np.sin(x)" in forms[2].code
-        assert "This creates a visualization" in forms[2].markdown[0]
-        assert forms[2].is_expression
-
-        # Clean up
-        pathlib.Path(f.name).unlink()
-
-
-def test_parse_empty_file():
-    """Test parsing an empty file."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write("")
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-        assert len(forms) == 0
-
-
-def test_consecutive_code_grouping():
-    """Test that consecutive code statements are grouped into single forms."""
-    content = """# Title
-# Description
-
-import numpy as np
-
-# Some comment
-x = np.linspace(0, 10, 100)
-y = np.sin(x)
-z = np.cos(x)
-
-# Another comment
-result = x, y, z
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Should have 3 forms total (better grouping with new parser)
-        assert len(forms) == 3
-
-        # Form 0: import with title markdown
-        assert "Title" in forms[0].markdown[0]
-        assert "import numpy as np" in forms[0].code
-
-        # Form 1: all three consecutive assignments grouped together with comment
-        assert "Some comment" in forms[1].markdown[0]
-        assert "x = np.linspace" in forms[1].code
-        assert "y = np.sin" in forms[1].code
-        assert "z = np.cos" in forms[1].code
-
-        # Form 2: final assignment with comment
-        assert "Another comment" in forms[2].markdown[0]
-        assert "result = x, y, z" in forms[2].code
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_parse_file_metadata_basic():
-    """Test parsing basic file metadata."""
-    source = """#| colight: hide-all-statements
-
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    assert "hide-all-statements" in metadata.pragma
-    assert "hide-all-visuals" not in metadata.pragma
-    assert "hide-all-code" not in metadata.pragma
-
-
-def test_parse_file_metadata_multiple_options():
-    """Test parsing multiple options in one line."""
-    source = """#| colight: hide-all-statements, hide-all-visuals
-
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    assert should_show_statements(metadata.pragma) is False
-    assert should_show_visuals(metadata.pragma) is False
-    assert should_show_code(metadata.pragma) is True
-
-
-def test_parse_file_metadata_combined_flags():
-    """Test combining multiple flags."""
-    source = """#| hide-all-statements hide-all-code
-
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    assert should_show_statements(metadata.pragma) is False
-    assert should_show_visuals(metadata.pragma) is True
-    assert should_show_code(metadata.pragma) is False
-
-
-def test_parse_file_metadata_no_pragmas():
-    """Test parsing a file without any pragmas."""
-    source = """# This is just a regular comment
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    assert should_show_statements(metadata.pragma) is True
-    assert should_show_visuals(metadata.pragma) is True
-    assert should_show_code(metadata.pragma) is True
-
-
-def test_parse_file_metadata_unknown_options():
-    """Test that unknown options are silently ignored."""
-    source = """#| colight: hide-all-statements, unknown-option
-
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    assert should_show_statements(metadata.pragma) is False
-
-
-def test_file_metadata_merge_with_cli():
-    """Test merging file metadata with CLI options."""
-    metadata = FileMetadata(pragma={"hide-all-statements"})
-
-    # Test that metadata contains the expected tags
-    assert should_show_statements(metadata.pragma) is False
-    assert should_show_visuals(metadata.pragma) is True
-    assert should_show_code(metadata.pragma) is True
-
-
-def test_file_metadata_cli_overrides():
-    """Test that CLI flags work correctly."""
-    metadata = FileMetadata(pragma={"hide-all-visuals"})
-
-    # Test that metadata contains the expected tags
-    assert should_show_statements(metadata.pragma) is True
-    assert should_show_code(metadata.pragma) is True
-    assert should_show_visuals(metadata.pragma) is False
-
-
-def test_parse_colight_file_with_metadata():
-    """Test parsing a colight file with metadata."""
-    content = """#| colight: hide-all-statements
-
-# This is a title
-# Some description
-
-import numpy as np
-
-# Create data
-x = np.linspace(0, 10, 100)
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Check that metadata was parsed correctly
-        assert should_show_statements(metadata.pragma) is False
-
-        # Check that forms were still parsed correctly
-        assert len(forms) >= 1
-        assert "import numpy as np" in forms[0].code
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_pragma_comments_filtered():
-    """Test that pragma comments are not included in markdown output."""
-    content = """#| colight: hide-all-statements
-
-# This is a regular comment
-# This should appear in output
-
-import numpy as np
-
-# Another regular comment
-x = np.linspace(0, 10, 100)
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Check that metadata was parsed correctly
-        assert should_show_statements(metadata.pragma) is False
-
-        # Check that pragma comments are not in any form's markdown
-        all_markdown = []
-        for form in forms:
-            all_markdown.extend(form.markdown)
-
-        # Regular comments should be present
-        assert any("This is a regular comment" in line for line in all_markdown)
-        assert any("Another regular comment" in line for line in all_markdown)
-
-        # Pragma comments should NOT be present
-        assert not any("colight:" in line for line in all_markdown)
-        assert not any("hide-all-statements" in line for line in all_markdown)
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_show_options_override_hide():
-    """Test that show- options override hide- options."""
-    source = """#| colight: hide-all-statements
-    
-import numpy as np
-"""
-    metadata = parse_file_metadata(source)
-    # File-level metadata should have hide-all-statements
-    assert should_show_statements(metadata.pragma) is False
-
-
-def test_per_form_pragma_parsing():
-    """Test parsing per-form pragma annotations."""
-    content = """# Regular comment
-    
-#| colight: hide-code
-# This form should hide its code
-import numpy as np
-
-# Regular comment without pragma
-x = np.linspace(0, 10, 100)
-
-#| colight: show-visuals
-# This form should show visuals
-y = np.sin(x)
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Check that forms have the right metadata
-        assert len(forms) >= 3
-
-        # First form should have hide_code=True
-        form_with_hide_code = None
-        for form in forms:
-            if "import numpy as np" in form.code:
-                form_with_hide_code = form
-                break
-
-        assert form_with_hide_code is not None
-        assert should_show_code(form_with_hide_code.metadata.pragma) is False
-
-        # Find form with show-visuals
-        form_with_show_visuals = None
-        for form in forms:
-            if "y = np.sin(x)" in form.code:
-                form_with_show_visuals = form
-                break
-
-        assert form_with_show_visuals is not None
-        assert should_show_visuals(form_with_show_visuals.metadata.pragma) is True
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_form_metadata_resolve_with_defaults():
-    """Test FormMetadata.resolve_with_defaults method."""
-    from colight_site.parser import FormMetadata
-
-    # Test with some overrides
-    metadata = FormMetadata(pragma={"hide-code", "show-visuals"})
-    default_tags = {"hide-statements", "hide-visuals"}
-    resolved = metadata.resolve_with_defaults(default_tags)
-
-    # Form metadata should override defaults
-    assert resolved == {"hide-code", "show-visuals"}
-
-
-def test_file_vs_per_form_pragma_distinction():
-    """Test that file-level pragmas only apply at the top, per-form pragmas are local."""
-    content = """#| hide-all-statements hide-all-code
-
-# First form - affected by file-level pragmas
-import numpy as np
-
-#| colight: hide-visuals
-# This pragma should NOT affect file metadata
-x = np.array([1, 2, 3])
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # File metadata should only include the top-level pragma
-        assert (
-            should_show_statements(metadata.pragma) is False
-        )  # from file-level flags
-        assert should_show_code(metadata.pragma) is False  # from file-level flags
-
-        # Find forms
-        import_form = None
-        array_form = None
-        for form in forms:
-            if "import numpy" in form.code:
-                import_form = form
-            elif "x = np.array" in form.code:
-                array_form = form
-
-        assert import_form is not None
-        assert array_form is not None
-
-        # Import form inherits file-level metadata
-        assert "hide-all-statements" in import_form.metadata.pragma
-        assert "hide-all-code" in import_form.metadata.pragma
-
-        # Array form should have the hide-visuals pragma from its per-form annotation
-        assert "hide-visuals" in array_form.metadata.pragma
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_new_pragma_formats():
-    """Test new pragma formats with %% and | starters without colight: prefix."""
-    content = """# %% hide-code
-# Regular comment
-import numpy as np
-
-#| show-code
-# Another comment
-x = np.array([1, 2, 3])
-
-#| hide-statements
-y = x * 2
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Should have 3 forms
-        assert len(forms) == 3
-
-        # First form should have hide_code=True from %% pragma
-        import_form = None
-        for form in forms:
-            if "import numpy" in form.code:
-                import_form = form
-                break
-        assert import_form is not None
-        assert should_show_code(import_form.metadata.pragma) is False
-
-        # Third form should have hide_statements=True from | pragma
-        y_form = None
-        for form in forms:
-            if "y = x * 2" in form.code:
-                y_form = form
-                break
-        assert y_form is not None
-        assert should_show_statements(y_form.metadata.pragma) is False
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_liberal_tag_matching():
-    """Test that tags are matched liberally anywhere in pragma comments."""
-    content = """#| hide-all-statements hide-all-code flag test
-
-# %% This comment has hide-code somewhere in it
-import numpy as np
-
-#| Some text with show-visuals and other words
-x = np.array([1, 2, 3])
-
-# %% hide-visuals should work too
-y = x * 2
-
-z = y + 1
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Find the forms and check their metadata
-        import_form = None
-        x_form = None
-
-        for form in forms:
-            if "import numpy" in form.code:
-                import_form = form
-            elif "x = np.array" in form.code:
-                x_form = form
-
-        # Check that liberal matching worked
-        assert import_form is not None
-        assert should_show_code(import_form.metadata.pragma) is False
-
-        assert x_form is not None
-        assert should_show_visuals(x_form.metadata.pragma) is True  # show-visuals
-
-        # File-level metadata from file-level flags
-        assert should_show_statements(metadata.pragma) is False
-        assert should_show_code(metadata.pragma) is False
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_mixed_pragma_formats():
-    """Test mixing old and new pragma formats."""
-    content = """#| colight: hide-all-statements
-# %% hide-all-visuals
-
-# Regular comment
-import numpy as np
-
-#| show-code
-x = np.array([1, 2, 3])
-"""
-
-    metadata = parse_file_metadata(content)
-
-    # Both old and new formats should be parsed
-    assert should_show_statements(metadata.pragma) is False
-    assert should_show_visuals(metadata.pragma) is False
-
-
-def test_case_insensitive_matching():
-    """Test that tag matching is case insensitive."""
-    content = """# %% Hide-All-Code
-
-import numpy as np
-
-#| SHOW-VISUALS
-x = np.array([1, 2, 3])
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # File-level hide_code should be in file metadata
-        assert should_show_code(metadata.pragma) is False
-
-        # Find forms and check metadata
-        import_form = None
-        x_form = None
-
-        for form in forms:
-            if "import numpy" in form.code:
-                import_form = form
-            elif "x = np.array" in form.code:
-                x_form = form
-
-        assert import_form is not None
-
-        assert x_form is not None
-        assert should_show_visuals(x_form.metadata.pragma) is True  # show-visuals
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_plural_singular_support():
-    """Test that both plural and singular forms work."""
-    content = """# %% hide-statement
-import numpy as np
-
-#| hide-statements should also work
-x = np.array([1, 2, 3])
-
-# %% show-visual
-y = x * 2
-
-#| show-visuals should also work
-z = y + 1
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # Find forms
-        import_form = None
-        x_form = None
-        y_form = None
-        z_form = None
-
-        for form in forms:
-            if "import numpy" in form.code:
-                import_form = form
-            elif "x = np.array" in form.code:
-                x_form = form
-            elif "y = x * 2" in form.code:
-                y_form = form
-            elif "z = y + 1" in form.code:
-                z_form = form
-
-        # Check that both singular and plural forms work
-        assert import_form is not None
-        assert (
-            should_show_statements(import_form.metadata.pragma) is False
-        )  # hide-statement
-
-        assert x_form is not None
-        assert (
-            should_show_statements(x_form.metadata.pragma) is False
-        )  # hide-statements
-
-        assert y_form is not None
-        assert should_show_visuals(y_form.metadata.pragma) is True  # show-visual
-
-        assert z_form is not None
-        assert should_show_visuals(z_form.metadata.pragma) is True  # show-visuals
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_regular_comments_not_pragmas():
-    """Test that regular comments with tag-like words are not treated as pragmas."""
-    content = """# Regular comment with hide-code mentioned
-import numpy as np
-
-# This comment mentions show-visuals but should be ignored
-x = np.array([1, 2, 3])
-
-# Some text with hide-statements should not affect anything
-y = x * 2
-"""
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
-
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-        # File metadata should be defaults (no pragmas detected)
-        assert should_show_statements(metadata.pragma) is True
-        assert should_show_visuals(metadata.pragma) is True
-        assert should_show_code(metadata.pragma) is True
-
-        # All form metadata should be empty (no pragmas detected)
-        for form in forms:
-            assert len(form.metadata.pragma) == 0
-
-        pathlib.Path(f.name).unlink()
-
-
-def test_combined_statements_ending_with_expression():
-    """Test that combined statements ending with an expression are treated as expressions."""
-    # Test case 1: Statement then expression - should be expression
-    content1 = """# Test statement then expression
-a = 1
-42
-"""
-
-    # Test case 2: Multiple statements then expression - should be expression
-    content2 = """# Test multiple statements then expression
-a = 1
-b = 2
-a + b
-"""
-
-    # Test case 3: Expression then statement - should be statement
-    content3 = """# Test expression then statement
-42
-a = 1
-"""
-
-    # Test case 4: Only statements - should be statement
-    content4 = """# Test only statements
-a = 1
-b = 2
-"""
-
-    test_cases = [
-        (content1, True, "Statement then expression"),
-        (content2, True, "Multiple statements then expression"),
-        (content3, False, "Expression then statement"),
-        (content4, False, "Only statements"),
-    ]
-
-    for content, expected_is_expression, description in test_cases:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".colight.py", delete=False
-        ) as f:
-            f.write(content)
-            f.flush()
-
-            forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-            assert len(forms) >= 1, f"{description}: Expected at least one form"
-            form = forms[0]
-
-            assert form.is_expression == expected_is_expression, (
-                f"{description}: Expected is_expression={expected_is_expression}, "
-                f"got {form.is_expression}"
+from colight_site.model import TagSet, EmptyLine
+
+
+class TestLexer:
+    """Test the lexing phase."""
+
+    def test_lex_empty(self):
+        """Test lexing empty source."""
+        elements = lex("")
+        assert len(elements) == 0
+
+    def test_lex_comments(self):
+        """Test lexing different comment types."""
+        source = textwrap.dedent("""
+            # Regular comment
+            #| pragma comment
+            #%% another pragma
+            
+            # Empty comment above
+        """).strip()
+
+        elements = lex(source)
+        assert len(elements) == 5
+        assert isinstance(elements[0], CommentLine)
+        assert elements[0].content == "Regular comment"  # Comment marker stripped
+        assert isinstance(elements[1], PragmaLine)
+        assert elements[1].content == "| pragma comment"
+        assert isinstance(elements[2], PragmaLine)
+        assert elements[2].content == "%% another pragma"
+        assert isinstance(elements[3], BlankLine)
+        assert isinstance(elements[4], CommentLine)
+
+    def test_lex_code(self):
+        """Test lexing code statements."""
+        source = textwrap.dedent("""
+            x = 1
+            y = 2
+            print(x + y)
+        """).strip()
+
+        elements = lex(source)
+        assert len(elements) == 3
+        assert all(isinstance(element, CodeLine) for element in elements)
+        # Check that code is parsed as CST nodes
+        import libcst as cst
+
+        assert all(isinstance(element.content, cst.CSTNode) for element in elements)
+
+    def test_lex_mixed(self):
+        """Test lexing mixed content."""
+        source = textwrap.dedent("""
+            # Title
+            #| hide-code
+            
+            x = 1
+            # Comment in code
+            y = 2
+        """).strip()
+
+        elements = lex(source)
+        # Check element types
+        assert isinstance(elements[0], CommentLine)  # Title
+        assert isinstance(elements[1], PragmaLine)  # hide-code
+        assert isinstance(elements[2], BlankLine)
+        assert isinstance(elements[3], CodeLine)  # x = 1
+        assert isinstance(elements[4], CommentLine)  # Comment in code
+        assert isinstance(elements[5], CodeLine)  # y = 2
+
+    def test_lex_markdown_headers(self):
+        """Test lexing markdown headers with double #."""
+        source = textwrap.dedent("""
+            # Regular comment
+            # # H1 Header
+            # ## H2 Header
+            # ### H3 Header
+        """).strip()
+
+        elements = lex(source)
+        assert len(elements) == 4
+        assert elements[0].content == "Regular comment"
+        assert elements[1].content == "# H1 Header"
+        assert elements[2].content == "## H2 Header"
+        assert elements[3].content == "### H3 Header"
+
+    def test_lex_pep723_block(self):
+        """Test that PEP 723 blocks are skipped."""
+        source = textwrap.dedent("""
+            # /// script
+            # dependencies = ["numpy"]
+            # ///
+            
+            import numpy as np
+        """).strip()
+
+        elements = lex(source)
+        # Should only have blank line and import
+        assert len(elements) == 2
+        assert isinstance(elements[0], BlankLine)
+        assert isinstance(elements[1], CodeLine)
+
+
+class TestBlockGrouping:
+    """Test the block grouping phase."""
+
+    def test_group_single_block(self):
+        """Test grouping a single block."""
+        import libcst as cst
+
+        elements = [
+            CommentLine(content="Title", lineno=1),
+            CodeLine(content=cst.parse_module("x = 1").body[0], lineno=2),
+        ]
+
+        blocks = group_blocks(elements)
+        assert len(blocks) == 1
+        assert len(blocks[0].prose_lines) == 1
+        assert len(blocks[0].code_nodes) == 1
+
+    def test_group_multiple_blocks(self):
+        """Test grouping with blank line separators."""
+        import libcst as cst
+
+        elements = [
+            CommentLine(content="Block 1", lineno=1),
+            CodeLine(content=cst.parse_module("x = 1").body[0], lineno=2),
+            BlankLine(lineno=3),
+            CommentLine(content="Block 2", lineno=4),
+            CodeLine(content=cst.parse_module("y = 2").body[0], lineno=5),
+        ]
+
+        blocks = group_blocks(elements)
+        assert len(blocks) == 2
+        assert blocks[0].prose_lines == ["Block 1"]
+        assert blocks[1].prose_lines == ["Block 2"]
+
+    def test_group_pragma_handling(self):
+        """Test that pragmas are collected properly."""
+        import libcst as cst
+
+        elements = [
+            PragmaLine(content="| hide-code", lineno=1),
+            CommentLine(content="Text", lineno=2),
+            CodeLine(content=cst.parse_module("x = 1").body[0], lineno=3),
+        ]
+
+        blocks = group_blocks(elements)
+        assert len(blocks) == 1
+        assert blocks[0].pragma_lines == ["| hide-code"]
+
+    def test_group_empty_comment_continuation(self):
+        """Test empty comments between code statements."""
+        import libcst as cst
+
+        elements = [
+            CodeLine(content=cst.parse_module("x = 1").body[0], lineno=1),
+            CommentLine(content="", lineno=2),  # Empty comment
+            CodeLine(content=cst.parse_module("y = 2").body[0], lineno=3),
+        ]
+
+        blocks = group_blocks(elements)
+        assert len(blocks) == 1
+        assert len(blocks[0].code_nodes) == 3  # Two code nodes + one EmptyLine
+        # Check that the middle item is an EmptyLine sentinel
+        assert isinstance(blocks[0].code_nodes[1], EmptyLine)
+
+
+class TestDocumentBuilder:
+    """Test the document building phase."""
+
+    def test_build_simple_document(self):
+        """Test building a simple document."""
+        raw_blocks = [
+            RawBlock(
+                prose_lines=["Hello"], code_nodes=[], pragma_lines=[], start_line=1
             )
-            assert form.is_statement == (not expected_is_expression), (
-                f"{description}: Expected is_statement={not expected_is_expression}, "
-                f"got {form.is_statement}"
+        ]
+
+        doc = build_document(raw_blocks)
+        assert len(doc.blocks) == 1
+        assert len(doc.blocks[0].elements) == 1
+        assert doc.blocks[0].elements[0].kind == "PROSE"
+        assert doc.blocks[0].elements[0].content == "Hello"
+
+    def test_build_with_pragmas(self):
+        """Test building with pragma tags."""
+        raw_blocks = [
+            RawBlock(
+                prose_lines=["Text"],  # Need some content
+                code_nodes=[],
+                pragma_lines=["| hide-code show-visuals"],
+                start_line=1,
             )
+        ]
 
-            pathlib.Path(f.name).unlink()
+        doc = build_document(raw_blocks)
+        assert len(doc.blocks) == 1
+        assert doc.blocks[0].tags.flags == {"hide-code", "show-visuals"}
 
+    def test_build_with_file_pragma(self):
+        """Test building with file-level pragma."""
+        raw_blocks = []
+        file_pragma = TagSet(frozenset({"hide-all-code"}))
 
-def test_empty_comment_continuation():
-    """Test that empty comments act as continuations within forms."""
-    # Test case 1: Empty comment continues the form
-    content1 = """#| show-code
-a = 1
-#
-42
-"""
+        doc = build_document(raw_blocks, file_pragma)
+        assert doc.tags.flags == {"hide-all-code"}
 
-    # Test case 2: Non-empty comment breaks the form
-    content2 = """#| show-code
-a = 1
-# This is a comment
-42
-"""
+    def test_pragma_with_blank_line(self):
+        """Test that pragmas work even with blank lines after them."""
+        source = textwrap.dedent("""
+            #| hide-code
+            
+            # This is prose
+            x = 42
+        """).strip()
 
-    # Test case 3: Multiple empty comments
-    content3 = """# Test multiple empty comments
-a = 1
-#
-b = 2
-#
-a + b
-"""
+        doc = parse_document(source)
+        assert len(doc.blocks) == 1
+        assert "hide-code" in doc.blocks[0].tags.flags
+        assert not doc.blocks[0].tags.show_code()
 
-    # Test case 4: Blank line breaks the form
-    content4 = """# Test blank line
-a = 1
+    def test_empty_comments_preserved_with_sentinels(self):
+        """Test that empty comments between statements are preserved using EmptyLine sentinels."""
+        source = textwrap.dedent("""
+            x = 1
+            #
+            y = 2
+            #
+            z = 3
+        """).strip()
 
-42
-"""
+        doc = parse_document(source)
+        # All statements are combined into one element with sentinels
+        assert len(doc.blocks) == 1
+        assert len(doc.blocks[0].elements) == 1
+        assert doc.blocks[0].elements[0].kind == "STATEMENT"
 
-    test_cases = [
-        (content1, 1, "a = 1\n\n42", True, "Empty comment continuation"),
-        (content2, 2, "a = 1", False, "Non-empty comment breaks form"),
-        (content3, 1, "a = 1\n\nb = 2\n\na + b", True, "Multiple empty comments"),
-        (content4, 2, "a = 1", False, "Blank line breaks form"),
-    ]
+        # The content should have EmptyLine sentinels
+        content = doc.blocks[0].elements[0].content
+        assert isinstance(content, list)
+        assert len(content) == 5  # 3 statements + 2 EmptyLine sentinels
 
-    for (
-        content,
-        expected_forms,
-        expected_first_code,
-        expected_is_expr,
-        description,
-    ) in test_cases:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".colight.py", delete=False
-        ) as f:
-            f.write(content)
-            f.flush()
+        from colight_site.model import EmptyLine
 
-            forms, metadata = parse_colight_file(pathlib.Path(f.name))
+        assert isinstance(content[1], EmptyLine)
+        assert isinstance(content[3], EmptyLine)
 
-            assert (
-                len(forms) == expected_forms
-            ), f"{description}: Expected {expected_forms} forms, got {len(forms)}"
-
-            if forms:
-                first_form = forms[0]
-                assert first_form.code.strip() == expected_first_code, (
-                    f"{description}: Expected code {repr(expected_first_code)}, "
-                    f"got {repr(first_form.code.strip())}"
-                )
-                assert first_form.is_expression == expected_is_expr, (
-                    f"{description}: Expected is_expression={expected_is_expr}, "
-                    f"got {first_form.is_expression}"
-                )
-
-            pathlib.Path(f.name).unlink()
+        # Check that get_source() properly handles EmptyLine sentinels
+        source_output = doc.blocks[0].elements[0].get_source()
+        assert source_output == "x = 1\n\ny = 2\n\nz = 3"
 
 
-def test_hide_prose_pragma():
-    """Test that hide-prose pragma works correctly."""
-    # Test hide-prose at file level
-    content1 = """# %% hide-all-prose
+class TestEndToEnd:
+    """Test the complete parsing pipeline."""
 
-# This prose should be hidden
-# It won't appear in the output
+    def test_parse_simple_document(self):
+        """Test parsing a simple document."""
+        source = textwrap.dedent("""
+            # Hello World
+            print("Hello, World!")
+        """).strip()
 
-import numpy as np
+        doc = parse_document(source)
+        assert len(doc.blocks) == 1
+        assert len(doc.blocks[0].elements) == 2
+        assert doc.blocks[0].elements[0].kind == "PROSE"
+        assert doc.blocks[0].elements[1].kind == "EXPRESSION"
 
-# This comment should also be hidden
-x = np.array([1, 2, 3])
-"""
+    def test_parse_with_pragmas(self):
+        """Test parsing with various pragmas."""
+        source = textwrap.dedent("""
+            #| hide-all-code
+            
+            # Document Title
+            #| show-code
+            x = 42
+            x
+        """).strip()
 
-    # Test show-prose overrides hide-prose
-    content2 = """# %% hide-all-prose
+        doc = parse_document(source)
 
-# This prose is hidden by default
+        # File-level pragma
+        assert "hide-all-code" in doc.tags.flags
 
-import numpy as np
+        # Without blank line between comment and code, they form one block
+        assert len(doc.blocks) == 1
 
-# | show-prose
-# But this prose should be visible
+        # Block has prose, then code
+        assert doc.blocks[0].elements[0].kind == "PROSE"
+        assert (
+            doc.blocks[0].elements[0].content == "Document Title"
+        )  # Comment marker stripped
+        assert doc.blocks[0].elements[1].kind == "STATEMENT"
+        assert doc.blocks[0].elements[2].kind == "EXPRESSION"
 
-x = np.array([1, 2, 3])
-"""
+        # Block has local pragma
+        assert "show-code" in doc.blocks[0].tags.flags
 
-    # Test per-form hide-prose
-    content3 = """# This prose is visible
+    def test_parse_multiple_blocks(self):
+        """Test parsing multiple blocks."""
+        source = textwrap.dedent("""
+            # Block 1
+            x = 1
+            
+            # Block 2
+            y = 2
+            
+            # Block 3
+            x + y
+        """).strip()
 
-import numpy as np
+        doc = parse_document(source)
+        assert len(doc.blocks) == 3
 
-# | hide-prose
-# This prose should be hidden
+        # Check last elements
+        assert doc.blocks[0].elements[-1].kind == "STATEMENT"
+        assert doc.blocks[1].elements[-1].kind == "STATEMENT"
+        assert doc.blocks[2].elements[-1].kind == "EXPRESSION"
 
-x = np.array([1, 2, 3])
+    def test_parse_code_classification(self):
+        """Test that code is correctly classified as statement vs expression."""
+        source = textwrap.dedent("""
+            # Statements
+            x = 1
+            y = 2
+            
+            # Expression
+            x + y
+            
+            # Mixed
+            z = 3
+            z * 2
+        """).strip()
 
-# This prose is visible again
-y = x * 2
-"""
+        doc = parse_document(source)
 
-    test_cases = [
-        (content1, "hide-prose at file level"),
-        (content2, "show-prose overrides hide-prose"),
-        (content3, "per-form hide-prose"),
-    ]
+        # First block - all statements
+        code_elems = doc.blocks[0].get_code_elements()
+        assert all(e.kind == "STATEMENT" for e in code_elems)
 
-    for content, description in test_cases:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".colight.py", delete=False
-        ) as f:
-            f.write(content)
-            f.flush()
+        # Second block - expression
+        assert doc.blocks[1].elements[-1].kind == "EXPRESSION"
 
-            forms, metadata = parse_colight_file(pathlib.Path(f.name))
-
-            if description == "hide-prose at file level":
-                # File metadata should have hide-all-prose
-                assert should_show_prose(metadata.pragma) is False
-                # All forms should inherit this unless overridden
-                for form in forms:
-                    if not form.metadata.pragma:  # No form-specific pragmas
-                        assert (
-                            should_show_prose(
-                                form.metadata.resolve_with_defaults(
-                                    metadata.pragma
-                                )
-                            )
-                            is False
-                        )
-
-            elif description == "show-prose overrides hide-prose":
-                # File metadata should have hide-all-prose
-                assert should_show_prose(metadata.pragma) is False
-                # Check the form with x = np.array - it should have show-prose
-                for form in forms:
-                    if "x = np.array" in form.code:
-                        assert (
-                            should_show_prose(
-                                form.metadata.resolve_with_defaults(
-                                    metadata.pragma
-                                )
-                            )
-                            is True
-                        )  # show-prose overrides
-
-            elif description == "per-form hide-prose":
-                # File metadata should not have hide-all-prose
-                assert should_show_prose(metadata.pragma) is True
-                # Check the form with x = np.array - it should have hide-prose
-                for form in forms:
-                    if "x = np.array" in form.code:
-                        assert should_show_prose(form.metadata.pragma) is False
-
-            pathlib.Path(f.name).unlink()
+        # Third block - statement then expression
+        code_elems = doc.blocks[2].get_code_elements()
+        assert code_elems[0].kind == "STATEMENT"
+        assert code_elems[1].kind == "EXPRESSION"

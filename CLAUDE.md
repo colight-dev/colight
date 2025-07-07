@@ -15,13 +15,6 @@
 - Format & lint: `pre-commit run --all-files`
 - Docs: `yarn docs:watch` to serve, `yarn docs:build` to build
 
-## Visual Testing
-
-- Run visual regression tests: `cd packages/colight && uv run pytest tests/visual/ -v`
-- Update visual baselines: `cd packages/colight && uv run python scripts/update_baselines.py`
-- Visual tests run in CI and compare pixel-perfect against baselines
-- Update baselines when you intentionally change visual output
-
 ## Code Style Guide
 
 - **Python**: snake_case for variables/functions, PascalCase for classes
@@ -54,3 +47,4 @@ When working on specific packages, navigate to the package directory or use the 
 ## Development Guidelines
 
 - Use yarn, not npm
+- If introducing a change which may increase complexity (eg. as a workaround for some difficulty), always ask the user first, they may have an idea for a simpler solution.

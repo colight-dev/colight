@@ -83,7 +83,6 @@ def build(
     in_subprocess: bool,
 ):
     """Build a .colight.py file into markdown/HTML."""
-    
 
     # Create BuildConfig from CLI args
     config = BuildConfig(
@@ -425,7 +424,7 @@ def live(
     click.echo(f"Starting LiveServer for {input_path}")
     click.echo(f"Cache directory: {output}")
     click.echo(f"Server: http://{host}:{port}")
-    
+
     # Create BuildConfig from CLI args
     config = BuildConfig(
         verbose=verbose,

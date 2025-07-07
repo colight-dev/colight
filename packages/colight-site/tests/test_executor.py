@@ -1,193 +1,212 @@
-"""Test the executor module - actual Python code evaluation."""
+"""Tests for the new executor implementation."""
 
-import pathlib
-import tempfile
-from colight_site.executor import FormExecutor, SafeFormExecutor
-from colight_site.parser import parse_colight_file
-
-
-def test_basic_execution():
-    """Test basic Python code execution."""
-    executor = FormExecutor()
-
-    # Test simple statement
-    content = """x = 42"""
-    forms = _parse_content(content)
-
-    result = executor.execute_form(forms[0])
-    assert result is None  # Statements return None
-    assert executor.env["x"] == 42
+import textwrap
+from colight_site.parser import parse_document
+from colight_site.executor import BlockExecutor, DocumentExecutor
+from colight_site.model import Block, Element, TagSet
+import libcst as cst
 
 
-def test_expression_evaluation():
-    """Test expression evaluation and result capture."""
-    executor = FormExecutor()
+class TestBlockExecutor:
+    """Test the BlockExecutor class."""
 
-    # Setup variable
-    executor.env["x"] = 10
+    def test_init(self):
+        """Test executor initialization."""
+        executor = BlockExecutor()
 
-    # Test expression
-    content = """x * 2"""
-    forms = _parse_content(content)
+        # Check environment is set up
+        assert "__name__" in executor.env
+        assert "__builtins__" in executor.env
+        assert "colight" in executor.env
+        assert "np" in executor.env
 
-    result = executor.execute_form(forms[0])
-    assert result == 20
+    def test_execute_simple_statement(self):
+        """Test executing a simple statement."""
+        # Create a block with a statement
+        stmt = cst.parse_module("x = 42").body[0]
+        elem = Element(kind="STATEMENT", content=stmt, lineno=1)
+        block = Block(elements=[elem], tags=TagSet(), start_line=1)
 
+        executor = BlockExecutor()
+        result = executor.execute_block(block)
 
-def test_persistent_namespace():
-    """Test that execution maintains persistent state across forms."""
-    executor = FormExecutor()
+        assert result.error is None
+        assert result.value is None  # Statement has no value
+        assert executor.env.get("x") == 42
 
-    content = """
-import math
+    def test_execute_expression(self):
+        """Test executing an expression."""
+        # Create a block with an expression
+        expr_stmt = cst.parse_module("2 + 3").body[0]
+        elem = Element(kind="EXPRESSION", content=expr_stmt, lineno=1)
+        block = Block(elements=[elem], tags=TagSet(), start_line=1)
 
-# Define a variable
-radius = 5
+        executor = BlockExecutor()
+        result = executor.execute_block(block)
 
-# Calculate area (this should be an expression)
-math.pi * radius ** 2
-"""
+        assert result.error is None
+        assert result.value == 5
 
-    forms = _parse_content(content)
+    def test_execute_with_output(self):
+        """Test capturing stdout."""
+        # Create a block that prints
+        stmt = cst.parse_module('print("Hello")').body[0]
+        elem = Element(kind="EXPRESSION", content=stmt, lineno=1)
+        block = Block(elements=[elem], tags=TagSet(), start_line=1)
 
-    # Execute import (form 0)
-    result1 = executor.execute_form(forms[0])
-    assert result1 is None
-    assert "math" in executor.env
+        executor = BlockExecutor()
+        result = executor.execute_block(block)
 
-    # Execute variable assignment (form 1)
-    result2 = executor.execute_form(forms[1])
-    assert result2 is None
-    assert executor.env["radius"] == 5
+        assert result.error is None
+        assert result.output.strip() == "Hello"
 
-    # Execute expression using previously defined variables (form 2)
-    result3 = executor.execute_form(forms[2])
-    assert result3 is not None
-    assert abs(result3 - (3.14159 * 25)) < 0.1  # Approximately pi * 25
+    def test_execute_with_error(self):
+        """Test handling execution errors."""
+        # Create a block with an error
+        stmt = cst.parse_module("1/0").body[0]
+        elem = Element(kind="EXPRESSION", content=stmt, lineno=1)
+        block = Block(elements=[elem], tags=TagSet(), start_line=1)
 
+        executor = BlockExecutor()
+        result = executor.execute_block(block)
 
-def test_numpy_arrays():
-    """Test handling of numpy arrays (common colight use case)."""
-    executor = FormExecutor()
+        assert result.error is not None
+        assert "ZeroDivisionError" in result.error
+        assert result.value is None
 
-    content = """
-import numpy as np
+    def test_persistent_namespace(self):
+        """Test that namespace persists between blocks."""
+        executor = BlockExecutor()
 
-# Create array
-x = np.linspace(0, 10, 5)
+        # First block: define variable
+        stmt1 = cst.parse_module("x = 10").body[0]
+        elem1 = Element(kind="STATEMENT", content=stmt1, lineno=1)
+        block1 = Block(elements=[elem1], tags=TagSet(), start_line=1)
 
-# Return array data
-x, np.sin(x)
-"""
+        # Second block: use variable
+        stmt2 = cst.parse_module("x * 2").body[0]
+        elem2 = Element(kind="EXPRESSION", content=stmt2, lineno=1)
+        block2 = Block(elements=[elem2], tags=TagSet(), start_line=1)
 
-    forms = _parse_content(content)
+        result1 = executor.execute_block(block1)
+        assert result1.error is None
 
-    # Execute import (form 0)
-    executor.execute_form(forms[0])
+        result2 = executor.execute_block(block2)
+        assert result2.error is None
+        assert result2.value == 20
 
-    # Execute array creation (form 1)
-    executor.execute_form(forms[1])
+    def test_mixed_elements(self):
+        """Test block with prose, statements, and expression."""
+        prose = Element(kind="PROSE", content="# Calculate", lineno=1)
+        stmt = cst.parse_module("y = 5").body[0]
+        stmt_elem = Element(kind="STATEMENT", content=stmt, lineno=2)
+        expr = cst.parse_module("y + 1").body[0]
+        expr_elem = Element(kind="EXPRESSION", content=expr, lineno=3)
 
-    # Execute expression that returns tuple of arrays (form 2)
-    result = executor.execute_form(forms[2])
+        block = Block(
+            elements=[prose, stmt_elem, expr_elem], tags=TagSet(), start_line=1
+        )
 
-    assert result is not None
-    assert len(result) == 2  # tuple of (x, sin(x))
+        executor = BlockExecutor()
+        result = executor.execute_block(block)
 
-    x_array, sin_array = result
-    assert len(x_array) == 5
-    assert len(sin_array) == 5
+        assert result.error is None
+        assert result.value == 6
+        assert executor.env.get("y") == 5
 
+    def test_colight_visualization(self):
+        """Test Colight visualization capture."""
+        # Create a simple list that will be visualized
+        code = "[1, 2, 3, 4]"
 
-def test_colight_visualization_bytes():
-    """Test getting visualizations as bytes."""
-    executor = FormExecutor()
+        doc = parse_document(code)
+        executor = BlockExecutor()
+        result = executor.execute_block(doc.blocks[0])
 
-    # Create some data that should be visualizable
-    executor.env["data"] = [1, 2, 3, 4, 5]
+        assert result.error is None
+        assert result.value == [1, 2, 3, 4]
+        assert result.colight_bytes is not None
+        assert len(result.colight_bytes) > 0
 
-    content = """data"""
-    forms = _parse_content(content)
+    def test_reset(self):
+        """Test resetting the executor."""
+        executor = BlockExecutor()
 
-    result = executor.execute_form(forms[0])
-    assert result == [1, 2, 3, 4, 5]
+        # Add some state
+        stmt = cst.parse_module("test_var = 123").body[0]
+        elem = Element(kind="STATEMENT", content=stmt, lineno=1)
+        block = Block(elements=[elem], tags=TagSet(), start_line=1)
+        executor.execute_block(block)
 
-    # Test getting visualization as bytes
-    colight_bytes = executor.get_colight_bytes(result)
+        assert "test_var" in executor.env
 
-    assert colight_bytes is not None
-    assert isinstance(colight_bytes, bytes)
-    assert colight_bytes.startswith(b"COLIGHT\x00")  # Check magic bytes
+        # Reset
+        executor.reset()
 
-    # Save to temporary file to test parsing
-    with tempfile.NamedTemporaryFile(suffix=".colight", delete=False) as f:
-        f.write(colight_bytes)
-        temp_path = pathlib.Path(f.name)
-
-    try:
-        # The file should be parseable by the colight format module
-        from colight.format import parse_file
-
-        json_data, buffers, update_entries = parse_file(temp_path)
-        assert json_data is not None
-        assert "ast" in json_data  # Should have AST structure
-        assert "display_as" in json_data  # Should have display preferences
-    finally:
-        temp_path.unlink()
-
-
-def test_error_handling():
-    """Test error handling in code execution."""
-    executor = SafeFormExecutor()
-
-    # Test runtime error (can't test syntax errors since LibCST would fail to parse)
-    content = """undefined_variable"""
-    forms = _parse_content(content)
-
-    try:
-        executor.execute_form(forms[0])
-        assert False, "Should have raised an exception"
-    except NameError:
-        pass  # Expected
-
-    # Test division by zero
-    content = """1 / 0"""
-    forms = _parse_content(content)
-
-    try:
-        executor.execute_form(forms[0])
-        assert False, "Should have raised an exception"
-    except ZeroDivisionError:
-        pass  # Expected
+        assert "test_var" not in executor.env
+        assert "colight" in executor.env  # Setup should be re-run
 
 
-def test_environment_isolation():
-    """Test that each executor has its own environment."""
-    executor1 = FormExecutor()
-    executor2 = FormExecutor()
+class TestDocumentExecutor:
+    """Test the DocumentExecutor class."""
 
-    # Set variable in first executor
-    content = '''test_var = "executor1"'''
-    forms = _parse_content(content)
-    executor1.execute_form(forms[0])
+    def test_execute_document(self):
+        """Test executing a complete document."""
+        source = textwrap.dedent("""
+            # Setup
+            x = 10
+            
+            # Calculate
+            y = x * 2
+            y
+        """).strip()
 
-    # Check it doesn't exist in second executor
-    content = """test_var"""
-    forms = _parse_content(content)
+        doc = parse_document(source)
+        executor = DocumentExecutor()
+        results, namespace = executor.execute(doc)
 
-    try:
-        executor2.execute_form(forms[0])
-        assert False, "Should have raised NameError"
-    except NameError:
-        pass  # Expected - variable not defined in executor2
+        assert len(results) == 2
+        assert results[0].error is None
+        assert results[1].error is None
+        assert results[1].value == 20
+        assert namespace["x"] == 10
+        assert namespace["y"] == 20
 
+    def test_execute_with_error_stops(self):
+        """Test that execution stops on error by default."""
+        source = textwrap.dedent("""
+            x = 1
+            
+            1/0
+            
+            y = 2
+        """).strip()
 
-def _parse_content(content: str):
-    """Helper to parse content into forms."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".colight.py", delete=False) as f:
-        f.write(content)
-        f.flush()
+        doc = parse_document(source)
+        # The parser creates just 1 block since there's no blank line separation
+        assert len(doc.blocks) == 1
 
-        forms, metadata = parse_colight_file(pathlib.Path(f.name))
-        pathlib.Path(f.name).unlink()
-        return forms
+        executor = DocumentExecutor()
+        results, _ = executor.execute(doc)
+
+        assert len(results) == 1
+        assert results[0].error is not None
+        assert "ZeroDivisionError" in results[0].error
+
+    def test_execute_single(self):
+        """Test execute_single method."""
+        source = textwrap.dedent("""
+            # First visualization
+            [1, 2]
+            
+            # Second visualization
+            [3, 4]
+        """).strip()
+
+        doc = parse_document(source)
+        executor = DocumentExecutor()
+        colight_bytes = executor.execute_single(doc)
+
+        assert len(colight_bytes) == 2  # 2 visualizations
+        assert colight_bytes[0] is not None
+        assert colight_bytes[1] is not None

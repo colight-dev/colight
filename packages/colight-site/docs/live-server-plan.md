@@ -161,43 +161,65 @@ Forms are ordered sequences of content that can contain interspersed markdown an
 
 ```jsx
 // Import colight APIs
-import { tw, md, html } from '@colight/api';
+import { tw, md, html } from "@colight/api";
 
 // Content item renderer
 function ContentRenderer({ item, pragma }) {
-  const showCode = !pragma.includes('hide-code') && 
-                   !(pragma.includes('hide-statements') && item.isStatement);
-  const showVisual = !pragma.includes('hide-visuals');
-  const showProse = !pragma.includes('hide-prose');
+  const showCode =
+    !pragma.includes("hide-code") &&
+    !(pragma.includes("hide-statements") && item.isStatement);
+  const showVisual = !pragma.includes("hide-visuals");
+  const showProse = !pragma.includes("hide-prose");
 
   switch (item.type) {
-    case 'markdown':
-      return showProse ? md({ className: 'mb-4' }, item.value) : null;
-    
-    case 'code':
-      return showCode ? html([
-        'pre',
-        { className: tw('bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4') },
-        ['code', { className: 'language-python' }, item.value]
-      ]) : null;
-    
-    case 'error':
+    case "markdown":
+      return showProse ? md({ className: "mb-4" }, item.value) : null;
+
+    case "code":
+      return showCode
+        ? html([
+            "pre",
+            {
+              className: tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4"),
+            },
+            ["code", { className: "language-python" }, item.value],
+          ])
+        : null;
+
+    case "error":
       return html([
-        'div.error',
-        { className: tw('bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4') },
-        ['pre', item.value]
+        "div.error",
+        {
+          className: tw(
+            "bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4",
+          ),
+        },
+        ["pre", item.value],
       ]);
-    
-    case 'visual':
-      return showVisual ? html([
-        'div.visual-container',
-        { className: tw('mb-4') },
-        // Will be populated by colight.loadVisuals()
-        item.format === 'inline' 
-          ? ['script', { type: 'application/x-colight', 'data-size': item.size }, item.data]
-          : ['div', { className: 'colight-embed', 'data-src': item.path, 'data-size': item.size }]
-      ]) : null;
-    
+
+    case "visual":
+      return showVisual
+        ? html([
+            "div.visual-container",
+            { className: tw("mb-4") },
+            // Will be populated by colight.loadVisuals()
+            item.format === "inline"
+              ? [
+                  "script",
+                  { type: "application/x-colight", "data-size": item.size },
+                  item.data,
+                ]
+              : [
+                  "div",
+                  {
+                    className: "colight-embed",
+                    "data-src": item.path,
+                    "data-size": item.size,
+                  },
+                ],
+          ])
+        : null;
+
     default:
       return null;
   }
@@ -207,25 +229,27 @@ function ContentRenderer({ item, pragma }) {
 function FormRenderer({ form }) {
   // Skip empty forms
   if (!form.content || form.content.length === 0) return null;
-  
+
   return html([
-    'div.colight-form',
-    { 
-      className: tw(`form-${form.id} ${form.pragma.join(' ')}`),
-      'data-line': form.line,
-      'data-form-id': form.id,
-      'data-end-type': form.endType
+    "div.colight-form",
+    {
+      className: tw(`form-${form.id} ${form.pragma.join(" ")}`),
+      "data-line": form.line,
+      "data-form-id": form.id,
+      "data-end-type": form.endType,
     },
-    ...form.content.map(item => ContentRenderer({ item, pragma: form.pragma }))
+    ...form.content.map((item) =>
+      ContentRenderer({ item, pragma: form.pragma }),
+    ),
   ]);
 }
 
 // Document renderer
 function DocumentRenderer({ doc }) {
   return html([
-    'div.colight-document',
-    { className: tw('max-w-4xl mx-auto px-4 py-8') },
-    ...doc.forms.map(form => FormRenderer({ form }))
+    "div.colight-document",
+    { className: tw("max-w-4xl mx-auto px-4 py-8") },
+    ...doc.forms.map((form) => FormRenderer({ form })),
   ]);
 }
 ```
@@ -242,6 +266,7 @@ function DocumentRenderer({ doc }) {
 #### Implementation Note:
 
 Focus ONLY on shipping JSON and rendering it. Do not implement caching/diffing features yet. The goal is to:
+
 1. Transform LiveServer to deliver JSON instead of HTML
 2. Update the SPA to fetch and render JSON documents
 3. Use colight's existing APIs (tw, md, html) for rendering

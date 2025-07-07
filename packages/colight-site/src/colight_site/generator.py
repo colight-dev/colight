@@ -1,18 +1,12 @@
-"""Generate Markdown and HTML output from executed forms."""
+"""Document-based generators for Markdown and HTML output."""
 
 import pathlib
-from typing import List, Optional, Dict, Union
-import markdown
 import base64
+from typing import List, Optional, Dict
+import markdown
 
-from .pragma import parse_pragma_arg
-from colight_site.parser import (
-    Form,
-    should_show_statements,
-    should_show_visuals,
-    should_show_code,
-    should_show_prose,
-)
+from .model import Document, Block, Element
+from .executor import ExecutionResult
 from colight.env import VERSIONED_CDN_DIST_URL
 from .constants import DEFAULT_INLINE_THRESHOLD
 
@@ -22,7 +16,7 @@ EMBED_URL = (
 
 
 class MarkdownGenerator:
-    """Generate Markdown from forms and their execution results."""
+    """Generate Markdown from Documents and execution results."""
 
     def __init__(
         self,
@@ -31,224 +25,169 @@ class MarkdownGenerator:
         inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
     ):
         self.output_dir = output_dir
-        self.output_file_dir = None  # Will be set when generating
         self.embed_path_template = (
-            embed_path_template or "{basename}_colight/form-{form:03d}.colight"
+            embed_path_template or "{basename}_colight/block-{block:03d}.colight"
         )
         self.inline_threshold = inline_threshold
 
-    def generate_markdown(
+    def generate(
         self,
-        forms: List[Form],
-        colight_data: List[Optional[Union[bytes, pathlib.Path]]],
+        document: Document,
+        results: List[ExecutionResult],
         path_context: Optional[Dict[str, str]] = None,
-        pragma: Optional[set[str] | str] = None,
-        execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
-        """Generate complete Markdown document."""
-        
-        pragma = parse_pragma_arg(pragma)
+        """Generate Markdown content from document and execution results.
 
+        Args:
+            document: The parsed document
+            results: Execution results, one per block
+            path_context: Context for embed path template
+
+        Returns:
+            Generated Markdown as string
+        """
         lines = []
 
-        # Process each form
-        for i, (form, colight_item) in enumerate(zip(forms, colight_data)):
-            # Resolve form-specific settings: per-form metadata overrides file/CLI defaults
-            resolved_tags = form.metadata.resolve_with_defaults(pragma)
-            
+        for block_idx, (block, result) in enumerate(zip(document.blocks, results)):
+            # Merge block tags with document tags
+            tags = document.tags | block.tags
+
             # Process elements in order
-            for elem in form.elements:
-                if elem.type == "prose":
-                    # Show prose unless hidden (using resolved tags)
-                    if should_show_prose(resolved_tags):
-                        prose_text = elem.content if isinstance(elem.content, str) else ""
-                        markdown_content = self._process_markdown_lines(prose_text.split("\n"))
-                        if markdown_content.strip():
-                            lines.append(markdown_content)
-                            lines.append("")
-                            
-                elif elem.type in ("statement", "expression"):
-                    # Check visibility based on element type and resolved tags
+            for elem in block.elements:
+                if elem.kind == "PROSE" and tags.show_prose():
+                    prose_text = elem.content if isinstance(elem.content, str) else ""
+                    processed = self._process_prose(prose_text)
+                    if processed.strip():
+                        lines.append(processed)
+                        lines.append("")
+
+                elif elem.kind in ("STATEMENT", "EXPRESSION"):
+                    # Check visibility
                     show_element = False
-                    if elem.type == "statement":
-                        show_element = should_show_code(resolved_tags) and should_show_statements(resolved_tags)
-                    elif elem.type == "expression":
-                        show_element = should_show_code(resolved_tags)
-                    
+                    if elem.kind == "STATEMENT":
+                        show_element = tags.show_statements()
+                    elif elem.kind == "EXPRESSION":
+                        show_element = tags.show_code()
+
                     if show_element:
-                        code = elem.get_code().strip()
-                        # Skip literals and empty code
-                        if code and not (elem.type == "expression" and form.is_literal):
+                        code = elem.get_source().strip()
+                        # Skip empty code and literal expressions
+                        if code and not (
+                            elem.kind == "EXPRESSION"
+                            and self._is_literal_expr(elem, block)
+                        ):
                             lines.append("```python")
                             lines.append(code)
                             lines.append("```")
                             lines.append("")
 
-            # Check for execution errors
-            if execution_errors and i < len(execution_errors) and execution_errors[i]:
-                # Display error message
+            # Check for execution error
+            if result.error:
                 lines.append("```")
-                lines.append(execution_errors[i])
+                lines.append(result.error.strip())
                 lines.append("```")
                 lines.append("")
-            # Add visual only if last element is an expression and visuals are shown
-            elif (should_show_visuals(resolved_tags) and colight_item and not form.is_dummy_form 
-                  and form.last_element and form.last_element.type == "expression"):
-                    if isinstance(colight_item, bytes):
-                        # Already in memory - embed as script tag
-                        base64_data = base64.b64encode(colight_item).decode("ascii")
-                        lines.append(
-                            f'<script type="application/x-colight">\n{base64_data}\n</script>'
-                        )
-                    elif isinstance(colight_item, pathlib.Path):
-                        # It's a Path - check file size to determine embedding method
-                        try:
-                            file_size = colight_item.stat().st_size
-                        except FileNotFoundError:
-                            # In tests, the file might not exist - treat as external reference
-                            file_size = float("inf")
 
-                        if file_size < self.inline_threshold:
-                            # Small file - read and embed as script tag
-                            with open(colight_item, "rb") as f:
-                                colight_bytes = f.read()
-                            base64_data = base64.b64encode(colight_bytes).decode(
-                                "ascii"
-                            )
-                            lines.append(
-                                f'<script type="application/x-colight">\n{base64_data}\n</script>'
-                            )
-                        else:
-                            # Large file - use external reference
-                            context = {**(path_context or {}), "form": i}
-                            embed_path = self.embed_path_template.format(**context)
-                            lines.append(
-                                f'<div class="colight-embed" data-src="{embed_path}"></div>'
-                            )
-                    else:
-                        # Should not happen, but satisfies type checker
-                        raise TypeError(
-                            f"Unexpected type for colight_item: {type(colight_item)}"
-                        )
-                    lines.append("")
-
-        return "\n".join(lines)
-
-    def _is_dummy_form(self, form: Form) -> bool:
-        """Check if this form is a dummy form (markdown-only with pass statement)."""
-        return form.is_dummy_form
-
-    def _get_relative_path(
-        self, colight_file: pathlib.Path, output_path: Optional[pathlib.Path]
-    ) -> str:
-        """Get relative path from output file to colight file."""
-        if output_path:
-            try:
-                return str(colight_file.relative_to(output_path.parent))
-            except ValueError:
-                # If relative_to fails, construct path manually
-                colight_dir_name = self.output_dir.name
-                return str(pathlib.Path(colight_dir_name) / colight_file.name)
-        else:
-            # Fallback to directory name + filename
-            colight_dir_name = self.output_dir.name
-            return str(pathlib.Path(colight_dir_name) / colight_file.name)
-
-    def _process_markdown_lines(self, markdown_lines: List[str]) -> str:
-        """Process markdown lines from comments."""
-        if not markdown_lines:
-            return ""
-
-        # Join lines and handle paragraph breaks
-        result_lines = []
-        current_paragraph = []
-
-        for line in markdown_lines:
-            if line.strip() == "":
-                # Empty line - end current paragraph
-                if current_paragraph:
-                    # Check if we should preserve line breaks (e.g., for headers)
-                    if self._should_preserve_line_breaks(current_paragraph):
-                        result_lines.extend(current_paragraph)
-                    else:
-                        result_lines.append(" ".join(current_paragraph))
-                    current_paragraph = []
-                    result_lines.append("")  # Add paragraph break
-            else:
-                current_paragraph.append(line)
-
-        # Add final paragraph
-        if current_paragraph:
-            # Check if we should preserve line breaks
-            if self._should_preserve_line_breaks(current_paragraph):
-                result_lines.extend(current_paragraph)
-            else:
-                result_lines.append(" ".join(current_paragraph))
-
-        return "\n".join(result_lines)
-
-    # Markdown patterns that require preserved line breaks
-    MARKDOWN_PATTERNS = [
-        lambda line: line.startswith("#"),  # Headers
-        lambda line: all(c in "=-" for c in line) and len(line) >= 3,  # Underlines
-        lambda line: line.startswith(("-", "*", "+")) and len(line) > 1,  # Lists
-        lambda line: line.split(".")[0].isdigit(),  # Numbered lists
-        lambda line: line.startswith(">"),  # Blockquotes
-        lambda line: line.startswith(("```", "~~~")),  # Code fences
-        lambda line: "|" in line,  # Tables
-    ]
-
-    def _should_preserve_line_breaks(self, lines: List[str]) -> bool:
-        """Check if line breaks should be preserved for this block of lines."""
-        for line in lines:
-            stripped = line.strip()
-            if stripped and any(
-                pattern(stripped) for pattern in self.MARKDOWN_PATTERNS
+            # Add visualization if applicable
+            elif (
+                tags.show_visuals()
+                and result.colight_bytes
+                and block.has_expression_result
+                and not block.is_empty
             ):
-                return True
-        return False
+                lines.append(
+                    self._embed_visualization(
+                        result.colight_bytes, block_idx, path_context
+                    )
+                )
+                lines.append("")
 
-    def write_markdown_file(self, content: str, output_path: pathlib.Path):
-        """Write markdown content to a file."""
-        self.output_file_dir = output_path.parent
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content, encoding="utf-8")
+        return "\n".join(lines).rstrip()
 
-    def write_html_file(self, content: str, output_path: pathlib.Path):
-        """Write HTML content to a file."""
-        self.output_file_dir = output_path.parent
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content, encoding="utf-8")
+    def _process_prose(self, text: str) -> str:
+        """Process prose text (currently just returns as-is)."""
+        # In the future, could handle special markdown processing here
+        return text
 
-    def generate_html(
+    def _is_literal_expr(self, elem: Element, block: Block) -> bool:
+        """Check if element is a literal expression (should be hidden)."""
+        # For now, simplified check - could use parser's _is_literal_value
+        if elem != block.last_element:
+            return False
+
+        code = elem.get_source().strip()
+        # Very basic literal detection
+        try:
+            import ast
+
+            ast.literal_eval(code)
+            return True
+        except (SyntaxError, ValueError):
+            return False
+
+    def _embed_visualization(
         self,
-        forms: List[Form],
-        colight_data: List[Optional[Union[bytes, pathlib.Path]]],
-        title: Optional[str] = None,
+        colight_bytes: bytes,
+        block_idx: int,
         path_context: Optional[Dict[str, str]] = None,
-        pragma: Optional[set[str] | str] = None,
-        execution_errors: Optional[List[Optional[str]]] = None,
     ) -> str:
-        """Generate complete HTML document with embedded visualizations."""
-        # First generate markdown content
-        markdown_content = self.generate_markdown(
-            forms,
-            colight_data,
-            path_context=path_context,
-            pragma=pragma,
-            execution_errors=execution_errors,
+        """Generate embed code for visualization."""
+        if len(colight_bytes) < self.inline_threshold:
+            # Small visualization - inline as base64
+            base64_data = base64.b64encode(colight_bytes).decode("ascii")
+            return f'<script type="application/x-colight">\n{base64_data}\n</script>'
+        else:
+            # Large visualization - external reference
+            context = {**(path_context or {}), "block": block_idx}
+            embed_path = self.embed_path_template.format(**context)
+            return f'<div class="colight-embed" data-src="{embed_path}"></div>'
+
+
+class HTMLGenerator:
+    """Generate HTML from Documents and execution results."""
+
+    def __init__(
+        self,
+        output_dir: pathlib.Path,
+        embed_path_template: Optional[str] = None,
+        inline_threshold: int = DEFAULT_INLINE_THRESHOLD,
+    ):
+        self.markdown_generator = MarkdownGenerator(
+            output_dir, embed_path_template, inline_threshold
         )
 
-        # Convert markdown to HTML
-        # Use md_in_html extension to preserve raw HTML (like script tags)
+    def generate(
+        self,
+        document: Document,
+        results: List[ExecutionResult],
+        title: Optional[str] = None,
+        path_context: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Generate HTML content from document and execution results.
+
+        Args:
+            document: The parsed document
+            results: Execution results, one per block
+            title: HTML page title
+            path_context: Context for embed path template
+
+        Returns:
+            Generated HTML as string
+        """
+        # First generate Markdown
+        markdown_content = self.markdown_generator.generate(
+            document, results, path_context
+        )
+
+        # Convert to HTML
         md = markdown.Markdown(extensions=["codehilite", "fenced_code", "md_in_html"])
         html_content = md.convert(markdown_content)
 
-        # Wrap in HTML template
-        return self._wrap_html_template(html_content, title or "Colight Document")
+        # Wrap in template
+        return self._wrap_template(html_content, title or "Colight Document")
 
-    def _wrap_html_template(self, content: str, title: str) -> str:
-        """Wrap content in HTML template with Colight embed support."""
+    def _wrap_template(self, content: str, title: str) -> str:
+        """Wrap content in HTML template."""
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -273,23 +212,29 @@ class MarkdownGenerator:
         .prose {{
             font-size: 14px;
         }}
+        
         .prose pre {{
             background: #f4f4f4;
             color: #333;
+            padding: 1em;
+            border-radius: 4px;
+            overflow-x: auto;
         }}
-
         
         code {{
             background: #f4f4f4;
             color: #333;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 0.9em;
         }}
         
-    
-        
+        .colight-embed {{
+            margin: 1em 0;
+        }}
     </style>
     <script src="{EMBED_URL}"></script>
     <script>colight.api.tw("prose")</script>
-    
 </head>
 <body>
     <div class='prose'>
@@ -297,3 +242,32 @@ class MarkdownGenerator:
     </div>
 </body>
 </html>"""
+
+
+def write_colight_files(
+    output_dir: pathlib.Path,
+    results: List[ExecutionResult],
+    basename: str = "block",
+) -> List[Optional[pathlib.Path]]:
+    """Write Colight visualization files to output directory.
+
+    Args:
+        output_dir: Directory to write files to
+        results: Execution results containing colight_bytes
+        basename: Base name for files
+
+    Returns:
+        List of paths (or None) for each visualization
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    for i, result in enumerate(results):
+        if result.colight_bytes:
+            path = output_dir / f"{basename}-{i:03d}.colight"
+            path.write_bytes(result.colight_bytes)
+            paths.append(path)
+        else:
+            paths.append(None)
+
+    return paths

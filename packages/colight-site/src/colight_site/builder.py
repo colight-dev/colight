@@ -6,11 +6,13 @@ import subprocess
 from dataclasses import dataclass, field
 
 from .parser import parse_colight_file
-from .executor import SafeFormExecutor
-from .generator import MarkdownGenerator
+from .executor import DocumentExecutor
+from .generator import MarkdownGenerator, HTMLGenerator, write_colight_files
+from .model import TagSet
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .pep723 import detect_pep723_metadata, parse_dependencies
 from .pragma import parse_pragma_arg
+
 
 @dataclass
 class BuildConfig:
@@ -196,11 +198,11 @@ def build_file(
         print(f"Building {input_path} -> {output_path}")
     try:
         # Parse the file
-        forms, file_metadata = parse_colight_file(input_path)
+        document = parse_colight_file(input_path)
         if config.verbose:
-            print(f"Found {len(forms)} forms")
-            if file_metadata.pragma:
-                print(f"  File metadata: {file_metadata}")
+            print(f"Found {len(document.blocks)} blocks")
+            if document.tags.flags:
+                print(f"  File tags: {document.tags.flags}")
     except Exception as e:
         if config.verbose:
             print(f"Parse error: {e}")
@@ -210,96 +212,47 @@ def build_file(
         output_path.write_text(error_content)
         return
 
+    # Apply pragma from config
+    if config.pragma:
+        document.tags = document.tags | TagSet(frozenset(config.pragma))
+
     # Setup execution environment
     # Default templates if not provided
-    output_template = (
-        config.colight_output_path or "./{basename}_colight/form-{form:03d}.colight"
-    )
     embed_template = (
-        config.colight_embed_path or "{basename}_colight/form-{form:03d}.colight"
+        config.colight_embed_path or "{basename}_colight/block-{block:03d}.colight"
     )
 
-    # For backward compatibility, create a directory for executor
-    # This will be used as a base directory for relative paths
+    # Create output directory for colight files
     colight_dir = output_path.parent / (output_path.stem + "_colight")
     if config.verbose:
         print(f"  Writing .colight files to: {colight_dir}")
-    executor = SafeFormExecutor(verbose=config.verbose)
+
+    # Execute the document
+    executor = DocumentExecutor(verbose=config.verbose)
+    results, _ = executor.execute(document, str(input_path))
 
     # Prepare path context for templates
-    # Get relative path from build root (assumes we're building from a common root)
-    try:
-        # Try to get relative path from input's parent's parent (assuming docs/ or src/ structure)
-        build_root = input_path.parent.parent
-        rel_path = output_path.relative_to(build_root)
-    except ValueError:
-        # Fallback to just using the output path's parent
-        build_root = output_path.parent
-        rel_path = output_path.relative_to(output_path.parent)
-
     path_context = {
         "basename": output_path.stem,
         "filename": output_path.name,
-        "reldir": str(rel_path.parent) if str(rel_path.parent) != "." else "",
-        "relpath": str(rel_path.with_suffix("")),
-        "abspath": str(output_path.absolute()),
-        "absdir": str(output_path.parent.absolute()),
     }
 
-    # Execute forms and collect visualizations
-    colight_data = []  # Can be None, bytes, or Path
-    execution_errors = []  # Track errors for reporting
-    for i, form in enumerate(forms):
-        try:
-            result = executor.execute_form(form, str(input_path))
-            colight_bytes = executor.get_colight_bytes(result)
+    # Write colight files if needed
+    colight_paths = write_colight_files(colight_dir, results, basename=output_path.stem)
 
-            if colight_bytes is None:
-                colight_data.append(None)
-            elif len(colight_bytes) < config.inline_threshold:
-                # Small file - keep in memory for inline embedding
-                colight_data.append(colight_bytes)
-                if config.verbose:
-                    print(
-                        f"  Form {i}: visualization will be inlined ({len(colight_bytes)} bytes)"
-                    )
-            else:
-                # Large file - save to disk
-                # Format the output path template
-                context = {**path_context, "form": i}
-                formatted_path = output_template.format(**context)
+    # Check if we had any errors
+    execution_errors = [r.error for r in results if r.error]
+    if execution_errors and not config.continue_on_error:
+        if config.verbose:
+            print("  Execution stopped due to errors")
 
-                # Resolve relative to output_path's parent or colight_dir
-                if formatted_path.startswith("./"):
-                    # Relative to the markdown file's location
-                    base_dir = output_path.parent
-                    formatted_path = formatted_path[2:]  # Remove ./
-                else:
-                    # Use the default colight_dir
-                    base_dir = colight_dir
-
-                output_file_path = base_dir / formatted_path
-                # Ensure parent directory exists
-                output_file_path.parent.mkdir(parents=True, exist_ok=True)
-
-                # Write bytes to file
-                output_file_path.write_bytes(colight_bytes)
-                colight_data.append(output_file_path)
-
-                if config.verbose:
-                    print(f"  Form {i}: saved visualization to {output_file_path.name}")
-
-            execution_errors.append(None)
-        except Exception as e:
-            error_msg = f"Form {i} (line {form.start_line}): {type(e).__name__}: {e}"
-            if config.continue_on_error:
-                if config.verbose:
-                    print(f"  {error_msg}")
-                colight_data.append(None)
-                execution_errors.append(error_msg)
-            else:
-                print(f"Error in {input_path}: {error_msg}")
-                raise
+    # For visualizations that should be inlined, update the results
+    inline_visuals = []
+    for i, result in enumerate(results):
+        if result.colight_bytes and len(result.colight_bytes) < config.inline_threshold:
+            inline_visuals.append(result.colight_bytes)
+        else:
+            inline_visuals.append(colight_paths[i] if i < len(colight_paths) else None)
 
     # Generate output
     generator = MarkdownGenerator(
@@ -307,35 +260,25 @@ def build_file(
         embed_path_template=embed_template,
         inline_threshold=config.inline_threshold,
     )
-    title = input_path.stem.replace(".colight", "").replace("_", " ").title()
-    merged_pragma = file_metadata.pragma.union(config.pragma)
 
-    # Use formats from config only (no file-level format pragma)
+    # Use formats from config only
     formats = config.formats
-
-    # For now, use the first format (single output)
-    # TODO: In the future, we could generate multiple formats
     final_format = next(iter(formats))
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     if final_format == "html":
-        html_content = generator.generate_html(
-            forms,
-            colight_data,
-            title=title,
-            path_context=path_context,
-            pragma=merged_pragma,
-            execution_errors=execution_errors,
+        title = input_path.stem.replace(".colight", "").replace("_", " ").title()
+        html_generator = HTMLGenerator(
+            colight_dir,
+            embed_path_template=embed_template,
+            inline_threshold=config.inline_threshold,
         )
-        generator.write_html_file(html_content, output_path)
+        html_content = html_generator.generate(document, results, title, path_context)
+        output_path.write_text(html_content)
     else:
-        markdown_content = generator.generate_markdown(
-            forms,
-            colight_data,
-            path_context=path_context,
-            pragma=merged_pragma,
-            execution_errors=execution_errors,
-        )
-        generator.write_markdown_file(markdown_content, output_path)
+        markdown_content = generator.generate(document, results, path_context)
+        output_path.write_text(markdown_content)
 
     if config.verbose:
         print(f"Generated {output_path}")
