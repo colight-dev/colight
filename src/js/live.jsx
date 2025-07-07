@@ -84,15 +84,68 @@ const ElementRenderer = ({ element }) => {
 const BlockRenderer = ({ block }) => {
   if (!block.elements || block.elements.length === 0) return null;
 
+  // Group consecutive statement/expression elements
+  const groupedElements = [];
+  let currentCodeGroup = [];
+
+  block.elements.forEach((element, idx) => {
+    if (!element.show) return;
+
+    if (element.type === "statement" || element.type === "expression") {
+      currentCodeGroup.push(element);
+    } else {
+      // If we have accumulated code elements, add them as a group
+      if (currentCodeGroup.length > 0) {
+        groupedElements.push({
+          type: "code-group",
+          elements: currentCodeGroup,
+        });
+        currentCodeGroup = [];
+      }
+      // Add the non-code element
+      groupedElements.push(element);
+    }
+  });
+
+  // Don't forget the last group if it exists
+  if (currentCodeGroup.length > 0) {
+    groupedElements.push({ type: "code-group", elements: currentCodeGroup });
+  }
+
   return (
     <div
       className={tw(`block-${block.id}`)}
       data-block-id={block.id}
       data-shows-visual={block.showsVisual}
     >
-      {block.elements.map((element, idx) => (
-        <ElementRenderer key={idx} element={element} />
-      ))}
+      {groupedElements.map((item, idx) => {
+        if (item.type === "code-group") {
+          return (
+            <div key={idx}>
+              <pre
+                className={tw(
+                  "bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4",
+                )}
+              >
+                <code className="language-python">
+                  {item.elements.map((el) => el.value).join("\n")}
+                </code>
+              </pre>
+              {/* Render visuals for any expressions in the group */}
+              {item.elements.map((el, elIdx) =>
+                el.type === "expression" && el.visual ? (
+                  <ColightVisual
+                    key={`visual-${idx}-${elIdx}`}
+                    data={el.visual}
+                  />
+                ) : null,
+              )}
+            </div>
+          );
+        } else {
+          return <ElementRenderer key={idx} element={item} />;
+        }
+      })}
       {block.error && (
         <div
           className={tw(
@@ -111,10 +164,11 @@ const DocumentRenderer = React.memo(
     const docRef = useRef();
 
     useEffect(() => {
+      // Run bylight on the entire document after render
       if (docRef.current) {
         window.bylight({ target: docRef.current });
       }
-    }, []); // Only run once when component mounts
+    }, [doc]); // Re-run when doc changes
 
     if (!doc) return null;
 
@@ -130,8 +184,8 @@ const DocumentRenderer = React.memo(
 
     return (
       <div
-        className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
         ref={docRef}
+        className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
       >
         {doc.blocks.map((block) => (
           <BlockRenderer key={block.id} block={block} />
@@ -498,7 +552,6 @@ const LiveServerApp = () => {
 
           // Check if any blocks actually need updating
           let hasChanges = false;
-          const hasRemovals = changes.removed?.length > 0;
 
           // Create new blocks array
           const updatedBlocks = current.blocks
