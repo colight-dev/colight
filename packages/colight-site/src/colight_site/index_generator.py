@@ -1,46 +1,22 @@
 """Generate index pages for colight-site projects."""
 
+import json
 import pathlib
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import fnmatch
 
 
+# Deprecated - use generate_index_json instead
 def generate_index_html(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
     include: Optional[List[str]] = None,
     ignore: Optional[List[str]] = None,
 ) -> None:
-    """Generate an index.html file listing all colight files in a directory structure.
-
-    Args:
-        input_path: The directory being watched
-        output_path: The output directory where index.html will be created
-        include: List of glob patterns to include
-        ignore: List of glob patterns to ignore
-    """
-    if include is None:
-        include = ["*.py"]
-
-    # First generate a Python file that will be processed by colight-site
-    index_py_path = output_path / "index.py"
-    generate_index_python(input_path, index_py_path, include, ignore)
-
-    # Then process it through colight-site to generate the HTML
-    from . import api
-    from .builder import BuildConfig
-
-    config = BuildConfig(
-        formats={"html"},
-        pragma={"hide-all-code"},  # Hide the code that generates the index
-        verbose=False,
+    """Deprecated: Generate an index.html file. Use generate_index_json instead."""
+    raise DeprecationWarning(
+        "generate_index_html is deprecated. Use generate_index_json instead."
     )
-
-    index_html_path = output_path / "index.html"
-    api.build_file(index_py_path, index_html_path, config=config)
-
-    # Clean up the intermediate Python file
-    index_py_path.unlink()
 
 
 def find_colight_files(
@@ -95,14 +71,80 @@ def matches_patterns(
     return matches_include
 
 
-def build_file_tree(
-    files: List[pathlib.Path],
+
+
+
+
+
+
+
+
+def generate_index_json(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
-) -> Dict:
-    """Build a nested dictionary representing the file tree."""
-    tree = {"name": input_path.name, "children": {}, "files": []}
+    include: Optional[List[str]] = None,
+    ignore: Optional[List[str]] = None,
+) -> None:
+    """Generate an index.json file listing all colight files in a directory structure.
 
+    Args:
+        input_path: The directory being watched
+        output_path: The output directory where index.json will be created
+        include: List of glob patterns to include
+        ignore: List of glob patterns to ignore
+    """
+    if include is None:
+        include = ["*.py"]
+
+    # Find all matching files
+    files = find_colight_files(input_path, include, ignore)
+
+    # Build tree structure
+    tree = build_file_tree_json(files, input_path)
+
+    # Write JSON file
+    index_json_path = output_path / "index.json"
+    with open(index_json_path, "w") as f:
+        json.dump(tree, f, indent=2)
+
+
+def build_file_tree_json(
+    files: List[pathlib.Path],
+    input_path: pathlib.Path,
+) -> Dict[str, Any]:
+    """Build a nested dictionary representing the file tree in JSON format.
+    
+    Returns a structure like:
+    {
+        "name": "root",
+        "path": "/",
+        "type": "directory",
+        "children": [
+            {
+                "name": "example.py",
+                "path": "example.py",
+                "type": "file",
+                "htmlPath": "example.html"
+            },
+            {
+                "name": "subfolder",
+                "path": "subfolder/",
+                "type": "directory",
+                "children": [...]
+            }
+        ]
+    }
+    """
+    root = {
+        "name": input_path.name or "root",
+        "path": "/",
+        "type": "directory",
+        "children": []
+    }
+
+    # Build a temporary nested dict structure
+    tree_dict = {}
+    
     for file_path in files:
         # Get relative path from input directory
         try:
@@ -111,135 +153,52 @@ def build_file_tree(
             # File is not relative to input path (single file mode)
             rel_path = pathlib.Path(file_path.name)
 
-        # Calculate HTML path
-        html_path = pathlib.Path(str(rel_path).replace(".py", ".html"))
-
-        # Add to tree
-        current = tree
-        parts = list(rel_path.parts)
-
-        # Navigate/create directory structure
-        for part in parts[:-1]:
-            if part not in current["children"]:
-                current["children"][part] = {"name": part, "children": {}, "files": []}
-            current = current["children"][part]
-
+        # Build nested structure
+        parts = rel_path.parts
+        current_dict = tree_dict
+        
+        # Create nested directories
+        for i, part in enumerate(parts[:-1]):
+            if part not in current_dict:
+                current_dict[part] = {}
+            current_dict = current_dict[part]
+        
         # Add file
-        current["files"].append(
-            {
-                "name": parts[-1],
-                "html_path": str(html_path),
-                "source_path": str(rel_path),
-            }
-        )
+        file_name = parts[-1]
+        html_path = str(rel_path).replace(".py", ".html")
+        current_dict[file_name] = {
+            "type": "file",
+            "htmlPath": html_path
+        }
 
-    return tree
+    # Convert the dict structure to the desired JSON format
+    def dict_to_tree(d: dict, path: str = "") -> List[Dict[str, Any]]:
+        items = []
+        
+        for name, value in sorted(d.items()):
+            current_path = f"{path}/{name}" if path else name
+            
+            if isinstance(value, dict):
+                if value.get("type") == "file":
+                    # It's a file
+                    items.append({
+                        "name": name,
+                        "path": current_path,
+                        "type": "file",
+                        "htmlPath": value["htmlPath"]
+                    })
+                else:
+                    # It's a directory
+                    children = dict_to_tree(value, current_path)
+                    if children:  # Only add non-empty directories
+                        items.append({
+                            "name": name,
+                            "path": current_path + "/",
+                            "type": "directory",
+                            "children": children
+                        })
+        
+        return items
 
-
-def generate_index_python(
-    input_path: pathlib.Path,
-    output_path: pathlib.Path,
-    include: Optional[List[str]] = None,
-    ignore: Optional[List[str]] = None,
-) -> None:
-    """Generate a Python file that creates an index using Colight."""
-    if include is None:
-        include = ["*.py"]
-
-    # Find all matching files
-    files = find_colight_files(input_path, include, ignore)
-
-    # Build tree structure
-    tree = build_file_tree(files, input_path, output_path.parent)
-
-    # Generate Python code
-    code = generate_python_code(tree, input_path)
-
-    # Write the Python file
-    output_path.write_text(code)
-
-
-def generate_python_code(tree: Dict, input_path: pathlib.Path) -> str:
-    """Generate Python code that uses Colight to create the index."""
-    # Build the list items
-    items = []
-    _build_items_list(tree, items)
-
-    # Format the items as Python list literals
-    items_code = ",\n            ".join(items)
-
-    if items:
-        code = f"""# | hide-all-code
-
-import colight.plot as Plot
-
-Plot.html(
-    [
-        "div.p-6",
-        ["h1.text-2xl.font-bold.mb-6", "Colight Examples Directory"],
-        ["p.mb-4", "Click on any example file to view it:"],
-        [
-            "ul.list-disc.pl-6",
-            {items_code}
-        ],
-    ]
-)
-"""
-    else:
-        # Handle empty directory
-        code = """# | hide-all-code
-
-import colight.plot as Plot
-
-Plot.html(
-    [
-        "div.p-6",
-        ["h1.text-2xl.font-bold.mb-6", "Colight Examples Directory"],
-        ["p.mb-4", "No colight files found in this directory."],
-    ]
-)
-"""
-
-    return code
-
-
-def _build_items_list(node: Dict, items: List[str], level: int = 0) -> None:
-    """Recursively build list items for the Python code."""
-    # Add files
-    for file_info in sorted(node.get("files", []), key=lambda x: x["name"]):
-        file_name = file_info["name"]
-        display_name = file_name.replace(".colight.py", "").replace(".py", "")
-        href = file_info["html_path"]
-
-        item = f"""[
-                "li.mb-2",
-                [
-                    "a.text-blue-600.hover:underline",
-                    {{"href": "{href}"}},
-                    "{display_name}",
-                ],
-            ]"""
-        items.append(item)
-
-    # Add subdirectories
-    for name, child in sorted(node.get("children", {}).items()):
-        if child.get("files") or child.get("children"):  # Only show non-empty dirs
-            # Add directory header
-            dir_item = f"""[
-                "li.mb-2",
-                ["span.font-semibold", "{name}/"],
-                ["ul.list-disc.pl-6.mt-2", """
-
-            # Add child items
-            child_items = []
-            _build_items_list(child, child_items, level + 1)
-
-            if child_items:
-                dir_item += "\n                    " + ",\n                    ".join(
-                    child_items
-                )
-
-            dir_item += """
-                ],
-            ]"""
-            items.append(dir_item)
+    root["children"] = dict_to_tree(tree_dict)
+    return root

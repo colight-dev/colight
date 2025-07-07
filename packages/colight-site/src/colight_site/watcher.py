@@ -10,7 +10,6 @@ import threading
 from . import api
 from .builder import BuildConfig
 from .server_live import LiveReloadServer
-from .index_generator import generate_index_html
 
 
 def watch_and_build(
@@ -227,8 +226,7 @@ def watch_build_and_serve(
         api.build_file(input_path, output_file, config=config)
     else:
         api.build_directory(input_path, output_path, config=config)
-        # Generate index page for directory mode
-        generate_index_html(input_path, output_path, include, ignore)
+        # Index is now generated as JSON via API endpoint
 
     # Start the live reload server
     # Set up roots like the original devserver
@@ -323,10 +321,9 @@ def watch_build_and_serve(
                                 if config.verbose:
                                     print(f"Rebuilt {changed_file}")
 
-                        # Regenerate index page
-                        generate_index_html(input_path, output_path, include, ignore)
+                        # Index regeneration is handled by API endpoint
                         if config.verbose:
-                            print("Regenerated index.html")
+                            print("Files rebuilt successfully")
 
                 except Exception as e:
                     print(f"Error during rebuild: {e}")

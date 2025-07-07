@@ -288,6 +288,21 @@ class ApiMiddleware:
             response = Response(response_data, mimetype="application/json")
             return response(environ, start_response)
 
+        # Handle /api/index endpoint
+        if path == "/api/index":
+            from .index_generator import generate_index_json, build_file_tree_json, find_colight_files
+            
+            # Get all colight files
+            combined_ignore = self._get_combined_ignore_patterns()
+            files = find_colight_files(self.input_path, self.include, combined_ignore)
+            
+            # Build the tree structure
+            tree = build_file_tree_json(files, self.input_path)
+            
+            response_data = json.dumps(tree, indent=2)
+            response = Response(response_data, mimetype="application/json")
+            return response(environ, start_response)
+
         # Handle /api/content/<path> endpoint (legacy HTML)
         if path.startswith("/api/content/"):
             file_path = path[13:]  # Remove /api/content/
@@ -580,20 +595,10 @@ class OnDemandMiddleware:
         if not (path.endswith(".html") or ("." not in pathlib.Path(path).name)):
             return self.app(environ, start_response)
 
-        # Special handling for index.html
+        # Special handling for index.html - no longer auto-generated
         if path == "/index.html" or path == "index.html":
-            # Check if index.html needs to be regenerated
-            index_file = self.output_path / "index.html"
-            if not index_file.exists() and not self.input_path.is_file():
-                # Regenerate index
-                from .index_generator import generate_index_html
-
-                print("Regenerating index.html...")
-                combined_ignore = self._get_combined_ignore_patterns()
-                generate_index_html(
-                    self.input_path, self.output_path, self.include, combined_ignore
-                )
-            # Let it be served normally
+            # Index is now handled by the client-side outliner
+            # Let it be served normally if it exists
             return self.app(environ, start_response)
 
         # Normalize path to always end with .html

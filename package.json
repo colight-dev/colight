@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@anywidget/react": "^0.0.7",
+    "@mui/base": "5.0.0-beta.61",
     "@observablehq/plot": "^0.6.16",
     "@tailwindcss/typography": "^0.5.15",
     "@testing-library/dom": "^10.4.0",
@@ -32,7 +33,6 @@
     "@twind/preset-typography": "^1.0.7",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
-    "@mui/base": "5.0.0-beta.61",
     "bylight": "^1.0.5",
     "concurrently": "^9.2.0",
     "d3": "^7.9.0",

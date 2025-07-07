@@ -1,55 +1,93 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useTransition } from "react";
 import ReactDOM from "react-dom/client";
-import { render as renderColight } from "../../packages/colight/src/colight/js/widget.jsx";
+import { DraggableViewer } from "../../packages/colight/src/colight/js/widget.jsx";
 import { parseColightScript } from "../../packages/colight/src/colight/js/format.js";
 import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
+import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import "./bylight.js";
-// ========== Utility Functions ==========
 
-const fuzzySearch = (query, items) => {
-  const q = query.toLowerCase();
-  return items
-    .map((item) => {
-      const name = item.toLowerCase();
-      let score = 0;
-      let lastIndex = -1;
+// ========== Constants ==========
 
-      for (const char of q) {
-        const index = name.indexOf(char, lastIndex + 1);
-        if (index === -1) return null;
-        score += index === lastIndex + 1 ? 2 : 1;
-        lastIndex = index;
-      }
+const WEBSOCKET_RECONNECT_DELAY = 1000; // ms
+const HISTORY_DEBOUNCE_DELAY = 300; // ms
 
-      return { item, score };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score)
-    .map(({ item }) => item);
+// ========== Path Utilities ==========
+
+const stripExt = (path) => path.replace(/\.py$/, "");
+const splitPath = (path) => path.split("/").filter(Boolean);
+const displayName = (path) => {
+  const parts = splitPath(path);
+  return parts[parts.length - 1] || "";
 };
 
-const getDisplayName = (path) => {
-  const parts = path.split("/");
-  return parts[parts.length - 1];
+// ========== Document Processing ==========
+
+const applyIncrementalUpdate = (currentDoc, newDoc, changes) => {
+  // Create a map of modified blocks for quick lookup
+  const modifiedBlocksMap = new Map();
+  newDoc.blocks.forEach((block) => {
+    if (changes.modified.includes(block.id)) {
+      modifiedBlocksMap.set(block.id, block);
+    }
+  });
+
+  // Check if any blocks actually need updating
+  let hasChanges = false;
+
+  // Create new blocks array
+  const updatedBlocks = currentDoc.blocks
+    .filter((block) => {
+      if (changes.removed?.includes(block.id)) {
+        hasChanges = true;
+        return false;
+      }
+      return true;
+    })
+    .map((block) => {
+      if (modifiedBlocksMap.has(block.id)) {
+        hasChanges = true;
+        return modifiedBlocksMap.get(block.id);
+      }
+      return block;
+    });
+
+  // If nothing changed, return the same object reference
+  if (!hasChanges) {
+    return currentDoc;
+  }
+
+  // Only create new object if there were actual changes
+  return {
+    ...currentDoc,
+    blocks: updatedBlocks,
+  };
 };
 
 // ========== Content Rendering Components ==========
 
 const ColightVisual = ({ data }) => {
-  const containerRef = useRef(null);
+  const [colightData, setColightData] = useState(null);
 
   useEffect(() => {
-    if (containerRef.current && data) {
+    if (data) {
       try {
-        const colightData = parseColightScript({ textContent: data });
-        renderColight(containerRef.current, colightData);
+        const parsed = parseColightScript({ textContent: data });
+        setColightData(parsed);
       } catch (error) {
-        console.error("Error rendering Colight visual:", error);
+        console.error("Error parsing Colight visual:", error);
       }
     }
   }, [data]);
 
-  return <div ref={containerRef} className="colight-embed mb-4" />;
+  if (!colightData) {
+    return <div className="colight-embed mb-4" />;
+  }
+
+  return (
+    <div className="colight-embed mb-4">
+      <DraggableViewer data={colightData} />
+    </div>
+  );
 };
 
 const ElementRenderer = ({ element }) => {
@@ -88,7 +126,7 @@ const BlockRenderer = ({ block }) => {
   const groupedElements = [];
   let currentCodeGroup = [];
 
-  block.elements.forEach((element, idx) => {
+  block.elements.forEach((element) => {
     if (!element.show) return;
 
     if (element.type === "statement" || element.type === "expression") {
@@ -159,8 +197,7 @@ const BlockRenderer = ({ block }) => {
   );
 };
 
-const DocumentRenderer = React.memo(
-  ({ doc }) => {
+const DocumentRenderer = ({ doc }) => {
     const docRef = useRef();
 
     useEffect(() => {
@@ -168,7 +205,7 @@ const DocumentRenderer = React.memo(
       if (docRef.current) {
         window.bylight({ target: docRef.current });
       }
-    }, [doc]); // Re-run when doc changes
+    }, [doc]); // Re-run when doc changes 
 
     if (!doc) return null;
 
@@ -192,197 +229,124 @@ const DocumentRenderer = React.memo(
         ))}
       </div>
     );
-  },
-  (prevProps, nextProps) => {
-    // Custom comparison - only re-render if blocks actually changed
-    if (!prevProps.doc || !nextProps.doc) return false;
-    return prevProps.doc === nextProps.doc; // Reference equality check
-  },
-);
+  }
 
-// ========== UI Components ==========
+// ========== Home Page Component ==========
 
-const TopBar = ({ currentFile, pinned, setPinned, connected, onHome }) => (
-  <div
-    className={tw(
-      "fixed top-0 left-0 right-0 h-10 bg-gray-100 border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
-    )}
-  >
-    <button
-      onClick={onHome}
-      className={tw(
-        "bg-transparent border-none cursor-pointer p-1 mr-3 text-lg flex items-center justify-center rounded transition-colors hover:bg-gray-300",
-      )}
-      title="Home"
-    >
-      🏠
-    </button>
-    <div className={tw("flex-1 font-mono")}>
-      {currentFile || "No file selected"}
-    </div>
-    <button
-      onClick={() => setPinned(!pinned)}
-      className={tw(
-        `border border-gray-500 rounded px-2 py-1 cursor-pointer mr-2.5 text-xs font-sans ${
-          pinned ? "bg-gray-800 text-white" : "bg-transparent text-gray-600"
-        }`,
-      )}
-    >
-      📌 {pinned ? "" : "Pin"}
-    </button>
-    <div
-      className={tw(
-        `w-2 h-2 rounded-full ml-2.5 ${connected ? "bg-green-400" : "bg-red-400"}`,
-      )}
-    />
-  </div>
-);
-
-const SearchModal = ({ isOpen, onClose, files, onSelectFile }) => {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const searchInputRef = useRef(null);
-
+const HomePage = () => {
+  const [watchingPath, setWatchingPath] = useState("");
+  
   useEffect(() => {
-    if (isOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [searchQuery]);
-
-  const filteredFiles = searchQuery ? fuzzySearch(searchQuery, files) : files;
-
-  const handleKeyDown = (e) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedIndex((prev) => Math.min(prev + 1, filteredFiles.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && filteredFiles[selectedIndex]) {
-      e.preventDefault();
-      onSelectFile(filteredFiles[selectedIndex]);
-      onClose();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-    }
-  };
-
-  if (!isOpen) return null;
-
+    // Get the directory being watched from the API
+    const getWatchingPath = async () => {
+      try {
+        const response = await fetch("/api/index");
+        if (response.ok) {
+          const data = await response.json();
+          setWatchingPath(data.name || "current directory");
+        }
+      } catch (err) {
+        console.error("Failed to get watching path:", err);
+      }
+    };
+    
+    getWatchingPath();
+  }, []);
+  
   return (
-    <div
-      className={tw(
-        "fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-[100px] z-[2000]",
-      )}
-      onClick={onClose}
-    >
-      <div
-        className={tw(
-          "bg-white rounded-lg shadow-xl w-[600px] max-h-[400px] flex flex-col font-sans",
-        )}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          ref={searchInputRef}
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Search files..."
-          className={tw(
-            "p-4 border-none border-b border-gray-200 text-base outline-none rounded-t-lg font-sans",
-          )}
-        />
-        <div className={tw("flex-1 overflow-auto max-h-[350px]")}>
-          {filteredFiles.length === 0 ? (
-            <div className={tw("p-5 text-center text-gray-600 font-sans")}>
-              No files found
-            </div>
-          ) : (
-            filteredFiles.map((file, index) => (
-              <div
-                key={file}
-                onClick={() => {
-                  onSelectFile(file);
-                  onClose();
-                }}
-                className={tw(
-                  `py-3 px-4 cursor-pointer border-b border-gray-100 flex items-center font-mono text-sm transition-colors ${
-                    index === selectedIndex ? "bg-blue-100" : "bg-white"
-                  }`,
-                )}
-                onMouseEnter={() => setSelectedIndex(index)}
-              >
-                <span className={tw("text-gray-600 mr-2")}>
-                  {file.includes("/")
-                    ? file.substring(0, file.lastIndexOf("/") + 1)
-                    : ""}
-                </span>
-                <span className={tw("font-bold")}>{getDisplayName(file)}</span>
-              </div>
-            ))
-          )}
-        </div>
-        <div
-          className={tw(
-            "py-2 px-4 border-t border-gray-200 text-xs text-gray-600 flex gap-4 font-sans",
-          )}
-        >
-          <span>↑↓ Navigate</span>
-          <span>↵ Open</span>
-          <span>esc Close</span>
-        </div>
+    <div className={tw("p-10 text-center font-mono text-gray-600")}>
+      <div className={tw("text-xl")}>
+        Watching <span className={tw("font-bold")}>{watchingPath || "..."}</span>
       </div>
     </div>
   );
 };
 
-const FileList = ({ files, onSelectFile }) => (
-  <div className={tw("p-10 max-w-4xl mx-auto font-sans")}>
-    <h1 className={tw("text-3xl mb-6 text-gray-800")}>Files</h1>
+// ========== UI Components ==========
 
-    {files.length === 0 ? (
-      <p className={tw("text-gray-600")}>No files found.</p>
-    ) : (
-      <>
-        <p className={tw("mb-6 text-gray-600")}>
-          {files.length} file{files.length !== 1 ? "s" : ""} available. Press{" "}
-          <kbd
-            className={tw(
-              "px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono",
-            )}
-          >
-            Cmd+K
-          </kbd>{" "}
-          to search.
-        </p>
-
-        <div className={tw("grid gap-2")}>
-          {files.map((file) => (
-            <a
-              key={file}
-              href={`/${file}`}
-              onClick={(e) => {
-                e.preventDefault();
-                onSelectFile(file);
-              }}
-              className={tw(
-                "block py-3 px-4 bg-gray-50 rounded-md no-underline text-gray-800 font-mono text-sm transition-colors border border-gray-200 hover:bg-gray-200 hover:border-gray-300",
-              )}
-            >
-              {file}
-            </a>
-          ))}
+const TopBar = ({ currentFile, connected, focusedPath, setFocusedPath, browsingDirectory, setBrowsingDirectory, isLoading }) => {
+  // Build breadcrumb
+  const buildBreadcrumb = () => {
+    const currentPath = browsingDirectory || currentFile;
+    if (!currentPath) return null;
+    
+    const parts = splitPath(currentPath);
+    const isBrowsingDirectory = !!browsingDirectory;
+    
+    return (
+      <div className={tw("flex items-center text-sm font-mono")}>
+        <button
+          onClick={() => setBrowsingDirectory("/")}
+          className={tw("px-1 py-0.5 rounded transition-colors hover:bg-gray-200")}
+          title="Browse root directory"
+        >
+          root
+        </button>
+        
+        {parts.map((part, index) => {
+          const isLastPart = index === parts.length - 1;
+          const isFile = !isBrowsingDirectory && isLastPart;
+          const pathSegments = parts.slice(0, index + 1);
+          const segmentPath = pathSegments.join("/");
+          const segmentPathWithSlash = segmentPath + "/";
+          
+          // Check if this item is focused
+          const isFocused = isFile 
+            ? focusedPath === currentFile 
+            : focusedPath === segmentPathWithSlash;
+          
+          return (
+            <React.Fragment key={index}>
+              <span className={tw("mx-1 text-gray-500")}>/</span>
+              <button
+                onClick={() => {
+                  if (isFile) {
+                    // Files toggle focus
+                    setFocusedPath(isFocused ? null : segmentPath);
+                  } else {
+                    // Directories open browser
+                    setBrowsingDirectory(segmentPathWithSlash);
+                  }
+                }}
+                className={tw(`px-1 py-0.5 rounded transition-colors hover:bg-gray-200 ${isFocused ? "font-bold" : ""}`)}
+                title={isFile ? (isFocused ? "Click to unfocus" : "Click to focus") : "Browse this directory"}
+              >
+                {isFocused && <span className={tw("mr-1")}>📌</span>}
+                {part}
+              </button>
+            </React.Fragment>
+          );
+        })}
+        {isBrowsingDirectory && <span className={tw("mx-1 text-gray-500")}>/</span>}
+      </div>
+    );
+  };
+  
+  return (
+    <div
+      className={tw(
+        "fixed top-0 left-0 right-0 h-10 bg-gray-100 border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
+      )}
+    >
+      <div className={tw("flex-1")}>
+        {buildBreadcrumb()}
+      </div>
+      {isLoading ? (
+        <div className={tw("ml-2.5")}>
+          <div className={tw("animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full")} />
         </div>
-      </>
-    )}
-  </div>
-);
+      ) : (
+        <div
+          className={tw(
+            `w-2 h-2 rounded-full ml-2.5 ${connected ? "bg-green-400" : "bg-red-400"}`,
+          )}
+          title={connected ? "Connected" : "Disconnected"}
+        />
+      )}
+    </div>
+  );
+};
+
 
 // ========== WebSocket Hook ==========
 
@@ -413,7 +377,7 @@ const useWebSocket = (onFileChange) => {
       ws.onclose = () => {
         console.log("LiveServer disconnected");
         setConnected(false);
-        setTimeout(connect, 1000);
+        setTimeout(connect, WEBSOCKET_RECONNECT_DELAY);
       };
 
       ws.onerror = (error) => {
@@ -428,73 +392,129 @@ const useWebSocket = (onFileChange) => {
         wsRef.current.close();
       }
     };
-  }, []); // Empty deps - no need to recreate on prop changes
+  }, [onFileChange]); // Empty deps - no need to recreate on prop changes
 
   return connected;
 };
 
-// ========== CSS for animations ==========
-
-const animationStyles = `
-  .block-updated {
-    animation: highlight-flash 1s ease-out;
-  }
-
-  @keyframes highlight-flash {
-    0% { background-color: rgba(255, 235, 59, 0.3); }
-    100% { background-color: transparent; }
-  }
-`;
-
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
-  const [files, setFiles] = useState([]);
   const [currentFile, setCurrentFile] = useState(null);
   const [documentData, setDocumentData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [fileVersions, setFileVersions] = useState({}); // Track versions for incremental updates
+  const [focusedPath, setFocusedPath] = useState(null); // Single focus state - can be file or directory
+  const [browsingDirectory, setBrowsingDirectoryState] = useState(null); // Directory being browsed
+  const [isPending, startTransition] = useTransition(); // For smooth transitions
+  const [directoryTree, setDirectoryTree] = useState(null); // Cached directory tree
+  const [isLoadingTree, setIsLoadingTree] = useState(false);
 
   // Refs for WebSocket callback
   const currentFileRef = useRef(null);
-  const pinnedRef = useRef(false);
   const hasLoadedDataRef = useRef({}); // Track which files have been loaded
+  const focusedPathRef = useRef(null); // Track focused path for WebSocket callback
+  const pendingVersionRef = useRef({}); // Track pending versions to prevent race conditions
+
+  // Track if we're still initializing
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Debounce timer for history updates
+  const historyUpdateTimerRef = useRef(null);
 
   // Keep refs in sync
   useEffect(() => {
     currentFileRef.current = currentFile;
-  }, [currentFile]);
+    
+    // Don't update URL during initial load
+    if (!isInitialized) return;
+    
+    // Clear existing timer
+    if (historyUpdateTimerRef.current) {
+      clearTimeout(historyUpdateTimerRef.current);
+    }
+    
+    // Debounce history updates
+    historyUpdateTimerRef.current = setTimeout(() => {
+      // Update URL when current file changes
+      if (currentFile) {
+        const url = new URL(window.location);
+        url.pathname = `/${currentFile}`;
+        if (focusedPath) {
+          url.searchParams.set("focus", focusedPath);
+        } else {
+          url.searchParams.delete("focus");
+        }
+        window.history.replaceState({}, "", url.toString());
+      } else if (window.location.pathname !== "/") {
+        // No file selected, go to root
+        const url = new URL(window.location);
+        url.pathname = "/";
+        if (focusedPath) {
+          url.searchParams.set("focus", focusedPath);
+        } else {
+          url.searchParams.delete("focus");
+        }
+        window.history.replaceState({}, "", url.toString());
+      }
+    }, HISTORY_DEBOUNCE_DELAY);
+    
+    return () => {
+      if (historyUpdateTimerRef.current) {
+        clearTimeout(historyUpdateTimerRef.current);
+      }
+    };
+  }, [currentFile, focusedPath, isInitialized]);
 
   useEffect(() => {
-    pinnedRef.current = pinned;
-  }, [pinned]);
+    focusedPathRef.current = focusedPath;
+  }, [focusedPath]);
 
-  // Load file list
-  const loadFiles = async () => {
+
+  // Load directory tree
+  const loadDirectoryTree = async () => {
+    if (directoryTree) return; // Already loaded
+    
+    setIsLoadingTree(true);
     try {
-      const response = await fetch("/api/files");
+      const response = await fetch("/api/index");
+      if (!response.ok) {
+        throw new Error("Failed to load directory tree");
+      }
       const data = await response.json();
-      setFiles(data.files || []);
+      startTransition(() => {
+        setDirectoryTree(data);
+      });
     } catch (error) {
-      console.error("Failed to load files:", error);
+      console.error("Failed to load directory tree:", error);
+    } finally {
+      setIsLoadingTree(false);
     }
+  };
+
+  // Custom setBrowsingDirectory that loads tree first
+  const setBrowsingDirectory = async (dir) => {
+    if (dir && !directoryTree) {
+      await loadDirectoryTree();
+    }
+    setBrowsingDirectoryState(dir);
+  };
+
+  // Fetch document from API
+  const fetchDocument = async (path) => {
+    const response = await fetch(`/api/document/${path}`);
+    const doc = await response.json();
+    
+    if (doc.error) {
+      throw new Error(doc.error);
+    }
+    
+    return doc;
   };
 
   // Load file content (now JSON with incremental update support)
   const loadFile = async (path, isUpdate = false) => {
-    // Only show loading spinner when we have no document to display yet
-    if (!isUpdate || !documentData) {
-      setLoading(true);
-    }
     try {
-      const response = await fetch(`/api/document/${path}`);
-      const doc = await response.json();
-
-      if (doc.error) {
-        throw new Error(doc.error);
-      }
+      const doc = await fetchDocument(path);
 
       // Check if this is an incremental update
       const changes = doc._changes;
@@ -523,222 +543,132 @@ const LiveServerApp = () => {
       ) {
         // Handle incremental update only if we have existing data
         const currentVersion = fileVersions[path] || 0;
+        const pendingVersion = pendingVersionRef.current[path] || 0;
 
-        // Ignore out-of-order updates
-        if (changes.version <= currentVersion) {
-          console.log("Ignoring out-of-order update", {
+        // Ignore out-of-order updates or updates that arrive during pending updates
+        if (changes.version <= currentVersion || changes.version <= pendingVersion) {
+          console.log("Ignoring out-of-order or stale update", {
             newVersion: changes.version,
             currentVersion,
+            pendingVersion,
           });
           return;
         }
 
+        // Mark this version as pending
+        pendingVersionRef.current[path] = changes.version;
+
         console.log("Performing incremental update");
 
         // Apply incremental updates
-        setDocumentData((current) => {
-          console.log(
-            "Current blocks:",
-            current.blocks.map((b) => ({ id: b.id, line: b.line })),
-          );
-
-          // Create a map of modified blocks for quick lookup
-          const modifiedBlocksMap = new Map();
-          doc.blocks.forEach((block) => {
-            if (changes.modified.includes(block.id)) {
-              modifiedBlocksMap.set(block.id, block);
+        startTransition(() => {
+          setDocumentData((current) => {
+            const updated = applyIncrementalUpdate(current, doc, changes);
+            if (updated === current) {
+              console.log("No actual changes, returning same document reference");
             }
+            return updated;
           });
+        });
 
-          // Check if any blocks actually need updating
-          let hasChanges = false;
+        // Update version and clear pending
+        setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
+        delete pendingVersionRef.current[path];
+        
+      } else  {
 
-          // Create new blocks array
-          const updatedBlocks = current.blocks
-            .filter((block) => {
-              if (changes.removed?.includes(block.id)) {
-                hasChanges = true;
-                return false;
-              }
-              return true;
-            })
-            .map((block) => {
-              if (modifiedBlocksMap.has(block.id)) {
-                console.log("Updating block:", block.id);
-                hasChanges = true;
-                return modifiedBlocksMap.get(block.id);
-              }
-              return block;
-            });
-
-          console.log(
-            "New blocks:",
-            updatedBlocks.map((b) => ({ id: b.id, line: b.line })),
-          );
-
-          // If nothing changed, return the same object reference
-          if (!hasChanges) {
-            console.log("No actual changes, returning same document reference");
-            return current;
-          }
-
-          // Only create new object if there were actual changes
-          return {
-            ...current,
-            blocks: updatedBlocks,
-          };
+        startTransition(() => {
+          setDocumentData(doc);
+          setCurrentFile(path);
+          hasLoadedDataRef.current[path] = true;
         });
 
         // Update version
-        setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
-
-        // Highlight modified blocks after React renders
-        setTimeout(() => {
-          if (changes.modified) {
-            console.log("Highlighting blocks:", changes.modified);
-            changes.modified.forEach((blockId) => {
-              const elem = document.querySelector(
-                `[data-block-id="${blockId}"]`,
-              );
-              if (elem) {
-                elem.classList.add("block-updated");
-                setTimeout(() => elem.classList.remove("block-updated"), 1000);
-              } else {
-                console.warn("Could not find block to highlight:", blockId);
-              }
-            });
-
-            // Scroll to the changed block if there's only one
-            if (changes.modified.length === 1) {
-              const elem = document.querySelector(
-                `[data-block-id="${changes.modified[0]}"]`,
-              );
-              if (elem) {
-                elem.scrollIntoView({ behavior: "smooth", block: "center" });
-              }
-            }
-          }
-        }, 50); // Small delay to ensure React has rendered
-      } else if (
-        changes &&
-        isUpdate &&
-        !changes.full &&
-        !hasLoadedDataRef.current[path]
-      ) {
-        // First update after page load - we have changes but no previous data
-        // Treat as full load but try to highlight the modified blocks
-        console.log(
-          "First update after page load - treating as full load with highlights",
-        );
-
-        setDocumentData(doc);
-        setCurrentFile(path);
-        hasLoadedDataRef.current[path] = true;
-
-        // Update version
-        if (changes?.version) {
-          setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
-        }
-
-        // After render, highlight the modified blocks
-        setTimeout(() => {
-          if (changes.modified) {
-            console.log("Highlighting modified blocks:", changes.modified);
-            changes.modified.forEach((blockId) => {
-              const elem = document.querySelector(
-                `[data-block-id="${blockId}"]`,
-              );
-              if (elem) {
-                elem.classList.add("block-updated");
-                setTimeout(() => elem.classList.remove("block-updated"), 1000);
-
-                // Scroll to the first modified block
-                if (changes.modified.indexOf(blockId) === 0) {
-                  elem.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
-              }
-            });
-          }
-        }, 100);
-      } else {
-        // Full document load
-        setDocumentData(doc);
-        setCurrentFile(path);
-        hasLoadedDataRef.current[path] = true;
-        window.history.pushState({}, "", `/${path}`);
-
-        // Update version if available
         if (changes?.version) {
           setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
         }
       }
     } catch (error) {
       console.error("Failed to load file:", error);
-      setDocumentData({
-        error: error.message,
-        blocks: [],
+      startTransition(() => {
+        setDocumentData({
+          error: error.message,
+          blocks: [],
+        });
       });
-    } finally {
-      setLoading(false);
     }
   };
 
   // Handle file changes from WebSocket
   const handleFileChange = useCallback((path) => {
-    if (currentFileRef.current === path) {
-      loadFile(path, true); // isUpdate = true
-    } else if (!pinnedRef.current) {
-      loadFile(path, true); // isUpdate = true
+    const focus = focusedPathRef.current;
+    
+    // If no focus, navigate to all changes
+    if (!focus) {
+      loadFile(path, true);
+      return;
+    }
+    
+    // If focused on a specific file, only update if it's that file
+    if (!focus.endsWith("/")) {
+      if (path === focus) {
+        loadFile(path, true);
+      }
+      return;
+    }
+    
+    // If focused on a directory, check if file is within it
+    const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+    const normalizedFocus = focus.startsWith("/") ? focus.slice(1) : focus;
+    
+    if (normalizedPath.startsWith(normalizedFocus)) {
+      loadFile(path, true);
+    } else {
+      console.log(`Ignoring file change outside focus: ${path} (focus: ${focus})`);
     }
   }, []);
 
   // Setup WebSocket connection
   const connected = useWebSocket(handleFileChange);
 
-  // Handle keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-
-    if (typeof document !== "undefined") {
-      document.addEventListener("keydown", handleKeyDown);
-      return () => document.removeEventListener("keydown", handleKeyDown);
-    }
-  }, []);
-
-  // Inject animation styles
-  useEffect(() => {
-    const styleEl = document.createElement("style");
-    styleEl.textContent = animationStyles;
-    document.head.appendChild(styleEl);
-
-    return () => styleEl.remove();
-  }, []);
 
   // Initial load
   useEffect(() => {
-    loadFiles();
 
-    // Handle initial route
+    // Handle initial route and focus state
     const path = window.location.pathname.slice(1);
+    const params = new URLSearchParams(window.location.search);
+    const focus = params.get("focus");
+    
+    if (focus) {
+      setFocusedPath(focus);
+    }
+    
     if (path) {
       loadFile(path);
     }
+    
+    // Mark as initialized after initial load
+    setTimeout(() => setIsInitialized(true), 0);
   }, []);
 
   // Handle popstate (browser back/forward)
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname.slice(1);
+      const params = new URLSearchParams(window.location.search);
+      const focus = params.get("focus");
+      
+      // Restore focus state
+      setFocusedPath(focus);
+      
       if (path) {
         loadFile(path);
       } else {
-        setCurrentFile(null);
-        setDocumentData(null);
+        startTransition(() => {
+          setCurrentFile(null);
+          setDocumentData(null);
+        });
       }
     };
 
@@ -748,50 +678,34 @@ const LiveServerApp = () => {
     }
   }, []);
 
-  const handleHome = () => {
-    setCurrentFile(null);
-    setDocumentData(null);
-    hasLoadedDataRef.current = {}; // Clear all loaded state
-    window.history.pushState({}, "", "/");
-  };
 
   return (
     <>
       <TopBar
         currentFile={currentFile}
-        pinned={pinned}
-        setPinned={setPinned}
         connected={connected}
-        onHome={handleHome}
-      />
-
-      <SearchModal
-        isOpen={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        files={files}
-        onSelectFile={loadFile}
+        focusedPath={focusedPath}
+        setFocusedPath={setFocusedPath}
+        browsingDirectory={browsingDirectory}
+        setBrowsingDirectory={setBrowsingDirectory}
+        isLoading={isPending || isLoadingTree}
       />
 
       <div className={tw("mt-10 relative")}>
-        {currentFile && documentData ? (
-          <>
-            {loading && (
-              <div
-                className={tw(
-                  "absolute inset-0 flex items-center justify-center bg-white/70 z-50",
-                )}
-              >
-                <div className={tw("font-mono text-gray-600")}>Loading...</div>
-              </div>
-            )}
-            <DocumentRenderer key={currentFile} doc={documentData} />
-          </>
-        ) : loading ? (
-          <div className={tw("p-10 text-center font-mono text-gray-600")}>
-            Loading...
-          </div>
+        {browsingDirectory && directoryTree ? (
+          <DirectoryBrowser
+            directoryPath={browsingDirectory}
+            tree={directoryTree}
+            onSelectFile={(path) => {
+              loadFile(path);
+              setBrowsingDirectoryState(null);
+            }}
+            onClose={() => setBrowsingDirectoryState(null)}
+          />
+        ) : currentFile && documentData ? (
+          <DocumentRenderer key={currentFile} doc={documentData} />
         ) : (
-          <FileList files={files} onSelectFile={loadFile} />
+          <HomePage />
         )}
       </div>
     </>

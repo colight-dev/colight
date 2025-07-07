@@ -597,6 +597,6 @@ export const render = async (element, data, id) => {
   root.render(<DraggableViewer data={{ ...data, id }} />);
 };
 
-export { parseColightData, parseColightScript };
+export { parseColightData, parseColightScript, DraggableViewer };
 
 globals.colight.render = render;
