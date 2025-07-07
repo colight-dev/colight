@@ -4,8 +4,9 @@ import asyncio
 import json
 import pathlib
 import threading
+import time
 import webbrowser
-from typing import Optional, List, Set, Dict, Any
+from typing import Optional, List, Set, Dict, Any, Tuple
 import fnmatch
 
 import websockets
@@ -74,6 +75,106 @@ def _should_rebuild_with_metadata(
     return False
 
 
+class DocumentCache:
+    """Cache for document JSON data with version tracking for incremental updates."""
+
+    def __init__(self):
+        self.cache: Dict[str, Tuple[dict, int]] = {}  # path -> (document, version)
+        self.versions: Dict[str, int] = {}  # path -> current version
+
+    def get_changes(self, path: str, new_doc: dict) -> dict:
+        """Compare cached document with new document and return changes."""
+        old_doc, old_version = self.cache.get(path, ({}, 0))
+        new_version = old_version + 1
+
+        old_blocks = {b["id"]: b for b in old_doc.get("blocks", [])}
+        new_blocks = {b["id"]: b for b in new_doc.get("blocks", [])}
+
+        changes = {
+            "modified": [],
+            "removed": [],
+            "moved": [],
+            "total": len(new_blocks),
+            "version": new_version,
+            "full": False,
+        }
+
+        # Track ordinals for move detection
+        old_ordinals = {
+            b["id"]: b.get("ordinal", i)
+            for i, b in enumerate(old_doc.get("blocks", []))
+        }
+        new_ordinals = {
+            b["id"]: b.get("ordinal", i)
+            for i, b in enumerate(new_doc.get("blocks", []))
+        }
+
+        # Detect changes
+        for bid, block in new_blocks.items():
+            if bid in old_blocks:
+                old_block = old_blocks[bid]
+                # Content changed
+                if old_block.get("content_hash") != block.get("content_hash"):
+                    changes["modified"].append(block)
+                # Position changed (moved)
+                elif old_ordinals.get(bid) != new_ordinals.get(bid):
+                    changes["moved"].append(
+                        {
+                            "block": block,
+                            "old_ordinal": old_ordinals.get(bid),
+                            "new_ordinal": new_ordinals.get(bid),
+                        }
+                    )
+            else:
+                # New block
+                changes["modified"].append(block)
+
+        # Track removed blocks (with full data for animations)
+        for bid, block in old_blocks.items():
+            if bid not in new_blocks:
+                changes["removed"].append(block)
+
+        # Decide if full reload is better
+        if self._should_full_reload(new_doc, changes):
+            changes["full"] = True
+
+        # Update cache
+        self.cache[path] = (new_doc, new_version)
+        self.versions[path] = new_version
+
+        return changes
+
+    def _should_full_reload(self, doc: dict, changes: dict) -> bool:
+        """Determine if a full reload is safer/better."""
+        total_blocks = changes["total"]
+
+        # No blocks at all
+        if total_blocks == 0:
+            return False
+
+        # Parse error in document
+        if doc.get("error"):
+            return True
+
+        # More than 30% of blocks changed
+        modified_count = len(changes["modified"]) + len(changes["removed"])
+        if total_blocks > 0 and modified_count > total_blocks * 0.3:
+            return True
+
+        # TODO: Add detection for large contiguous changes
+
+        return False
+
+    def clear(self, path: Optional[str] = None):
+        """Clear cache for a specific path or all paths."""
+        if path:
+            self.cache.pop(path, None)
+            self.versions.pop(path, None)
+        else:
+            self.cache.clear()
+            self.versions.clear()
+
+
 class SpaMiddleware:
     """Middleware that serves the SPA for all non-API, non-static routes."""
 
@@ -110,6 +211,7 @@ class ApiMiddleware:
         config: BuildConfig,
         include: List[str],
         ignore: Optional[List[str]] = None,
+        document_cache: Optional[DocumentCache] = None,
     ):
         self.app = app
         self.input_path = input_path
@@ -117,6 +219,7 @@ class ApiMiddleware:
         self.config = config
         self.include = include
         self.ignore = ignore
+        self.document_cache = document_cache or DocumentCache()
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
@@ -236,8 +339,26 @@ class ApiMiddleware:
 
                     generator = JsonFormGenerator(config=self.config)
                     json_content = generator.generate_json(source_file)
+                    doc = json.loads(json_content)
 
-                    response = Response(json_content, mimetype="application/json")
+                    # Get changes from cache
+                    changes = self.document_cache.get_changes(file_path, doc)
+
+                    # Add changes info to response
+                    doc["_changes"] = {
+                        "version": changes["version"],
+                        "full": changes["full"],
+                        "modified": [b["id"] for b in changes["modified"]]
+                        if not changes["full"]
+                        else None,
+                        "removed": [b["id"] for b in changes["removed"]]
+                        if not changes["full"]
+                        else None,
+                    }
+
+                    response = Response(
+                        json.dumps(doc, indent=2), mimetype="application/json"
+                    )
                     return response(environ, start_response)
                 except Exception as e:
                     error_data = json.dumps({"error": str(e), "type": "build_error"})
@@ -563,6 +684,7 @@ class LiveServer:
         self._http_server = None
         self._http_thread = None
         self._stop_event = asyncio.Event()
+        self._document_cache = DocumentCache()  # Cache for incremental updates
 
     def _get_spa_html(self):
         """Get the SPA HTML template."""
@@ -613,7 +735,7 @@ class LiveServer:
             roots,
         )
 
-        # Add API middleware
+        # Add API middleware with document cache
         app = ApiMiddleware(
             app,
             self.input_path,
@@ -621,6 +743,7 @@ class LiveServer:
             self.config,
             self.include,
             self.ignore,
+            self._document_cache,
         )
 
         # Add SPA middleware (serves the React app)
@@ -687,7 +810,11 @@ class LiveServer:
                     # File is not relative to input path
                     html_path = changed_file.stem
 
-            message = json.dumps({"type": "file-changed", "path": html_path})
+            # For now, just send file-changed notification
+            # The client will fetch the document and check _changes field
+            message = json.dumps(
+                {"type": "file-changed", "path": html_path, "timestamp": time.time()}
+            )
         else:
             # General reload
             message = json.dumps({"type": "reload"})

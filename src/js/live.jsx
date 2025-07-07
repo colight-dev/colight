@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import ReactDOM from "react-dom/client";
-import "../../packages/colight/src/colight/js/embed.js"; // Import Colight embed script
+import { render as renderColight } from "../../packages/colight/src/colight/js/widget.jsx";
+import { parseColightScript } from "../../packages/colight/src/colight/js/format.js";
 import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
 import "./bylight.js";
-
 // ========== Utility Functions ==========
 
 const fuzzySearch = (query, items) => {
@@ -35,6 +35,23 @@ const getDisplayName = (path) => {
 
 // ========== Content Rendering Components ==========
 
+const ColightVisual = ({ data }) => {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (containerRef.current && data) {
+      try {
+        const colightData = parseColightScript({ textContent: data });
+        renderColight(containerRef.current, colightData);
+      } catch (error) {
+        console.error("Error rendering Colight visual:", error);
+      }
+    }
+  }, [data]);
+
+  return <div ref={containerRef} className="colight-embed mb-4" />;
+};
+
 const ElementRenderer = ({ element }) => {
   // Skip if element shouldn't be shown
   if (!element.show) return null;
@@ -54,9 +71,7 @@ const ElementRenderer = ({ element }) => {
           </pre>
           {/* Render visual if it's an expression with visual data */}
           {element.type === "expression" && element.visual && (
-            <div className={tw("mb-4")}>
-              <script type="application/x-colight">{element.visual}</script>
-            </div>
+            <ColightVisual data={element.visual} />
           )}
         </>
       );
@@ -91,38 +106,45 @@ const BlockRenderer = ({ block }) => {
   );
 };
 
-const DocumentRenderer = ({ doc }) => {
-  const docRef = useRef();
+const DocumentRenderer = React.memo(
+  ({ doc }) => {
+    const docRef = useRef();
 
-  useEffect(() => {
-    if (docRef.current) {
-      window.bylight({ target: docRef.current });
-    }
-  }, [docRef.current]);
-
-  useEffect(() => {
-    // Initialize Colight visualizations after render
-    setTimeout(() => {
-      if (window.colight && window.colight.loadVisuals) {
-        console.log("Initializing Colight visualizations");
-        window.colight.loadVisuals();
+    useEffect(() => {
+      if (docRef.current) {
+        window.bylight({ target: docRef.current });
       }
-    }, 0);
-  }, [doc]);
+    }, []); // Only run once when component mounts
 
-  if (!doc) return null;
+    if (!doc) return null;
 
-  return (
-    <div
-      className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
-      ref={docRef}
-    >
-      {doc.blocks.map((block) => (
-        <BlockRenderer key={block.id} block={block} />
-      ))}
-    </div>
-  );
-};
+    // Debug duplicate keys
+    const blockIds = doc.blocks.map((b) => b.id);
+    const duplicates = blockIds.filter(
+      (id, index) => blockIds.indexOf(id) !== index,
+    );
+    if (duplicates.length > 0) {
+      console.warn("Duplicate block IDs found:", duplicates);
+      console.log("All block IDs:", blockIds);
+    }
+
+    return (
+      <div
+        className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
+        ref={docRef}
+      >
+        {doc.blocks.map((block) => (
+          <BlockRenderer key={block.id} block={block} />
+        ))}
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    // Custom comparison - only re-render if blocks actually changed
+    if (!prevProps.doc || !nextProps.doc) return false;
+    return prevProps.doc === nextProps.doc; // Reference equality check
+  },
+);
 
 // ========== UI Components ==========
 
@@ -357,6 +379,19 @@ const useWebSocket = (onFileChange) => {
   return connected;
 };
 
+// ========== CSS for animations ==========
+
+const animationStyles = `
+  .block-updated {
+    animation: highlight-flash 1s ease-out;
+  }
+
+  @keyframes highlight-flash {
+    0% { background-color: rgba(255, 235, 59, 0.3); }
+    100% { background-color: transparent; }
+  }
+`;
+
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
@@ -366,10 +401,12 @@ const LiveServerApp = () => {
   const [loading, setLoading] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [fileVersions, setFileVersions] = useState({}); // Track versions for incremental updates
 
   // Refs for WebSocket callback
   const currentFileRef = useRef(null);
   const pinnedRef = useRef(false);
+  const hasLoadedDataRef = useRef({}); // Track which files have been loaded
 
   // Keep refs in sync
   useEffect(() => {
@@ -391,9 +428,12 @@ const LiveServerApp = () => {
     }
   };
 
-  // Load file content (now JSON)
-  const loadFile = async (path) => {
-    setLoading(true);
+  // Load file content (now JSON with incremental update support)
+  const loadFile = async (path, isUpdate = false) => {
+    // Only show loading spinner when we have no document to display yet
+    if (!isUpdate || !documentData) {
+      setLoading(true);
+    }
     try {
       const response = await fetch(`/api/document/${path}`);
       const doc = await response.json();
@@ -402,9 +442,183 @@ const LiveServerApp = () => {
         throw new Error(doc.error);
       }
 
-      setDocumentData(doc);
-      setCurrentFile(path);
-      window.history.pushState({}, "", `/${path}`);
+      // Check if this is an incremental update
+      const changes = doc._changes;
+      console.log("Document loaded:", {
+        path,
+        isUpdate,
+        hasChanges: !!changes,
+        changesFull: changes?.full,
+        version: changes?.version,
+        modified: changes?.modified?.length,
+        removed: changes?.removed?.length,
+        hasLoadedData: !!hasLoadedDataRef.current[path],
+        conditions: {
+          hasChanges: !!changes,
+          isUpdate,
+          hasLoadedData: !!hasLoadedDataRef.current[path],
+          notFull: !changes?.full,
+        },
+      });
+
+      if (
+        changes &&
+        isUpdate &&
+        !changes.full &&
+        hasLoadedDataRef.current[path]
+      ) {
+        // Handle incremental update only if we have existing data
+        const currentVersion = fileVersions[path] || 0;
+
+        // Ignore out-of-order updates
+        if (changes.version <= currentVersion) {
+          console.log("Ignoring out-of-order update", {
+            newVersion: changes.version,
+            currentVersion,
+          });
+          return;
+        }
+
+        console.log("Performing incremental update");
+
+        // Apply incremental updates
+        setDocumentData((current) => {
+          console.log(
+            "Current blocks:",
+            current.blocks.map((b) => ({ id: b.id, line: b.line })),
+          );
+
+          // Create a map of modified blocks for quick lookup
+          const modifiedBlocksMap = new Map();
+          doc.blocks.forEach((block) => {
+            if (changes.modified.includes(block.id)) {
+              modifiedBlocksMap.set(block.id, block);
+            }
+          });
+
+          // Check if any blocks actually need updating
+          let hasChanges = false;
+          const hasRemovals = changes.removed?.length > 0;
+
+          // Create new blocks array
+          const updatedBlocks = current.blocks
+            .filter((block) => {
+              if (changes.removed?.includes(block.id)) {
+                hasChanges = true;
+                return false;
+              }
+              return true;
+            })
+            .map((block) => {
+              if (modifiedBlocksMap.has(block.id)) {
+                console.log("Updating block:", block.id);
+                hasChanges = true;
+                return modifiedBlocksMap.get(block.id);
+              }
+              return block;
+            });
+
+          console.log(
+            "New blocks:",
+            updatedBlocks.map((b) => ({ id: b.id, line: b.line })),
+          );
+
+          // If nothing changed, return the same object reference
+          if (!hasChanges) {
+            console.log("No actual changes, returning same document reference");
+            return current;
+          }
+
+          // Only create new object if there were actual changes
+          return {
+            ...current,
+            blocks: updatedBlocks,
+          };
+        });
+
+        // Update version
+        setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
+
+        // Highlight modified blocks after React renders
+        setTimeout(() => {
+          if (changes.modified) {
+            console.log("Highlighting blocks:", changes.modified);
+            changes.modified.forEach((blockId) => {
+              const elem = document.querySelector(
+                `[data-block-id="${blockId}"]`,
+              );
+              if (elem) {
+                elem.classList.add("block-updated");
+                setTimeout(() => elem.classList.remove("block-updated"), 1000);
+              } else {
+                console.warn("Could not find block to highlight:", blockId);
+              }
+            });
+
+            // Scroll to the changed block if there's only one
+            if (changes.modified.length === 1) {
+              const elem = document.querySelector(
+                `[data-block-id="${changes.modified[0]}"]`,
+              );
+              if (elem) {
+                elem.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+            }
+          }
+        }, 50); // Small delay to ensure React has rendered
+      } else if (
+        changes &&
+        isUpdate &&
+        !changes.full &&
+        !hasLoadedDataRef.current[path]
+      ) {
+        // First update after page load - we have changes but no previous data
+        // Treat as full load but try to highlight the modified blocks
+        console.log(
+          "First update after page load - treating as full load with highlights",
+        );
+
+        setDocumentData(doc);
+        setCurrentFile(path);
+        hasLoadedDataRef.current[path] = true;
+
+        // Update version
+        if (changes?.version) {
+          setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
+        }
+
+        // After render, highlight the modified blocks
+        setTimeout(() => {
+          if (changes.modified) {
+            console.log("Highlighting modified blocks:", changes.modified);
+            changes.modified.forEach((blockId) => {
+              const elem = document.querySelector(
+                `[data-block-id="${blockId}"]`,
+              );
+              if (elem) {
+                elem.classList.add("block-updated");
+                setTimeout(() => elem.classList.remove("block-updated"), 1000);
+
+                // Scroll to the first modified block
+                if (changes.modified.indexOf(blockId) === 0) {
+                  elem.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }
+            });
+          }
+        }, 100);
+      } else {
+        // Full document load
+        setDocumentData(doc);
+        setCurrentFile(path);
+        hasLoadedDataRef.current[path] = true;
+        window.history.pushState({}, "", `/${path}`);
+
+        // Update version if available
+        if (changes?.version) {
+          setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
+        }
+      }
     } catch (error) {
       console.error("Failed to load file:", error);
       setDocumentData({
@@ -419,9 +633,9 @@ const LiveServerApp = () => {
   // Handle file changes from WebSocket
   const handleFileChange = useCallback((path) => {
     if (currentFileRef.current === path) {
-      loadFile(path);
+      loadFile(path, true); // isUpdate = true
     } else if (!pinnedRef.current) {
-      loadFile(path);
+      loadFile(path, true); // isUpdate = true
     }
   }, []);
 
@@ -441,6 +655,15 @@ const LiveServerApp = () => {
       document.addEventListener("keydown", handleKeyDown);
       return () => document.removeEventListener("keydown", handleKeyDown);
     }
+  }, []);
+
+  // Inject animation styles
+  useEffect(() => {
+    const styleEl = document.createElement("style");
+    styleEl.textContent = animationStyles;
+    document.head.appendChild(styleEl);
+
+    return () => styleEl.remove();
   }, []);
 
   // Initial load
@@ -475,6 +698,7 @@ const LiveServerApp = () => {
   const handleHome = () => {
     setCurrentFile(null);
     setDocumentData(null);
+    hasLoadedDataRef.current = {}; // Clear all loaded state
     window.history.pushState({}, "", "/");
   };
 
@@ -496,12 +720,23 @@ const LiveServerApp = () => {
       />
 
       <div className={tw("mt-10 relative")}>
-        {loading ? (
+        {currentFile && documentData ? (
+          <>
+            {loading && (
+              <div
+                className={tw(
+                  "absolute inset-0 flex items-center justify-center bg-white/70 z-50",
+                )}
+              >
+                <div className={tw("font-mono text-gray-600")}>Loading...</div>
+              </div>
+            )}
+            <DocumentRenderer key={currentFile} doc={documentData} />
+          </>
+        ) : loading ? (
           <div className={tw("p-10 text-center font-mono text-gray-600")}>
             Loading...
           </div>
-        ) : currentFile && documentData ? (
-          <DocumentRenderer doc={documentData} />
         ) : (
           <FileList files={files} onSelectFile={loadFile} />
         )}
