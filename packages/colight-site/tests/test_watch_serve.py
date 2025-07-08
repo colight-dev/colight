@@ -44,42 +44,40 @@ def test_watch_build_and_serve_creates_output_directory(tmp_path):
                 assert call_args.kwargs["roots"]["/"] == output_dir
 
 
-def test_watch_build_and_serve_generates_index_for_directory(tmp_path):
-    """Test that watch_build_and_serve generates index.html for directory mode."""
+def test_watch_build_and_serve_builds_files_for_directory(tmp_path):
+    """Test that watch_build_and_serve builds individual files for directory mode."""
     input_dir = tmp_path / "input"
     input_dir.mkdir()
 
-    # Create test files
-    (input_dir / "test1.colight.py").write_text("import colight as cl\ncl.sphere()")
-    (input_dir / "test2.colight.py").write_text("import colight as cl\ncl.cube()")
+    # Create test files - use simple content that doesn't require colight
+    (input_dir / "test1.colight.py").write_text("# Test 1\nprint('test1')")
+    (input_dir / "test2.colight.py").write_text("# Test 2\nprint('test2')")
 
     output_dir = tmp_path / "output"
 
-    # Mock the server and watch
+    # Mock the server and thread, but let the initial build happen
     with patch("colight_site.watcher.LiveReloadServer"):
-        with patch("colight_site.watcher.watch") as mock_watch:
-            with patch("colight_site.watcher.threading.Thread"):
-                # Make watch raise KeyboardInterrupt to exit immediately
+        with patch("colight_site.watcher.threading.Thread"):
+            # Mock watch to raise KeyboardInterrupt after initial build
+            with patch("colight_site.watcher.watch") as mock_watch:
                 mock_watch.side_effect = KeyboardInterrupt()
 
                 try:
                     watch_build_and_serve(
                         input_dir,
                         output_dir,
-                        config=BuildConfig(verbose=False),
+                        config=BuildConfig(verbose=False, formats={"html"}),
                         open_url=False,
                     )
                 except KeyboardInterrupt:
                     pass
 
-                # Check index.html was created
-                index_file = output_dir / "index.html"
-                assert index_file.exists()
+                # Check individual files were built
+                assert (output_dir / "test1.html").exists()
+                assert (output_dir / "test2.html").exists()
 
-                # Check index contains the expected elements
-                index_content = index_file.read_text()
-                # The index is now generated as a Colight widget
-                assert "application/x-colight" in index_content
+                # Index is now handled by client-side outliner, not generated as a file
+                assert not (output_dir / "index.html").exists()
 
 
 def test_watch_build_and_serve_defaults_to_html_format(tmp_path):

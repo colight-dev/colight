@@ -198,6 +198,14 @@ class Element:
 
 
 @dataclass(slots=True)
+class BlockInterface:
+    """Interface information for a block (provides/requires symbols)."""
+
+    provides: List[str] = field(default_factory=list)
+    requires: List[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class Block:
     """Execution/render unit containing elements and metadata.
 
@@ -209,6 +217,7 @@ class Block:
     tags: TagSet
     start_line: int
     id: int = field(default=0)
+    interface: BlockInterface = field(default_factory=BlockInterface)
 
     # Cached compiled code (populated on demand)
     _exec_code: Optional[CodeType] = field(default=None, init=False, repr=False)
@@ -241,6 +250,14 @@ class Block:
         return [
             elem for elem in self.elements if elem.kind in ("STATEMENT", "EXPRESSION")
         ]
+
+    def get_code_text(self) -> str:
+        """Get all code as a single string for dependency analysis."""
+        code_parts = []
+        for elem in self.elements:
+            if elem.kind in ("STATEMENT", "EXPRESSION"):
+                code_parts.append(elem.get_source())
+        return "\n".join(code_parts)
 
     def compile_once(self, filename: str = "<string>") -> None:
         """Compile code elements for execution (caches result).

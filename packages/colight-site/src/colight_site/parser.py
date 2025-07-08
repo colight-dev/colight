@@ -357,7 +357,7 @@ def build_document(
 
     blocks = []
 
-    for raw_block in raw_blocks:
+    for block_idx, raw_block in enumerate(raw_blocks):
         # Parse block-level pragmas
         block_pragma = TagSet()
         for pragma_line in raw_block.pragma_lines:
@@ -459,8 +459,27 @@ def build_document(
                 ]
 
             block = Block(
-                elements=elements, tags=block_pragma, start_line=raw_block.start_line
+                elements=elements,
+                tags=block_pragma,
+                start_line=raw_block.start_line,
+                id=block_idx,
             )
+
+            # Analyze dependencies for blocks with code
+            if block.get_code_elements():
+                from .dependency_analyzer import analyze_block_dependencies
+                from .model import BlockInterface
+
+                try:
+                    code_text = block.get_code_text()
+                    provides, requires = analyze_block_dependencies(code_text)
+                    block.interface = BlockInterface(
+                        provides=sorted(list(provides)), requires=sorted(list(requires))
+                    )
+                except Exception:
+                    # If analysis fails, just use empty interface
+                    pass
+
             blocks.append(block)
 
     return Document(blocks=blocks, tags=file_pragma)

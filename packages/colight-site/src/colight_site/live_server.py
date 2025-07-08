@@ -177,6 +177,11 @@ class ApiMiddleware:
 
         self.file_resolver = FileResolver(input_path, include, ignore)
 
+        # Create incremental executor for efficient re-execution
+        from .incremental_executor import IncrementalExecutor
+
+        self.incremental_executor = IncrementalExecutor(verbose=config.verbose)
+
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
         return self.file_resolver.get_all_files()
@@ -263,10 +268,25 @@ class ApiMiddleware:
                     # Generate JSON directly from source
                     from .json_generator import JsonFormGenerator
 
+                    # Get previous document to detect changed blocks
+                    old_doc = self.document_cache.cache.get(file_path, (None, None))[0]
+                    changed_blocks = None
+
+                    if old_doc:
+                        # Detect which blocks have changed based on content_hash
+                        changed_blocks = set()
+                        old_blocks = {b["id"]: b for b in old_doc.get("blocks", [])}
+
+                        # We'll need to parse to get current block IDs and hashes
+                        # For now, let the incremental executor figure it out
+                        changed_blocks = None
+
                     generator = JsonFormGenerator(
-                        config=self.config, visual_store=self.visual_store
+                        config=self.config,
+                        visual_store=self.visual_store,
+                        incremental_executor=self.incremental_executor,
                     )
-                    json_content = generator.generate_json(source_file)
+                    json_content = generator.generate_json(source_file, changed_blocks)
                     doc = json.loads(json_content)
 
                     # Get changes from cache

@@ -71,8 +71,8 @@ def test_on_demand_middleware_builds_files(temp_project, output_dir):
     assert "Example Page" in (output_dir / "example.html").read_text()
 
 
-def test_on_demand_middleware_handles_index(temp_project, output_dir):
-    """Test that OnDemandMiddleware handles index.html generation."""
+def test_on_demand_middleware_skips_index(temp_project, output_dir):
+    """Test that OnDemandMiddleware skips index.html generation (handled by client)."""
     config = BuildConfig(formats={"html"})
 
     def not_found_app(environ, start_response):
@@ -88,8 +88,9 @@ def test_on_demand_middleware_handles_index(temp_project, output_dir):
     # Request index.html
     response = client.get("/index.html")
 
-    # Should generate index page
-    assert (output_dir / "index.html").exists()
+    # Should NOT generate index page (handled by client-side outliner)
+    assert response.status_code == 404
+    assert not (output_dir / "index.html").exists()
 
 
 def test_on_demand_middleware_subdirectories(temp_project, output_dir):

@@ -4,12 +4,12 @@ import json
 import base64
 import hashlib
 import pathlib
-import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from .parser import parse_colight_file
 from .executor import DocumentExecutor
+from .incremental_executor import IncrementalExecutor, ExecutionResult
 from .model import Block, TagSet
 from .builder import BuildConfig
 
@@ -23,9 +23,19 @@ class JsonDocumentGenerator:
 
     config: BuildConfig = field(default_factory=BuildConfig)
     visual_store: Optional[Dict[str, bytes]] = None  # Storage for large visuals
+    incremental_executor: Optional[IncrementalExecutor] = (
+        None  # For incremental execution
+    )
 
-    def generate_json(self, source_path: pathlib.Path) -> str:
-        """Generate JSON representation of a Python file."""
+    def generate_json(
+        self, source_path: pathlib.Path, changed_blocks: Optional[set] = None
+    ) -> str:
+        """Generate JSON representation of a Python file.
+
+        Args:
+            source_path: Path to the source file
+            changed_blocks: Set of block IDs that have changed (for incremental execution)
+        """
         # Parse the file
         document = parse_colight_file(source_path)
 
@@ -33,9 +43,25 @@ class JsonDocumentGenerator:
         if self.config.pragma:
             document.tags = document.tags | TagSet(frozenset(self.config.pragma))
 
-        # Execute document
-        executor = DocumentExecutor(verbose=self.config.verbose)
-        results, _ = executor.execute(document, str(source_path))
+        # Execute document incrementally if we have an executor
+        if self.incremental_executor:
+            block_results = self.incremental_executor.execute_incremental(
+                document, changed_blocks, str(source_path)
+            )
+            # Create a map of block ID to result for easy lookup
+            result_map = {str(block.id): result for block, result in block_results}
+            # Create results list in document order
+            results = []
+            for block in document.blocks:
+                if str(block.id) in result_map:
+                    results.append(result_map[str(block.id)])
+                else:
+                    # Shouldn't happen, but handle gracefully
+                    results.append(ExecutionResult())
+        else:
+            # Fall back to regular execution
+            executor = DocumentExecutor(verbose=self.config.verbose)
+            results, _ = executor.execute(document, str(source_path))
 
         # Generate file hash for unique block IDs
         file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
@@ -124,13 +150,10 @@ class JsonDocumentGenerator:
                 if elem["type"] == "expression":
                     visual_size = len(result.colight_bytes)
                     visual_id = f"{file_hash}-{block.id}"
-                    
+
                     # Include metadata
-                    elem["visual_meta"] = {
-                        "size": visual_size,
-                        "format": "colight"
-                    }
-                    
+                    elem["visual_meta"] = {"size": visual_size, "format": "colight"}
+
                     if visual_size <= VISUAL_INLINE_THRESHOLD:
                         # Inline small visuals as before
                         elem["visual"] = base64.b64encode(result.colight_bytes).decode(
@@ -138,19 +161,21 @@ class JsonDocumentGenerator:
                         )
                     else:
                         # Use content hash for deduplication and caching
-                        visual_hash = hashlib.sha256(result.colight_bytes).hexdigest()[:16]
+                        visual_hash = hashlib.sha256(result.colight_bytes).hexdigest()[
+                            :16
+                        ]
                         visual_key = f"{visual_hash}"
-                        
+
                         # Store large visuals externally (deduped by hash)
                         if self.visual_store is not None:
                             self.visual_store[visual_key] = result.colight_bytes
-                        
+
                         # Store reference for large visuals
                         elem["visual_ref"] = {
                             "id": visual_key,
                             "url": f"/api/visual/{visual_key}",
                             "size": visual_size,
-                            "format": "colight"
+                            "format": "colight",
                         }
                     break
 
@@ -173,12 +198,17 @@ class JsonDocumentGenerator:
 
         return {
             "id": stable_id,
+            "interface": {
+                "provides": block.interface.provides,
+                "requires": block.interface.requires,
+            },
             "interface_hash": interface_hash,
             "content_hash": content_hash,
             "line": block.start_line,
             "ordinal": block_id,
             "elements": elements,
             "error": result.error if result.error else None,
+            "stdout": result.output if result.output else None,
             "showsVisual": block.has_expression_result and tags.show_visuals(),
         }
 
