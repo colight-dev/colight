@@ -403,10 +403,10 @@ export function StateProvider(data) {
   useEffect(() => {
     if (currentAst) {
       globals.colight.instances[id] = $state;
-      if (data.onMounted) {
+      if (data.onMount) {
         setTimeout(() => {
-          $state.whenReady(data.onMounted)
-        }, 10)
+          $state.whenReady(data.onMount);
+        }, 10);
       }
       return () => delete globals.colight.instances[id];
     }

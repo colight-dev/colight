@@ -15,64 +15,14 @@ from werkzeug.middleware.shared_data import SharedDataMiddleware
 from werkzeug.wrappers import Request, Response
 from watchfiles import awatch
 
-import colight_site.api as api
 from colight_site.builder import BuildConfig
+from colight_site.build_helper import BuildHelper
 
-
-def _get_metadata_path(html_path: pathlib.Path) -> pathlib.Path:
-    """Get the metadata file path for an HTML file."""
-    return html_path.with_suffix(".meta.json")
-
-
-def _save_build_metadata(
-    html_path: pathlib.Path, source_path: pathlib.Path, config: BuildConfig
-) -> None:
-    """Save build metadata for caching."""
-    metadata = {
-        "source_mtime": source_path.stat().st_mtime,
-        "pragma": sorted(list(config.pragma)),
-        "source_path": str(source_path),
-    }
-
-    meta_path = _get_metadata_path(html_path)
-    meta_path.write_text(json.dumps(metadata, indent=2))
-
-
-def _load_build_metadata(html_path: pathlib.Path) -> Optional[Dict]:
-    """Load build metadata if it exists."""
-    meta_path = _get_metadata_path(html_path)
-    if meta_path.exists():
-        try:
-            return json.loads(meta_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
-    return None
-
-
-def _should_rebuild_with_metadata(
-    source_path: pathlib.Path, html_path: pathlib.Path, config: BuildConfig
-) -> bool:
-    """Check if rebuild is needed considering metadata."""
-    if not html_path.exists():
-        return True
-
-    metadata = _load_build_metadata(html_path)
-    if not metadata:
-        # No metadata, fall back to mtime check
-        return source_path.stat().st_mtime > html_path.stat().st_mtime
-
-    # Check if source file changed
-    current_mtime = source_path.stat().st_mtime
-    if current_mtime > metadata.get("source_mtime", 0):
-        return True
-
-    # Check if pragma tags changed
-    current_pragmas = sorted(list(config.pragma))
-    cached_pragmas = metadata.get("pragma", [])
-    if current_pragmas != cached_pragmas:
-        return True
-
-    return False
+# Import the helper functions for backward compatibility
+_get_metadata_path = BuildHelper.get_metadata_path
+_save_build_metadata = BuildHelper.save_build_metadata
+_load_build_metadata = BuildHelper.load_build_metadata
+_should_rebuild_with_metadata = BuildHelper.should_rebuild_with_metadata
 
 
 class DocumentCache:
@@ -222,58 +172,21 @@ class ApiMiddleware:
         self.document_cache = document_cache or DocumentCache()
         self.visual_store = {}  # Store visual data by ID
 
+        # Use FileResolver for file operations
+        from .file_resolver import FileResolver
+
+        self.file_resolver = FileResolver(input_path, include, ignore)
+
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
-        from .index_generator import find_colight_files
-
-        combined_ignore = self._get_combined_ignore_patterns()
-        files = find_colight_files(self.input_path, self.include, combined_ignore)
-
-        # Convert to relative paths without extensions
-        if self.input_path.is_file():
-            return [self.input_path.stem]
-        else:
-            paths = []
-            for f in files:
-                rel_path = str(f.relative_to(self.input_path))
-                # Remove .py extension
-                if rel_path.endswith(".py"):
-                    rel_path = rel_path[:-3]
-                # Remove .colight.py extension
-                if rel_path.endswith(".colight"):
-                    rel_path = rel_path[:-8]
-                paths.append(rel_path)
-            return paths
+        return self.file_resolver.get_all_files()
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        default_ignore = [
-            ".*",  # Hidden files/dirs
-            "__pycache__",
-            "*.pyc",
-            "__init__.py",
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-            ".env",
-            "env",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            ".coverage",
-            "htmlcov",
-            ".tox",
-            "*.egg-info",
-            ".idea",
-            ".vscode",
-            ".colight_cache",
-        ]
+        from .constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(default_ignore)
+        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
         return combined_ignore
 
     def __call__(self, environ, start_response):
@@ -291,15 +204,15 @@ class ApiMiddleware:
 
         # Handle /api/index endpoint
         if path == "/api/index":
-            from .index_generator import generate_index_json, build_file_tree_json, find_colight_files
-            
+            from .index_generator import build_file_tree_json, find_colight_files
+
             # Get all colight files
             combined_ignore = self._get_combined_ignore_patterns()
             files = find_colight_files(self.input_path, self.include, combined_ignore)
-            
+
             # Build the tree structure
             tree = build_file_tree_json(files, self.input_path)
-            
+
             response_data = json.dumps(tree, indent=2)
             response = Response(response_data, mimetype="application/json")
             return response(environ, start_response)
@@ -313,24 +226,21 @@ class ApiMiddleware:
                 file_path = file_path + ".html"
 
             # Build the file if needed (reuse OnDemandMiddleware logic)
-            source_file = self._find_source_file(file_path)
+            source_file = self.file_resolver.find_source_file(file_path)
             if source_file:
-                output_file = self._get_output_path(source_file)
+                output_file = self.file_resolver.get_output_path(
+                    source_file, self.output_path
+                )
 
-                if _should_rebuild_with_metadata(source_file, output_file, self.config):
-                    try:
-                        # Ensure output directory exists
-                        output_file.parent.mkdir(parents=True, exist_ok=True)
-                        # Build the file
-                        api.build_file(source_file, output_file, config=self.config)
-                        # Save metadata
-                        _save_build_metadata(output_file, source_file, self.config)
-                    except Exception as e:
-                        error_html = f'<div style="color: red; white-space: pre-wrap; padding: 20px; font-family: monospace;">Build Error:\n{str(e)}</div>'
-                        response = Response(
-                            error_html, status=500, mimetype="text/html"
-                        )
-                        return response(environ, start_response)
+                # Build if needed and handle errors
+                error_result = BuildHelper.build_file_if_stale(
+                    source_file, output_file, self.config, error_format="html"
+                )
+
+                if error_result:
+                    # Build failed, return error HTML directly
+                    response = Response(error_result, status=500, mimetype="text/html")
+                    return response(environ, start_response)
 
                 # Read and return the built HTML
                 if output_file.exists():
@@ -347,13 +257,15 @@ class ApiMiddleware:
             file_path = path[14:]  # Remove /api/document/
 
             # Find source file
-            source_file = self._find_source_file(file_path + ".html")
+            source_file = self.file_resolver.find_source_file(file_path + ".html")
             if source_file:
                 try:
                     # Generate JSON directly from source
                     from .json_generator import JsonFormGenerator
 
-                    generator = JsonFormGenerator(config=self.config, visual_store=self.visual_store)
+                    generator = JsonFormGenerator(
+                        config=self.config, visual_store=self.visual_store
+                    )
                     json_content = generator.generate_json(source_file)
                     doc = json.loads(json_content)
 
@@ -394,7 +306,7 @@ class ApiMiddleware:
         # Handle /api/visual/<visual_id> endpoint
         if path.startswith("/api/visual/"):
             visual_id = path[12:]  # Remove /api/visual/
-            
+
             if visual_id in self.visual_store:
                 visual_data = self.visual_store[visual_id]
                 response = Response(
@@ -402,68 +314,20 @@ class ApiMiddleware:
                     mimetype="application/octet-stream",
                     headers={
                         "Cache-Control": "public, max-age=31536000, immutable",  # Cache forever
-                        "Content-Type": "application/x-colight"
-                    }
+                        "Content-Type": "application/x-colight",
+                    },
                 )
                 return response(environ, start_response)
             else:
                 response = Response(
                     json.dumps({"error": "Visual not found", "id": visual_id}),
                     status=404,
-                    mimetype="application/json"
+                    mimetype="application/json",
                 )
                 return response(environ, start_response)
 
         # Not an API request, pass through
         return self.app(environ, start_response)
-
-    def _find_source_file(self, requested_path: str) -> Optional[pathlib.Path]:
-        """Find the source .py file for a requested path."""
-        # Remove .html extension if present
-        clean_path = requested_path.removesuffix(".html")
-
-        # Check if we're in single file mode
-        if self.input_path.is_file():
-            if clean_path == self.input_path.stem or clean_path == "":
-                return (
-                    self.input_path if self._matches_patterns(self.input_path) else None
-                )
-            return None
-
-        # Try different variations
-        possible_paths = [
-            self.input_path / f"{clean_path}.py",
-            self.input_path / f"{clean_path}.colight.py",
-            self.input_path / clean_path / "__init__.py",
-        ]
-
-        for source_path in possible_paths:
-            if (
-                source_path.exists()
-                and source_path.is_file()
-                and self._matches_patterns(source_path)
-            ):
-                return source_path
-
-        return None
-
-    def _get_output_path(self, source_file: pathlib.Path) -> pathlib.Path:
-        """Get the output path for a source file."""
-        if self.input_path.is_file():
-            return self.output_path / source_file.with_suffix(".html").name
-
-        try:
-            rel_path = source_file.relative_to(self.input_path)
-            return self.output_path / rel_path.with_suffix(".html")
-        except ValueError:
-            return self.output_path / source_file.with_suffix(".html").name
-
-    def _matches_patterns(self, file_path: pathlib.Path) -> bool:
-        """Check if file matches include/ignore patterns."""
-        from .index_generator import matches_patterns
-
-        combined_ignore = self._get_combined_ignore_patterns()
-        return matches_patterns(file_path, self.include, combined_ignore)
 
 
 class OnDemandMiddleware:
@@ -486,125 +350,14 @@ class OnDemandMiddleware:
         self.ignore = ignore
         self._ensure_output_dir()
 
+        # Use FileResolver for file operations
+        from .file_resolver import FileResolver
+
+        self.file_resolver = FileResolver(input_path, include, ignore)
+
     def _ensure_output_dir(self):
         """Ensure output directory exists."""
         self.output_path.mkdir(parents=True, exist_ok=True)
-
-    def _matches_patterns(self, file_path: pathlib.Path) -> bool:
-        """Check if file matches include patterns and doesn't match ignore patterns."""
-        # Use the same pattern matching logic as LiveServer
-        from .index_generator import matches_patterns
-
-        # Get default ignore patterns
-        default_ignore = [
-            ".*",  # Hidden files/dirs
-            "__pycache__",
-            "*.pyc",
-            "__init__.py",  # Ignore __init__ files
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-            ".env",
-            "env",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            ".coverage",
-            "htmlcov",
-            ".tox",
-            "*.egg-info",
-            ".idea",
-            ".vscode",
-            ".colight_cache",
-        ]
-
-        combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(default_ignore)
-
-        return matches_patterns(file_path, self.include, combined_ignore)
-
-    def _find_source_file(self, requested_path: str) -> Optional[pathlib.Path]:
-        """Find the source .py file for a requested .html path."""
-        # Remove leading slash and .html extension
-        clean_path = requested_path.lstrip("/").removesuffix(".html")
-
-        # Check if we're in single file mode
-        if self.input_path.is_file():
-            # For single file mode, only serve if the name matches
-            if clean_path == self.input_path.stem or clean_path == "":
-                return (
-                    self.input_path if self._matches_patterns(self.input_path) else None
-                )
-            return None
-
-        # If empty path, don't try to find source (let index.html be served)
-        if not clean_path:
-            return None
-
-        # Try different variations
-        possible_paths = [
-            self.input_path / f"{clean_path}.py",
-            self.input_path / f"{clean_path}.colight.py",
-            self.input_path / clean_path / "__init__.py",
-        ]
-
-        for source_path in possible_paths:
-            if (
-                source_path.exists()
-                and source_path.is_file()
-                and self._matches_patterns(source_path)
-            ):
-                return source_path
-
-        return None
-
-    def _get_output_path(self, source_file: pathlib.Path) -> pathlib.Path:
-        """Get the output path for a source file, mirroring directory structure."""
-        if self.input_path.is_file():
-            # Single file mode
-            return self.output_path / source_file.with_suffix(".html").name
-
-        # Directory mode - mirror the structure
-        try:
-            rel_path = source_file.relative_to(self.input_path)
-            return self.output_path / rel_path.with_suffix(".html")
-        except ValueError:
-            # Fallback if not relative
-            return self.output_path / source_file.with_suffix(".html").name
-
-    def _get_combined_ignore_patterns(self) -> List[str]:
-        """Get combined default and user ignore patterns."""
-        default_ignore = [
-            ".*",  # Hidden files/dirs
-            "__pycache__",
-            "*.pyc",
-            "__init__.py",  # Ignore __init__ files
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-            ".env",
-            "env",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            ".coverage",
-            "htmlcov",
-            ".tox",
-            "*.egg-info",
-            ".idea",
-            ".vscode",
-            ".colight_cache",
-        ]
-
-        combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(default_ignore)
-        return combined_ignore
 
     def __call__(self, environ, start_response):
         """Handle requests, building files on-demand."""
@@ -629,56 +382,34 @@ class OnDemandMiddleware:
         if not path.endswith(".html"):
             path = f"{path}.html"
 
-        # Try to find source file
-        source_file = self._find_source_file(path)
+        # Try to find source file using FileResolver
+        # Remove leading slash for consistency
+        clean_path = path.lstrip("/")
+        source_file = self.file_resolver.find_source_file(clean_path)
 
         if self.config.verbose:
             print(f"Looking for source file for path: {path}")
             print(f"Found source file: {source_file}")
 
         if source_file:
-            output_file = self._get_output_path(source_file)
+            output_file = self.file_resolver.get_output_path(
+                source_file, self.output_path
+            )
 
             if self.config.verbose:
                 print(f"Output file will be: {output_file}")
 
-            # Build if needed
-            if _should_rebuild_with_metadata(source_file, output_file, self.config):
-                try:
-                    print(f"Building {source_file} -> {output_file}")
+            # Build if needed using BuildHelper
+            from .build_helper import BuildHelper
 
-                    # Ensure output directory exists
-                    output_file.parent.mkdir(parents=True, exist_ok=True)
+            error_result = BuildHelper.build_file_if_stale(
+                source_file, output_file, self.config, error_format="html"
+            )
 
-                    # Build the file
-                    api.build_file(source_file, output_file, config=self.config)
-                    # Save metadata
-                    _save_build_metadata(output_file, source_file, self.config)
-
-                    if self.config.verbose:
-                        print(f"Built {source_file} successfully")
-
-                except Exception as e:
-                    print(f"Error building {source_file}: {e}")
-                    error_html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Build Error</title>
-                        <style>
-                            body {{ font-family: monospace; margin: 40px; }}
-                            .error {{ color: red; white-space: pre-wrap; }}
-                        </style>
-                    </head>
-                    <body>
-                        <h1>Build Error</h1>
-                        <p>Failed to build: {source_file}</p>
-                        <pre class="error">{str(e)}</pre>
-                    </body>
-                    </html>
-                    """
-                    response = Response(error_html, status=500, mimetype="text/html")
-                    return response(environ, start_response)
+            if error_result:
+                # Build failed, return error
+                response = Response(error_result, status=500, mimetype="text/html")
+                return response(environ, start_response)
 
         # Continue with normal app handling (will serve from cache or 404)
         return self.app(environ, start_response)
@@ -901,33 +632,10 @@ class LiveServer:
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        default_ignore = [
-            ".*",  # Hidden files/dirs
-            "__pycache__",
-            "*.pyc",
-            "__init__.py",  # Ignore __init__ files
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-            ".env",
-            "env",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            ".coverage",
-            "htmlcov",
-            ".tox",
-            "*.egg-info",
-            ".idea",
-            ".vscode",
-            ".colight_cache",
-        ]
+        from .constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(default_ignore)
+        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
         return combined_ignore
 
     async def serve(self):

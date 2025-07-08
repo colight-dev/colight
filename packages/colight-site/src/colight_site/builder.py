@@ -314,23 +314,16 @@ def build_directory(
     if ignore is None:
         ignore = []
 
-    # Find all Python files matching patterns
-    python_files = []
-    for include_pattern in include:
-        for path in input_dir.rglob(include_pattern):
-            if path.suffix == ".py":
-                # Always ignore __pycache__ directories and __init__.py files
-                if "__pycache__" in path.parts or path.name == "__init__.py":
-                    continue
+    # Use index_generator to find files with proper pattern matching
+    from .index_generator import find_colight_files
+    from .constants import DEFAULT_IGNORE_PATTERNS
 
-                # Check if file should be ignored by user patterns
-                should_ignore = False
-                for ignore_pattern in ignore:
-                    if path.match(ignore_pattern):
-                        should_ignore = True
-                        break
-                if not should_ignore:
-                    python_files.append(path)
+    # Combine user ignore patterns with defaults
+    combined_ignore = list(ignore)
+    combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
+
+    # Find all matching files
+    python_files = find_colight_files(input_dir, include, combined_ignore)
 
     # Remove duplicates and sort
     python_files = sorted(set(python_files))
