@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useCallback, useRef, useTransition } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  useTransition,
+} from "react";
 import ReactDOM from "react-dom/client";
 import { DraggableViewer } from "../../packages/colight/src/colight/js/widget.jsx";
 import { parseColightScript } from "../../packages/colight/src/colight/js/format.js";
@@ -13,43 +19,72 @@ const HISTORY_DEBOUNCE_DELAY = 300; // ms
 
 const splitPath = (path) => path.split("/").filter(Boolean);
 
+// Get the base path for the application (handles sub-path hosting)
+const getBasePath = () => {
+  // In production, this might be set via a meta tag or global variable
+  return window.COLIGHT_BASE_PATH || "";
+};
+
+// Extract the file path from the URL, accounting for base path
+const getFilePathFromUrl = () => {
+  const basePath = getBasePath();
+  const pathname = window.location.pathname;
+
+  if (basePath && pathname.startsWith(basePath)) {
+    return pathname.slice(basePath.length + 1); // +1 for the trailing slash
+  }
+
+  return pathname.slice(1); // Default behavior
+};
+
 // ========== Document Processing ==========
 
 const applyIncrementalUpdate = (currentDoc, newDoc, changes) => {
-  // Create a map of modified blocks for quick lookup
-  const modifiedBlocksMap = new Map();
-  newDoc.blocks.forEach((block) => {
-    if (changes.modified.includes(block.id)) {
-      modifiedBlocksMap.set(block.id, block);
-    }
-  });
+  // Quick check - if nothing changed, return same reference
+  if (
+    (!changes.modified || changes.modified.length === 0) &&
+    (!changes.removed || changes.removed.length === 0) &&
+    (!changes.moved || changes.moved.length === 0)
+  ) {
+    return currentDoc;
+  }
 
-  // Check if any blocks actually need updating
-  let hasChanges = false;
+  // Create maps for efficient lookups
+  const oldBlocksMap = new Map(currentDoc.blocks.map((b) => [b.id, b]));
+  const removedSet = new Set(changes.removed || []);
+  const modifiedSet = new Set(changes.modified || []);
 
-  // Create new blocks array
-  const updatedBlocks = currentDoc.blocks
-    .filter((block) => {
-      if (changes.removed?.includes(block.id)) {
-        hasChanges = true;
-        return false;
+  // Build the new blocks array respecting the order from newDoc
+  // This handles: new blocks, moved blocks, and maintains correct order
+  const updatedBlocks = newDoc.blocks
+    .map((newBlock) => {
+      const blockId = newBlock.id;
+
+      // Skip removed blocks (shouldn't be in newDoc, but be defensive)
+      if (removedSet.has(blockId)) {
+        return null;
       }
-      return true;
+
+      // If it's modified or new, use the new block data
+      if (modifiedSet.has(blockId) || !oldBlocksMap.has(blockId)) {
+        return newBlock;
+      }
+
+      // For unmodified blocks, preserve the old reference for React optimization
+      return oldBlocksMap.get(blockId);
     })
-    .map((block) => {
-      if (modifiedBlocksMap.has(block.id)) {
-        hasChanges = true;
-        return modifiedBlocksMap.get(block.id);
-      }
-      return block;
-    });
+    .filter(Boolean); // Remove any nulls
 
-  // If nothing changed, return the same object reference
+  // Check if we actually made any changes
+  const hasChanges =
+    updatedBlocks.length !== currentDoc.blocks.length ||
+    updatedBlocks.some((block, i) => block !== currentDoc.blocks[i]);
+
   if (!hasChanges) {
     return currentDoc;
   }
 
-  // Only create new object if there were actual changes
+  // Return new document with updated blocks
   return {
     ...currentDoc,
     blocks: updatedBlocks,
@@ -58,7 +93,7 @@ const applyIncrementalUpdate = (currentDoc, newDoc, changes) => {
 
 // ========== Content Rendering Components ==========
 
-const ColightVisual = ({ data, dataRef, meta }) => {
+const ColightVisual = ({ data, dataRef }) => {
   const containerRef = useRef(null);
   const [colightData, setColightData] = useState(null);
   const [pendingColightData, setPendingColightData] = useState(null);
@@ -66,15 +101,20 @@ const ColightVisual = ({ data, dataRef, meta }) => {
   const [loadedId, setLoadedId] = useState(null);
   const [minHeight, setMinHeight] = useState(0);
   const keyRef = useRef(0);
-  
-  console.log('ColightVisual state:', { isLoading, hasColightData: !!colightData, hasPending: !!pendingColightData, dataRef });
+
+  console.log("ColightVisual state:", {
+    isLoading,
+    hasColightData: !!colightData,
+    hasPending: !!pendingColightData,
+    dataRef,
+  });
 
   // Helper to convert blob to base64
   const blobToBase64 = async (blob) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result.split(',')[1];
+        const base64 = reader.result.split(",")[1];
         resolve(base64);
       };
       reader.onerror = reject;
@@ -85,7 +125,7 @@ const ColightVisual = ({ data, dataRef, meta }) => {
   // Load visual data
   const loadVisualData = async () => {
     if (!dataRef || !dataRef.url) return;
-    
+
     setIsLoading(true);
     try {
       const response = await fetch(dataRef.url);
@@ -93,8 +133,19 @@ const ColightVisual = ({ data, dataRef, meta }) => {
         throw new Error(`Failed to load visual: ${response.status}`);
       }
       const blob = await response.blob();
-      const base64 = await blobToBase64(blob);
-      const parsed = parseColightScript({ textContent: base64 });
+      // Check if parseColightScript supports ArrayBuffer/Uint8Array
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      // Try to use Uint8Array directly, fall back to base64 if needed
+      let parsed;
+      try {
+        parsed = parseColightScript({ buffer: uint8Array });
+      } catch (e) {
+        // Fall back to base64 if direct buffer parsing fails
+        const base64 = await blobToBase64(blob);
+        parsed = parseColightScript({ textContent: base64 });
+      }
       setPendingColightData(parsed);
       setLoadedId(dataRef.id);
     } catch (error) {
@@ -123,28 +174,33 @@ const ColightVisual = ({ data, dataRef, meta }) => {
             observer.disconnect();
           }
         },
-        { rootMargin: '100px' }
+        { rootMargin: "100px" },
       );
-      
-      if (containerRef.current) {
-        observer.observe(containerRef.current);
+
+      const element = containerRef.current;
+      if (element) {
+        observer.observe(element);
       }
-      
-      return () => observer.disconnect();
+
+      return () => {
+        if (element) {
+          observer.unobserve(element);
+        }
+        observer.disconnect();
+      };
     }
   }, [data, dataRef, loadedId]);
-  
+
   // Update the displayed visual when loading is complete
   useEffect(() => {
     if (!isLoading && pendingColightData) {
-      console.log('Swapping visual data');
+      console.log("Swapping visual data");
       setColightData(pendingColightData);
-      setMinHeight(containerRef.current?.offsetHeight || 0)
+      setMinHeight(containerRef.current?.offsetHeight || 0);
       keyRef.current += 1;
       setPendingColightData(null);
     }
   }, [isLoading, pendingColightData]);
-
 
   // Show placeholder only if we have nothing to show yet
   if (!colightData && !isLoading) {
@@ -152,14 +208,31 @@ const ColightVisual = ({ data, dataRef, meta }) => {
   }
 
   return (
-    <div ref={containerRef} style={{minHeight}} className="colight-embed mb-4 relative">
+    <div
+      ref={containerRef}
+      style={{ minHeight }}
+      className="colight-embed mb-4 relative"
+    >
       {/* Show existing visual if we have one */}
-      {colightData && <DraggableViewer key={keyRef.current} data={{...colightData, onMount: () => setMinHeight(0)}} />}
-      
+      {colightData && (
+        <DraggableViewer
+          key={keyRef.current}
+          data={{ ...colightData, onMount: () => setMinHeight(0) }}
+        />
+      )}
+
       {/* Show loading overlay when fetching new visual */}
       {isLoading && (
-        <div className={tw("absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded")}>
-          <div className={tw("animate-spin h-8 w-8 border-4 border-gray-300 border-t-gray-600 rounded-full")} />
+        <div
+          className={tw(
+            "absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded",
+          )}
+        >
+          <div
+            className={tw(
+              "animate-spin h-8 w-8 border-4 border-gray-300 border-t-gray-600 rounded-full",
+            )}
+          />
         </div>
       )}
     </div>
@@ -184,13 +257,13 @@ const ElementRenderer = ({ element }) => {
             <code className="language-python">{element.value}</code>
           </pre>
           {/* Render visual if it's an expression with visual data */}
-          {element.type === "expression" && (element.visual || element.visual_ref) && (
-            <ColightVisual 
-              data={element.visual} 
-              dataRef={element.visual_ref}
-              meta={element.visual_meta}
-            />
-          )}
+          {element.type === "expression" &&
+            (element.visual || element.visual_ref) && (
+              <ColightVisual
+                data={element.visual}
+                dataRef={element.visual_ref}
+              />
+            )}
         </>
       );
 
@@ -207,12 +280,22 @@ const BlockRenderer = ({ block }) => {
   let currentCodeGroup = [];
 
   block.elements.forEach((element) => {
-    if (!element.show) return;
-
+    // Process all elements to maintain proper grouping boundaries
     if (element.type === "statement" || element.type === "expression") {
-      currentCodeGroup.push(element);
+      if (element.show) {
+        currentCodeGroup.push(element);
+      } else {
+        // Hidden code element - still breaks the group
+        if (currentCodeGroup.length > 0) {
+          groupedElements.push({
+            type: "code-group",
+            elements: currentCodeGroup,
+          });
+          currentCodeGroup = [];
+        }
+      }
     } else {
-      // If we have accumulated code elements, add them as a group
+      // Non-code element (prose) - always breaks the code group
       if (currentCodeGroup.length > 0) {
         groupedElements.push({
           type: "code-group",
@@ -220,8 +303,10 @@ const BlockRenderer = ({ block }) => {
         });
         currentCodeGroup = [];
       }
-      // Add the non-code element
-      groupedElements.push(element);
+      // Only add visible non-code elements
+      if (element.show) {
+        groupedElements.push(element);
+      }
     }
   });
 
@@ -256,7 +341,6 @@ const BlockRenderer = ({ block }) => {
                     key={`visual-${idx}-${elIdx}`}
                     data={el.visual}
                     dataRef={el.visual_ref}
-                    meta={el.visual_meta}
                   />
                 ) : null,
               )}
@@ -280,44 +364,44 @@ const BlockRenderer = ({ block }) => {
 };
 
 const DocumentRenderer = ({ doc }) => {
-    const docRef = useRef();
+  const docRef = useRef();
 
-    useEffect(() => {
-      // Run bylight on the entire document after render
-      if (docRef.current) {
-        window.bylight({ target: docRef.current });
-      }
-    }, [doc]); // Re-run when doc changes 
-
-    if (!doc) return null;
-
-    // Debug duplicate keys
-    const blockIds = doc.blocks.map((b) => b.id);
-    const duplicates = blockIds.filter(
-      (id, index) => blockIds.indexOf(id) !== index,
-    );
-    if (duplicates.length > 0) {
-      console.warn("Duplicate block IDs found:", duplicates);
-      console.log("All block IDs:", blockIds);
+  useEffect(() => {
+    // Run bylight on the entire document after render
+    if (docRef.current) {
+      window.bylight({ target: docRef.current });
     }
+  }, [doc]); // Re-run when doc changes
 
-    return (
-      <div
-        ref={docRef}
-        className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
-      >
-        {doc.blocks.map((block) => (
-          <BlockRenderer key={block.id} block={block} />
-        ))}
-      </div>
-    );
+  if (!doc) return null;
+
+  // Debug duplicate keys
+  const blockIds = doc.blocks.map((b) => b.id);
+  const duplicates = blockIds.filter(
+    (id, index) => blockIds.indexOf(id) !== index,
+  );
+  if (duplicates.length > 0) {
+    console.warn("Duplicate block IDs found:", duplicates);
+    console.log("All block IDs:", blockIds);
   }
+
+  return (
+    <div
+      ref={docRef}
+      className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
+    >
+      {doc.blocks.map((block) => (
+        <BlockRenderer key={block.id} block={block} />
+      ))}
+    </div>
+  );
+};
 
 // ========== Home Page Component ==========
 
 const HomePage = () => {
   const [watchingPath, setWatchingPath] = useState("");
-  
+
   useEffect(() => {
     // Get the directory being watched from the API
     const getWatchingPath = async () => {
@@ -331,14 +415,15 @@ const HomePage = () => {
         console.error("Failed to get watching path:", err);
       }
     };
-    
+
     getWatchingPath();
   }, []);
-  
+
   return (
     <div className={tw("p-10 text-center font-mono text-gray-600")}>
       <div className={tw("text-xl")}>
-        Watching <span className={tw("font-bold")}>{watchingPath || "..."}</span>
+        Watching{" "}
+        <span className={tw("font-bold")}>{watchingPath || "..."}</span>
       </div>
     </div>
   );
@@ -346,37 +431,47 @@ const HomePage = () => {
 
 // ========== UI Components ==========
 
-const TopBar = ({ currentFile, connected, focusedPath, setFocusedPath, browsingDirectory, setBrowsingDirectory, isLoading }) => {
+const TopBar = ({
+  currentFile,
+  connected,
+  focusedPath,
+  setFocusedPath,
+  browsingDirectory,
+  setBrowsingDirectory,
+  isLoading,
+}) => {
   // Build breadcrumb
   const buildBreadcrumb = () => {
     const currentPath = browsingDirectory || currentFile;
     if (!currentPath) return null;
-    
+
     const parts = splitPath(currentPath);
     const isBrowsingDirectory = !!browsingDirectory;
-    
+
     return (
       <div className={tw("flex items-center text-sm font-mono")}>
         <button
           onClick={() => setBrowsingDirectory("/")}
-          className={tw("px-1 py-0.5 rounded transition-colors hover:bg-gray-200")}
+          className={tw(
+            "px-1 py-0.5 rounded transition-colors hover:bg-gray-200",
+          )}
           title="Browse root directory"
         >
           root
         </button>
-        
+
         {parts.map((part, index) => {
           const isLastPart = index === parts.length - 1;
           const isFile = !isBrowsingDirectory && isLastPart;
           const pathSegments = parts.slice(0, index + 1);
           const segmentPath = pathSegments.join("/");
           const segmentPathWithSlash = segmentPath + "/";
-          
+
           // Check if this item is focused
-          const isFocused = isFile 
-            ? focusedPath === currentFile 
+          const isFocused = isFile
+            ? focusedPath === currentFile
             : focusedPath === segmentPathWithSlash;
-          
+
           return (
             <React.Fragment key={index}>
               <span className={tw("mx-1 text-gray-500")}>/</span>
@@ -390,8 +485,16 @@ const TopBar = ({ currentFile, connected, focusedPath, setFocusedPath, browsingD
                     setBrowsingDirectory(segmentPathWithSlash);
                   }
                 }}
-                className={tw(`px-1 py-0.5 rounded transition-colors hover:bg-gray-200 ${isFocused ? "font-bold" : ""}`)}
-                title={isFile ? (isFocused ? "Click to unfocus" : "Click to focus") : "Browse this directory"}
+                className={tw(
+                  `px-1 py-0.5 rounded transition-colors hover:bg-gray-200 ${isFocused ? "font-bold" : ""}`,
+                )}
+                title={
+                  isFile
+                    ? isFocused
+                      ? "Click to unfocus"
+                      : "Click to focus"
+                    : "Browse this directory"
+                }
               >
                 {isFocused && <span className={tw("mr-1")}>📌</span>}
                 {part}
@@ -399,23 +502,27 @@ const TopBar = ({ currentFile, connected, focusedPath, setFocusedPath, browsingD
             </React.Fragment>
           );
         })}
-        {isBrowsingDirectory && <span className={tw("mx-1 text-gray-500")}>/</span>}
+        {isBrowsingDirectory && (
+          <span className={tw("mx-1 text-gray-500")}>/</span>
+        )}
       </div>
     );
   };
-  
+
   return (
     <div
       className={tw(
         "fixed top-0 left-0 right-0 h-10 bg-gray-100 border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
       )}
     >
-      <div className={tw("flex-1")}>
-        {buildBreadcrumb()}
-      </div>
+      <div className={tw("flex-1")}>{buildBreadcrumb()}</div>
       {isLoading ? (
         <div className={tw("ml-2.5")}>
-          <div className={tw("animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full")} />
+          <div
+            className={tw(
+              "animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full",
+            )}
+          />
         </div>
       ) : (
         <div
@@ -428,7 +535,6 @@ const TopBar = ({ currentFile, connected, focusedPath, setFocusedPath, browsingD
     </div>
   );
 };
-
 
 // ========== WebSocket Hook ==========
 
@@ -499,22 +605,28 @@ const LiveServerApp = () => {
 
   // Track if we're still initializing
   const [isInitialized, setIsInitialized] = useState(false);
-  
+
   // Debounce timer for history updates
   const historyUpdateTimerRef = useRef(null);
 
   // Keep refs in sync
   useEffect(() => {
     currentFileRef.current = currentFile;
-    
+
+    // Clean up pending versions when file changes
+    if (!currentFile) {
+      // Clear all pending versions when no file is selected
+      pendingVersionRef.current = {};
+    }
+
     // Don't update URL during initial load
     if (!isInitialized) return;
-    
+
     // Clear existing timer
     if (historyUpdateTimerRef.current) {
       clearTimeout(historyUpdateTimerRef.current);
     }
-    
+
     // Debounce history updates
     historyUpdateTimerRef.current = setTimeout(() => {
       // Update URL when current file changes
@@ -539,7 +651,7 @@ const LiveServerApp = () => {
         window.history.pushState({}, "", url.toString());
       }
     }, HISTORY_DEBOUNCE_DELAY);
-    
+
     return () => {
       if (historyUpdateTimerRef.current) {
         clearTimeout(historyUpdateTimerRef.current);
@@ -551,11 +663,10 @@ const LiveServerApp = () => {
     focusedPathRef.current = focusedPath;
   }, [focusedPath]);
 
-
   // Load directory tree
   const loadDirectoryTree = async () => {
     if (directoryTree) return; // Already loaded
-    
+
     setIsLoadingTree(true);
     try {
       const response = await fetch("/api/index");
@@ -585,11 +696,11 @@ const LiveServerApp = () => {
   const fetchDocument = async (path) => {
     const response = await fetch(`/api/document/${path}`);
     const doc = await response.json();
-    
+
     if (doc.error) {
       throw new Error(doc.error);
     }
-    
+
     return doc;
   };
 
@@ -628,7 +739,10 @@ const LiveServerApp = () => {
         const pendingVersion = pendingVersionRef.current[path] || 0;
 
         // Ignore out-of-order updates or updates that arrive during pending updates
-        if (changes.version <= currentVersion || changes.version <= pendingVersion) {
+        if (
+          changes.version <= currentVersion ||
+          changes.version <= pendingVersion
+        ) {
           console.log("Ignoring out-of-order or stale update", {
             newVersion: changes.version,
             currentVersion,
@@ -647,7 +761,9 @@ const LiveServerApp = () => {
           setDocumentData((current) => {
             const updated = applyIncrementalUpdate(current, doc, changes);
             if (updated === current) {
-              console.log("No actual changes, returning same document reference");
+              console.log(
+                "No actual changes, returning same document reference",
+              );
             }
             return updated;
           });
@@ -656,22 +772,30 @@ const LiveServerApp = () => {
         // Update version and clear pending
         setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
         delete pendingVersionRef.current[path];
-        
+
+        // Clean up old pending versions to prevent memory leak
+        const currentPaths = new Set([currentFileRef.current]);
+        Object.keys(pendingVersionRef.current).forEach((key) => {
+          if (!currentPaths.has(key)) {
+            delete pendingVersionRef.current[key];
+          }
+        });
+
         // If only one block was modified, scroll to it
         if (changes.modified && changes.modified.length === 1) {
           setTimeout(() => {
             const blockId = changes.modified[0];
-            let element = document.querySelector(`[data-block-id="${blockId}"]`);
+            let element = document.querySelector(
+              `[data-block-id="${blockId}"]`,
+            );
             if (element) {
-              element = element.querySelector('.colight-embed') || element;
-              console.log("the element", element, blockId)
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              element = element.querySelector(".colight-embed") || element;
+              console.log("the element", element, blockId);
+              element.scrollIntoView({ behavior: "smooth", block: "center" });
             }
           }, 100); // Small delay to ensure DOM is updated
         }
-        
-      } else  {
-
+      } else {
         startTransition(() => {
           setDocumentData(doc);
           setCurrentFile(path);
@@ -697,13 +821,13 @@ const LiveServerApp = () => {
   // Handle file changes from WebSocket
   const handleFileChange = useCallback((path) => {
     const focus = focusedPathRef.current;
-    
+
     // If no focus, navigate to all changes
     if (!focus) {
       loadFile(path, true);
       return;
     }
-    
+
     // If focused on a specific file, only update if it's that file
     if (!focus.endsWith("/")) {
       if (path === focus) {
@@ -711,38 +835,38 @@ const LiveServerApp = () => {
       }
       return;
     }
-    
+
     // If focused on a directory, check if file is within it
     const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
     const normalizedFocus = focus.startsWith("/") ? focus.slice(1) : focus;
-    
+
     if (normalizedPath.startsWith(normalizedFocus)) {
       loadFile(path, true);
     } else {
-      console.log(`Ignoring file change outside focus: ${path} (focus: ${focus})`);
+      console.log(
+        `Ignoring file change outside focus: ${path} (focus: ${focus})`,
+      );
     }
   }, []);
 
   // Setup WebSocket connection
   const connected = useWebSocket(handleFileChange);
 
-
   // Initial load
   useEffect(() => {
-
     // Handle initial route and focus state
-    const path = window.location.pathname.slice(1);
+    const path = getFilePathFromUrl();
     const params = new URLSearchParams(window.location.search);
     const focus = params.get("focus");
-    
+
     if (focus) {
       setFocusedPath(focus);
     }
-    
+
     if (path) {
       loadFile(path);
     }
-    
+
     // Mark as initialized after initial load
     setTimeout(() => setIsInitialized(true), 0);
   }, []);
@@ -750,13 +874,13 @@ const LiveServerApp = () => {
   // Handle popstate (browser back/forward)
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.pathname.slice(1);
+      const path = getFilePathFromUrl();
       const params = new URLSearchParams(window.location.search);
       const focus = params.get("focus");
-      
+
       // Restore focus state
       setFocusedPath(focus);
-      
+
       if (path) {
         loadFile(path);
       } else {
@@ -772,7 +896,6 @@ const LiveServerApp = () => {
       return () => window.removeEventListener("popstate", handlePopState);
     }
   }, []);
-
 
   return (
     <>
