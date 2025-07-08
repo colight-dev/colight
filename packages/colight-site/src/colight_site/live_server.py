@@ -220,6 +220,7 @@ class ApiMiddleware:
         self.include = include
         self.ignore = ignore
         self.document_cache = document_cache or DocumentCache()
+        self.visual_store = {}  # Store visual data by ID
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
@@ -352,7 +353,7 @@ class ApiMiddleware:
                     # Generate JSON directly from source
                     from .json_generator import JsonFormGenerator
 
-                    generator = JsonFormGenerator(config=self.config)
+                    generator = JsonFormGenerator(config=self.config, visual_store=self.visual_store)
                     json_content = generator.generate_json(source_file)
                     doc = json.loads(json_content)
 
@@ -389,6 +390,29 @@ class ApiMiddleware:
                 mimetype="application/json",
             )
             return response(environ, start_response)
+
+        # Handle /api/visual/<visual_id> endpoint
+        if path.startswith("/api/visual/"):
+            visual_id = path[12:]  # Remove /api/visual/
+            
+            if visual_id in self.visual_store:
+                visual_data = self.visual_store[visual_id]
+                response = Response(
+                    visual_data,
+                    mimetype="application/octet-stream",
+                    headers={
+                        "Cache-Control": "public, max-age=31536000, immutable",  # Cache forever
+                        "Content-Type": "application/x-colight"
+                    }
+                )
+                return response(environ, start_response)
+            else:
+                response = Response(
+                    json.dumps({"error": "Visual not found", "id": visual_id}),
+                    status=404,
+                    mimetype="application/json"
+                )
+                return response(environ, start_response)
 
         # Not an API request, pass through
         return self.app(environ, start_response)

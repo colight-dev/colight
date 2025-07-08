@@ -11,14 +11,7 @@ import "./bylight.js";
 const WEBSOCKET_RECONNECT_DELAY = 1000; // ms
 const HISTORY_DEBOUNCE_DELAY = 300; // ms
 
-// ========== Path Utilities ==========
-
-const stripExt = (path) => path.replace(/\.py$/, "");
 const splitPath = (path) => path.split("/").filter(Boolean);
-const displayName = (path) => {
-  const parts = splitPath(path);
-  return parts[parts.length - 1] || "";
-};
 
 // ========== Document Processing ==========
 
@@ -65,27 +58,110 @@ const applyIncrementalUpdate = (currentDoc, newDoc, changes) => {
 
 // ========== Content Rendering Components ==========
 
-const ColightVisual = ({ data }) => {
+const ColightVisual = ({ data, dataRef, meta }) => {
+  const containerRef = useRef(null);
   const [colightData, setColightData] = useState(null);
+  const [pendingColightData, setPendingColightData] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadedId, setLoadedId] = useState(null);
+  const [minHeight, setMinHeight] = useState(0);
+  const keyRef = useRef(0);
+  
+  console.log('ColightVisual state:', { isLoading, hasColightData: !!colightData, hasPending: !!pendingColightData, dataRef });
+
+  // Helper to convert blob to base64
+  const blobToBase64 = async (blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Load visual data
+  const loadVisualData = async () => {
+    if (!dataRef || !dataRef.url) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await fetch(dataRef.url);
+      if (!response.ok) {
+        throw new Error(`Failed to load visual: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const base64 = await blobToBase64(blob);
+      const parsed = parseColightScript({ textContent: base64 });
+      setPendingColightData(parsed);
+      setLoadedId(dataRef.id);
+    } catch (error) {
+      console.error("Error loading visual:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (data) {
+      // We have inline data - parse it directly
       try {
         const parsed = parseColightScript({ textContent: data });
         setColightData(parsed);
+        setPendingColightData(null);
       } catch (error) {
         console.error("Error parsing Colight visual:", error);
       }
+    } else if (dataRef && dataRef.id !== loadedId) {
+      // Set up intersection observer for lazy loading
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting) {
+            loadVisualData();
+            observer.disconnect();
+          }
+        },
+        { rootMargin: '100px' }
+      );
+      
+      if (containerRef.current) {
+        observer.observe(containerRef.current);
+      }
+      
+      return () => observer.disconnect();
     }
-  }, [data]);
+  }, [data, dataRef, loadedId]);
+  
+  // Update the displayed visual when loading is complete
+  useEffect(() => {
+    if (!isLoading && pendingColightData) {
+      console.log('Swapping visual data');
+      setColightData(pendingColightData);
+      setMinHeight(containerRef.current?.offsetHeight || 0)
+      keyRef.current += 1;
+      setPendingColightData(null);
+    }
+  }, [isLoading, pendingColightData]);
 
-  if (!colightData) {
-    return <div className="colight-embed mb-4" />;
+
+  // Show placeholder only if we have nothing to show yet
+  if (!colightData && !isLoading) {
+    return <div ref={containerRef} className="colight-embed mb-4" />;
   }
 
   return (
-    <div className="colight-embed mb-4">
-      <DraggableViewer data={colightData} />
+    <div ref={containerRef} style={{minHeight}} className="colight-embed mb-4 relative">
+      {/* Show existing visual if we have one */}
+      {colightData && <DraggableViewer key={keyRef.current} data={{...colightData, onMount: () => setMinHeight(0)}} />}
+      
+      {/* Show loading overlay when fetching new visual */}
+      {isLoading && (
+        <div className={tw("absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded")}>
+          <div className={tw("animate-spin h-8 w-8 border-4 border-gray-300 border-t-gray-600 rounded-full")} />
+        </div>
+      )}
     </div>
   );
 };
@@ -108,8 +184,12 @@ const ElementRenderer = ({ element }) => {
             <code className="language-python">{element.value}</code>
           </pre>
           {/* Render visual if it's an expression with visual data */}
-          {element.type === "expression" && element.visual && (
-            <ColightVisual data={element.visual} />
+          {element.type === "expression" && (element.visual || element.visual_ref) && (
+            <ColightVisual 
+              data={element.visual} 
+              dataRef={element.visual_ref}
+              meta={element.visual_meta}
+            />
           )}
         </>
       );
@@ -171,10 +251,12 @@ const BlockRenderer = ({ block }) => {
               </pre>
               {/* Render visuals for any expressions in the group */}
               {item.elements.map((el, elIdx) =>
-                el.type === "expression" && el.visual ? (
+                el.type === "expression" && (el.visual || el.visual_ref) ? (
                   <ColightVisual
                     key={`visual-${idx}-${elIdx}`}
                     data={el.visual}
+                    dataRef={el.visual_ref}
+                    meta={el.visual_meta}
                   />
                 ) : null,
               )}
@@ -444,7 +526,7 @@ const LiveServerApp = () => {
         } else {
           url.searchParams.delete("focus");
         }
-        window.history.replaceState({}, "", url.toString());
+        window.history.pushState({}, "", url.toString());
       } else if (window.location.pathname !== "/") {
         // No file selected, go to root
         const url = new URL(window.location);
@@ -454,7 +536,7 @@ const LiveServerApp = () => {
         } else {
           url.searchParams.delete("focus");
         }
-        window.history.replaceState({}, "", url.toString());
+        window.history.pushState({}, "", url.toString());
       }
     }, HISTORY_DEBOUNCE_DELAY);
     
@@ -574,6 +656,19 @@ const LiveServerApp = () => {
         // Update version and clear pending
         setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
         delete pendingVersionRef.current[path];
+        
+        // If only one block was modified, scroll to it
+        if (changes.modified && changes.modified.length === 1) {
+          setTimeout(() => {
+            const blockId = changes.modified[0];
+            let element = document.querySelector(`[data-block-id="${blockId}"]`);
+            if (element) {
+              element = element.querySelector('.colight-embed') || element;
+              console.log("the element", element, blockId)
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 100); // Small delay to ensure DOM is updated
+        }
         
       } else  {
 

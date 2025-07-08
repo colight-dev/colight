@@ -4,7 +4,8 @@ import json
 import base64
 import hashlib
 import pathlib
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
 from .parser import parse_colight_file
@@ -12,12 +13,16 @@ from .executor import DocumentExecutor
 from .model import Block, TagSet
 from .builder import BuildConfig
 
+# Threshold for inline vs external visual storage
+VISUAL_INLINE_THRESHOLD = 50 * 1024  # 50KB
+
 
 @dataclass
 class JsonDocumentGenerator:
     """Convert parsed documents to JSON representation for client-side rendering."""
 
     config: BuildConfig = field(default_factory=BuildConfig)
+    visual_store: Optional[Dict[str, bytes]] = None  # Storage for large visuals
 
     def generate_json(self, source_path: pathlib.Path) -> str:
         """Generate JSON representation of a Python file."""
@@ -117,10 +122,36 @@ class JsonDocumentGenerator:
             # Find the last expression element in our elements array
             for elem in reversed(elements):
                 if elem["type"] == "expression":
-                    # Base64 encode the visual data
-                    elem["visual"] = base64.b64encode(result.colight_bytes).decode(
-                        "ascii"
-                    )
+                    visual_size = len(result.colight_bytes)
+                    visual_id = f"{file_hash}-{block.id}"
+                    
+                    # Include metadata
+                    elem["visual_meta"] = {
+                        "size": visual_size,
+                        "format": "colight"
+                    }
+                    
+                    if visual_size <= VISUAL_INLINE_THRESHOLD:
+                        # Inline small visuals as before
+                        elem["visual"] = base64.b64encode(result.colight_bytes).decode(
+                            "ascii"
+                        )
+                    else:
+                        # Use content hash for deduplication and caching
+                        visual_hash = hashlib.sha256(result.colight_bytes).hexdigest()[:16]
+                        visual_key = f"{visual_hash}"
+                        
+                        # Store large visuals externally (deduped by hash)
+                        if self.visual_store is not None:
+                            self.visual_store[visual_key] = result.colight_bytes
+                        
+                        # Store reference for large visuals
+                        elem["visual_ref"] = {
+                            "id": visual_key,
+                            "url": f"/api/visual/{visual_key}",
+                            "size": visual_size,
+                            "format": "colight"
+                        }
                     break
 
         # Skip blocks with no visible content
