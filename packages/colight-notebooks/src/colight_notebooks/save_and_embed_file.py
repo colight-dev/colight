@@ -1,10 +1,37 @@
+from pathlib import Path
+from typing import Union
+
+import colight.env as env
 import colight.plot as Plot
-import colight.format as format
 from colight.plot import js
 from colight.scene3d import PointCloud
-from notebooks.scene3d.scene3d_ripple import create_ripple_grid
-from notebooks.save_and_embed_file import create_embed_example
-from pathlib import Path
+from colight_notebooks.scene3d.scene3d_ripple import create_ripple_grid
+
+
+def create_embed_example(colight_path: Union[str, Path]) -> str:
+    """Create a minimal HTML example demonstrating .colight embedding."""
+    colight_path = Path(colight_path)
+    output_dir = colight_path.parent
+
+    rel_path = colight_path.name
+    script_url = env.UNVERSIONED_CDN_DIST_URL + "/embed.mjs"
+
+    example_html = f"""<!DOCTYPE html>
+<html>
+<body>
+    <div class="colight-embed" data-src="{rel_path}"></a>
+    <script type="module">
+        import {{loadVisuals}} from "{script_url}"
+        loadVisuals()
+    </script>
+</body>
+</html>"""
+
+    example_path = output_dir / f"{colight_path.stem}.html"
+    with open(example_path, "w") as f:
+        f.write(example_html)
+    return str(example_path)
+
 
 # Create output directory if it doesn't exist
 output_dir = Path("scratch")
@@ -43,7 +70,6 @@ p = (
             "frame": 0,
             "grid_xyz": grid_xyz_frames,
             "grid_rgb": grid_rgb,
-            "title": ".colight example",
         }
     )
     | Plot.Slider("frame", range=n_frames, fps=30)
@@ -60,16 +86,11 @@ where:
 - $\phi(t)$ is the time-dependent phase
         """)
     )
-    | Plot.html(["h1", Plot.js("$state.title")])
 )
 
-colight_path = p.save_file("scratch/embed_example.colight")
-create_embed_example(colight_path)
-print(f"✓ Created .colight file at: {colight_path}")
+p
 
-p.save_html("scratch/embed_example.html", local=True)
 
-format.save_updates(
-    "scratch/embed_update.colight",
-    [[{"title": Plot.js("`My new title ${Math.random()}`")}]],
-)
+path = create_embed_example(p.save_file("scratch/embed_example.colight"))
+
+print(f"✓ Created .colight file at: {path}")

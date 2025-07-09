@@ -3,15 +3,23 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "notebooks"
+name = "colight-notebooks"
 version = "0.1.0"
 description = "Colight example notebooks"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "colight"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/notebooks"]
 
 [tool.pyright]
-venvPath = ".."
+venvPath = "../.."
 venv = ".venv"
+reportUnusedExpression = false
+
+[tool.ruff.lint]
+ignore = [
+    "E402",
+]

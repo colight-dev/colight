@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "colight-docs"
+version = "0.1.0"
+description = "Colight documentation content"
+requires-python = ">=3.9"
+dependencies = [
+    "colight",
+    "colight-site"
+
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/colight_docs"]
+
+[tool.pyright]
+venvPath = "../.."
+venv = ".venv"
+reportUnusedExpression = false
+
+[tool.ruff.lint]
+ignore = [
+    "E402",
+]

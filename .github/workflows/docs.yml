@@ -46,7 +46,7 @@ jobs:
         run: yarn docs:build
 
       - name: Copy llms.py to site
-        run: cp docs/llms.py ./site/
+        run: cp packages/colight-docs/src/colight_docs/llms.py ./site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

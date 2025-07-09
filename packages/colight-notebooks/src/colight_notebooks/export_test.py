@@ -5,7 +5,7 @@ Quick test script for the .colight export functionality.
 import colight.plot as Plot
 import numpy as np
 from pathlib import Path
-from notebooks.save_and_embed_file import create_embed_example
+from colight_notebooks.save_and_embed_file import create_embed_example
 
 # Create output directory
 output_dir = Path("scratch")

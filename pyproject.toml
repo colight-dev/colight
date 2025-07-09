@@ -2,13 +2,13 @@
 # This file provides shared tooling configuration but is not a buildable package
 
 [tool.uv.workspace]
-members = ["packages/*", "notebooks"]
+members = ["packages/*"]
 
 [tool.uv.sources]
 colight = { workspace = true }
 colight-site = { workspace = true }
 colight-mkdocs = { workspace = true }
-notebooks = { workspace = true }
+colight-notebooks = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
@@ -42,7 +42,7 @@ dev = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests", "docs", "notebooks",]
+include = [ "packages/*/src", "packages/*/tests", "docs"]
 exclude = []
 typeCheckingMode = "standard"
 reportUnusedExpression = false

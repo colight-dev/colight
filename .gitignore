@@ -9,7 +9,7 @@ basic_plot.*
 docs/overrides/stylesheets/tailwind.css
 *.env
 *.js.map
-notebooks/webgpu.html
+**/notebooks/webgpu.html
 **/node_modules/**
 **/__pycache__/**
 scratch
