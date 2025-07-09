@@ -6,6 +6,7 @@ import React, {
   useTransition,
 } from "react";
 import ReactDOM from "react-dom/client";
+import Fuse from "fuse.js";
 import { DraggableViewer } from "../../packages/colight/src/colight/js/widget.jsx";
 import { parseColightScript } from "../../packages/colight/src/colight/js/format.js";
 import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
@@ -101,13 +102,6 @@ const ColightVisual = ({ data, dataRef }) => {
   const [loadedId, setLoadedId] = useState(null);
   const [minHeight, setMinHeight] = useState(0);
   const keyRef = useRef(0);
-
-  console.log("ColightVisual state:", {
-    isLoading,
-    hasColightData: !!colightData,
-    hasPending: !!pendingColightData,
-    dataRef,
-  });
 
   // Helper to convert blob to base64
   const blobToBase64 = async (blob) => {
@@ -239,7 +233,7 @@ const ColightVisual = ({ data, dataRef }) => {
   );
 };
 
-const ElementRenderer = ({ element }) => {
+const ElementRenderer = ({ element, pragmaOverrides }) => {
   // Skip if element shouldn't be shown
   if (!element.show) return null;
 
@@ -258,7 +252,8 @@ const ElementRenderer = ({ element }) => {
           </pre>
           {/* Render visual if it's an expression with visual data */}
           {element.type === "expression" &&
-            (element.visual || element.visual_ref) && (
+            (element.visual || element.visual_ref) &&
+            !pragmaOverrides.hideVisuals && (
               <ColightVisual
                 data={element.visual}
                 dataRef={element.visual_ref}
@@ -272,7 +267,7 @@ const ElementRenderer = ({ element }) => {
   }
 };
 
-const BlockRenderer = ({ block }) => {
+const BlockRenderer = ({ block, pragmaOverrides }) => {
   if (!block.elements || block.elements.length === 0) return null;
 
   // Group consecutive statement/expression elements
@@ -280,9 +275,24 @@ const BlockRenderer = ({ block }) => {
   let currentCodeGroup = [];
 
   block.elements.forEach((element) => {
+    // Apply pragma overrides to element visibility
+    let shouldShow = element.show;
+    if (pragmaOverrides.hideStatements && element.type === "statement") {
+      shouldShow = false;
+    }
+    if (
+      pragmaOverrides.hideCode &&
+      (element.type === "expression" || element.type === "statement")
+    ) {
+      shouldShow = false;
+    }
+    if (pragmaOverrides.hideProse && element.type === "prose") {
+      shouldShow = false;
+    }
+
     // Process all elements to maintain proper grouping boundaries
     if (element.type === "statement" || element.type === "expression") {
-      if (element.show) {
+      if (shouldShow) {
         currentCodeGroup.push(element);
       } else {
         // Hidden code element - still breaks the group
@@ -292,6 +302,16 @@ const BlockRenderer = ({ block }) => {
             elements: currentCodeGroup,
           });
           currentCodeGroup = [];
+        }
+        // If this is a hidden expression with a visual, show just the visual
+        if (
+          element.type === "expression" &&
+          (element.visual || element.visual_ref)
+        ) {
+          groupedElements.push({
+            type: "visual-only",
+            element: element,
+          });
         }
       }
     } else {
@@ -304,7 +324,7 @@ const BlockRenderer = ({ block }) => {
         currentCodeGroup = [];
       }
       // Only add visible non-code elements
-      if (element.show) {
+      if (shouldShow) {
         groupedElements.push(element);
       }
     }
@@ -335,19 +355,34 @@ const BlockRenderer = ({ block }) => {
                 </code>
               </pre>
               {/* Render visuals for any expressions in the group */}
-              {item.elements.map((el, elIdx) =>
-                el.type === "expression" && (el.visual || el.visual_ref) ? (
-                  <ColightVisual
-                    key={`visual-${idx}-${elIdx}`}
-                    data={el.visual}
-                    dataRef={el.visual_ref}
-                  />
-                ) : null,
-              )}
+              {!pragmaOverrides.hideVisuals &&
+                item.elements.map((el, elIdx) =>
+                  el.type === "expression" && (el.visual || el.visual_ref) ? (
+                    <ColightVisual
+                      key={`visual-${idx}-${elIdx}`}
+                      data={el.visual}
+                      dataRef={el.visual_ref}
+                    />
+                  ) : null,
+                )}
             </div>
           );
+        } else if (item.type === "visual-only") {
+          return !pragmaOverrides.hideVisuals ? (
+            <ColightVisual
+              key={idx}
+              data={item.element.visual}
+              dataRef={item.element.visual_ref}
+            />
+          ) : null;
         } else {
-          return <ElementRenderer key={idx} element={item} />;
+          return (
+            <ElementRenderer
+              key={idx}
+              element={item}
+              pragmaOverrides={pragmaOverrides}
+            />
+          );
         }
       })}
       {block.error && (
@@ -363,7 +398,7 @@ const BlockRenderer = ({ block }) => {
   );
 };
 
-const DocumentRenderer = ({ doc }) => {
+const DocumentRenderer = ({ doc, pragmaOverrides }) => {
   const docRef = useRef();
 
   useEffect(() => {
@@ -391,7 +426,11 @@ const DocumentRenderer = ({ doc }) => {
       className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
     >
       {doc.blocks.map((block) => (
-        <BlockRenderer key={block.id} block={block} />
+        <BlockRenderer
+          key={block.id}
+          block={block}
+          pragmaOverrides={pragmaOverrides}
+        />
       ))}
     </div>
   );
@@ -429,6 +468,296 @@ const HomePage = () => {
   );
 };
 
+// ========== Command Bar ==========
+
+const CommandBar = ({
+  isOpen,
+  onClose,
+  directoryTree,
+  currentFile,
+  onOpenFile,
+  pragmaOverrides,
+  setPragmaOverrides,
+  focusedPath,
+  setFocusedPath,
+}) => {
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [commands, setCommands] = useState([]);
+  const inputRef = useRef(null);
+  const fuse = useRef(null);
+
+  // Initialize Fuse.js for file search
+  useEffect(() => {
+    if (directoryTree && directoryTree !== null) {
+      const allFiles = [];
+
+      // Recursive function to extract all .colight.py files
+      const extractFiles = (items, currentPath = "") => {
+        if (!items || !Array.isArray(items)) return;
+
+        items.forEach((item) => {
+          if (item.type === "file") {
+            const fullPath = currentPath
+              ? `${currentPath}/${item.name}`
+              : item.name;
+            allFiles.push({
+              name: item.name,
+              path: fullPath,
+              relativePath: fullPath,
+              // Add searchable terms
+              searchTerms: [
+                item.name.replace(".colight.py", ""),
+                item.name,
+                fullPath,
+                ...fullPath.split("/").filter(Boolean),
+              ]
+                .join(" ")
+                .toLowerCase(),
+            });
+          } else if (item.type === "directory" && item.children) {
+            const newPath = currentPath
+              ? `${currentPath}/${item.name}`
+              : item.name;
+            extractFiles(item.children, newPath);
+          }
+        });
+      };
+
+      // Start extraction - handle both root with children or direct array
+      if (directoryTree.children) {
+        extractFiles(directoryTree.children);
+      } else if (Array.isArray(directoryTree)) {
+        extractFiles(directoryTree);
+      } else {
+        extractFiles([directoryTree]);
+      }
+
+      fuse.current = new Fuse(allFiles, {
+        keys: ["name", "path", "searchTerms"],
+        threshold: 0.4,
+        includeScore: true,
+        minMatchCharLength: 2,
+        // More fuzzy search options
+        location: 0,
+        distance: 100,
+        useExtendedSearch: false,
+        ignoreLocation: true,
+        findAllMatches: true,
+      });
+    }
+  }, [directoryTree]);
+
+  // Generate commands based on query
+  useEffect(() => {
+    const newCommands = [];
+    const lowerQuery = query.toLowerCase().trim();
+
+    // Always define available commands
+    const allCommands = [
+      {
+        type: "toggle",
+        title: `${pragmaOverrides.hideStatements ? "Show" : "Hide"} Statements`,
+        subtitle: `${pragmaOverrides.hideStatements ? "○" : "●"} Toggle statement visibility`,
+        searchTerms: ["statements", "hide", "show", "toggle"],
+        action: () =>
+          setPragmaOverrides((prev) => ({
+            ...prev,
+            hideStatements: !prev.hideStatements,
+          })),
+      },
+      {
+        type: "toggle",
+        title: `${pragmaOverrides.hideCode ? "Show" : "Hide"} Code`,
+        subtitle: `${pragmaOverrides.hideCode ? "○" : "●"} Toggle code visibility`,
+        searchTerms: ["code", "hide", "show", "toggle"],
+        action: () =>
+          setPragmaOverrides((prev) => ({ ...prev, hideCode: !prev.hideCode })),
+      },
+      {
+        type: "toggle",
+        title: `${pragmaOverrides.hideProse ? "Show" : "Hide"} Prose`,
+        subtitle: `${pragmaOverrides.hideProse ? "○" : "●"} Toggle prose visibility`,
+        searchTerms: ["prose", "text", "markdown", "hide", "show", "toggle"],
+        action: () =>
+          setPragmaOverrides((prev) => ({
+            ...prev,
+            hideProse: !prev.hideProse,
+          })),
+      },
+      {
+        type: "toggle",
+        title: `${pragmaOverrides.hideVisuals ? "Show" : "Hide"} Visuals`,
+        subtitle: `${pragmaOverrides.hideVisuals ? "○" : "●"} Toggle visual outputs`,
+        searchTerms: ["visuals", "visual", "output", "hide", "show", "toggle"],
+        action: () =>
+          setPragmaOverrides((prev) => ({
+            ...prev,
+            hideVisuals: !prev.hideVisuals,
+          })),
+      },
+    ];
+
+    if (currentFile) {
+      allCommands.push({
+        type: "pin",
+        title:
+          focusedPath === currentFile
+            ? "Unpin Current File"
+            : "Pin Current File",
+        subtitle:
+          focusedPath === currentFile
+            ? "📌 Remove focus from current file"
+            : "📌 Focus on current file only",
+        searchTerms: ["pin", "unpin", "focus", "file"],
+        action: () =>
+          setFocusedPath(focusedPath === currentFile ? null : currentFile),
+      });
+    }
+
+    if (lowerQuery) {
+      // Filter commands that match the query
+      const matchingCommands = allCommands.filter(
+        (cmd) =>
+          cmd.title.toLowerCase().includes(lowerQuery) ||
+          cmd.subtitle.toLowerCase().includes(lowerQuery) ||
+          cmd.searchTerms.some((term) => term.includes(lowerQuery)),
+      );
+      newCommands.push(...matchingCommands);
+
+      // File search results
+      if (fuse.current) {
+        const results = fuse.current.search(query);
+        results.slice(0, 10).forEach((result) => {
+          newCommands.push({
+            type: "file",
+            title: result.item.name,
+            subtitle: result.item.relativePath,
+            score: result.score,
+            action: () => onOpenFile(result.item.relativePath),
+          });
+        });
+      }
+    } else {
+      // Show all commands when no query
+      newCommands.push(...allCommands);
+    }
+
+    setCommands(newCommands);
+    setSelectedIndex(0);
+  }, [
+    query,
+    pragmaOverrides,
+    currentFile,
+    focusedPath,
+    onOpenFile,
+    setPragmaOverrides,
+    setFocusedPath,
+  ]);
+
+  // Handle keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!isOpen) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.min(prev + 1, commands.length - 1));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.max(prev - 1, 0));
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (commands[selectedIndex]) {
+            commands[selectedIndex].action();
+            onClose();
+          }
+          break;
+        case "Escape":
+          e.preventDefault();
+          onClose();
+          break;
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, commands, selectedIndex, onClose]);
+
+  // Focus input when opened
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className={tw(
+        "fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-20 z-[2000]",
+      )}
+    >
+      <div
+        className={tw("bg-white rounded-lg shadow-2xl w-full max-w-2xl mx-4")}
+      >
+        <div className={tw("p-4 border-b border-gray-200")}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search files or type a command..."
+            className={tw("w-full text-lg outline-none")}
+          />
+        </div>
+
+        <div className={tw("max-h-96 overflow-y-auto")}>
+          {commands.map((command, index) => (
+            <div
+              key={index}
+              className={tw(
+                `px-4 py-3 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                  index === selectedIndex ? "bg-blue-50" : "hover:bg-gray-50"
+                }`,
+              )}
+              onClick={() => {
+                command.action();
+                onClose();
+              }}
+            >
+              <div className={tw("font-medium text-gray-900")}>
+                {command.title}
+              </div>
+              <div className={tw("text-sm text-gray-600")}>
+                {command.subtitle}
+              </div>
+            </div>
+          ))}
+
+          {commands.length === 0 && (
+            <div className={tw("px-4 py-8 text-center text-gray-500")}>
+              No results found
+            </div>
+          )}
+        </div>
+
+        <div
+          className={tw(
+            "px-4 py-2 bg-gray-50 text-xs text-gray-500 border-t border-gray-200",
+          )}
+        >
+          Use ↑↓ to navigate, Enter to select, Esc to close
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ========== UI Components ==========
 
 const TopBar = ({
@@ -439,6 +768,8 @@ const TopBar = ({
   browsingDirectory,
   setBrowsingDirectory,
   isLoading,
+  pragmaOverrides,
+  setPragmaOverrides,
 }) => {
   // Build breadcrumb
   const buildBreadcrumb = () => {
@@ -512,10 +843,61 @@ const TopBar = ({
   return (
     <div
       className={tw(
-        "fixed top-0 left-0 right-0 h-10 bg-gray-100 border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
+        "fixed top-0 left-0 right-0 h-10 bg-white border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
       )}
     >
       <div className={tw("flex-1")}>{buildBreadcrumb()}</div>
+
+      {/* Pragma controls */}
+      {currentFile && (
+        <div className={tw("flex items-center gap-2 mr-4")}>
+          <button
+            onClick={() =>
+              setPragmaOverrides((prev) => ({
+                ...prev,
+                hideCode: !prev.hideCode,
+              }))
+            }
+            className={tw(
+              `px-2 py-1 text-xs rounded border transition-colors ${
+                pragmaOverrides.hideCode
+                  ? "bg-red-100 border-red-300 text-red-700"
+                  : "bg-green-100 border-green-300 text-green-700"
+              }`,
+            )}
+            title={
+              pragmaOverrides.hideCode
+                ? "Code hidden - click to show"
+                : "Code shown - click to hide"
+            }
+          >
+            {pragmaOverrides.hideCode ? "○" : "●"} Code
+          </button>
+          <button
+            onClick={() =>
+              setPragmaOverrides((prev) => ({
+                ...prev,
+                hideProse: !prev.hideProse,
+              }))
+            }
+            className={tw(
+              `px-2 py-1 text-xs rounded border transition-colors ${
+                pragmaOverrides.hideProse
+                  ? "bg-red-100 border-red-300 text-red-700"
+                  : "bg-green-100 border-green-300 text-green-700"
+              }`,
+            )}
+            title={
+              pragmaOverrides.hideProse
+                ? "Prose hidden - click to show"
+                : "Prose shown - click to hide"
+            }
+          >
+            {pragmaOverrides.hideProse ? "○" : "●"} Prose
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <div className={tw("ml-2.5")}>
           <div
@@ -596,6 +978,13 @@ const LiveServerApp = () => {
   const [isPending, startTransition] = useTransition(); // For smooth transitions
   const [directoryTree, setDirectoryTree] = useState(null); // Cached directory tree
   const [isLoadingTree, setIsLoadingTree] = useState(false);
+  const [pragmaOverrides, setPragmaOverrides] = useState({
+    hideStatements: false,
+    hideCode: false,
+    hideProse: false,
+    hideVisuals: false,
+  });
+  const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
 
   // Refs for WebSocket callback
   const currentFileRef = useRef(null);
@@ -711,22 +1100,6 @@ const LiveServerApp = () => {
 
       // Check if this is an incremental update
       const changes = doc._changes;
-      console.log("Document loaded:", {
-        path,
-        isUpdate,
-        hasChanges: !!changes,
-        changesFull: changes?.full,
-        version: changes?.version,
-        modified: changes?.modified?.length,
-        removed: changes?.removed?.length,
-        hasLoadedData: !!hasLoadedDataRef.current[path],
-        conditions: {
-          hasChanges: !!changes,
-          isUpdate,
-          hasLoadedData: !!hasLoadedDataRef.current[path],
-          notFull: !changes?.full,
-        },
-      });
 
       if (
         changes &&
@@ -743,29 +1116,16 @@ const LiveServerApp = () => {
           changes.version <= currentVersion ||
           changes.version <= pendingVersion
         ) {
-          console.log("Ignoring out-of-order or stale update", {
-            newVersion: changes.version,
-            currentVersion,
-            pendingVersion,
-          });
           return;
         }
 
         // Mark this version as pending
         pendingVersionRef.current[path] = changes.version;
 
-        console.log("Performing incremental update");
-
         // Apply incremental updates
         startTransition(() => {
           setDocumentData((current) => {
-            const updated = applyIncrementalUpdate(current, doc, changes);
-            if (updated === current) {
-              console.log(
-                "No actual changes, returning same document reference",
-              );
-            }
-            return updated;
+            return applyIncrementalUpdate(current, doc, changes);
           });
         });
 
@@ -790,7 +1150,6 @@ const LiveServerApp = () => {
             );
             if (element) {
               element = element.querySelector(".colight-embed") || element;
-              console.log("the element", element, blockId);
               element.scrollIntoView({ behavior: "smooth", block: "center" });
             }
           }, 100); // Small delay to ensure DOM is updated
@@ -842,10 +1201,6 @@ const LiveServerApp = () => {
 
     if (normalizedPath.startsWith(normalizedFocus)) {
       loadFile(path, true);
-    } else {
-      console.log(
-        `Ignoring file change outside focus: ${path} (focus: ${focus})`,
-      );
     }
   }, []);
 
@@ -897,8 +1252,38 @@ const LiveServerApp = () => {
     }
   }, []);
 
+  // Handle global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Cmd+K (Mac) or Ctrl+K (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setIsCommandBarOpen((x) => !x);
+        if (!directoryTree) loadDirectoryTree();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [directoryTree]);
+
   return (
     <>
+      <CommandBar
+        isOpen={isCommandBarOpen}
+        onClose={() => setIsCommandBarOpen(false)}
+        directoryTree={directoryTree}
+        currentFile={currentFile}
+        onOpenFile={(path) => {
+          loadFile(path);
+          setBrowsingDirectoryState(null);
+        }}
+        pragmaOverrides={pragmaOverrides}
+        setPragmaOverrides={setPragmaOverrides}
+        focusedPath={focusedPath}
+        setFocusedPath={setFocusedPath}
+      />
+
       <TopBar
         currentFile={currentFile}
         connected={connected}
@@ -907,6 +1292,8 @@ const LiveServerApp = () => {
         browsingDirectory={browsingDirectory}
         setBrowsingDirectory={setBrowsingDirectory}
         isLoading={isPending || isLoadingTree}
+        pragmaOverrides={pragmaOverrides}
+        setPragmaOverrides={setPragmaOverrides}
       />
 
       <div className={tw("mt-10 relative")}>
@@ -921,7 +1308,11 @@ const LiveServerApp = () => {
             onClose={() => setBrowsingDirectoryState(null)}
           />
         ) : currentFile && documentData ? (
-          <DocumentRenderer key={currentFile} doc={documentData} />
+          <DocumentRenderer
+            key={currentFile}
+            doc={documentData}
+            pragmaOverrides={pragmaOverrides}
+          />
         ) : (
           <HomePage />
         )}
