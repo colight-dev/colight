@@ -1,11 +1,12 @@
 """File watching functionality for colight-site."""
 
 import asyncio
-import pathlib
-from typing import Optional, List
-from watchfiles import watch
 import fnmatch
+import pathlib
 import threading
+from typing import List, Optional
+
+from watchfiles import watch
 
 from . import api
 from .builder import BuildConfig

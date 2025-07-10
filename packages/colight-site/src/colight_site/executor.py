@@ -1,13 +1,14 @@
 """Block-based executor for colight documents."""
 
-import sys
-import io
 import contextlib
-from typing import Any, Dict, Optional, List, Tuple
+import io
+import sys
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+from colight.inspect import inspect
 
 from .model import Block, Document
-from colight.inspect import inspect
 
 
 @dataclass

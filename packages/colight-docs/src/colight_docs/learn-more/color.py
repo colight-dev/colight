@@ -6,7 +6,6 @@ import colight.plot as Plot
 #
 # You can use a [built-in color scheme](https://observablehq.com/@d3/color-schemes) from D3.js by specifying the [scheme name](bylight?match="Viridis") in the `color` option:
 
-# %%
 (
     Plot.cell(range(20), {"x": Plot.identity, "fill": Plot.identity, "inset": -0.5})
     + {"color": {"type": "linear", "scheme": "Viridis"}}
@@ -19,7 +18,6 @@ import colight.plot as Plot
 #
 # You can also create custom color scales by specifying a range and an [interpolation function](bylight?match=Plot.js\(...\)):
 
-# %%
 (
     Plot.cell(range(20), {"x": Plot.identity, "fill": Plot.identity, "inset": -0.5})
     + {
@@ -40,7 +38,6 @@ import colight.plot as Plot
 #
 # Colight allows you to use [D3 color scales](https://github.com/d3/d3-scale-chromatic) directly in your plots:
 
-# %%
 (
     Plot.cell(
         range(10),
@@ -53,7 +50,6 @@ import colight.plot as Plot
 #
 # [Plot.colorMap(...)](bylight?match=Plot.colorMap) assigns specific colors to categories, while [Plot.colorLegend()](bylight) adds a color legend to your plot. In the following example, we create a dot plot with categorical data. The [fill channel](bylight?match="fill":+"category") determines the color of each dot based on its category.
 
-# %%
 categorical_data = [
     {"category": "A", "value": 10},
     {"category": "B", "value": 20},
@@ -85,7 +81,6 @@ categorical_data = [
 #
 # Categorical color assignment has the advantage that we can use it with [Plot.colorMap(...)](bylight) to assign specific colors to categories, and [Plot.colorLegend()](bylight) to display the color mappings.
 
-# %%
 import random
 
 (
@@ -108,7 +103,6 @@ import random
 #
 # You can specify colors using RGB or RGBA values by specifying color channel value as CSS rgb/rgba syntax: `"rgb(255, 0, 0)"` or `"rgba(255, 0, 0, 0.5)"`. For example:
 
-# %%
 x = [0, 1, 2, 3, 4]
 y = [0, 1, 2, 3, 4]
 colors = [

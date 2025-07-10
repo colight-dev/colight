@@ -1,12 +1,13 @@
 import asyncio
 import json
-from pathlib import Path
 import threading
 import webbrowser
+from pathlib import Path
+
 import websockets
 from watchfiles import awatch
-from werkzeug.serving import make_server
 from werkzeug.middleware.shared_data import SharedDataMiddleware
+from werkzeug.serving import make_server
 
 
 class HtmlFallbackMiddleware:

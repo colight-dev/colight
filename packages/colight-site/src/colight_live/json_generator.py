@@ -1,17 +1,18 @@
 """Generate JSON representation of documents for LiveServer."""
 
-import json
 import base64
 import hashlib
+import json
 import pathlib
-from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
-from ..parser import parse_colight_file
-from ..executor import DocumentExecutor
-from ..model import Block, TagSet
-from ..builder import BuildConfig
-from .incremental_executor import IncrementalExecutor, ExecutionResult
+from colight_site.builder import BuildConfig
+from colight_site.executor import DocumentExecutor
+from colight_site.model import Block, TagSet
+from colight_site.parser import parse_colight_file
+
+from .incremental_executor import ExecutionResult, IncrementalExecutor
 
 # Threshold for inline vs external visual storage
 VISUAL_INLINE_THRESHOLD = 50 * 1024  # 50KB

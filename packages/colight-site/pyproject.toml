@@ -27,7 +27,7 @@ dependencies = [
 text = "MIT"
 
 [project.scripts]
-colight-site = "colight_site.cli:main"
+colight-site = "colight_cli:main"
 
 [dependency-groups]
 dev = [

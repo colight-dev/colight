@@ -2,8 +2,9 @@
 
 import json
 import pathlib
-from typing import Dict, List, Optional, Any
-from ..file_resolver import find_files
+from typing import Any, Dict, List, Optional
+
+from colight_site.file_resolver import find_files
 
 
 def generate_index_json(

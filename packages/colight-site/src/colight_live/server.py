@@ -1,23 +1,27 @@
 """LiveServer: On-demand development server for colight-site."""
 
 import asyncio
+import fnmatch
 import json
 import pathlib
 import threading
 import time
 import webbrowser
-from typing import Optional, List, Set, Dict, Any, Tuple
-import fnmatch
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import websockets
-from werkzeug.serving import make_server
-from werkzeug.middleware.shared_data import SharedDataMiddleware
-from werkzeug.wrappers import Request, Response
 from watchfiles import awatch
+from werkzeug.middleware.shared_data import SharedDataMiddleware
+from werkzeug.serving import make_server
+from werkzeug.wrappers import Request, Response
 
+from colight_site.build_helper import BuildHelper
 from colight_site.builder import BuildConfig
+from colight_site.constants import DEFAULT_IGNORE_PATTERNS
+from colight_site.file_resolver import FileResolver, find_files
+
+from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
-from ..file_resolver import find_files
 
 
 class DocumentCache:
@@ -166,15 +170,7 @@ class ApiMiddleware:
         self.ignore = ignore
         self.document_cache = document_cache or DocumentCache()
         self.visual_store = {}  # Store visual data by ID
-
-        # Use FileResolver for file operations
-        from ..file_resolver import FileResolver
-
         self.file_resolver = FileResolver(input_path, include, ignore)
-
-        # Create incremental executor for efficient re-execution
-        from .incremental_executor import IncrementalExecutor
-
         self.incremental_executor = IncrementalExecutor(verbose=config.verbose)
 
     def _get_files(self) -> List[str]:
@@ -183,7 +179,6 @@ class ApiMiddleware:
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        from ..constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
         combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
@@ -327,9 +322,6 @@ class OnDemandMiddleware:
         self.ignore = ignore
         self._ensure_output_dir()
 
-        # Use FileResolver for file operations
-        from ..file_resolver import FileResolver
-
         self.file_resolver = FileResolver(input_path, include, ignore)
 
     def _ensure_output_dir(self):
@@ -375,9 +367,6 @@ class OnDemandMiddleware:
 
             if self.config.verbose:
                 print(f"Output file will be: {output_file}")
-
-            # Build if needed using BuildHelper
-            from ..build_helper import BuildHelper
 
             error_result = BuildHelper.build_file_if_stale(
                 source_file, output_file, self.config, error_format="html"
@@ -609,7 +598,6 @@ class LiveServer:
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        from ..constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
         combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)

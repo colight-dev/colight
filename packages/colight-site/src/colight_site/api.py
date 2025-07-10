@@ -1,16 +1,16 @@
 """Public API for colight-site - for use by plugins and external tools."""
 
 import pathlib
-from typing import Optional, List, Union
 from dataclasses import dataclass
+from typing import List, Optional, Union
 
-from .parser import parse_colight_file, is_colight_file
-from .executor import DocumentExecutor
-from .generator import MarkdownGenerator, HTMLGenerator
-from .model import Block
-from .constants import DEFAULT_INLINE_THRESHOLD
-from .pragma import parse_pragma_arg
 from . import builder  # For internal use only
+from .constants import DEFAULT_INLINE_THRESHOLD
+from .executor import DocumentExecutor
+from .generator import HTMLGenerator, MarkdownGenerator
+from .model import Block
+from .parser import is_colight_file, parse_colight_file
+from .pragma import parse_pragma_arg
 
 
 @dataclass

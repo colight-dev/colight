@@ -1,14 +1,15 @@
 """Document-based generators for Markdown and HTML output."""
 
-import pathlib
 import base64
-from typing import List, Optional, Dict
-import markdown
+import pathlib
+from typing import Dict, List, Optional
 
-from .model import Document, Block, Element
-from .executor import ExecutionResult
+import markdown
 from colight.env import VERSIONED_CDN_DIST_URL
+
 from .constants import DEFAULT_INLINE_THRESHOLD
+from .executor import ExecutionResult
+from .model import Block, Document, Element
 
 EMBED_URL = (
     VERSIONED_CDN_DIST_URL + "/embed.js" if VERSIONED_CDN_DIST_URL else "/dist/embed.js"

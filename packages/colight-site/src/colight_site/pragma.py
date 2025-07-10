@@ -1,6 +1,7 @@
 """Centralized comment and pragma handling for the parser."""
 
-from typing import TypedDict, Literal, Iterator, Iterable
+from typing import Iterable, Iterator, Literal, TypedDict
+
 import libcst as cst
 
 

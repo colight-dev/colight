@@ -64,8 +64,8 @@
     "test:site": "uv run python -m pytest packages/colight-site/tests",
     "test": "npm-run-all test:py test:js test:site",
     "pyright": "uv run pyright",
-    "watch-examples": "uv run python -m colight_site.cli watch packages/colight-site/tests/examples",
-    "cli": "uv run python -m colight_site.cli ",
+    "watch-examples": "uv run python -m colight_cli watch packages/colight-site/tests/examples",
+    "cli": "uv run python -m colight_cli ",
     "live": "yarn cli live .",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },

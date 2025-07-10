@@ -1,8 +1,9 @@
 """AST-based dependency analysis for code blocks."""
 
-import libcst
-from typing import Set, Tuple, Optional
 import builtins
+from typing import Optional, Set, Tuple
+
+import libcst
 
 # Python builtin names to exclude from dependencies
 BUILTIN_NAMES = set(dir(builtins))

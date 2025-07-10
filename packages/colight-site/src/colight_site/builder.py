@@ -1,19 +1,18 @@
 """Main builder module that coordinates parsing, execution, and generation."""
 
 import pathlib
-from typing import Optional, List
 import subprocess
 from dataclasses import dataclass, field
+from typing import List, Optional
 
-from .parser import parse_colight_file
+from .constants import DEFAULT_IGNORE_PATTERNS, DEFAULT_INLINE_THRESHOLD
 from .executor import DocumentExecutor
-from .generator import MarkdownGenerator, HTMLGenerator, write_colight_files
+from .file_resolver import find_files
+from .generator import HTMLGenerator, MarkdownGenerator, write_colight_files
 from .model import TagSet
-from .constants import DEFAULT_INLINE_THRESHOLD
+from .parser import parse_colight_file
 from .pep723 import detect_pep723_metadata, parse_dependencies
 from .pragma import parse_pragma_arg
-from .file_resolver import find_files
-from .constants import DEFAULT_IGNORE_PATTERNS
 
 
 @dataclass
@@ -173,7 +172,7 @@ def build_file(
                 "--",
                 "python",
                 "-m",
-                "colight_site.cli",
+                "colight_cli",
                 "build",
                 str(input_path),
                 "-o",

@@ -1,8 +1,8 @@
 """Block dependency graph for topological execution ordering."""
 
-from typing import Dict, List, Set
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from typing import Dict, List, Set
 
 
 @dataclass

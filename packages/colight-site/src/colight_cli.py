@@ -1,16 +1,16 @@
 """CLI interface for colight-site."""
 
 import asyncio
-import click
 import pathlib
 from typing import Optional
 
-from . import api
-from . import watcher
-from .constants import DEFAULT_INLINE_THRESHOLD
-from .builder import BuildConfig
-from .pragma import parse_pragma_arg
-from .live.server import LiveServer
+import click
+
+from colight_live.server import LiveServer
+from colight_site import api, watcher
+from colight_site.builder import BuildConfig
+from colight_site.constants import DEFAULT_INLINE_THRESHOLD
+from colight_site.pragma import parse_pragma_arg
 
 
 @click.group()

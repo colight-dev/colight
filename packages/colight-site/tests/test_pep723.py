@@ -1,12 +1,12 @@
 """Tests for PEP 723 support."""
 
+import os
 import pathlib
 import tempfile
-import os
 
-from colight_site.pep723 import detect_pep723_metadata, parse_dependencies
 from colight_site.builder import build_file
 from colight_site.parser import parse_colight_file
+from colight_site.pep723 import detect_pep723_metadata, parse_dependencies
 
 
 def test_detect_pep723_metadata():
@@ -249,9 +249,9 @@ print("test")
     # Check that colight-site build is in the command
     assert "--" in cmd
     dash_idx = cmd.index("--")
-    # After the --, should be python -m colight_site.cli build
+    # After the --, should be python -m colight_cli build
     assert "-m" in cmd[dash_idx:]
-    assert "colight_site.cli" in cmd[dash_idx:]
+    assert "colight_cli" in cmd[dash_idx:]
     assert "build" in cmd[dash_idx:]
 
     # Check that --in-subprocess flag is present

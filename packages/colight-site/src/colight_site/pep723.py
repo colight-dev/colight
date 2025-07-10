@@ -1,7 +1,7 @@
 """Support for PEP 723 inline script metadata."""
 
 import re
-from typing import Optional, List
+from typing import List, Optional
 
 
 def detect_pep723_metadata(content: str) -> Optional[str]:

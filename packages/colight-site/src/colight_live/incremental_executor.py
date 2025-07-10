@@ -1,11 +1,12 @@
 """Incremental executor using dependency graph for smart re-execution."""
 
-from typing import Dict, Optional, List, Set, Tuple
-from dataclasses import dataclass, field
 import hashlib
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Tuple
 
-from ..model import Block, Document
-from ..executor import ExecutionResult, BlockExecutor
+from colight_site.executor import BlockExecutor, ExecutionResult
+from colight_site.model import Block, Document
+
 from .block_graph import BlockGraph
 
 

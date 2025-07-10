@@ -1,9 +1,10 @@
 """File resolution and pattern matching utilities for colight-site."""
 
+import fnmatch
 import pathlib
 from typing import List, Optional
+
 from .constants import DEFAULT_IGNORE_PATTERNS
-import fnmatch
 
 
 def find_files(

@@ -1,17 +1,19 @@
 """Clean parser implementation for colight files."""
 
+import pathlib
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Iterator, List, Literal, Optional, Union
+
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
-from dataclasses import dataclass
-from typing import List, Union, Optional, Literal, Iterator
-from enum import Enum, auto
-import pathlib
 
-from .live.dependency_analyzer import analyze_block_dependencies
-from .model import TagSet, Element, Block, BlockInterface, Document, EmptyLine
+from colight_live.dependency_analyzer import analyze_block_dependencies
+
+from .model import Block, BlockInterface, Document, Element, EmptyLine, TagSet
 from .pragma import (
-    parse_comment_line,
     extract_pragma_content,
+    parse_comment_line,
 )
 
 
