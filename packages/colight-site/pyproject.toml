@@ -38,6 +38,8 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/colight_site",
+    "src/colight_live",
+    "src/colight_cli.py",
 ]
 
 [tool.pyright]

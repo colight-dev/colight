@@ -113,6 +113,21 @@ class TestLexer:
         assert isinstance(elements[0], BlankLine)
         assert isinstance(elements[1], CodeLine)
 
+    def test_lex_trailing_prose(self):
+        """Test lexing prose that appears after code (footer content)."""
+        source = textwrap.dedent("""
+            1 + 1
+            
+            # hello
+        """).strip()
+
+        elements = lex(source)
+        assert len(elements) == 3
+        assert isinstance(elements[0], CodeLine)  # 1 + 1
+        assert isinstance(elements[1], BlankLine)
+        assert isinstance(elements[2], CommentLine)  # hello
+        assert elements[2].content == "hello"
+
 
 class TestBlockGrouping:
     """Test the block grouping phase."""
@@ -359,3 +374,26 @@ class TestEndToEnd:
         code_elems = doc.blocks[2].get_code_elements()
         assert code_elems[0].kind == "STATEMENT"
         assert code_elems[1].kind == "EXPRESSION"
+
+    def test_parse_trailing_prose(self):
+        """Test parsing document with prose after code (footer content)."""
+        source = textwrap.dedent("""
+            1 + 1
+            
+            # hello world
+            # this is trailing prose
+        """).strip()
+
+        doc = parse_document(source)
+        assert len(doc.blocks) == 2
+
+        # First block contains the expression
+        assert len(doc.blocks[0].elements) == 1
+        assert doc.blocks[0].elements[0].kind == "EXPRESSION"
+
+        # Second block contains the prose
+        assert len(doc.blocks[1].elements) == 1
+        assert doc.blocks[1].elements[0].kind == "PROSE"
+        assert (
+            doc.blocks[1].elements[0].content == "hello world\nthis is trailing prose"
+        )

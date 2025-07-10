@@ -58,6 +58,10 @@ class BlockGraph:
             self.provides[block_id] = provides
             self.requires[block_id] = requires
 
+            # Track which block provides each symbol
+            for symbol in provides:
+                self.symbol_providers[symbol] = block_id
+
         # Sort blocks by ID to ensure proper order
         ordered_blocks = sorted(self.blocks.keys(), key=lambda x: int(x))
 

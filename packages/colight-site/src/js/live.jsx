@@ -8,7 +8,10 @@ import React, {
 import ReactDOM from "react-dom/client";
 import Fuse from "fuse.js";
 import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
-import { parseColightScript } from "../../../colight/src/js/format.js";
+import {
+  parseColightScript,
+  parseColightData,
+} from "../../../colight/src/js/format.js";
 import { tw, md } from "../../../colight/src/js/api.jsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import "./bylight.js";
@@ -39,165 +42,73 @@ const getFilePathFromUrl = () => {
 };
 
 // ========== Document Processing ==========
-
-const applyIncrementalUpdate = (currentDoc, newDoc, changes) => {
-  // Quick check - if nothing changed, return same reference
-  if (
-    (!changes.modified || changes.modified.length === 0) &&
-    (!changes.removed || changes.removed.length === 0) &&
-    (!changes.moved || changes.moved.length === 0)
-  ) {
-    return currentDoc;
-  }
-
-  // Create maps for efficient lookups
-  const oldBlocksMap = new Map(currentDoc.blocks.map((b) => [b.id, b]));
-  const removedSet = new Set(changes.removed || []);
-  const modifiedSet = new Set(changes.modified || []);
-
-  // Build the new blocks array respecting the order from newDoc
-  // This handles: new blocks, moved blocks, and maintains correct order
-  const updatedBlocks = newDoc.blocks
-    .map((newBlock) => {
-      const blockId = newBlock.id;
-
-      // Skip removed blocks (shouldn't be in newDoc, but be defensive)
-      if (removedSet.has(blockId)) {
-        return null;
-      }
-
-      // If it's modified or new, use the new block data
-      if (modifiedSet.has(blockId) || !oldBlocksMap.has(blockId)) {
-        return newBlock;
-      }
-
-      // For unmodified blocks, preserve the old reference for React optimization
-      return oldBlocksMap.get(blockId);
-    })
-    .filter(Boolean); // Remove any nulls
-
-  // Check if we actually made any changes
-  const hasChanges =
-    updatedBlocks.length !== currentDoc.blocks.length ||
-    updatedBlocks.some((block, i) => block !== currentDoc.blocks[i]);
-
-  if (!hasChanges) {
-    return currentDoc;
-  }
-
-  // Return new document with updated blocks
-  return {
-    ...currentDoc,
-    blocks: updatedBlocks,
-  };
-};
+// Removed applyIncrementalUpdate - now using simple state replacement with RunVersion
 
 // ========== Content Rendering Components ==========
 
 const ColightVisual = ({ data, dataRef }) => {
   const containerRef = useRef(null);
-  const [colightData, setColightData] = useState(null);
-  const [pendingColightData, setPendingColightData] = useState(null);
+  const [[currentKey, currentData, pendingData], setColightData] = useState([
+    0,
+    null,
+    null,
+  ]);
+
+  const setPendingData = (pending) =>
+    setColightData(([i, d, p]) => [i, d, pending]);
+
   const [isLoading, setIsLoading] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
   const [minHeight, setMinHeight] = useState(0);
-  const keyRef = useRef(0);
+  const [isPending, startTransition] = useTransition(); // For smooth transitions
 
-  // Helper to convert blob to base64
-  const blobToBase64 = async (blob) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result.split(",")[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
-  // Load visual data
-  const loadVisualData = async () => {
-    if (!dataRef || !dataRef.url) return;
-
-    setIsLoading(true);
-    try {
-      const response = await fetch(dataRef.url);
-      if (!response.ok) {
-        throw new Error(`Failed to load visual: ${response.status}`);
-      }
-      const blob = await response.blob();
-      // Check if parseColightScript supports ArrayBuffer/Uint8Array
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-
-      // Try to use Uint8Array directly, fall back to base64 if needed
-      let parsed;
-      try {
-        parsed = parseColightScript({ buffer: uint8Array });
-      } catch (e) {
-        // Fall back to base64 if direct buffer parsing fails
-        const base64 = await blobToBase64(blob);
-        parsed = parseColightScript({ textContent: base64 });
-      }
-      setPendingColightData(parsed);
-      setLoadedId(dataRef.id);
-    } catch (error) {
-      console.error("Error loading visual:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Load external visual when needed
   useEffect(() => {
     if (data) {
       // We have inline data - parse it directly
       try {
-        const parsed = parseColightScript({ textContent: data });
-        setColightData(parsed);
-        setPendingColightData(null);
+        setMinHeight(containerRef.current?.offsetHeight || 0);
+        setColightData(([i, c, p]) => [
+          i + 1,
+          parseColightScript({ textContent: data }),
+          null,
+        ]);
       } catch (error) {
         console.error("Error parsing Colight visual:", error);
       }
-    } else if (dataRef && dataRef.id !== loadedId) {
-      // Set up intersection observer for lazy loading
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0].isIntersecting) {
-            loadVisualData();
-            observer.disconnect();
+    } else {
+      setIsLoading(true);
+      try {
+        (async () => {
+          const response = await fetch(dataRef.url);
+          if (!response.ok) {
+            throw new Error(`Failed to load visual: ${response.status}`);
           }
-        },
-        { rootMargin: "100px" },
-      );
-
-      const element = containerRef.current;
-      if (element) {
-        observer.observe(element);
+          const blob = await response.blob();
+          const pending = parseColightData(await blob.arrayBuffer());
+          setColightData(([i, c, p]) => [i, c, pending]);
+          setLoadedId(dataRef.id);
+        })();
+      } catch (error) {
+        console.error("Error loading visual:", error);
+      } finally {
+        setIsLoading(false);
       }
-
-      return () => {
-        if (element) {
-          observer.unobserve(element);
-        }
-        observer.disconnect();
-      };
     }
   }, [data, dataRef, loadedId]);
 
   // Update the displayed visual when loading is complete
   useEffect(() => {
-    if (!isLoading && pendingColightData) {
-      console.log("Swapping visual data");
-      setColightData(pendingColightData);
+    if (!isLoading && pendingData) {
       setMinHeight(containerRef.current?.offsetHeight || 0);
-      keyRef.current += 1;
-      setPendingColightData(null);
+      startTransition(() => {
+        setColightData(([i, c, p]) => [i + 1, pendingData, null]);
+      });
     }
-  }, [isLoading, pendingColightData]);
+  }, [isLoading, pendingData]);
 
   // Show placeholder only if we have nothing to show yet
-  if (!colightData && !isLoading) {
+  if (!currentData && !isLoading) {
     return <div ref={containerRef} className="colight-embed mb-4" />;
   }
 
@@ -208,26 +119,20 @@ const ColightVisual = ({ data, dataRef }) => {
       className="colight-embed mb-4 relative"
     >
       {/* Show existing visual if we have one */}
-      {colightData && (
+      {currentData && (
         <DraggableViewer
-          key={keyRef.current}
-          data={{ ...colightData, onMount: () => setMinHeight(0) }}
+          key={currentKey}
+          data={{ ...currentData, onMount: () => setMinHeight(0) }}
         />
       )}
 
       {/* Show loading overlay when fetching new visual */}
-      {isLoading && (
+      {(isLoading || isPending) && (
         <div
           className={tw(
-            "absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded",
+            `absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded`,
           )}
-        >
-          <div
-            className={tw(
-              "animate-spin h-8 w-8 border-4 border-gray-300 border-t-gray-600 rounded-full",
-            )}
-          />
-        </div>
+        ></div>
       )}
     </div>
   );
@@ -251,8 +156,7 @@ const ElementRenderer = ({ element, pragmaOverrides }) => {
             <code className="language-python">{element.value}</code>
           </pre>
           {/* Render visual if it's an expression with visual data */}
-          {element.type === "expression" &&
-            (element.visual || element.visual_ref) &&
+          {(element.visual || element.visual_ref) &&
             !pragmaOverrides.hideVisuals && (
               <ColightVisual
                 data={element.visual}
@@ -268,7 +172,26 @@ const ElementRenderer = ({ element, pragmaOverrides }) => {
 };
 
 const BlockRenderer = ({ block, pragmaOverrides }) => {
-  if (!block.elements || block.elements.length === 0) return null;
+  // If block is pending but has content, show content with pending indicator
+  const isPending = block.pending;
+
+  if (!block.elements || block.elements.length === 0) {
+    // Only show placeholder if block truly has no content yet
+    if (isPending) {
+      return (
+        <div
+          className={tw(`block-${block.id} opacity-50 animate-pulse`)}
+          data-block-id={block.id}
+          data-shows-visual={block.showsVisual}
+        >
+          <div className={tw("bg-gray-100 p-4 rounded-lg mb-4")}>
+            <div className={tw("h-4 bg-gray-300 rounded animate-pulse")}></div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
 
   // Group consecutive statement/expression elements
   const groupedElements = [];
@@ -337,10 +260,18 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
 
   return (
     <div
-      className={tw(`block-${block.id}`)}
+      className={tw(`block-${block.id} ${isPending ? "relative" : ""}`)}
       data-block-id={block.id}
       data-shows-visual={block.showsVisual}
     >
+      {/* Show pending indicator overlay */}
+      {isPending && (
+        <div
+          className={tw(
+            "absolute inset-0 bg-yellow-100 bg-opacity-30 rounded-lg pointer-events-none z-10 animate-pulse",
+          )}
+        />
+      )}
       {groupedElements.map((item, idx) => {
         if (item.type === "code-group") {
           return (
@@ -370,7 +301,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
         } else if (item.type === "visual-only") {
           return !pragmaOverrides.hideVisuals ? (
             <ColightVisual
-              key={idx}
+              key={`visual-only-${idx}`}
               data={item.element.visual}
               dataRef={item.element.visual_ref}
             />
@@ -398,7 +329,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
   );
 };
 
-const DocumentRenderer = ({ doc, pragmaOverrides }) => {
+const DocumentRenderer = ({ blocks, currentFile, pragmaOverrides }) => {
   const docRef = useRef();
 
   useEffect(() => {
@@ -406,32 +337,38 @@ const DocumentRenderer = ({ doc, pragmaOverrides }) => {
     if (docRef.current) {
       window.bylight({ target: docRef.current });
     }
-  }, [doc]); // Re-run when doc changes
+  }, [blocks]); // Re-run when blocks change
 
-  if (!doc) return null;
+  if (!blocks || Object.keys(blocks).length === 0) return null;
 
-  // Debug duplicate keys
-  const blockIds = doc.blocks.map((b) => b.id);
-  const duplicates = blockIds.filter(
-    (id, index) => blockIds.indexOf(id) !== index,
-  );
-  if (duplicates.length > 0) {
-    console.warn("Duplicate block IDs found:", duplicates);
-    console.log("All block IDs:", blockIds);
-  }
+  // Sort blocks by their ID to maintain order
+  const sortedBlockIds = Object.keys(blocks).sort();
 
   return (
     <div
       ref={docRef}
       className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
     >
-      {doc.blocks.map((block) => (
-        <BlockRenderer
-          key={block.id}
-          block={block}
-          pragmaOverrides={pragmaOverrides}
-        />
-      ))}
+      {sortedBlockIds.map((blockId) => {
+        const result = blocks[blockId];
+        // Create a simplified block structure from the result
+        const block = {
+          id: blockId,
+          elements: result.elements || [],
+          error: result.error,
+          stdout: result.stdout,
+          showsVisual: result.showsVisual,
+          pending: result.pending,
+        };
+
+        return (
+          <BlockRenderer
+            key={blockId}
+            block={block}
+            pragmaOverrides={pragmaOverrides}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -920,7 +857,7 @@ const TopBar = ({
 
 // ========== WebSocket Hook ==========
 
-const useWebSocket = (onFileChange) => {
+const useWebSocket = (onMessage, wsRefOut) => {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef(null);
 
@@ -933,15 +870,15 @@ const useWebSocket = (onFileChange) => {
       ws.onopen = () => {
         console.log("LiveServer connected");
         setConnected(true);
+        if (wsRefOut) {
+          wsRefOut.current = ws;
+        }
       };
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log("WebSocket message:", data);
-
-        if (data.type === "file-changed" && data.path) {
-          onFileChange(data.path);
-        }
+        onMessage(data);
       };
 
       ws.onclose = () => {
@@ -962,7 +899,7 @@ const useWebSocket = (onFileChange) => {
         wsRef.current.close();
       }
     };
-  }, [onFileChange]); // Empty deps - no need to recreate on prop changes
+  }, [onMessage]);
 
   return connected;
 };
@@ -972,7 +909,7 @@ const useWebSocket = (onFileChange) => {
 const LiveServerApp = () => {
   const [currentFile, setCurrentFile] = useState(null);
   const [documentData, setDocumentData] = useState(null);
-  const [fileVersions, setFileVersions] = useState({}); // Track versions for incremental updates
+  const [blockResults, setBlockResults] = useState({}); // Track block results by ID
   const [focusedPath, setFocusedPath] = useState(null); // Single focus state - can be file or directory
   const [browsingDirectory, setBrowsingDirectoryState] = useState(null); // Directory being browsed
   const [isPending, startTransition] = useTransition(); // For smooth transitions
@@ -988,9 +925,8 @@ const LiveServerApp = () => {
 
   // Refs for WebSocket callback
   const currentFileRef = useRef(null);
-  const hasLoadedDataRef = useRef({}); // Track which files have been loaded
   const focusedPathRef = useRef(null); // Track focused path for WebSocket callback
-  const pendingVersionRef = useRef({}); // Track pending versions to prevent race conditions
+  const latestRunRef = useRef(0); // Track latest run version
 
   // Track if we're still initializing
   const [isInitialized, setIsInitialized] = useState(false);
@@ -1001,12 +937,6 @@ const LiveServerApp = () => {
   // Keep refs in sync
   useEffect(() => {
     currentFileRef.current = currentFile;
-
-    // Clean up pending versions when file changes
-    if (!currentFile) {
-      // Clear all pending versions when no file is selected
-      pendingVersionRef.current = {};
-    }
 
     // Don't update URL during initial load
     if (!isInitialized) return;
@@ -1081,131 +1011,186 @@ const LiveServerApp = () => {
     setBrowsingDirectoryState(dir);
   };
 
-  // Fetch document from API
-  const fetchDocument = async (path) => {
-    const response = await fetch(`/api/document/${path}`);
-    const doc = await response.json();
-
-    if (doc.error) {
-      throw new Error(doc.error);
-    }
-
-    return doc;
-  };
-
-  // Load file content (now JSON with incremental update support)
-  const loadFile = async (path, isUpdate = false) => {
-    try {
-      const doc = await fetchDocument(path);
-
-      // Check if this is an incremental update
-      const changes = doc._changes;
-
-      if (
-        changes &&
-        isUpdate &&
-        !changes.full &&
-        hasLoadedDataRef.current[path]
-      ) {
-        // Handle incremental update only if we have existing data
-        const currentVersion = fileVersions[path] || 0;
-        const pendingVersion = pendingVersionRef.current[path] || 0;
-
-        // Ignore out-of-order updates or updates that arrive during pending updates
-        if (
-          changes.version <= currentVersion ||
-          changes.version <= pendingVersion
-        ) {
-          return;
-        }
-
-        // Mark this version as pending
-        pendingVersionRef.current[path] = changes.version;
-
-        // Apply incremental updates
-        startTransition(() => {
-          setDocumentData((current) => {
-            return applyIncrementalUpdate(current, doc, changes);
-          });
-        });
-
-        // Update version and clear pending
-        setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
-        delete pendingVersionRef.current[path];
-
-        // Clean up old pending versions to prevent memory leak
-        const currentPaths = new Set([currentFileRef.current]);
-        Object.keys(pendingVersionRef.current).forEach((key) => {
-          if (!currentPaths.has(key)) {
-            delete pendingVersionRef.current[key];
-          }
-        });
-
-        // If only one block was modified, scroll to it
-        if (changes.modified && changes.modified.length === 1) {
-          setTimeout(() => {
-            const blockId = changes.modified[0];
-            let element = document.querySelector(
-              `[data-block-id="${blockId}"]`,
-            );
-            if (element) {
-              element = element.querySelector(".colight-embed") || element;
-              element.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-          }, 100); // Small delay to ensure DOM is updated
-        }
-      } else {
-        startTransition(() => {
-          setDocumentData(doc);
-          setCurrentFile(path);
-          hasLoadedDataRef.current[path] = true;
-        });
-
-        // Update version
-        if (changes?.version) {
-          setFileVersions((prev) => ({ ...prev, [path]: changes.version }));
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load file:", error);
-      startTransition(() => {
-        setDocumentData({
-          error: error.message,
-          blocks: [],
-        });
-      });
-    }
-  };
-
-  // Handle file changes from WebSocket
-  const handleFileChange = useCallback((path) => {
-    const focus = focusedPathRef.current;
-
-    // If no focus, navigate to all changes
-    if (!focus) {
-      loadFile(path, true);
-      return;
-    }
-
-    // If focused on a specific file, only update if it's that file
-    if (!focus.endsWith("/")) {
-      if (path === focus) {
-        loadFile(path, true);
-      }
-      return;
-    }
-
-    // If focused on a directory, check if file is within it
-    const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-    const normalizedFocus = focus.startsWith("/") ? focus.slice(1) : focus;
-
-    if (normalizedPath.startsWith(normalizedFocus)) {
-      loadFile(path, true);
+  // Request a file load from the server
+  const requestFileLoad = useCallback((path) => {
+    // Send a synthetic file-changed event to trigger a build
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "request-load", path }));
     }
   }, []);
 
+  // Track changed blocks for the current run
+  const changedBlocksRef = useRef(new Set());
+
+  // Handle WebSocket messages with RunVersion
+  const handleWebSocketMessage = useCallback((message) => {
+    // Ignore messages from old runs
+    if (message.run && message.run < latestRunRef.current) {
+      console.log(
+        `Ignoring stale message from run ${message.run} (latest: ${latestRunRef.current})`,
+      );
+      return;
+    }
+
+    switch (message.type) {
+      case "run-start":
+        if (message.run) {
+          // Update latest run version
+          latestRunRef.current = message.run;
+
+          // Check if this file change is relevant based on focus
+          const file = message.file;
+          const focus = focusedPathRef.current;
+
+          let shouldProcess = false;
+
+          // If no focus, process all changes
+          if (!focus) {
+            shouldProcess = true;
+          }
+          // If focused on a specific file, only process if it's that file
+          else if (!focus.endsWith("/")) {
+            shouldProcess = file === focus;
+          }
+          // If focused on a directory, check if file is within it
+          else {
+            const normalizedFile = file.startsWith("/") ? file.slice(1) : file;
+            const normalizedFocus = focus.startsWith("/")
+              ? focus.slice(1)
+              : focus;
+            shouldProcess = normalizedFile.startsWith(normalizedFocus);
+          }
+
+          if (shouldProcess) {
+            // Clear tracked changed blocks
+            changedBlocksRef.current.clear();
+
+            // Handle the new manifest-based update
+            if (message.blocks && message.dirty) {
+              // We have block manifest - update intelligently
+              setCurrentFile(file);
+              setBlockResults((prev) => {
+                const newResults = {};
+                const blockSet = new Set(message.blocks);
+                const dirtySet = new Set(message.dirty);
+
+                // Process each block in the manifest
+                for (const blockId of message.blocks) {
+                  if (prev[blockId]) {
+                    // Existing block
+                    if (dirtySet.has(blockId)) {
+                      // Mark as pending (will be re-executed)
+                      newResults[blockId] = {
+                        ...prev[blockId],
+                        pending: true,
+                        cache_hit: false,
+                        // Keep all existing properties to maintain layout
+                      };
+                    } else {
+                      // Keep unchanged, but clear any pending state
+                      newResults[blockId] = {
+                        ...prev[blockId],
+                        pending: false,
+                      };
+                    }
+                  } else {
+                    // New block - create placeholder
+                    newResults[blockId] = {
+                      pending: true,
+                      elements: [],
+                      ok: true,
+                    };
+                  }
+                }
+
+                // Note: blocks not in the manifest are implicitly removed
+                // by not including them in newResults
+
+                return newResults;
+              });
+            } else {
+              // Legacy behavior - clear blocks
+              startTransition(() => {
+                setCurrentFile(file);
+                setBlockResults({});
+              });
+            }
+          }
+        }
+        break;
+
+      case "block-result":
+        if (message.run && message.run === latestRunRef.current) {
+          // Track changed blocks
+          if (message.content_changed) {
+            changedBlocksRef.current.add(message.block);
+          }
+
+          // Update block result
+          setBlockResults((prev) => {
+            return {
+              ...prev,
+              [message.block]: {
+                ok: message.ok,
+                stdout: message.stdout,
+                error: message.error,
+                showsVisual: message.showsVisual,
+                elements: message.elements || [],
+                cache_hit: message.cache_hit,
+                content_changed: message.content_changed,
+                pending: false, // Clear pending state
+              },
+            };
+          });
+        }
+        break;
+
+      case "run-end":
+        if (message.run && message.run === latestRunRef.current) {
+          // Run completed
+          console.log(`Run ${message.run} completed`);
+          if (message.error) {
+            console.error("Run error:", message.error);
+          }
+
+          // Check if we should auto-scroll to a changed block
+          const changedBlocksList = Array.from(changedBlocksRef.current);
+
+          // If exactly one block changed, scroll to it
+          if (false && changedBlocksList.length === 1) {
+            setTimeout(() => {
+              const blockId = changedBlocksList[0];
+              const element = document.querySelector(
+                `[data-block-id="${blockId}"]`,
+              );
+              if (element) {
+                element.scrollIntoView({ behavior: "smooth", block: "center" });
+                // Briefly highlight the block
+                element.style.backgroundColor = "#fffbdd";
+                setTimeout(() => {
+                  element.style.backgroundColor = "";
+                }, 1000);
+              }
+            }, 100); // Small delay to ensure DOM is updated
+          }
+        }
+        break;
+
+      case "reload":
+        // General reload - refresh the page
+        window.location.reload();
+        break;
+
+      default:
+        console.warn("Unknown WebSocket message type:", message.type);
+    }
+  }, []);
+
+  // WebSocket ref for sending messages
+  const wsRef = useRef(null);
+
   // Setup WebSocket connection
-  const connected = useWebSocket(handleFileChange);
+  const connected = useWebSocket(handleWebSocketMessage, wsRef);
 
   // Initial load
   useEffect(() => {
@@ -1219,12 +1204,23 @@ const LiveServerApp = () => {
     }
 
     if (path) {
-      loadFile(path);
+      // Set current file - the WebSocket will handle loading when connected
+      setCurrentFile(path);
     }
 
     // Mark as initialized after initial load
     setTimeout(() => setIsInitialized(true), 0);
   }, []);
+
+  // Request file load when connected and current file changes
+  useEffect(() => {
+    if (connected && currentFile && wsRef.current) {
+      // Request the server to load this file
+      wsRef.current.send(
+        JSON.stringify({ type: "request-load", path: currentFile }),
+      );
+    }
+  }, [connected, currentFile]);
 
   // Handle popstate (browser back/forward)
   useEffect(() => {
@@ -1237,11 +1233,11 @@ const LiveServerApp = () => {
       setFocusedPath(focus);
 
       if (path) {
-        loadFile(path);
+        setCurrentFile(path);
       } else {
         startTransition(() => {
           setCurrentFile(null);
-          setDocumentData(null);
+          setBlockResults({});
         });
       }
     };
@@ -1275,7 +1271,7 @@ const LiveServerApp = () => {
         directoryTree={directoryTree}
         currentFile={currentFile}
         onOpenFile={(path) => {
-          loadFile(path);
+          setCurrentFile(path);
           setBrowsingDirectoryState(null);
         }}
         pragmaOverrides={pragmaOverrides}
@@ -1302,17 +1298,25 @@ const LiveServerApp = () => {
             directoryPath={browsingDirectory}
             tree={directoryTree}
             onSelectFile={(path) => {
-              loadFile(path);
+              setCurrentFile(path);
               setBrowsingDirectoryState(null);
             }}
             onClose={() => setBrowsingDirectoryState(null)}
           />
-        ) : currentFile && documentData ? (
+        ) : currentFile && Object.keys(blockResults).length > 0 ? (
           <DocumentRenderer
             key={currentFile}
-            doc={documentData}
+            blocks={blockResults}
+            currentFile={currentFile}
             pragmaOverrides={pragmaOverrides}
           />
+        ) : currentFile ? (
+          // Loading state for current file
+          <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
+            <div className={tw("text-center text-gray-500")}>
+              Loading {currentFile}...
+            </div>
+          </div>
         ) : (
           <HomePage />
         )}

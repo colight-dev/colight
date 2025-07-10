@@ -6,7 +6,7 @@ for functional/immutable code patterns.
 """
 
 from colight_site.parser import parse_document
-from colight_site.live.incremental_executor import IncrementalExecutor
+from colight_live.incremental_executor import IncrementalExecutor
 
 
 def test_simple_dependency_chain_with_edits():

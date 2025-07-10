@@ -1,7 +1,7 @@
 """Test incremental execution with imports - would have caught the bug."""
 
 from colight_site.parser import parse_document
-from colight_site.live.incremental_executor import IncrementalExecutor
+from colight_live.incremental_executor import IncrementalExecutor
 
 
 def test_import_execution():

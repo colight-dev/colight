@@ -250,6 +250,33 @@ def lex(source_code: str) -> List[ParsedLine]:
         if stmt_line:
             current_line = stmt_line.end.line + 1
 
+    # Process footer (trailing comments/blank lines after last statement)
+    if hasattr(module, "footer") and module.footer:
+        for line in module.footer:
+            if line.comment:
+                # Get the raw comment value
+                raw_comment = line.comment.value
+
+                # Parse the comment
+                parsed = parse_comment_line(raw_comment)
+
+                if parsed["kind"] == "PRAGMA":
+                    elements.append(
+                        PragmaLine(content=parsed["text"], lineno=current_line)
+                    )
+                else:
+                    elements.append(
+                        CommentLine(
+                            content=parsed["text"],
+                            lineno=current_line,
+                            is_pragma=False,
+                        )
+                    )
+            elif line.whitespace.value.strip() == "":
+                # Blank line
+                elements.append(BlankLine(lineno=current_line))
+            current_line += 1
+
     return elements
 
 

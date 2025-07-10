@@ -5,7 +5,7 @@ from unittest.mock import patch
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
-from colight_site.live.server import LiveServer, OnDemandMiddleware
+from colight_live.server import LiveServer, OnDemandMiddleware
 from colight_site.builder import BuildConfig
 
 

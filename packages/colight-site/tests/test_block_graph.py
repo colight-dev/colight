@@ -1,6 +1,6 @@
 """Tests for block dependency graph."""
 
-from colight_site.live.block_graph import BlockGraph
+from colight_live.block_graph import BlockGraph
 
 
 def test_simple_dependency_chain():

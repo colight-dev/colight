@@ -1,6 +1,6 @@
 """Tests for dependency analysis."""
 
-from colight_site.live.dependency_analyzer import analyze_block_dependencies
+from colight_live.dependency_analyzer import analyze_block_dependencies
 
 
 def test_simple_provides():

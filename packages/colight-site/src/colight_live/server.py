@@ -2,12 +2,12 @@
 
 import asyncio
 import fnmatch
+import itertools
 import json
 import pathlib
 import threading
-import time
 import webbrowser
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set
 
 import websockets
 from watchfiles import awatch
@@ -24,104 +24,7 @@ from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
 
 
-class DocumentCache:
-    """Cache for document JSON data with version tracking for incremental updates."""
-
-    def __init__(self):
-        self.cache: Dict[str, Tuple[dict, int]] = {}  # path -> (document, version)
-        self.versions: Dict[str, int] = {}  # path -> current version
-
-    def get_changes(self, path: str, new_doc: dict) -> dict:
-        """Compare cached document with new document and return changes."""
-        old_doc, old_version = self.cache.get(path, ({}, 0))
-        new_version = old_version + 1
-
-        old_blocks = {b["id"]: b for b in old_doc.get("blocks", [])}
-        new_blocks = {b["id"]: b for b in new_doc.get("blocks", [])}
-
-        changes = {
-            "modified": [],
-            "removed": [],
-            "moved": [],
-            "total": len(new_blocks),
-            "version": new_version,
-            "full": False,
-        }
-
-        # Track ordinals for move detection
-        old_ordinals = {
-            b["id"]: b.get("ordinal", i)
-            for i, b in enumerate(old_doc.get("blocks", []))
-        }
-        new_ordinals = {
-            b["id"]: b.get("ordinal", i)
-            for i, b in enumerate(new_doc.get("blocks", []))
-        }
-
-        # Detect changes
-        for bid, block in new_blocks.items():
-            if bid in old_blocks:
-                old_block = old_blocks[bid]
-                # Content changed
-                if old_block.get("content_hash") != block.get("content_hash"):
-                    changes["modified"].append(block)
-                # Position changed (moved)
-                elif old_ordinals.get(bid) != new_ordinals.get(bid):
-                    changes["moved"].append(
-                        {
-                            "block": block,
-                            "old_ordinal": old_ordinals.get(bid),
-                            "new_ordinal": new_ordinals.get(bid),
-                        }
-                    )
-            else:
-                # New block
-                changes["modified"].append(block)
-
-        # Track removed blocks (with full data for animations)
-        for bid, block in old_blocks.items():
-            if bid not in new_blocks:
-                changes["removed"].append(block)
-
-        # Decide if full reload is better
-        if self._should_full_reload(new_doc, changes):
-            changes["full"] = True
-
-        # Update cache
-        self.cache[path] = (new_doc, new_version)
-        self.versions[path] = new_version
-
-        return changes
-
-    def _should_full_reload(self, doc: dict, changes: dict) -> bool:
-        """Determine if a full reload is safer/better."""
-        total_blocks = changes["total"]
-
-        # No blocks at all
-        if total_blocks == 0:
-            return False
-
-        # Parse error in document
-        if doc.get("error"):
-            return True
-
-        # More than 30% of blocks changed
-        modified_count = len(changes["modified"]) + len(changes["removed"])
-        if total_blocks > 0 and modified_count > total_blocks * 0.3:
-            return True
-
-        # TODO: Add detection for large contiguous changes
-
-        return False
-
-    def clear(self, path: Optional[str] = None):
-        """Clear cache for a specific path or all paths."""
-        if path:
-            self.cache.pop(path, None)
-            self.versions.pop(path, None)
-        else:
-            self.cache.clear()
-            self.versions.clear()
+# DocumentCache removed - no longer needed with RunVersion architecture
 
 
 class SpaMiddleware:
@@ -160,7 +63,6 @@ class ApiMiddleware:
         config: BuildConfig,
         include: List[str],
         ignore: Optional[List[str]] = None,
-        document_cache: Optional[DocumentCache] = None,
     ):
         self.app = app
         self.input_path = input_path
@@ -168,7 +70,6 @@ class ApiMiddleware:
         self.config = config
         self.include = include
         self.ignore = ignore
-        self.document_cache = document_cache or DocumentCache()
         self.visual_store = {}  # Store visual data by ID
         self.file_resolver = FileResolver(input_path, include, ignore)
         self.incremental_executor = IncrementalExecutor(verbose=config.verbose)
@@ -220,41 +121,13 @@ class ApiMiddleware:
                     # Generate JSON directly from source
                     from .json_generator import JsonFormGenerator
 
-                    # Get previous document to detect changed blocks
-                    old_doc = self.document_cache.cache.get(file_path, (None, None))[0]
-                    changed_blocks = None
-
-                    if old_doc:
-                        # Detect which blocks have changed based on content_hash
-                        changed_blocks = set()
-                        old_blocks = {b["id"]: b for b in old_doc.get("blocks", [])}
-
-                        # We'll need to parse to get current block IDs and hashes
-                        # For now, let the incremental executor figure it out
-                        changed_blocks = None
-
                     generator = JsonFormGenerator(
                         config=self.config,
                         visual_store=self.visual_store,
                         incremental_executor=self.incremental_executor,
                     )
-                    json_content = generator.generate_json(source_file, changed_blocks)
+                    json_content = generator.generate_json(source_file, None)
                     doc = json.loads(json_content)
-
-                    # Get changes from cache
-                    changes = self.document_cache.get_changes(file_path, doc)
-
-                    # Add changes info to response
-                    doc["_changes"] = {
-                        "version": changes["version"],
-                        "full": changes["full"],
-                        "modified": [b["id"] for b in changes["modified"]]
-                        if not changes["full"]
-                        else None,
-                        "removed": [b["id"] for b in changes["removed"]]
-                        if not changes["full"]
-                        else None,
-                    }
 
                     response = Response(
                         json.dumps(doc, indent=2), mimetype="application/json"
@@ -410,7 +283,11 @@ class LiveServer:
         self._http_server = None
         self._http_thread = None
         self._stop_event = asyncio.Event()
-        self._document_cache = DocumentCache()  # Cache for incremental updates
+        self._run_counter = itertools.count(1)  # Monotonic run version counter
+        self._current_run_task: Optional[asyncio.Task] = None  # Current execution task
+        self._api_middleware: Optional[ApiMiddleware] = (
+            None  # Reference to API middleware
+        )
 
     def _get_spa_html(self):
         """Get the SPA HTML template."""
@@ -461,16 +338,16 @@ class LiveServer:
             roots,
         )
 
-        # Add API middleware with document cache
-        app = ApiMiddleware(
+        # Add API middleware
+        self._api_middleware = ApiMiddleware(
             app,
             self.input_path,
             self.output_path,
             self.config,
             self.include,
             self.ignore,
-            self._document_cache,
         )
+        app = self._api_middleware
 
         # Add SPA middleware (serves the React app)
         app = SpaMiddleware(app, self._get_spa_html())
@@ -496,59 +373,217 @@ class LiveServer:
         """Handle WebSocket connections."""
         self.connections.add(websocket)
         try:
-            await websocket.wait_closed()
+            # Listen for messages from the client
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    if data.get("type") == "request-load" and data.get("path"):
+                        # Client is requesting to load a file
+                        file_path = data["path"]
+                        # Find the actual source file
+                        if self._api_middleware:
+                            source_file = (
+                                self._api_middleware.file_resolver.find_source_file(
+                                    file_path + ".html"
+                                )
+                            )
+                            if source_file:
+                                # Trigger a build for this file
+                                await self._send_reload_signal(source_file)
+                except json.JSONDecodeError:
+                    pass  # Ignore invalid messages
+        except websockets.exceptions.ConnectionClosed:
+            pass
         finally:
             self.connections.remove(websocket)
 
-    async def _send_reload_signal(self, changed_file=None):
-        """Send reload signal to all connected clients."""
+    async def _ws_broadcast(self, message: dict):
+        """Broadcast a message to all connected WebSocket clients."""
         if not self.connections:
             return
 
-        # Send file-specific change notification
-        if changed_file:
-            # Convert to relative path without extension
-            if self.input_path.is_file():
-                html_path = self.input_path.stem
+        message_str = json.dumps(message)
+        await asyncio.gather(
+            *(ws.send(message_str) for ws in self.connections), return_exceptions=True
+        )
+
+    async def _trigger_build(self, file_path: pathlib.Path):
+        """Trigger a build for a changed file."""
+        run = next(self._run_counter)
+
+        # Convert to relative path without extension
+        if self.input_path.is_file():
+            html_path = self.input_path.stem
+        else:
+            try:
+                # Make sure we have absolute paths for comparison
+                abs_file = file_path if file_path.is_absolute() else file_path.resolve()
+                abs_input = (
+                    self.input_path
+                    if self.input_path.is_absolute()
+                    else self.input_path.resolve()
+                )
+
+                rel_path = abs_file.relative_to(abs_input)
+                html_path = str(rel_path)
+                # Remove .py extension
+                if html_path.endswith(".py"):
+                    html_path = html_path[:-3]
+                # Remove .colight.py extension
+                elif html_path.endswith(".colight.py"):
+                    html_path = html_path[:-11]
+            except ValueError:
+                # File is not relative to input path
+                html_path = file_path.stem
+
+        # Parse document to get block information
+        from colight_site.parser import parse_colight_file
+        from colight_site.model import TagSet
+
+        try:
+            # Find source file
+            if self._api_middleware:
+                source_file = self._api_middleware.file_resolver.find_source_file(
+                    html_path + ".html"
+                )
+                if not source_file:
+                    await self._ws_broadcast(
+                        {"run": run, "type": "run-start", "file": html_path}
+                    )
+                    await self._ws_broadcast(
+                        {"run": run, "type": "run-end", "error": "File not found"}
+                    )
+                    return
+
+                # Parse the document
+                document = parse_colight_file(source_file)
+
+                # Apply config pragma if any
+                if self.config.pragma:
+                    document.tags = document.tags | TagSet(
+                        frozenset(self.config.pragma)
+                    )
+
+                # Generate file hash for stable block IDs (same as in JSON generator)
+                import hashlib
+
+                file_hash = hashlib.sha256(str(source_file).encode()).hexdigest()[:6]
+
+                # Get block IDs in document order with proper format
+                block_ids = []
+                for i, block in enumerate(document.blocks):
+                    unique_id = block.id if block.id != 0 else i
+                    stable_id = f"{file_hash}-B{unique_id:05d}"
+                    block_ids.append(stable_id)
+
+                # Determine which blocks are dirty (will be re-executed)
+                if self._api_middleware.incremental_executor:
+                    dirty_blocks_raw = (
+                        self._api_middleware.incremental_executor.get_dirty_blocks(
+                            document
+                        )
+                    )
+                    # Convert raw block IDs to stable IDs
+                    dirty_blocks = []
+                    for i, block in enumerate(document.blocks):
+                        if str(block.id) in dirty_blocks_raw:
+                            unique_id = block.id if block.id != 0 else i
+                            stable_id = f"{file_hash}-B{unique_id:05d}"
+                            dirty_blocks.append(stable_id)
+                else:
+                    # If no incremental executor, all blocks are dirty
+                    dirty_blocks = block_ids
+
+                # Send enhanced run-start message with block manifest
+                await self._ws_broadcast(
+                    {
+                        "run": run,
+                        "type": "run-start",
+                        "file": html_path,
+                        "blocks": block_ids,  # All blocks in document order
+                        "dirty": dirty_blocks,  # Blocks that will be re-executed
+                    }
+                )
             else:
+                # Fallback to simple run-start
+                await self._ws_broadcast(
+                    {"run": run, "type": "run-start", "file": html_path}
+                )
+
+            # Now continue with execution (we already have document from above)
+            if self._api_middleware and "document" in locals():
+                from .json_generator import JsonFormGenerator
+
+                generator = JsonFormGenerator(
+                    config=self.config,
+                    visual_store=self._api_middleware.visual_store,
+                    incremental_executor=self._api_middleware.incremental_executor,
+                )
+
+                # Execute incrementally and stream results
+                for block_id, result in generator.execute_incremental_with_results(
+                    source_file
+                ):
+                    # Check if task was cancelled
+                    if asyncio.current_task().cancelled():
+                        return
+
+                    # Send block-result message
+                    await self._ws_broadcast(
+                        {
+                            "run": run,
+                            "type": "block-result",
+                            "block": block_id,
+                            "ok": result.get("ok", True),
+                            "stdout": result.get("stdout", ""),
+                            "error": result.get("error"),
+                            "showsVisual": result.get("showsVisual", False),
+                            "elements": result.get("elements", []),
+                            "cache_hit": result.get("cache_hit", False),
+                            "content_changed": result.get("content_changed", False),
+                        }
+                    )
+
+                # Send run-end message
+                await self._ws_broadcast({"run": run, "type": "run-end"})
+            else:
+                # This shouldn't happen in normal operation
+                await self._ws_broadcast(
+                    {"run": run, "type": "run-end", "error": "Server not initialized"}
+                )
+
+        except asyncio.CancelledError:
+            # Task was cancelled, clean up if needed
+            await self._ws_broadcast({"run": run, "type": "run-end", "cancelled": True})
+            raise
+        except Exception as e:
+            # Send error and run-end
+            await self._ws_broadcast({"run": run, "type": "run-end", "error": str(e)})
+            if self.config.verbose:
+                import traceback
+
+                traceback.print_exc()
+
+    async def _send_reload_signal(self, changed_file=None):
+        """Send reload signal to all connected clients."""
+        # This method is now simplified - just trigger a build
+        if changed_file:
+            # Cancel any in-flight build
+            if self._current_run_task and not self._current_run_task.done():
+                self._current_run_task.cancel()
+                # Wait a bit for cancellation to complete
                 try:
-                    # Make sure we have absolute paths for comparison
-                    abs_file = (
-                        changed_file
-                        if changed_file.is_absolute()
-                        else changed_file.resolve()
-                    )
-                    abs_input = (
-                        self.input_path
-                        if self.input_path.is_absolute()
-                        else self.input_path.resolve()
-                    )
+                    await asyncio.wait_for(self._current_run_task, timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
 
-                    rel_path = abs_file.relative_to(abs_input)
-                    html_path = str(rel_path)
-                    # Remove .py extension
-                    if html_path.endswith(".py"):
-                        html_path = html_path[:-3]
-                    # Remove .colight.py extension
-                    elif html_path.endswith(".colight.py"):
-                        html_path = html_path[:-11]
-                except ValueError:
-                    # File is not relative to input path
-                    html_path = changed_file.stem
-
-            # For now, just send file-changed notification
-            # The client will fetch the document and check _changes field
-            message = json.dumps(
-                {"type": "file-changed", "path": html_path, "timestamp": time.time()}
+            # Start new build task
+            self._current_run_task = asyncio.create_task(
+                self._trigger_build(changed_file)
             )
         else:
-            # General reload
-            message = json.dumps({"type": "reload"})
-
-        # Send to all connections, ignoring failures
-        await asyncio.gather(
-            *(ws.send(message) for ws in self.connections), return_exceptions=True
-        )
+            # General reload (shouldn't happen in new architecture)
+            await self._ws_broadcast({"type": "reload"})
 
     async def _watch_for_changes(self):
         """Watch for file changes."""

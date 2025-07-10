@@ -87,6 +87,68 @@ class JsonDocumentGenerator:
 
         return json.dumps(doc, indent=2)
 
+    def execute_incremental_with_results(self, source_path: pathlib.Path):
+        """Execute a document incrementally and yield (block_id, result_dict) pairs.
+
+        This method is used by the LiveServer to stream results as they are executed.
+        """
+        # Parse the file
+        document = parse_colight_file(source_path)
+
+        # Apply config pragma if any
+        if self.config.pragma:
+            document.tags = document.tags | TagSet(frozenset(self.config.pragma))
+
+        # Generate file hash for unique block IDs
+        file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
+
+        # Execute incrementally in document order (streaming)
+        if self.incremental_executor:
+            # Use the new streaming method that executes in document order
+            i = 0
+            for (
+                block,
+                result,
+            ) in self.incremental_executor.execute_incremental_streaming(
+                document, None, str(source_path)
+            ):
+                json_block = self._block_to_json(
+                    block, result, document.tags, i, file_hash, source_path
+                )
+                if json_block:
+                    # Extract the parts we need for the WebSocket message
+                    result_dict = {
+                        "ok": not bool(json_block.get("error")),
+                        "stdout": json_block.get("stdout", ""),
+                        "error": json_block.get("error"),
+                        "showsVisual": json_block.get("showsVisual", False),
+                        "elements": json_block.get("elements", []),
+                        "cache_hit": getattr(result, "cache_hit", False),
+                        "content_changed": getattr(result, "content_changed", False),
+                    }
+                    yield json_block["id"], result_dict
+                i += 1
+        else:
+            # Fall back to regular execution
+            executor = DocumentExecutor(verbose=self.config.verbose)
+            results, _ = executor.execute(document, str(source_path))
+
+            for i, (block, result) in enumerate(zip(document.blocks, results)):
+                json_block = self._block_to_json(
+                    block, result, document.tags, i, file_hash, source_path
+                )
+                if json_block:
+                    result_dict = {
+                        "ok": not bool(json_block.get("error")),
+                        "stdout": json_block.get("stdout", ""),
+                        "error": json_block.get("error"),
+                        "showsVisual": json_block.get("showsVisual", False),
+                        "elements": json_block.get("elements", []),
+                        "cache_hit": getattr(result, "cache_hit", False),
+                        "content_changed": getattr(result, "content_changed", False),
+                    }
+                    yield json_block["id"], result_dict
+
     def _block_to_json(
         self,
         block: Block,
