@@ -42,7 +42,7 @@ packages = [
     "src/colight",
 ]
 artifacts = [
-    "src/colight/js/widget.mjs",
+    "src/js/widget.mjs",
 ]
 
 [tool.pyright]
@@ -59,4 +59,5 @@ reportFunctionMemberAccess = false
 [tool.ruff.lint]
 ignore = [
     "E402",
+    "F841",
 ]

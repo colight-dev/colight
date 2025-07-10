@@ -7,11 +7,11 @@ import pathlib
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 
-from .parser import parse_colight_file
-from .executor import DocumentExecutor
+from ..parser import parse_colight_file
+from ..executor import DocumentExecutor
+from ..model import Block, TagSet
+from ..builder import BuildConfig
 from .incremental_executor import IncrementalExecutor, ExecutionResult
-from .model import Block, TagSet
-from .builder import BuildConfig
 
 # Threshold for inline vs external visual storage
 VISUAL_INLINE_THRESHOLD = 50 * 1024  # 50KB

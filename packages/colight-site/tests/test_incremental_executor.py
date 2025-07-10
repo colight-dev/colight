@@ -1,6 +1,6 @@
 """Tests for incremental execution with dependency tracking."""
 
-from colight_site.incremental_executor import IncrementalExecutor
+from colight_site.live.incremental_executor import IncrementalExecutor
 from colight_site.model import Document, Block, Element, TagSet, BlockInterface
 import libcst as cst
 

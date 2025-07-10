@@ -11,6 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["@webgpu/types"]
   },
-  "include": ["src/**/*"],
+  "include": [
+    "packages/colight/src/js",
+    "packages/colight-site/src/colight_site/live/js"
+  ],
   "exclude": ["node_modules"]
 }

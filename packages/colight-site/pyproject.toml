@@ -54,4 +54,5 @@ reportFunctionMemberAccess = false
 [tool.ruff.lint]
 ignore = [
     "E402",
+    "F841",
 ]

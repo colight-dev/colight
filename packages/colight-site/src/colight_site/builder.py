@@ -12,6 +12,8 @@ from .model import TagSet
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .pep723 import detect_pep723_metadata, parse_dependencies
 from .pragma import parse_pragma_arg
+from .file_resolver import find_files
+from .constants import DEFAULT_IGNORE_PATTERNS
 
 
 @dataclass
@@ -314,16 +316,12 @@ def build_directory(
     if ignore is None:
         ignore = []
 
-    # Use index_generator to find files with proper pattern matching
-    from .index_generator import find_colight_files
-    from .constants import DEFAULT_IGNORE_PATTERNS
-
     # Combine user ignore patterns with defaults
     combined_ignore = list(ignore)
     combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
 
     # Find all matching files
-    python_files = find_colight_files(input_dir, include, combined_ignore)
+    python_files = find_files(input_dir, include, combined_ignore)
 
     # Remove duplicates and sort
     python_files = sorted(set(python_files))

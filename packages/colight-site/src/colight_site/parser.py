@@ -7,7 +7,8 @@ from typing import List, Union, Optional, Literal, Iterator
 from enum import Enum, auto
 import pathlib
 
-from .model import TagSet, Element, Block, Document, EmptyLine
+from .live.dependency_analyzer import analyze_block_dependencies
+from .model import TagSet, Element, Block, BlockInterface, Document, EmptyLine
 from .pragma import (
     parse_comment_line,
     extract_pragma_content,
@@ -467,9 +468,6 @@ def build_document(
 
             # Analyze dependencies for blocks with code
             if block.get_code_elements():
-                from .dependency_analyzer import analyze_block_dependencies
-                from .model import BlockInterface
-
                 try:
                     code_text = block.get_code_text()
                     provides, requires = analyze_block_dependencies(code_text)

@@ -4,8 +4,8 @@ from typing import Dict, Optional, List, Set, Tuple
 from dataclasses import dataclass, field
 import hashlib
 
-from .model import Block, Document
-from .executor import ExecutionResult, BlockExecutor
+from ..model import Block, Document
+from ..executor import ExecutionResult, BlockExecutor
 from .block_graph import BlockGraph
 
 

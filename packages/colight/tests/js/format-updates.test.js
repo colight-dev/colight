@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseColightData } from "../../src/colight/js/format.js";
+import { parseColightData } from "../../src/js/format.js";
 
 describe("Colight Format Updates", () => {
   // Helper to create a .colight entry

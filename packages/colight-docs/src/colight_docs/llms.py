@@ -447,7 +447,7 @@ def evaluate(widget, _e):
 
 # List of ancient civilizations with their temporal and geographic data
 # Each dict has: name (str), start/end years (int), continent (str), peak_population (int)
-from docs.examples.data import civilizations
+from colight_docs.examples.data import civilizations
 
 # </given-user-file-context>
 # User: Create a timeline visualization of the ancient civilizations I've defined above.
@@ -576,7 +576,7 @@ Interactive features include:
 # scientist (str): discoverer name(s)
 # discovery (str): name of discovery
 # description (str): detailed explanation
-from docs.examples.data import discoveries
+from colight_docs.examples.data import discoveries
 
 # </given-user-file-context>
 # User: Could you help me plot this dataset, showing a timeline of when each discovery was published and the period until it gained widespread acceptance? Include tooltips with the detailed descriptions.
@@ -705,7 +705,7 @@ frames = generate_spring_motion()
 # <given-user-file-context>
 # pulsar_data is a numpy array of [x, y, wave_index] points representing pulsar waves
 # Each point has an x coordinate, y amplitude, and wave_index to identify which wave it belongs to
-from docs.examples.data import pulsar_data
+from colight_docs.examples.data import pulsar_data
 
 # </given-user-file-context>
 # User: Create an isotype chart for this data using emoji.
@@ -756,7 +756,7 @@ import colight.plot as Plot
 # <given-user-file-context>
 # pulsar_data is a numpy array of [x, y, wave_index] points representing pulsar waves
 # Each point has an x coordinate, y amplitude, and wave_index to identify which wave it belongs to
-from docs.examples.data import pulsar_data
+from colight_docs.examples.data import pulsar_data
 
 # </given-user-file-context>
 # User: Create a visualization inspired by the PSR B1919+21 pulsar plot (also known as the "Unknown Pleasures" album cover) - I've imported the data above.

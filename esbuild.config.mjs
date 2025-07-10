@@ -19,7 +19,7 @@ const commonOptions = {
 const widgetESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/widget.jsx'],
+  entryPoints: ['packages/colight/src/js/widget.jsx'],
   outfile: 'dist/widget.mjs',
   plugins: [],
 };
@@ -28,7 +28,7 @@ const widgetESM = {
 const anywidgetESM = {
   ...widgetESM,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/anywidget.jsx'],
+  entryPoints: ['packages/colight/src/js/anywidget.jsx'],
   outfile: 'dist/anywidget.mjs',
 };
 
@@ -36,7 +36,7 @@ const anywidgetESM = {
 const embedConfigJS = {
   ...commonOptions,
   format: 'iife',
-  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  entryPoints: ['packages/colight/src/js/embed.js'],
   outfile: 'dist/embed.js',
   plugins: [],
 };
@@ -45,7 +45,7 @@ const embedConfigJS = {
 const embedConfigESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  entryPoints: ['packages/colight/src/js/embed.js'],
   outfile: 'dist/embed.mjs',
 };
 
@@ -53,7 +53,7 @@ const embedConfigESM = {
 const liveConfig = {
   ...commonOptions,
   format: 'iife',
-  entryPoints: ['src/js/live.jsx'],
+  entryPoints: ['packages/colight-site/src/js/live.jsx'],
   outfile: 'dist/live.js',
   plugins: [],
   define: {
@@ -66,7 +66,7 @@ const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveCon
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch
 if (USE_CDN_IMPORTS) {
-  importMap.load('packages/colight/src/colight/js/import-map.cdn.json');
+  importMap.load('packages/colight/src/js/import-map.cdn.json');
   configs.forEach(config => {
     config.plugins.push(importMap.plugin());
   });

@@ -111,7 +111,7 @@ jobs:
         run: |
           ls -la dist/
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
-          cp packages/colight/src/colight/widget.css dist/
+          cp packages/colight/src/widget.css dist/
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
         env:

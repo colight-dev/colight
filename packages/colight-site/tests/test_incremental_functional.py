@@ -6,7 +6,7 @@ for functional/immutable code patterns.
 """
 
 from colight_site.parser import parse_document
-from colight_site.incremental_executor import IncrementalExecutor
+from colight_site.live.incremental_executor import IncrementalExecutor
 
 
 def test_simple_dependency_chain_with_edits():
@@ -283,7 +283,7 @@ squared = [x ** 3 for x in evens]
 total = sum(squared)"""
 
     doc_edited = parse_document(code_edited)
-    results = executor.execute_incremental(doc_edited, changed_blocks={"2"})
+    executor.execute_incremental(doc_edited, changed_blocks={"2"})
 
     # Only squared and total should update
     assert executor.env["evens"] == [2, 4, 6, 8, 10]  # unchanged

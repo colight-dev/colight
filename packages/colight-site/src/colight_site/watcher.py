@@ -9,7 +9,7 @@ import threading
 
 from . import api
 from .builder import BuildConfig
-from .server_live import LiveReloadServer
+from .server_watch import LiveReloadServer
 
 
 def watch_and_build(

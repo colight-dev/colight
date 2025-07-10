@@ -2,6 +2,60 @@
 
 import pathlib
 from typing import List, Optional
+from .constants import DEFAULT_IGNORE_PATTERNS
+import fnmatch
+
+
+def find_files(
+    input_path: pathlib.Path,
+    include: List[str],
+    ignore: Optional[List[str]] = None,
+) -> List[pathlib.Path]:
+    """Find all files matching the include patterns."""
+    files = []
+
+    if input_path.is_file():
+        # Single file mode
+        return [input_path] if matches_patterns(input_path, include, ignore) else []
+
+    # Directory mode
+    for pattern in include:
+        for file_path in input_path.rglob(pattern):
+            if file_path.is_file() and matches_patterns(file_path, include, ignore):
+                files.append(file_path)
+
+    return sorted(set(files))  # Remove duplicates and sort
+
+
+def matches_patterns(
+    file_path: pathlib.Path,
+    include_patterns: List[str],
+    ignore_patterns: Optional[List[str]] = None,
+) -> bool:
+    """Check if file matches include patterns and doesn't match ignore patterns."""
+    file_str = str(file_path)
+
+    # First check ignore patterns - check all parts of the path
+    if ignore_patterns:
+        for part in file_path.parts:
+            for pattern in ignore_patterns:
+                if fnmatch.fnmatch(part, pattern):
+                    return False
+
+        # Also check the full path
+        for pattern in ignore_patterns:
+            if fnmatch.fnmatch(file_str, pattern) or fnmatch.fnmatch(
+                file_path.name, pattern
+            ):
+                return False
+
+    # Check if file matches any include pattern
+    matches_include = any(
+        fnmatch.fnmatch(file_str, pattern) or fnmatch.fnmatch(file_path.name, pattern)
+        for pattern in include_patterns
+    )
+
+    return matches_include
 
 
 class FileResolver:
@@ -95,8 +149,6 @@ class FileResolver:
         Returns:
             True if file matches include patterns and doesn't match ignore patterns
         """
-        from .index_generator import matches_patterns
-        from .constants import DEFAULT_IGNORE_PATTERNS
 
         # Combine user ignore patterns with defaults
         combined_ignore = list(self.ignore)
@@ -110,14 +162,12 @@ class FileResolver:
         Returns:
             List of relative paths without extensions
         """
-        from .index_generator import find_colight_files
-        from .constants import DEFAULT_IGNORE_PATTERNS
 
         # Combine user ignore patterns with defaults
         combined_ignore = list(self.ignore)
         combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
 
-        files = find_colight_files(self.input_path, self.include, combined_ignore)
+        files = find_files(self.input_path, self.include, combined_ignore)
 
         # Convert to relative paths without extensions
         if self._is_single_file:

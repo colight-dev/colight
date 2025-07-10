@@ -5,7 +5,7 @@ from unittest.mock import patch
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
-from colight_site.live_server import LiveServer, OnDemandMiddleware
+from colight_site.live.server import LiveServer, OnDemandMiddleware
 from colight_site.builder import BuildConfig
 
 
@@ -108,7 +108,7 @@ def test_on_demand_middleware_subdirectories(temp_project, output_dir):
     client = Client(middleware, Response)
 
     # Request a file in a subdirectory
-    response = client.get("/docs/guide.html")
+    client.get("/docs/guide.html")
 
     # Should build the file in the correct subdirectory
     assert (output_dir / "docs" / "guide.html").exists()
@@ -130,7 +130,7 @@ def test_on_demand_middleware_only_rebuilds_when_needed(temp_project, output_dir
     client = Client(middleware, Response)
 
     # First request builds the file
-    response = client.get("/example.html")
+    client.get("/example.html")
     assert (output_dir / "example.html").exists()
 
     # Get initial modification time
@@ -138,7 +138,7 @@ def test_on_demand_middleware_only_rebuilds_when_needed(temp_project, output_dir
 
     # Second request should not rebuild
     with patch("colight_site.api.build_file") as mock_build:
-        response = client.get("/example.html")
+        client.get("/example.html")
         mock_build.assert_not_called()
 
     # Modification time should be unchanged

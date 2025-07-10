@@ -1,4 +1,3 @@
-# | hide-code
 import colight.plot as Plot
 
 # ## Color Schemes
@@ -14,7 +13,6 @@ import colight.plot as Plot
     + Plot.height(50)
 )
 
-# %% [markdown]
 # Here, the `x` and `fill` channels both use [Plot.identity](bylight?in=-1) to use the corresponding value in the provided [range](bylight?in=-1&match=range\(...\)).
 #
 # ### Custom color interpolation
@@ -33,7 +31,6 @@ import colight.plot as Plot
     + Plot.height(50)
 )
 
-# %% [markdown]
 # In this example:
 # - `"range"` specifies the start and end colors for the scale (blue to red).
 # - `"interpolate"` defines how to transition between these colors, using D3's HSL interpolation.
@@ -52,10 +49,9 @@ import colight.plot as Plot
     + Plot.height(50)
 )
 
-# %% [markdown]
 # ### Using colorMap and colorLegend
 #
-# [Plot.colorMap(...)](bylight) assigns specific colors to categories, while [Plot.colorLegend()](bylight) adds a color legend to your plot. In the following example, we create a dot plot with categorical data. The [fill channel](bylight?match="fill":+"category") determines the color of each dot based on its category.
+# [Plot.colorMap(...)](bylight?match=Plot.colorMap) assigns specific colors to categories, while [Plot.colorLegend()](bylight) adds a color legend to your plot. In the following example, we create a dot plot with categorical data. The [fill channel](bylight?match="fill":+"category") determines the color of each dot based on its category.
 
 # %%
 categorical_data = [
@@ -73,7 +69,6 @@ categorical_data = [
     + Plot.colorLegend()
 )
 
-# %% [markdown]
 # ### Applying a constant color to an entire mark
 #
 # When specifying colors for marks, there's an important distinction to be aware of:
@@ -109,7 +104,6 @@ import random
 )
 
 
-# %% [markdown]
 # ### Using RGB(A) Colors
 #
 # You can specify colors using RGB or RGBA values by specifying color channel value as CSS rgb/rgba syntax: `"rgb(255, 0, 0)"` or `"rgba(255, 0, 0, 0.5)"`. For example:

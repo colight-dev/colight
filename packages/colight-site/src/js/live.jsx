@@ -7,9 +7,9 @@ import React, {
 } from "react";
 import ReactDOM from "react-dom/client";
 import Fuse from "fuse.js";
-import { DraggableViewer } from "../../packages/colight/src/colight/js/widget.jsx";
-import { parseColightScript } from "../../packages/colight/src/colight/js/format.js";
-import { tw, md } from "../../packages/colight/src/colight/js/api.jsx";
+import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
+import { parseColightScript } from "../../../colight/src/js/format.js";
+import { tw, md } from "../../../colight/src/js/api.jsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import "./bylight.js";
 

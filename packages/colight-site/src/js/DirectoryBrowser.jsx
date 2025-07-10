@@ -1,12 +1,17 @@
-import { useState, } from "react";
-import { tw } from "../../packages/colight/src/colight/js/utils";
+import { useState } from "react";
+import { tw } from "../../../colight/src/js/utils";
 
 // Individual node in the directory tree
-const DirectoryNode = ({ node, onSelectFile, level = 0, defaultExpanded = false }) => {
+const DirectoryNode = ({
+  node,
+  onSelectFile,
+  level = 0,
+  defaultExpanded = false,
+}) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const isDirectory = node.type === "directory";
   const hasChildren = isDirectory && node.children && node.children.length > 0;
-  
+
   const handleClick = () => {
     if (isDirectory) {
       if (hasChildren) {
@@ -18,36 +23,45 @@ const DirectoryNode = ({ node, onSelectFile, level = 0, defaultExpanded = false 
       onSelectFile(cleanPath);
     }
   };
-  
+
   return (
     <div style={{ paddingLeft: `${level * 20}px` }}>
       <div
         className={tw(
-          "flex items-center py-1.5 px-2 cursor-pointer transition-all duration-200 hover:bg-gray-50 rounded"
+          "flex items-center py-1.5 px-2 cursor-pointer transition-all duration-200 hover:bg-gray-50 rounded",
         )}
         onClick={handleClick}
       >
         {isDirectory && (
-          <span 
-            className={tw(`mr-2 text-xs transition-transform duration-200 ${
-              expanded ? "" : "-rotate-90"
-            }`)}
+          <span
+            className={tw(
+              `mr-2 text-xs transition-transform duration-200 ${
+                expanded ? "" : "-rotate-90"
+              }`,
+            )}
             style={{ width: "12px", display: "inline-block" }}
           >
             {hasChildren ? "▼" : ""}
           </span>
         )}
         {!isDirectory && (
-          <span className={tw("mr-2 text-gray-300")} style={{ width: "12px", display: "inline-block" }}>
+          <span
+            className={tw("mr-2 text-gray-300")}
+            style={{ width: "12px", display: "inline-block" }}
+          >
             •
           </span>
         )}
-        
-        <span className={tw(`flex-1 ${isDirectory ? "text-gray-700 font-medium" : "text-gray-600"} text-sm`)}>
+
+        <span
+          className={tw(
+            `flex-1 ${isDirectory ? "text-gray-700 font-medium" : "text-gray-600"} text-sm`,
+          )}
+        >
           {node.name.replace(/\.py$/, "")}
         </span>
       </div>
-      
+
       {isDirectory && hasChildren && expanded && (
         <div>
           {node.children.map((child) => (
@@ -66,17 +80,22 @@ const DirectoryNode = ({ node, onSelectFile, level = 0, defaultExpanded = false 
 };
 
 // Main directory browser component
-export const DirectoryBrowser = ({ directoryPath, onSelectFile, onClose, tree }) => {
+export const DirectoryBrowser = ({
+  directoryPath,
+  onSelectFile,
+  onClose,
+  tree,
+}) => {
   // Get the subtree for the current directory
   let displayTree = tree;
-  
+
   if (tree && directoryPath && directoryPath !== "/") {
     const parts = directoryPath.split("/").filter(Boolean);
     let current = tree;
-    
+
     for (const part of parts) {
       if (current.type === "directory" && current.children) {
-        const child = current.children.find(c => c.name === part);
+        const child = current.children.find((c) => c.name === part);
         if (child) {
           current = child;
         } else {
@@ -84,14 +103,14 @@ export const DirectoryBrowser = ({ directoryPath, onSelectFile, onClose, tree })
         }
       }
     }
-    
+
     displayTree = current;
   }
-  
+
   if (!displayTree) {
     return null;
   }
-  
+
   return (
     <div className={tw("max-w-3xl mx-auto p-4")}>
       {displayTree.type === "directory" && displayTree.children ? (

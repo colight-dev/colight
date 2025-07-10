@@ -1,6 +1,6 @@
 """Tests for Python-correct scoping in dependency analysis."""
 
-from colight_site.dependency_analyzer import analyze_block_dependencies
+from colight_site.live.dependency_analyzer import analyze_block_dependencies
 
 
 def test_list_comprehension_scoping():

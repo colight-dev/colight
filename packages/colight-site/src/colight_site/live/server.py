@@ -16,13 +16,8 @@ from werkzeug.wrappers import Request, Response
 from watchfiles import awatch
 
 from colight_site.builder import BuildConfig
-from colight_site.build_helper import BuildHelper
-
-# Import the helper functions for backward compatibility
-_get_metadata_path = BuildHelper.get_metadata_path
-_save_build_metadata = BuildHelper.save_build_metadata
-_load_build_metadata = BuildHelper.load_build_metadata
-_should_rebuild_with_metadata = BuildHelper.should_rebuild_with_metadata
+from .index_generator import build_file_tree_json
+from ..file_resolver import find_files
 
 
 class DocumentCache:
@@ -173,7 +168,7 @@ class ApiMiddleware:
         self.visual_store = {}  # Store visual data by ID
 
         # Use FileResolver for file operations
-        from .file_resolver import FileResolver
+        from ..file_resolver import FileResolver
 
         self.file_resolver = FileResolver(input_path, include, ignore)
 
@@ -188,7 +183,7 @@ class ApiMiddleware:
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        from .constants import DEFAULT_IGNORE_PATTERNS
+        from ..constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
         combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
@@ -209,11 +204,9 @@ class ApiMiddleware:
 
         # Handle /api/index endpoint
         if path == "/api/index":
-            from .index_generator import build_file_tree_json, find_colight_files
-
             # Get all colight files
             combined_ignore = self._get_combined_ignore_patterns()
-            files = find_colight_files(self.input_path, self.include, combined_ignore)
+            files = find_files(self.input_path, self.include, combined_ignore)
 
             # Build the tree structure
             tree = build_file_tree_json(files, self.input_path)
@@ -222,42 +215,6 @@ class ApiMiddleware:
             response = Response(response_data, mimetype="application/json")
             return response(environ, start_response)
 
-        # Handle /api/content/<path> endpoint (legacy HTML)
-        if path.startswith("/api/content/"):
-            file_path = path[13:]  # Remove /api/content/
-
-            # Add .html extension if not present (for finding source)
-            if not file_path.endswith(".html"):
-                file_path = file_path + ".html"
-
-            # Build the file if needed (reuse OnDemandMiddleware logic)
-            source_file = self.file_resolver.find_source_file(file_path)
-            if source_file:
-                output_file = self.file_resolver.get_output_path(
-                    source_file, self.output_path
-                )
-
-                # Build if needed and handle errors
-                error_result = BuildHelper.build_file_if_stale(
-                    source_file, output_file, self.config, error_format="html"
-                )
-
-                if error_result:
-                    # Build failed, return error HTML directly
-                    response = Response(error_result, status=500, mimetype="text/html")
-                    return response(environ, start_response)
-
-                # Read and return the built HTML
-                if output_file.exists():
-                    content = output_file.read_text()
-                    response = Response(content, mimetype="text/html")
-                    return response(environ, start_response)
-
-            # File not found
-            response = Response("File not found", status=404)
-            return response(environ, start_response)
-
-        # Handle /api/document/<path> endpoint (new JSON)
         if path.startswith("/api/document/"):
             file_path = path[14:]  # Remove /api/document/
 
@@ -371,7 +328,7 @@ class OnDemandMiddleware:
         self._ensure_output_dir()
 
         # Use FileResolver for file operations
-        from .file_resolver import FileResolver
+        from ..file_resolver import FileResolver
 
         self.file_resolver = FileResolver(input_path, include, ignore)
 
@@ -420,7 +377,7 @@ class OnDemandMiddleware:
                 print(f"Output file will be: {output_file}")
 
             # Build if needed using BuildHelper
-            from .build_helper import BuildHelper
+            from ..build_helper import BuildHelper
 
             error_result = BuildHelper.build_file_if_stale(
                 source_file, output_file, self.config, error_format="html"
@@ -652,7 +609,7 @@ class LiveServer:
 
     def _get_combined_ignore_patterns(self) -> List[str]:
         """Get combined default and user ignore patterns."""
-        from .constants import DEFAULT_IGNORE_PATTERNS
+        from ..constants import DEFAULT_IGNORE_PATTERNS
 
         combined_ignore = list(self.ignore) if self.ignore else []
         combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)

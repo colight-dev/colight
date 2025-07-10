@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { $StateContext } from "../../src/colight/js/context";
-import { createStateStore } from "../../src/colight/js/widget";
+import { $StateContext } from "../../src/js/context";
+import { createStateStore } from "../../src/js/widget";
 
 /**
  * Wraps a component with a blank state context for testing.
