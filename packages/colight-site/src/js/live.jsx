@@ -1121,27 +1121,39 @@ const LiveServerApp = () => {
 
       case "block-result":
         if (message.run && message.run === latestRunRef.current) {
-          // Track changed blocks
-          if (message.content_changed) {
-            changedBlocksRef.current.add(message.block);
-          }
-
-          // Update block result
-          setBlockResults((prev) => {
-            return {
+          // Handle unchanged blocks (lightweight message)
+          if (message.unchanged) {
+            // Just clear pending state, keep existing results
+            setBlockResults((prev) => ({
               ...prev,
               [message.block]: {
-                ok: message.ok,
-                stdout: message.stdout,
-                error: message.error,
-                showsVisual: message.showsVisual,
-                elements: message.elements || [],
-                cache_hit: message.cache_hit,
-                content_changed: message.content_changed,
-                pending: false, // Clear pending state
+                ...prev[message.block],
+                pending: false,
               },
-            };
-          });
+            }));
+          } else {
+            // Track changed blocks
+            if (message.content_changed) {
+              changedBlocksRef.current.add(message.block);
+            }
+
+            // Update block result with new data
+            setBlockResults((prev) => {
+              return {
+                ...prev,
+                [message.block]: {
+                  ok: message.ok,
+                  stdout: message.stdout,
+                  error: message.error,
+                  showsVisual: message.showsVisual,
+                  elements: message.elements || [],
+                  cache_hit: message.cache_hit,
+                  content_changed: message.content_changed,
+                  pending: false, // Clear pending state
+                },
+              };
+            });
+          }
         }
         break;
 
@@ -1157,7 +1169,7 @@ const LiveServerApp = () => {
           const changedBlocksList = Array.from(changedBlocksRef.current);
 
           // If exactly one block changed, scroll to it
-          if (false && changedBlocksList.length === 1) {
+          if (true && changedBlocksList.length === 1) {
             setTimeout(() => {
               const blockId = changedBlocksList[0];
               const element = document.querySelector(
@@ -1333,3 +1345,6 @@ if (typeof window !== "undefined") {
     ReactDOM.createRoot(root).render(<LiveServerApp />);
   }
 }
+
+// Export components for testing
+export { LiveServerApp, BlockRenderer, ColightVisual, CommandBar };

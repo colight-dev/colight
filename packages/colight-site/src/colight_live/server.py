@@ -440,6 +440,8 @@ class LiveServer:
         from colight_site.parser import parse_colight_file
         from colight_site.model import TagSet
 
+        source_file = None
+
         try:
             # Find source file
             if self._api_middleware:
@@ -511,7 +513,7 @@ class LiveServer:
                 )
 
             # Now continue with execution (we already have document from above)
-            if self._api_middleware and "document" in locals():
+            if self._api_middleware and "document" in locals() and source_file:
                 from .json_generator import JsonFormGenerator
 
                 generator = JsonFormGenerator(
@@ -525,24 +527,43 @@ class LiveServer:
                     source_file
                 ):
                     # Check if task was cancelled
-                    if asyncio.current_task().cancelled():
+                    task = asyncio.current_task()
+                    if task and task.cancelled():
                         return
 
-                    # Send block-result message
-                    await self._ws_broadcast(
-                        {
-                            "run": run,
-                            "type": "block-result",
-                            "block": block_id,
-                            "ok": result.get("ok", True),
-                            "stdout": result.get("stdout", ""),
-                            "error": result.get("error"),
-                            "showsVisual": result.get("showsVisual", False),
-                            "elements": result.get("elements", []),
-                            "cache_hit": result.get("cache_hit", False),
-                            "content_changed": result.get("content_changed", False),
-                        }
-                    )
+                    # Check if block result is unchanged
+                    cache_hit = result.get("cache_hit", False)
+                    content_changed = result.get("content_changed", False)
+                    unchanged = cache_hit and not content_changed
+
+                    # Always send block-result for dirty blocks, but optimize payload
+                    if unchanged:
+                        # Send lightweight message for unchanged blocks
+                        await self._ws_broadcast(
+                            {
+                                "run": run,
+                                "type": "block-result",
+                                "block": block_id,
+                                "unchanged": True,
+                                # Minimal fields - client keeps existing results
+                            }
+                        )
+                    else:
+                        # Send full message for changed blocks
+                        await self._ws_broadcast(
+                            {
+                                "run": run,
+                                "type": "block-result",
+                                "block": block_id,
+                                "ok": result.get("ok", True),
+                                "stdout": result.get("stdout", ""),
+                                "error": result.get("error"),
+                                "showsVisual": result.get("showsVisual", False),
+                                "elements": result.get("elements", []),
+                                "cache_hit": cache_hit,
+                                "content_changed": content_changed,
+                            }
+                        )
 
                 # Send run-end message
                 await self._ws_broadcast({"run": run, "type": "run-end"})
