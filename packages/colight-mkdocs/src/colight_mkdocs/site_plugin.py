@@ -1,4 +1,4 @@
-"""MkDocs plugin for processing .py and .colight.py files in-memory.
+"""MkDocs plugin for processing .py files with Colight.
 
 This plugin processes Python files during the build without creating intermediate files,
 similar to how mkdocs-jupyter works.
@@ -9,14 +9,13 @@ import traceback
 from functools import cached_property
 from typing import Optional
 
-from mkdocs.config import Config
-from mkdocs.plugins import BasePlugin
-from mkdocs.config.config_options import Type, DictOfItems, ListOfItems
-from mkdocs.structure.files import Files, File
-from mkdocs.structure.pages import Page
-
 from colight_site import api
 from colight_site.constants import DEFAULT_INLINE_THRESHOLD
+from mkdocs.config import Config
+from mkdocs.config.config_options import DictOfItems, ListOfItems, Type
+from mkdocs.plugins import BasePlugin
+from mkdocs.structure.files import File, Files
+from mkdocs.structure.pages import Page
 
 
 class ColightFile(File):
@@ -83,7 +82,7 @@ class SitePlugin(BasePlugin):
     config_scheme = (
         ("verbose", Type(bool, default=False)),
         ("format", Type(str, default="markdown")),
-        ("include", ListOfItems(Type(str), default=["*.py", "*.colight.py"])),
+        ("include", ListOfItems(Type(str), default=["*.py"])),
         ("ignore", ListOfItems(Type(str), default=[])),
         ("hide_statements", Type(bool, default=False)),
         ("hide_visuals", Type(bool, default=False)),
@@ -227,11 +226,8 @@ class SitePlugin(BasePlugin):
         rel_path = file_path.relative_to(docs_dir)
 
         # Create the output directory in the site based on the file's destination
-        # For .colight.py files, we want to match the MkDocs page structure
-        if rel_path.name.endswith(".colight.py"):
-            # e.g., sliders.colight.py -> sliders.colight
-            output_name = rel_path.name[:-3]  # Remove just .py, keep .colight
-        elif rel_path.name.endswith(".py"):
+        # Match the MkDocs page structure
+        if rel_path.name.endswith(".py"):
             output_name = rel_path.name[:-3]  # Remove .py
         else:
             output_name = rel_path.stem
@@ -244,7 +240,7 @@ class SitePlugin(BasePlugin):
             print(f"[colight]   Writing .colight files to: {colight_dir}")
 
         # Process the colight file using the public API
-        result = api.process_colight_file(
+        result = api.evaluate_python(
             file_path,
             output_dir=colight_dir,
             inline_threshold=self.config["inline_threshold"],

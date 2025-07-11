@@ -83,7 +83,7 @@ def build(
     inline_threshold: int,
     in_subprocess: bool,
 ):
-    """Build a .colight.py file into markdown/HTML."""
+    """Build a .py file into markdown/HTML."""
 
     # Create BuildConfig from CLI args
     config = BuildConfig(

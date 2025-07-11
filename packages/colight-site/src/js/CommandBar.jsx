@@ -24,7 +24,7 @@ const CommandBar = ({
     if (directoryTree && directoryTree !== null) {
       const allFiles = [];
 
-      // Recursive function to extract all .colight.py files
+      // Recursive function to extract all .py files
       const extractFiles = (items, currentPath = "") => {
         if (!items || !Array.isArray(items)) return;
 
@@ -39,7 +39,7 @@ const CommandBar = ({
               relativePath: fullPath,
               // Add searchable terms
               searchTerms: [
-                item.name.replace(".colight.py", ""),
+                item.name.replace(".py", ""),
                 item.name,
                 fullPath,
                 ...fullPath.split("/").filter(Boolean),

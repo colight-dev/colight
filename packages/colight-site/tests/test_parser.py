@@ -59,7 +59,12 @@ class TestLexer:
         # Check that code is parsed as CST nodes
         import libcst as cst
 
-        assert all(isinstance(element.content, cst.CSTNode) for element in elements)
+        # Type narrowing - we know all elements are CodeLine from the check above
+        code_elements = [elem for elem in elements if isinstance(elem, CodeLine)]
+        assert len(code_elements) == len(elements)  # All are CodeLine
+        assert all(
+            isinstance(element.content, cst.CSTNode) for element in code_elements
+        )
 
     def test_lex_mixed(self):
         """Test lexing mixed content."""
@@ -92,10 +97,14 @@ class TestLexer:
 
         elements = lex(source)
         assert len(elements) == 4
-        assert elements[0].content == "Regular comment"
-        assert elements[1].content == "# H1 Header"
-        assert elements[2].content == "## H2 Header"
-        assert elements[3].content == "### H3 Header"
+        assert all(isinstance(elem, CommentLine) for elem in elements)
+        # Type narrow to CommentLine
+        comment_elements = [elem for elem in elements if isinstance(elem, CommentLine)]
+        assert len(comment_elements) == 4
+        assert comment_elements[0].content == "Regular comment"
+        assert comment_elements[1].content == "# H1 Header"
+        assert comment_elements[2].content == "## H2 Header"
+        assert comment_elements[3].content == "### H3 Header"
 
     def test_lex_pep723_block(self):
         """Test that PEP 723 blocks are skipped."""

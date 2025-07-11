@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from colight_site.executor import BlockExecutor, ExecutionResult
 from colight_site.model import Block, Document
+from colight_site.utils import hash_block_content
 
 from .block_graph import BlockGraph
 
@@ -32,12 +33,7 @@ class IncrementalExecutor(BlockExecutor):
 
     def _get_content_hash(self, block: Block) -> str:
         """Get a hash of block's content including prose."""
-        # Include all elements, not just code
-        content_parts = []
-        for elem in block.elements:
-            content_parts.append(f"{elem.kind}:{elem.get_source()}")
-        content = "\n".join(content_parts)
-        return hashlib.sha256(content.encode()).hexdigest()
+        return hash_block_content(block)
 
     def _compute_cache_key(self, block: Block, dependency_keys: Dict[str, str]) -> str:
         """Compute content-addressable cache key for a block.
@@ -48,11 +44,8 @@ class IncrementalExecutor(BlockExecutor):
 
         This ensures that if any dependency changes, this block's key changes too.
         """
-        # Start with block's own content - use same method as content hash
-        content_parts = []
-        for elem in block.elements:
-            content_parts.append(f"{elem.kind}:{elem.get_source()}")
-        content = "\n".join(content_parts).encode()
+        # Start with block's own content hash
+        content = hash_block_content(block).encode()
 
         # Add sorted dependency cache keys
         dep_keys = []

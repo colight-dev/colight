@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .constants import DEFAULT_IGNORE_PATTERNS, DEFAULT_INLINE_THRESHOLD
+from .constants import DEFAULT_INLINE_THRESHOLD
 from .executor import DocumentExecutor
 from .file_resolver import find_files
 from .generator import HTMLGenerator, MarkdownGenerator, write_colight_files
@@ -13,6 +13,7 @@ from .model import TagSet
 from .parser import parse_colight_file
 from .pep723 import detect_pep723_metadata, parse_dependencies
 from .pragma import parse_pragma_arg
+from .utils import merge_ignore_patterns
 
 
 @dataclass
@@ -106,12 +107,7 @@ class BuildConfig:
 
 def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
     """Convert Python file path to output path with correct extension."""
-    if input_path.name.endswith(".colight.py"):
-        # Remove .colight.py and add the new extension
-        base_name = input_path.name[:-11]  # Remove ".colight.py"
-        suffix = ".html" if format == "html" else ".md"
-        return input_path.parent / (base_name + suffix)
-    elif input_path.suffix == ".py":
+    if input_path.suffix == ".py":
         # For regular .py files, replace .py with the output extension
         suffix = ".html" if format == "html" else ".md"
         return input_path.with_suffix(suffix)
@@ -312,15 +308,9 @@ def build_directory(
     # Default to .py files if no include patterns specified
     if include is None:
         include = ["*.py"]
-    if ignore is None:
-        ignore = []
-
-    # Combine user ignore patterns with defaults
-    combined_ignore = list(ignore)
-    combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
 
     # Find all matching files
-    python_files = find_files(input_dir, include, combined_ignore)
+    python_files = find_files(input_dir, include, merge_ignore_patterns(ignore))
 
     # Remove duplicates and sort
     python_files = sorted(set(python_files))
@@ -357,8 +347,8 @@ def init_project(project_dir: pathlib.Path):
     (project_dir / "src").mkdir(exist_ok=True)
     (project_dir / "build").mkdir(exist_ok=True)
 
-    # Create example .colight.py file
-    example_file = project_dir / "src" / "example.colight.py"
+    # Create example file
+    example_file = project_dir / "src" / "example.py"
     example_content = """# My First Colight Document
 # This is a simple example of mixing narrative text with executable code.
 
@@ -398,7 +388,7 @@ colight-site watch src --output build
 
 ## Files
 
-- `src/` - Source .colight.py files
+- `src/` - Source files
 - `build/` - Generated markdown and HTML files
 """
 

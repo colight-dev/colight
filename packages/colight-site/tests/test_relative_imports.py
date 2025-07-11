@@ -28,8 +28,8 @@ def helper():
         sub_dir.mkdir()
         (sub_dir / "__init__.py").write_text("")
 
-        # Create a .colight.py file with relative imports
-        test_file = sub_dir / "example.colight.py"
+        # Create a .py file with relative imports
+        test_file = sub_dir / "example.py"
         test_file.write_text("""
 # Test relative imports
 from ..utils import helper
@@ -61,7 +61,7 @@ def test_relative_imports_no_package():
     """Test that files not in a package still work (no relative imports)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create a standalone file
-        test_file = Path(tmpdir) / "standalone.colight.py"
+        test_file = Path(tmpdir) / "standalone.py"
         test_file.write_text("""
 # No relative imports, just regular code
 import os
@@ -100,7 +100,7 @@ def test_nested_package_structure():
         (sub / "mid_utils.py").write_text('MID = "middle level"')
 
         # Create test file in deepest level
-        test_file = deep / "test.colight.py"
+        test_file = deep / "test.py"
         test_file.write_text("""
 # Import from various levels
 from ...top_utils import TOP

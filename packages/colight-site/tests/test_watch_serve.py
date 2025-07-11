@@ -2,13 +2,13 @@
 
 from unittest.mock import patch
 
-from colight_site.watcher import watch_build_and_serve
 from colight_site.builder import BuildConfig
+from colight_site.watcher import watch_build_and_serve
 
 
 def test_watch_build_and_serve_creates_output_directory(tmp_path):
     """Test that watch_build_and_serve creates the output directory."""
-    input_file = tmp_path / "test.colight.py"
+    input_file = tmp_path / "test.py"
     input_file.write_text("import colight as cl\ncl.sphere()")
     output_dir = tmp_path / "output"
 
@@ -50,8 +50,8 @@ def test_watch_build_and_serve_builds_files_for_directory(tmp_path):
     input_dir.mkdir()
 
     # Create test files - use simple content that doesn't require colight
-    (input_dir / "test1.colight.py").write_text("# Test 1\nprint('test1')")
-    (input_dir / "test2.colight.py").write_text("# Test 2\nprint('test2')")
+    (input_dir / "test1.py").write_text("# Test 1\nprint('test1')")
+    (input_dir / "test2.py").write_text("# Test 2\nprint('test2')")
 
     output_dir = tmp_path / "output"
 
@@ -82,7 +82,7 @@ def test_watch_build_and_serve_builds_files_for_directory(tmp_path):
 
 def test_watch_build_and_serve_defaults_to_html_format(tmp_path):
     """Test that watch_build_and_serve defaults to HTML format."""
-    input_file = tmp_path / "test.colight.py"
+    input_file = tmp_path / "test.py"
 
     input_file.write_text("import colight as cl\ncl.sphere()")
     output_dir = tmp_path / "output"

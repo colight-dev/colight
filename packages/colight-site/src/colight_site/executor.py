@@ -19,6 +19,8 @@ class ExecutionResult:
     output: str = ""
     error: Optional[str] = None
     colight_bytes: Optional[bytes] = None
+    cache_hit: bool = False
+    content_changed: bool = False
 
 
 class BlockExecutor:

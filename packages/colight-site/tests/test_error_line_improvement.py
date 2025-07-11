@@ -2,7 +2,7 @@
 
 import re
 from colight_site.executor import BlockExecutor
-from colight_site.model import Block, Element
+from colight_site.model import Block, Element, TagSet
 from colight_site.parser import parse_document
 import libcst as cst
 
@@ -12,7 +12,7 @@ def test_line_numbers_not_string_1():
     # Create a block that starts at line 20
     stmt = cst.parse_statement("undefined_variable")
     elem = Element(kind="EXPRESSION", content=stmt, lineno=20)
-    block = Block(elements=[elem], tags=None, start_line=20, id=0)
+    block = Block(elements=[elem], tags=TagSet(), start_line=20, id=0)
 
     executor = BlockExecutor()
 
@@ -87,6 +87,7 @@ def test_comparison_with_without_line_tracking():
     code = "x = 1 / 0"
 
     # Old way - compile without line offset
+    old_traceback = ""
     try:
         exec(compile(code, "test.py", "exec"))
     except Exception:
@@ -97,7 +98,7 @@ def test_comparison_with_without_line_tracking():
     # New way - with our block that has line tracking
     stmt = cst.parse_statement(code)
     elem = Element(kind="STATEMENT", content=stmt, lineno=42)
-    block = Block(elements=[elem], tags=None, start_line=42, id=0)
+    block = Block(elements=[elem], tags=TagSet(), start_line=42, id=0)
 
     executor = BlockExecutor()
     result = executor.execute_block(block, "test.py")
@@ -109,6 +110,7 @@ def test_comparison_with_without_line_tracking():
 
     # Old shows line 1, new shows line 42
     assert "line 1" in old_traceback
+    assert result.error is not None
     assert "line 42" in result.error
 
 

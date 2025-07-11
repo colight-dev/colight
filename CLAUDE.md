@@ -7,6 +7,7 @@
 - Run tests: `yarn test` (JS, Python, and colight-site)
 - Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
+- Run specific JS test file: `yarn vitest run packages/colight/tests/js/some-test.js`
 - Run Python tests: `yarn test:py` or `uv run pytest packages/colight/tests/`
 - Run colight-site tests: `yarn test:site` or `uv run pytest packages/colight-site/tests/`
 - Run single Python test: `uv run pytest packages/colight/tests/test_file.py::test_function`
@@ -39,7 +40,7 @@ For detailed patterns, review existing code in the corresponding module.
 This project uses a monorepo structure with multiple packages:
 
 - `packages/colight/` - Main visualization library
-- `packages/colight-site/` - Static site generator for .colight.py files
+- `packages/colight-site/` - Static site generator for .py files
 - Root workspace manages shared dependencies and tooling
 
 When working on specific packages, navigate to the package directory or use the workspace commands from the root.
@@ -51,3 +52,17 @@ When working on specific packages, navigate to the package directory or use the 
 - **Tests**: Never put test files at the root level. Always place tests in a `tests` directory within the appropriate package. For example:
   - `packages/colight/tests/` for colight package tests
   - `packages/colight-site/tests/` for colight-site package tests
+
+## Testing Best Practices
+
+- **Test Real Code**: Always test actual exported functions/components, never create "mirror" implementations that duplicate logic (they will drift from reality)
+- **File Naming**: Avoid naming non-test files with `test_` prefix in Python directories - pytest will try to import them
+- **Component Testing**: When components need testing, export them properly (e.g., `export { ComponentName }` or `export default ComponentName`)
+- **React Component Tests**: Simple smoke tests are often sufficient - check rendering, basic interactions, and prop handling
+- **Vitest Configuration**: In the monorepo, `vitest.config.mjs` must include both package test paths:
+  ```javascript
+  include: [
+    "packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
+    "packages/colight-site/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
+  ];
+  ```

@@ -4,7 +4,7 @@ import fnmatch
 import pathlib
 from typing import List, Optional
 
-from .constants import DEFAULT_IGNORE_PATTERNS
+from .utils import merge_ignore_patterns
 
 
 def find_files(
@@ -103,7 +103,6 @@ class FileResolver:
         # Try different variations for directory mode
         possible_paths = [
             self.input_path / f"{clean_path}.py",
-            self.input_path / f"{clean_path}.colight.py",
             self.input_path / clean_path / "__init__.py",
         ]
 
@@ -151,11 +150,9 @@ class FileResolver:
             True if file matches include patterns and doesn't match ignore patterns
         """
 
-        # Combine user ignore patterns with defaults
-        combined_ignore = list(self.ignore)
-        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
-
-        return matches_patterns(file_path, self.include, combined_ignore)
+        return matches_patterns(
+            file_path, self.include, merge_ignore_patterns(self.ignore)
+        )
 
     def get_all_files(self) -> List[str]:
         """Get list of all matching files as relative paths.
@@ -164,11 +161,9 @@ class FileResolver:
             List of relative paths without extensions
         """
 
-        # Combine user ignore patterns with defaults
-        combined_ignore = list(self.ignore)
-        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
-
-        files = find_files(self.input_path, self.include, combined_ignore)
+        files = find_files(
+            self.input_path, self.include, merge_ignore_patterns(self.ignore)
+        )
 
         # Convert to relative paths without extensions
         if self._is_single_file:
@@ -180,8 +175,5 @@ class FileResolver:
                 # Remove .py extension
                 if rel_path.endswith(".py"):
                     rel_path = rel_path[:-3]
-                # Remove .colight.py extension
-                if rel_path.endswith(".colight"):
-                    rel_path = rel_path[:-8]
                 paths.append(rel_path)
             return sorted(paths)

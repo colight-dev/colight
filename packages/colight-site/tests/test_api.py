@@ -2,6 +2,7 @@
 
 import pathlib
 import tempfile
+
 from colight_site import api
 
 
@@ -11,7 +12,7 @@ def test_evaluate_python():
         temp_path = pathlib.Path(temp_dir)
 
         # Create a test file
-        test_file = temp_path / "test.colight.py"
+        test_file = temp_path / "test.py"
         test_content = """# Test API
 
 import numpy as np
@@ -54,7 +55,7 @@ def test_evaluate_python_with_inline():
         temp_path = pathlib.Path(temp_dir)
 
         # Create a test file
-        test_file = temp_path / "test.colight.py"
+        test_file = temp_path / "test.py"
         test_content = """import numpy as np
 x = np.array([1, 2, 3])
 x
@@ -83,7 +84,7 @@ def test_build_file_api():
         temp_path = pathlib.Path(temp_dir)
 
         # Create test file
-        test_file = temp_path / "test.colight.py"
+        test_file = temp_path / "test.py"
         test_file.write_text("# Test\nimport numpy as np")
 
         output_file = temp_path / "test.md"
@@ -101,17 +102,15 @@ def test_api_imports():
     """Test that all public API functions are importable."""
     # These should all be available from the main module
     from colight_site import (
-        evaluate_python,
-        is_colight_file,
-        build_file,
         build_directory,
-        init_project,
+        build_file,
+        evaluate_python,
         get_output_path,
+        init_project,
     )
 
     # Verify they are the right types
     assert callable(evaluate_python)
-    assert callable(is_colight_file)
     assert callable(build_file)
     assert callable(build_directory)
     assert callable(init_project)

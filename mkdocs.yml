@@ -83,7 +83,7 @@ plugins:
   - colight.mkdocs.site_plugin:
       verbose: false
       format: markdown
-      include: ["*.py", "*.colight.py"]
+      include: ["*.py"]
       ignore: ["llms.py", "data.py", "__init__.py"]
       file_options:
         "*.py":

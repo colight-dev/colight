@@ -58,7 +58,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 testpaths = ["tests"]
-# Ignore colight.py files which are not test files
+# Ignore .py files which are not test files
 addopts = "--ignore=tests/examples/"
 
 [tool.ruff.lint]

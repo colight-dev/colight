@@ -65,23 +65,24 @@ class BlockGraph:
         # Sort blocks by ID to ensure proper order
         ordered_blocks = sorted(self.blocks.keys(), key=lambda x: int(x))
 
-        # Second pass: build dependency edges respecting execution order
-        for i, block_id in enumerate(ordered_blocks):
+        # Second pass: build dependency edges in linear time
+        last_provider = {}  # symbol -> block_id that last provided it
+
+        for block_id in ordered_blocks:
+            # First, check requirements and create edges from providers
             required_symbols = self.requires.get(block_id, set())
-
             for symbol in required_symbols:
-                # Find the most recent provider ABOVE this block
-                provider = None
-                for j in range(i):  # Only look at blocks before this one
-                    earlier_block = ordered_blocks[j]
-                    if symbol in self.provides.get(earlier_block, set()):
-                        provider = earlier_block  # Keep the last (most recent) provider
-
-                if provider:
+                if symbol in last_provider:
+                    provider = last_provider[symbol]
                     # This block depends on the provider
                     self.reverse_edges[block_id].add(provider)
                     # The provider has this block as a dependent
                     self.edges[provider].add(block_id)
+
+            # Then update last_provider with symbols this block provides
+            provided_symbols = self.provides.get(block_id, set())
+            for symbol in provided_symbols:
+                last_provider[symbol] = block_id
 
     def execution_order(self) -> List[str]:
         """Return topological sort of all blocks.

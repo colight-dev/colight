@@ -9,7 +9,7 @@ from .constants import DEFAULT_INLINE_THRESHOLD
 from .executor import DocumentExecutor
 from .generator import HTMLGenerator, MarkdownGenerator
 from .model import Block
-from .parser import is_colight_file, parse_colight_file
+from .parser import parse_colight_file
 from .pragma import parse_pragma_arg
 
 
@@ -52,7 +52,7 @@ def evaluate_python(
     - Creating markdown/HTML output
 
     Args:
-        input_path: Path to the .colight.py file
+        input_path: Path to the .py file
         output_dir: Directory for saving .colight files (if needed)
         inline_threshold: Size threshold for inlining visualizations
         format: Output format ("markdown" or "html")
@@ -150,14 +150,14 @@ def evaluate_python(
 
 
 def build_file(input_path: pathlib.Path, output_path: pathlib.Path, **kwargs) -> None:
-    """Build a single .colight.py file to markdown/HTML. Convenience wrapper for CLI."""
+    """Build a single .py file to markdown/HTML. Convenience wrapper for CLI."""
     builder.build_file(input_path, output_path, **kwargs)
 
 
 def build_directory(
     input_dir: pathlib.Path, output_dir: pathlib.Path, **kwargs
 ) -> None:
-    """Build all .colight.py files in a directory. Convenience wrapper for CLI."""
+    """Build all .py files in a directory. Convenience wrapper for CLI."""
     builder.build_directory(input_dir, output_dir, **kwargs)
 
 
@@ -175,7 +175,6 @@ def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
 __all__ = [
     # Core API
     "evaluate_python",
-    "is_colight_file",
     "EvaluatedBlock",
     "EvaluatedPython",
     # CLI convenience functions

@@ -2,17 +2,17 @@
 
 import pathlib
 import tempfile
+
 from colight_site.builder import build_file, init_project
-from colight_site.parser import is_colight_file
 
 
 def test_end_to_end_build():
-    """Test complete workflow from .colight.py to markdown + visualizations."""
+    """Test complete workflow from .py to markdown + visualizations."""
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = pathlib.Path(temp_dir)
 
-        # Create a test .colight.py file
-        input_file = temp_path / "test.colight.py"
+        # Create a test .py file
+        input_file = temp_path / "test.py"
         input_content = """# Data Visualization Example
 # This demonstrates creating a simple plot with numpy.
 
@@ -101,9 +101,8 @@ def test_project_initialization():
         assert (project_path / "README.md").exists()
 
         # Check example file
-        example_file = project_path / "src" / "example.colight.py"
+        example_file = project_path / "src" / "example.py"
         assert example_file.exists()
-        assert is_colight_file(example_file)
 
         # Check README content
         readme_content = (project_path / "README.md").read_text()
@@ -117,7 +116,7 @@ def test_error_recovery():
         temp_path = pathlib.Path(temp_dir)
 
         # Create a file with syntax error
-        input_file = temp_path / "broken.colight.py"
+        input_file = temp_path / "broken.py"
         input_content = """# This file has errors
 # But some parts should still work
 
@@ -146,7 +145,7 @@ x.sum()
         assert output_file.exists()
         content = output_file.read_text()
         assert "Parse Error" in content  # Error message from builder
-        assert "broken.colight.py" in content  # Filename in error message
+        assert "broken.py" in content  # Filename in error message
 
 
 def test_multiple_visualizations():
@@ -154,7 +153,7 @@ def test_multiple_visualizations():
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = pathlib.Path(temp_dir)
 
-        input_file = temp_path / "multi_viz.colight.py"
+        input_file = temp_path / "multi_viz.py"
         input_content = """# Multiple Visualizations
 # This file creates several visualizations.
 
@@ -211,7 +210,7 @@ def test_empty_and_comment_only_forms():
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = pathlib.Path(temp_dir)
 
-        input_file = temp_path / "comments.colight.py"
+        input_file = temp_path / "comments.py"
         input_content = """# Title Comment
 # This is just narrative text.
 

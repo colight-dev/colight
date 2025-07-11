@@ -4,21 +4,19 @@ __version__ = "2025.4.1"
 
 # Re-export the public API for easy access
 from .api import (
-    evaluate_python,
-    is_colight_file,
     EvaluatedBlock,
     EvaluatedPython,
-    build_file,
     build_directory,
-    init_project,
+    build_file,
+    evaluate_python,
     get_output_path,
+    init_project,
 )
 
 __all__ = [
     "__version__",
     # Core API
     "evaluate_python",
-    "is_colight_file",
     "EvaluatedBlock",
     "EvaluatedPython",
     # CLI convenience functions

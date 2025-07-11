@@ -562,8 +562,3 @@ def parse_file(file_path: pathlib.Path) -> Document:
 def parse_colight_file(file_path: pathlib.Path) -> Document:
     """Parse a colight file (compatibility alias)."""
     return parse_file(file_path)
-
-
-def is_colight_file(path: pathlib.Path) -> bool:
-    """Check if a path is a colight file."""
-    return path.suffix == ".py" and path.stem.endswith(".colight")

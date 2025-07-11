@@ -5,7 +5,7 @@ import TopBar from "../../src/js/TopBar";
 
 describe("TopBar", () => {
   const mockProps = {
-    currentFile: "path/to/file.colight.py",
+    currentFile: "path/to/file.py",
     connected: true,
     focusedPath: null,
     setFocusedPath: vi.fn(),
@@ -24,7 +24,7 @@ describe("TopBar", () => {
     expect(screen.getByText("root")).toBeTruthy();
     expect(screen.getByText("path")).toBeTruthy();
     expect(screen.getByText("to")).toBeTruthy();
-    expect(screen.getByText("file.colight.py")).toBeTruthy();
+    expect(screen.getByText("file.py")).toBeTruthy();
   });
 
   it("should show connection status", () => {

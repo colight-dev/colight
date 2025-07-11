@@ -2,7 +2,7 @@
 
 Static site generator for Colight visualizations.
 
-Converts `.colight.py` files into markdown/HTML documents where:
+Converts `.py` files into markdown/HTML documents where:
 
 - Comments become narrative markdown
 - Code blocks are executed to generate Colight visualizations
@@ -12,7 +12,7 @@ Converts `.colight.py` files into markdown/HTML documents where:
 
 ```bash
 # Build a single file
-colight-site build src/post.colight.py --output build/post.md
+colight-site build src/post.py --output build/post.md
 
 # Watch for changes
 colight-site watch src/ --output build/
@@ -23,7 +23,7 @@ colight-site init my-blog/
 
 ## File Format
 
-`.colight.py` files mix comments (markdown) with executable Python code:
+`.py` files mix comments (markdown) with executable Python code:
 
 ```python
 # My Data Visualization

@@ -17,12 +17,11 @@ from werkzeug.wrappers import Request, Response
 
 from colight_site.build_helper import BuildHelper
 from colight_site.builder import BuildConfig
-from colight_site.constants import DEFAULT_IGNORE_PATTERNS
 from colight_site.file_resolver import FileResolver, find_files
+from colight_site.utils import merge_ignore_patterns
 
 from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
-
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -78,13 +77,6 @@ class ApiMiddleware:
         """Get list of all matching Python files."""
         return self.file_resolver.get_all_files()
 
-    def _get_combined_ignore_patterns(self) -> List[str]:
-        """Get combined default and user ignore patterns."""
-
-        combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
-        return combined_ignore
-
     def __call__(self, environ, start_response):
         """Handle API requests."""
         request = Request(environ)
@@ -100,9 +92,9 @@ class ApiMiddleware:
 
         # Handle /api/index endpoint
         if path == "/api/index":
-            # Get all colight files
-            combined_ignore = self._get_combined_ignore_patterns()
-            files = find_files(self.input_path, self.include, combined_ignore)
+            files = find_files(
+                self.input_path, self.include, merge_ignore_patterns(self.ignore)
+            )
 
             # Build the tree structure
             tree = build_file_tree_json(files, self.input_path)
@@ -429,16 +421,13 @@ class LiveServer:
                 # Remove .py extension
                 if html_path.endswith(".py"):
                     html_path = html_path[:-3]
-                # Remove .colight.py extension
-                elif html_path.endswith(".colight.py"):
-                    html_path = html_path[:-11]
             except ValueError:
                 # File is not relative to input path
                 html_path = file_path.stem
 
         # Parse document to get block information
-        from colight_site.parser import parse_colight_file
         from colight_site.model import TagSet
+        from colight_site.parser import parse_colight_file
 
         source_file = None
 
@@ -628,7 +617,7 @@ class LiveServer:
         file_str = str(file_path)
 
         # Get combined ignore patterns
-        combined_ignore = self._get_combined_ignore_patterns()
+        combined_ignore = merge_ignore_patterns(self.ignore)
 
         # First check ignore patterns - check all parts of the path
         for part in file_path.parts:
@@ -651,13 +640,6 @@ class LiveServer:
         )
 
         return matches_include
-
-    def _get_combined_ignore_patterns(self) -> List[str]:
-        """Get combined default and user ignore patterns."""
-
-        combined_ignore = list(self.ignore) if self.ignore else []
-        combined_ignore.extend(DEFAULT_IGNORE_PATTERNS)
-        return combined_ignore
 
     async def serve(self):
         """Start the server."""
