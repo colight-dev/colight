@@ -81,6 +81,8 @@ export function processRunStart(
         }
       } else {
         // New block - create placeholder
+        // Always mark as pending since we don't have data for it yet
+        // The server will send either full data or "unchanged"
         newResults[blockId] = {
           pending: true,
           elements: [],

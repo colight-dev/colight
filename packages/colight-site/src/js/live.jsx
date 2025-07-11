@@ -578,11 +578,16 @@ const LiveServerApp = () => {
   // Debounce timer for history updates
   const historyUpdateTimerRef = useRef(null);
 
-  // Keep refs in sync
+  // Keep currentFile ref in sync
   useEffect(() => {
     currentFileRef.current = currentFile;
-    blockResultsRef.current = blockResults;
+  }, [currentFile]);
 
+  // Keep blockResults ref in sync immediately (not in useEffect)
+  blockResultsRef.current = blockResults;
+
+  // Handle URL updates
+  useEffect(() => {
     // Don't update URL during initial load
     if (!isInitialized) return;
 
@@ -650,6 +655,13 @@ const LiveServerApp = () => {
 
   // Custom setBrowsingDirectory that loads tree first
   const setBrowsingDirectory = async (dir) => {
+    // Handle boolean values from TopBar
+    if (dir === true) {
+      dir = "/";
+    } else if (dir === false) {
+      dir = null;
+    }
+
     if (dir && !directoryTree) {
       await loadDirectoryTree();
     }
@@ -667,19 +679,31 @@ const LiveServerApp = () => {
   // Track changed blocks for the current run
   const changedBlocksRef = useRef(new Set());
 
-  // Handle WebSocket messages using the factory function
-  const handleWebSocketMessage = useCallback(
-    createWebSocketMessageHandler({
-      latestRunRef,
-      focusedPathRef,
-      blockResultsRef,
-      changedBlocksRef,
-      setCurrentFile,
-      setBlockResults,
-      startTransition,
-    }),
-    [],
-  );
+  // Create a stable message handler that doesn't change
+  const messageHandlerRef = useRef();
+
+  // Update the handler whenever dependencies change, but don't recreate the callback
+  useEffect(() => {
+    messageHandlerRef.current = (message) => {
+      const handler = createWebSocketMessageHandler({
+        latestRunRef,
+        focusedPathRef,
+        blockResultsRef,
+        changedBlocksRef,
+        setCurrentFile,
+        setBlockResults,
+        startTransition,
+      });
+      return handler(message);
+    };
+  }, [setCurrentFile, setBlockResults, startTransition]);
+
+  // Stable callback that won't cause WebSocket to reconnect
+  const handleWebSocketMessage = useCallback((message) => {
+    if (messageHandlerRef.current) {
+      messageHandlerRef.current(message);
+    }
+  }, []);
 
   // WebSocket ref for sending messages
   const wsRef = useRef(null);
@@ -711,8 +735,13 @@ const LiveServerApp = () => {
   useEffect(() => {
     if (connected && currentFile && wsRef.current) {
       // Request the server to load this file
+      // Include the current run version so server knows if we need full data
       wsRef.current.send(
-        JSON.stringify({ type: "request-load", path: currentFile }),
+        JSON.stringify({
+          type: "request-load",
+          path: currentFile,
+          clientRun: latestRunRef.current,
+        }),
       );
     }
   }, [connected, currentFile]);
@@ -781,13 +810,7 @@ const LiveServerApp = () => {
         focusedPath={focusedPath}
         setFocusedPath={setFocusedPath}
         browsingDirectory={browsingDirectory}
-        setBrowsingDirectory={(value) => {
-          if (value) {
-            setBrowsingDirectoryState("/");
-          } else {
-            setBrowsingDirectoryState(null);
-          }
-        }}
+        setBrowsingDirectory={setBrowsingDirectory}
         isLoading={false}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}

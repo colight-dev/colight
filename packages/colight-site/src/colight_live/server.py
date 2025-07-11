@@ -372,6 +372,9 @@ class LiveServer:
                     if data.get("type") == "request-load" and data.get("path"):
                         # Client is requesting to load a file
                         file_path = data["path"]
+                        client_run = data.get(
+                            "clientRun", 0
+                        )  # Get client's current run version
                         # Find the actual source file
                         if self._api_middleware:
                             source_file = (
@@ -380,8 +383,8 @@ class LiveServer:
                                 )
                             )
                             if source_file:
-                                # Trigger a build for this file
-                                await self._send_reload_signal(source_file)
+                                # Trigger a build for this file with client run info
+                                await self._send_reload_signal(source_file, client_run)
                 except json.JSONDecodeError:
                     pass  # Ignore invalid messages
         except websockets.exceptions.ConnectionClosed:
@@ -399,9 +402,14 @@ class LiveServer:
             *(ws.send(message_str) for ws in self.connections), return_exceptions=True
         )
 
-    async def _trigger_build(self, file_path: pathlib.Path):
+    async def _trigger_build(
+        self, file_path: pathlib.Path, client_run: Optional[int] = None
+    ):
         """Trigger a build for a changed file."""
         run = next(self._run_counter)
+
+        # If client_run is provided and less than current run, send full data
+        force_full_data = client_run is not None and client_run < run
 
         # Convert to relative path without extension
         if self.input_path.is_file():
@@ -526,7 +534,8 @@ class LiveServer:
                     unchanged = cache_hit and not content_changed
 
                     # Always send block-result for dirty blocks, but optimize payload
-                    if unchanged:
+                    # If client is behind (force_full_data), always send full data
+                    if unchanged and not force_full_data:
                         # Send lightweight message for unchanged blocks
                         await self._ws_broadcast(
                             {
@@ -574,7 +583,7 @@ class LiveServer:
 
                 traceback.print_exc()
 
-    async def _send_reload_signal(self, changed_file=None):
+    async def _send_reload_signal(self, changed_file=None, client_run=None):
         """Send reload signal to all connected clients."""
         # This method is now simplified - just trigger a build
         if changed_file:
@@ -589,7 +598,7 @@ class LiveServer:
 
             # Start new build task
             self._current_run_task = asyncio.create_task(
-                self._trigger_build(changed_file)
+                self._trigger_build(changed_file, client_run)
             )
         else:
             # General reload (shouldn't happen in new architecture)
