@@ -6,7 +6,6 @@ import React, {
   useTransition,
 } from "react";
 import ReactDOM from "react-dom/client";
-import Fuse from "fuse.js";
 import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
 import {
   parseColightScript,
@@ -14,6 +13,9 @@ import {
 } from "../../../colight/src/js/format.js";
 import { tw, md } from "../../../colight/src/js/api.jsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
+import CommandBar from "./CommandBar.jsx";
+import TopBar from "./TopBar.jsx";
+import { processWebSocketMessage } from "./websocket-message-handler.js";
 import "./bylight.js";
 
 // ========== Constants ==========
@@ -54,13 +56,9 @@ const ColightVisual = ({ data, dataRef }) => {
     null,
   ]);
 
-  const setPendingData = (pending) =>
-    setColightData(([i, d, p]) => [i, d, pending]);
-
   const [isLoading, setIsLoading] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
   const [minHeight, setMinHeight] = useState(0);
-  const [isPending, startTransition] = useTransition(); // For smooth transitions
 
   // Load external visual when needed
   useEffect(() => {
@@ -101,9 +99,7 @@ const ColightVisual = ({ data, dataRef }) => {
   useEffect(() => {
     if (!isLoading && pendingData) {
       setMinHeight(containerRef.current?.offsetHeight || 0);
-      startTransition(() => {
-        setColightData(([i, c, p]) => [i + 1, pendingData, null]);
-      });
+      setColightData(([i, c, p]) => [i + 1, pendingData, null]);
     }
   }, [isLoading, pendingData]);
 
@@ -127,7 +123,7 @@ const ColightVisual = ({ data, dataRef }) => {
       )}
 
       {/* Show loading overlay when fetching new visual */}
-      {(isLoading || isPending) && (
+      {isLoading && (
         <div
           className={tw(
             `absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded`,
@@ -407,453 +403,7 @@ const HomePage = () => {
 
 // ========== Command Bar ==========
 
-const CommandBar = ({
-  isOpen,
-  onClose,
-  directoryTree,
-  currentFile,
-  onOpenFile,
-  pragmaOverrides,
-  setPragmaOverrides,
-  focusedPath,
-  setFocusedPath,
-}) => {
-  const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [commands, setCommands] = useState([]);
-  const inputRef = useRef(null);
-  const fuse = useRef(null);
-
-  // Initialize Fuse.js for file search
-  useEffect(() => {
-    if (directoryTree && directoryTree !== null) {
-      const allFiles = [];
-
-      // Recursive function to extract all .colight.py files
-      const extractFiles = (items, currentPath = "") => {
-        if (!items || !Array.isArray(items)) return;
-
-        items.forEach((item) => {
-          if (item.type === "file") {
-            const fullPath = currentPath
-              ? `${currentPath}/${item.name}`
-              : item.name;
-            allFiles.push({
-              name: item.name,
-              path: fullPath,
-              relativePath: fullPath,
-              // Add searchable terms
-              searchTerms: [
-                item.name.replace(".colight.py", ""),
-                item.name,
-                fullPath,
-                ...fullPath.split("/").filter(Boolean),
-              ]
-                .join(" ")
-                .toLowerCase(),
-            });
-          } else if (item.type === "directory" && item.children) {
-            const newPath = currentPath
-              ? `${currentPath}/${item.name}`
-              : item.name;
-            extractFiles(item.children, newPath);
-          }
-        });
-      };
-
-      // Start extraction - handle both root with children or direct array
-      if (directoryTree.children) {
-        extractFiles(directoryTree.children);
-      } else if (Array.isArray(directoryTree)) {
-        extractFiles(directoryTree);
-      } else {
-        extractFiles([directoryTree]);
-      }
-
-      fuse.current = new Fuse(allFiles, {
-        keys: ["name", "path", "searchTerms"],
-        threshold: 0.4,
-        includeScore: true,
-        minMatchCharLength: 2,
-        // More fuzzy search options
-        location: 0,
-        distance: 100,
-        useExtendedSearch: false,
-        ignoreLocation: true,
-        findAllMatches: true,
-      });
-    }
-  }, [directoryTree]);
-
-  // Generate commands based on query
-  useEffect(() => {
-    const newCommands = [];
-    const lowerQuery = query.toLowerCase().trim();
-
-    // Always define available commands
-    const allCommands = [
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideStatements ? "Show" : "Hide"} Statements`,
-        subtitle: `${pragmaOverrides.hideStatements ? "○" : "●"} Toggle statement visibility`,
-        searchTerms: ["statements", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideStatements: !prev.hideStatements,
-          })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideCode ? "Show" : "Hide"} Code`,
-        subtitle: `${pragmaOverrides.hideCode ? "○" : "●"} Toggle code visibility`,
-        searchTerms: ["code", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({ ...prev, hideCode: !prev.hideCode })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideProse ? "Show" : "Hide"} Prose`,
-        subtitle: `${pragmaOverrides.hideProse ? "○" : "●"} Toggle prose visibility`,
-        searchTerms: ["prose", "text", "markdown", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideProse: !prev.hideProse,
-          })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideVisuals ? "Show" : "Hide"} Visuals`,
-        subtitle: `${pragmaOverrides.hideVisuals ? "○" : "●"} Toggle visual outputs`,
-        searchTerms: ["visuals", "visual", "output", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideVisuals: !prev.hideVisuals,
-          })),
-      },
-    ];
-
-    if (currentFile) {
-      allCommands.push({
-        type: "pin",
-        title:
-          focusedPath === currentFile
-            ? "Unpin Current File"
-            : "Pin Current File",
-        subtitle:
-          focusedPath === currentFile
-            ? "📌 Remove focus from current file"
-            : "📌 Focus on current file only",
-        searchTerms: ["pin", "unpin", "focus", "file"],
-        action: () =>
-          setFocusedPath(focusedPath === currentFile ? null : currentFile),
-      });
-    }
-
-    if (lowerQuery) {
-      // Filter commands that match the query
-      const matchingCommands = allCommands.filter(
-        (cmd) =>
-          cmd.title.toLowerCase().includes(lowerQuery) ||
-          cmd.subtitle.toLowerCase().includes(lowerQuery) ||
-          cmd.searchTerms.some((term) => term.includes(lowerQuery)),
-      );
-      newCommands.push(...matchingCommands);
-
-      // File search results
-      if (fuse.current) {
-        const results = fuse.current.search(query);
-        results.slice(0, 10).forEach((result) => {
-          newCommands.push({
-            type: "file",
-            title: result.item.name,
-            subtitle: result.item.relativePath,
-            score: result.score,
-            action: () => onOpenFile(result.item.relativePath),
-          });
-        });
-      }
-    } else {
-      // Show all commands when no query
-      newCommands.push(...allCommands);
-    }
-
-    setCommands(newCommands);
-    setSelectedIndex(0);
-  }, [
-    query,
-    pragmaOverrides,
-    currentFile,
-    focusedPath,
-    onOpenFile,
-    setPragmaOverrides,
-    setFocusedPath,
-  ]);
-
-  // Handle keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (!isOpen) return;
-
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setSelectedIndex((prev) => Math.min(prev + 1, commands.length - 1));
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setSelectedIndex((prev) => Math.max(prev - 1, 0));
-          break;
-        case "Enter":
-          e.preventDefault();
-          if (commands[selectedIndex]) {
-            commands[selectedIndex].action();
-            onClose();
-          }
-          break;
-        case "Escape":
-          e.preventDefault();
-          onClose();
-          break;
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, commands, selectedIndex, onClose]);
-
-  // Focus input when opened
-  useEffect(() => {
-    if (isOpen && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      className={tw(
-        "fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-20 z-[2000]",
-      )}
-    >
-      <div
-        className={tw("bg-white rounded-lg shadow-2xl w-full max-w-2xl mx-4")}
-      >
-        <div className={tw("p-4 border-b border-gray-200")}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search files or type a command..."
-            className={tw("w-full text-lg outline-none")}
-          />
-        </div>
-
-        <div className={tw("max-h-96 overflow-y-auto")}>
-          {commands.map((command, index) => (
-            <div
-              key={index}
-              className={tw(
-                `px-4 py-3 cursor-pointer border-b border-gray-100 last:border-b-0 ${
-                  index === selectedIndex ? "bg-blue-50" : "hover:bg-gray-50"
-                }`,
-              )}
-              onClick={() => {
-                command.action();
-                onClose();
-              }}
-            >
-              <div className={tw("font-medium text-gray-900")}>
-                {command.title}
-              </div>
-              <div className={tw("text-sm text-gray-600")}>
-                {command.subtitle}
-              </div>
-            </div>
-          ))}
-
-          {commands.length === 0 && (
-            <div className={tw("px-4 py-8 text-center text-gray-500")}>
-              No results found
-            </div>
-          )}
-        </div>
-
-        <div
-          className={tw(
-            "px-4 py-2 bg-gray-50 text-xs text-gray-500 border-t border-gray-200",
-          )}
-        >
-          Use ↑↓ to navigate, Enter to select, Esc to close
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // ========== UI Components ==========
-
-const TopBar = ({
-  currentFile,
-  connected,
-  focusedPath,
-  setFocusedPath,
-  browsingDirectory,
-  setBrowsingDirectory,
-  isLoading,
-  pragmaOverrides,
-  setPragmaOverrides,
-}) => {
-  // Build breadcrumb
-  const buildBreadcrumb = () => {
-    const currentPath = browsingDirectory || currentFile;
-    if (!currentPath) return null;
-
-    const parts = splitPath(currentPath);
-    const isBrowsingDirectory = !!browsingDirectory;
-
-    return (
-      <div className={tw("flex items-center text-sm font-mono")}>
-        <button
-          onClick={() => setBrowsingDirectory("/")}
-          className={tw(
-            "px-1 py-0.5 rounded transition-colors hover:bg-gray-200",
-          )}
-          title="Browse root directory"
-        >
-          root
-        </button>
-
-        {parts.map((part, index) => {
-          const isLastPart = index === parts.length - 1;
-          const isFile = !isBrowsingDirectory && isLastPart;
-          const pathSegments = parts.slice(0, index + 1);
-          const segmentPath = pathSegments.join("/");
-          const segmentPathWithSlash = segmentPath + "/";
-
-          // Check if this item is focused
-          const isFocused = isFile
-            ? focusedPath === currentFile
-            : focusedPath === segmentPathWithSlash;
-
-          return (
-            <React.Fragment key={index}>
-              <span className={tw("mx-1 text-gray-500")}>/</span>
-              <button
-                onClick={() => {
-                  if (isFile) {
-                    // Files toggle focus
-                    setFocusedPath(isFocused ? null : segmentPath);
-                  } else {
-                    // Directories open browser
-                    setBrowsingDirectory(segmentPathWithSlash);
-                  }
-                }}
-                className={tw(
-                  `px-1 py-0.5 rounded transition-colors hover:bg-gray-200 ${isFocused ? "font-bold" : ""}`,
-                )}
-                title={
-                  isFile
-                    ? isFocused
-                      ? "Click to unfocus"
-                      : "Click to focus"
-                    : "Browse this directory"
-                }
-              >
-                {isFocused && <span className={tw("mr-1")}>📌</span>}
-                {part}
-              </button>
-            </React.Fragment>
-          );
-        })}
-        {isBrowsingDirectory && (
-          <span className={tw("mx-1 text-gray-500")}>/</span>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div
-      className={tw(
-        "fixed top-0 left-0 right-0 h-10 bg-white border-b border-gray-300 flex items-center px-5 z-[1000] font-sans text-sm",
-      )}
-    >
-      <div className={tw("flex-1")}>{buildBreadcrumb()}</div>
-
-      {/* Pragma controls */}
-      {currentFile && (
-        <div className={tw("flex items-center gap-2 mr-4")}>
-          <button
-            onClick={() =>
-              setPragmaOverrides((prev) => ({
-                ...prev,
-                hideCode: !prev.hideCode,
-              }))
-            }
-            className={tw(
-              `px-2 py-1 text-xs rounded border transition-colors ${
-                pragmaOverrides.hideCode
-                  ? "bg-red-100 border-red-300 text-red-700"
-                  : "bg-green-100 border-green-300 text-green-700"
-              }`,
-            )}
-            title={
-              pragmaOverrides.hideCode
-                ? "Code hidden - click to show"
-                : "Code shown - click to hide"
-            }
-          >
-            {pragmaOverrides.hideCode ? "○" : "●"} Code
-          </button>
-          <button
-            onClick={() =>
-              setPragmaOverrides((prev) => ({
-                ...prev,
-                hideProse: !prev.hideProse,
-              }))
-            }
-            className={tw(
-              `px-2 py-1 text-xs rounded border transition-colors ${
-                pragmaOverrides.hideProse
-                  ? "bg-red-100 border-red-300 text-red-700"
-                  : "bg-green-100 border-green-300 text-green-700"
-              }`,
-            )}
-            title={
-              pragmaOverrides.hideProse
-                ? "Prose hidden - click to show"
-                : "Prose shown - click to hide"
-            }
-          >
-            {pragmaOverrides.hideProse ? "○" : "●"} Prose
-          </button>
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className={tw("ml-2.5")}>
-          <div
-            className={tw(
-              "animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full",
-            )}
-          />
-        </div>
-      ) : (
-        <div
-          className={tw(
-            `w-2 h-2 rounded-full ml-2.5 ${connected ? "bg-green-400" : "bg-red-400"}`,
-          )}
-          title={connected ? "Connected" : "Disconnected"}
-        />
-      )}
-    </div>
-  );
-};
 
 // ========== WebSocket Hook ==========
 
@@ -904,6 +454,99 @@ const useWebSocket = (onMessage, wsRefOut) => {
   return connected;
 };
 
+// ========== Message Handler Factory ==========
+
+// Factory function to create the WebSocket message handler
+// This allows us to test the handler logic with mock dependencies
+export const createWebSocketMessageHandler = (deps) => {
+  const {
+    latestRunRef,
+    focusedPathRef,
+    blockResultsRef,
+    changedBlocksRef,
+    setCurrentFile,
+    setBlockResults,
+    startTransition = (fn) => fn(), // Default to synchronous for testing
+  } = deps;
+
+  return (message) => {
+    // Process the message using the extracted logic
+    const state = {
+      latestRun: latestRunRef.current,
+      focusedPath: focusedPathRef.current,
+      blockResults: blockResultsRef.current || {},
+      changedBlocks: changedBlocksRef.current,
+    };
+
+    const action = processWebSocketMessage(message, state);
+
+    // Handle the action
+    switch (action.type) {
+      case "run-start":
+        // Update latest run version
+        latestRunRef.current = action.latestRun;
+        changedBlocksRef.current = action.changedBlocks;
+
+        if (action.blockResults) {
+          // Update state with new block results
+          setCurrentFile(action.currentFile);
+          setBlockResults(action.blockResults);
+        } else {
+          // Legacy behavior - clear blocks
+          startTransition(() => {
+            setCurrentFile(action.currentFile);
+            setBlockResults({});
+          });
+        }
+        break;
+
+      case "block-result":
+        setBlockResults((prev) => ({
+          ...prev,
+          [action.blockId]: action.blockResult,
+        }));
+        break;
+
+      case "run-end":
+        console.log(`Run ${action.run} completed`);
+        if (action.error) {
+          console.error("Run error:", action.error);
+        }
+
+        // Check if we should auto-scroll to a changed block
+        if (action.changedBlocks.length === 1) {
+          setTimeout(() => {
+            const blockId = action.changedBlocks[0];
+            const element = document.querySelector(
+              `[data-block-id="${blockId}"]`,
+            );
+            if (element) {
+              element.scrollIntoView({ behavior: "smooth", block: "center" });
+              // Briefly highlight the block
+              element.style.backgroundColor = "#fffbdd";
+              setTimeout(() => {
+                element.style.backgroundColor = "";
+              }, 1000);
+            }
+          }, 100); // Small delay to ensure DOM is updated
+        }
+        break;
+
+      case "reload":
+        window.location.reload();
+        break;
+
+      case "unknown":
+        console.warn("Unknown WebSocket message type:", action.messageType);
+        break;
+
+      case "no-op":
+        // No action needed
+        break;
+    }
+  };
+};
+
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
@@ -927,6 +570,7 @@ const LiveServerApp = () => {
   const currentFileRef = useRef(null);
   const focusedPathRef = useRef(null); // Track focused path for WebSocket callback
   const latestRunRef = useRef(0); // Track latest run version
+  const blockResultsRef = useRef({}); // Track block results for WebSocket callback
 
   // Track if we're still initializing
   const [isInitialized, setIsInitialized] = useState(false);
@@ -937,6 +581,7 @@ const LiveServerApp = () => {
   // Keep refs in sync
   useEffect(() => {
     currentFileRef.current = currentFile;
+    blockResultsRef.current = blockResults;
 
     // Don't update URL during initial load
     if (!isInitialized) return;
@@ -1022,181 +667,19 @@ const LiveServerApp = () => {
   // Track changed blocks for the current run
   const changedBlocksRef = useRef(new Set());
 
-  // Handle WebSocket messages with RunVersion
-  const handleWebSocketMessage = useCallback((message) => {
-    // Ignore messages from old runs
-    if (message.run && message.run < latestRunRef.current) {
-      console.log(
-        `Ignoring stale message from run ${message.run} (latest: ${latestRunRef.current})`,
-      );
-      return;
-    }
-
-    switch (message.type) {
-      case "run-start":
-        if (message.run) {
-          // Update latest run version
-          latestRunRef.current = message.run;
-
-          // Check if this file change is relevant based on focus
-          const file = message.file;
-          const focus = focusedPathRef.current;
-
-          let shouldProcess = false;
-
-          // If no focus, process all changes
-          if (!focus) {
-            shouldProcess = true;
-          }
-          // If focused on a specific file, only process if it's that file
-          else if (!focus.endsWith("/")) {
-            shouldProcess = file === focus;
-          }
-          // If focused on a directory, check if file is within it
-          else {
-            const normalizedFile = file.startsWith("/") ? file.slice(1) : file;
-            const normalizedFocus = focus.startsWith("/")
-              ? focus.slice(1)
-              : focus;
-            shouldProcess = normalizedFile.startsWith(normalizedFocus);
-          }
-
-          if (shouldProcess) {
-            // Clear tracked changed blocks
-            changedBlocksRef.current.clear();
-
-            // Handle the new manifest-based update
-            if (message.blocks && message.dirty) {
-              // We have block manifest - update intelligently
-              setCurrentFile(file);
-              setBlockResults((prev) => {
-                const newResults = {};
-                const blockSet = new Set(message.blocks);
-                const dirtySet = new Set(message.dirty);
-
-                // Process each block in the manifest
-                for (const blockId of message.blocks) {
-                  if (prev[blockId]) {
-                    // Existing block
-                    if (dirtySet.has(blockId)) {
-                      // Mark as pending (will be re-executed)
-                      newResults[blockId] = {
-                        ...prev[blockId],
-                        pending: true,
-                        cache_hit: false,
-                        // Keep all existing properties to maintain layout
-                      };
-                    } else {
-                      // Keep unchanged, but clear any pending state
-                      newResults[blockId] = {
-                        ...prev[blockId],
-                        pending: false,
-                      };
-                    }
-                  } else {
-                    // New block - create placeholder
-                    newResults[blockId] = {
-                      pending: true,
-                      elements: [],
-                      ok: true,
-                    };
-                  }
-                }
-
-                // Note: blocks not in the manifest are implicitly removed
-                // by not including them in newResults
-
-                return newResults;
-              });
-            } else {
-              // Legacy behavior - clear blocks
-              startTransition(() => {
-                setCurrentFile(file);
-                setBlockResults({});
-              });
-            }
-          }
-        }
-        break;
-
-      case "block-result":
-        if (message.run && message.run === latestRunRef.current) {
-          // Handle unchanged blocks (lightweight message)
-          if (message.unchanged) {
-            // Just clear pending state, keep existing results
-            setBlockResults((prev) => ({
-              ...prev,
-              [message.block]: {
-                ...prev[message.block],
-                pending: false,
-              },
-            }));
-          } else {
-            // Track changed blocks
-            if (message.content_changed) {
-              changedBlocksRef.current.add(message.block);
-            }
-
-            // Update block result with new data
-            setBlockResults((prev) => {
-              return {
-                ...prev,
-                [message.block]: {
-                  ok: message.ok,
-                  stdout: message.stdout,
-                  error: message.error,
-                  showsVisual: message.showsVisual,
-                  elements: message.elements || [],
-                  cache_hit: message.cache_hit,
-                  content_changed: message.content_changed,
-                  pending: false, // Clear pending state
-                },
-              };
-            });
-          }
-        }
-        break;
-
-      case "run-end":
-        if (message.run && message.run === latestRunRef.current) {
-          // Run completed
-          console.log(`Run ${message.run} completed`);
-          if (message.error) {
-            console.error("Run error:", message.error);
-          }
-
-          // Check if we should auto-scroll to a changed block
-          const changedBlocksList = Array.from(changedBlocksRef.current);
-
-          // If exactly one block changed, scroll to it
-          if (true && changedBlocksList.length === 1) {
-            setTimeout(() => {
-              const blockId = changedBlocksList[0];
-              const element = document.querySelector(
-                `[data-block-id="${blockId}"]`,
-              );
-              if (element) {
-                element.scrollIntoView({ behavior: "smooth", block: "center" });
-                // Briefly highlight the block
-                element.style.backgroundColor = "#fffbdd";
-                setTimeout(() => {
-                  element.style.backgroundColor = "";
-                }, 1000);
-              }
-            }, 100); // Small delay to ensure DOM is updated
-          }
-        }
-        break;
-
-      case "reload":
-        // General reload - refresh the page
-        window.location.reload();
-        break;
-
-      default:
-        console.warn("Unknown WebSocket message type:", message.type);
-    }
-  }, []);
+  // Handle WebSocket messages using the factory function
+  const handleWebSocketMessage = useCallback(
+    createWebSocketMessageHandler({
+      latestRunRef,
+      focusedPathRef,
+      blockResultsRef,
+      changedBlocksRef,
+      setCurrentFile,
+      setBlockResults,
+      startTransition,
+    }),
+    [],
+  );
 
   // WebSocket ref for sending messages
   const wsRef = useRef(null);
@@ -1298,8 +781,14 @@ const LiveServerApp = () => {
         focusedPath={focusedPath}
         setFocusedPath={setFocusedPath}
         browsingDirectory={browsingDirectory}
-        setBrowsingDirectory={setBrowsingDirectory}
-        isLoading={isPending || isLoadingTree}
+        setBrowsingDirectory={(value) => {
+          if (value) {
+            setBrowsingDirectoryState("/");
+          } else {
+            setBrowsingDirectoryState(null);
+          }
+        }}
+        isLoading={false}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}
       />
@@ -1347,4 +836,4 @@ if (typeof window !== "undefined") {
 }
 
 // Export components for testing
-export { LiveServerApp, BlockRenderer, ColightVisual, CommandBar };
+export { LiveServerApp, BlockRenderer, ColightVisual };

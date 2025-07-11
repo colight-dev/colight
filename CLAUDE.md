@@ -48,3 +48,6 @@ When working on specific packages, navigate to the package directory or use the 
 
 - Use yarn, not npm
 - If introducing a change which may increase complexity (eg. as a workaround for some difficulty), always ask the user first, they may have an idea for a simpler solution.
+- **Tests**: Never put test files at the root level. Always place tests in a `tests` directory within the appropriate package. For example:
+  - `packages/colight/tests/` for colight package tests
+  - `packages/colight-site/tests/` for colight-site package tests
