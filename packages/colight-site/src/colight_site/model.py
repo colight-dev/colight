@@ -11,7 +11,6 @@ import libcst as cst
 _HIDE_ALL_PREFIX = "hide-all-"
 _HIDE_PREFIX = "hide-"
 _SHOW_PREFIX = "show-"
-_CATEGORIES = ("code", "prose", "statements", "visuals")
 
 
 def _base(tag: str) -> str:

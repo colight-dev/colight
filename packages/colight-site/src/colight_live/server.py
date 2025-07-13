@@ -15,13 +15,15 @@ from werkzeug.middleware.shared_data import SharedDataMiddleware
 from werkzeug.serving import make_server
 from werkzeug.wrappers import Request, Response
 
-from colight_site.build_helper import BuildHelper
-from colight_site.builder import BuildConfig
 from colight_site.file_resolver import FileResolver, find_files
+from colight_site.model import TagSet
+from colight_site.parser import parse_colight_file
+from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
 from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
+from .json_generator import JsonDocumentGenerator
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -58,20 +60,18 @@ class ApiMiddleware:
         self,
         app,
         input_path: pathlib.Path,
-        output_path: pathlib.Path,
-        config: BuildConfig,
         include: List[str],
         ignore: Optional[List[str]] = None,
+        verbose: bool = False,
     ):
         self.app = app
         self.input_path = input_path
-        self.output_path = output_path
-        self.config = config
         self.include = include
         self.ignore = ignore
         self.visual_store = {}  # Store visual data by ID
         self.file_resolver = FileResolver(input_path, include, ignore)
-        self.incremental_executor = IncrementalExecutor(verbose=config.verbose)
+        self.incremental_executor = IncrementalExecutor(verbose=verbose)
+        self.verbose = verbose 
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
@@ -110,11 +110,9 @@ class ApiMiddleware:
             source_file = self.file_resolver.find_source_file(file_path + ".html")
             if source_file:
                 try:
-                    # Generate JSON directly from source
-                    from .json_generator import JsonFormGenerator
 
-                    generator = JsonFormGenerator(
-                        config=self.config,
+                    generator = JsonDocumentGenerator(
+                        verbose=self.verbose,
                         visual_store=self.visual_store,
                         incremental_executor=self.incremental_executor,
                     )
@@ -167,103 +165,24 @@ class ApiMiddleware:
         return self.app(environ, start_response)
 
 
-class OnDemandMiddleware:
-    """Middleware that builds .py files to .html on-demand."""
-
-    def __init__(
-        self,
-        app,
-        input_path: pathlib.Path,
-        output_path: pathlib.Path,
-        config: BuildConfig,
-        include: List[str],
-        ignore: Optional[List[str]] = None,
-    ):
-        self.app = app
-        self.input_path = input_path
-        self.output_path = output_path
-        self.config = config
-        self.include = include
-        self.ignore = ignore
-        self._ensure_output_dir()
-
-        self.file_resolver = FileResolver(input_path, include, ignore)
-
-    def _ensure_output_dir(self):
-        """Ensure output directory exists."""
-        self.output_path.mkdir(parents=True, exist_ok=True)
-
-    def __call__(self, environ, start_response):
-        """Handle requests, building files on-demand."""
-        request = Request(environ)
-        path = request.path
-
-        # Debug logging
-        if self.config.verbose:
-            print(f"OnDemandMiddleware handling: {path}")
-
-        # Only handle .html requests or paths without extensions
-        if not (path.endswith(".html") or ("." not in pathlib.Path(path).name)):
-            return self.app(environ, start_response)
-
-        # Special handling for index.html - no longer auto-generated
-        if path == "/index.html" or path == "index.html":
-            # Index is now handled by the client-side outliner
-            # Let it be served normally if it exists
-            return self.app(environ, start_response)
-
-        # Normalize path to always end with .html
-        if not path.endswith(".html"):
-            path = f"{path}.html"
-
-        # Try to find source file using FileResolver
-        # Remove leading slash for consistency
-        clean_path = path.lstrip("/")
-        source_file = self.file_resolver.find_source_file(clean_path)
-
-        if self.config.verbose:
-            print(f"Looking for source file for path: {path}")
-            print(f"Found source file: {source_file}")
-
-        if source_file:
-            output_file = self.file_resolver.get_output_path(
-                source_file, self.output_path
-            )
-
-            if self.config.verbose:
-                print(f"Output file will be: {output_file}")
-
-            error_result = BuildHelper.build_file_if_stale(
-                source_file, output_file, self.config, error_format="html"
-            )
-
-            if error_result:
-                # Build failed, return error
-                response = Response(error_result, status=500, mimetype="text/html")
-                return response(environ, start_response)
-
-        # Continue with normal app handling (will serve from cache or 404)
-        return self.app(environ, start_response)
-
-
 class LiveServer:
     """On-demand development server with live reload."""
 
     def __init__(
         self,
         input_path: pathlib.Path,
-        output_path: pathlib.Path,
-        config: BuildConfig,
         include: List[str],
         ignore: Optional[List[str]] = None,
         host: str = "127.0.0.1",
         http_port: int = 5500,
         ws_port: int = 5501,
         open_url: bool = True,
+        verbose: bool = False,
+        pragma: Optional[str | set] = set(),
     ):
         self.input_path = input_path
-        self.output_path = output_path
-        self.config = config
+        self.verbose = verbose
+        self.pragma = parse_pragma_arg(pragma)
         self.include = include
         self.ignore = ignore
         self.host = host
@@ -334,17 +253,14 @@ class LiveServer:
         self._api_middleware = ApiMiddleware(
             app,
             self.input_path,
-            self.output_path,
-            self.config,
             self.include,
             self.ignore,
+            self.verbose
         )
         app = self._api_middleware
 
         # Add SPA middleware (serves the React app)
         app = SpaMiddleware(app, self._get_spa_html())
-
-        # Don't add live reload script injection - the SPA handles WebSocket connection
 
         return app
 
@@ -435,10 +351,6 @@ class LiveServer:
                 # File is not relative to input path
                 html_path = file_path.stem
 
-        # Parse document to get block information
-        from colight_site.model import TagSet
-        from colight_site.parser import parse_colight_file
-
         source_file = None
 
         try:
@@ -460,9 +372,9 @@ class LiveServer:
                 document = parse_colight_file(source_file)
 
                 # Apply config pragma if any
-                if self.config.pragma:
+                if self.pragma:
                     document.tags = document.tags | TagSet(
-                        frozenset(self.config.pragma)
+                        frozenset(self.pragma)
                     )
 
                 # Generate file hash for stable block IDs (same as in JSON generator)
@@ -513,10 +425,11 @@ class LiveServer:
 
             # Now continue with execution (we already have document from above)
             if self._api_middleware and "document" in locals() and source_file:
-                from .json_generator import JsonFormGenerator
+                from .json_generator import JsonDocumentGenerator
 
-                generator = JsonFormGenerator(
-                    config=self.config,
+                generator = JsonDocumentGenerator(
+                    verbose=self.verbose,
+                    pragma=self.pragma,
                     visual_store=self._api_middleware.visual_store,
                     incremental_executor=self._api_middleware.incremental_executor,
                 )
@@ -580,7 +493,7 @@ class LiveServer:
         except Exception as e:
             # Send error and run-end
             await self._ws_broadcast({"run": run, "type": "run-end", "error": str(e)})
-            if self.config.verbose:
+            if self.verbose:
                 import traceback
 
                 traceback.print_exc()

@@ -2,8 +2,8 @@
 
 from unittest.mock import patch
 
-from colight_site.builder import BuildConfig
-from colight_site.watcher import watch_build_and_serve
+from colight_static.builder import BuildConfig
+from colight_static.watcher import watch_build_and_serve
 
 
 def test_watch_build_and_serve_creates_output_directory(tmp_path):
@@ -13,9 +13,9 @@ def test_watch_build_and_serve_creates_output_directory(tmp_path):
     output_dir = tmp_path / "output"
 
     # Mock the server and watch to prevent actual serving
-    with patch("colight_site.watcher.LiveReloadServer") as mock_server:
-        with patch("colight_site.watcher.watch") as mock_watch:
-            with patch("colight_site.watcher.threading.Thread"):
+    with patch("colight_static.watcher.LiveReloadServer") as mock_server:
+        with patch("colight_static.watcher.watch") as mock_watch:
+            with patch("colight_static.watcher.threading.Thread"):
                 # Make watch raise KeyboardInterrupt to exit immediately
                 mock_watch.side_effect = KeyboardInterrupt()
 
@@ -56,10 +56,10 @@ def test_watch_build_and_serve_builds_files_for_directory(tmp_path):
     output_dir = tmp_path / "output"
 
     # Mock the server and thread, but let the initial build happen
-    with patch("colight_site.watcher.LiveReloadServer"):
-        with patch("colight_site.watcher.threading.Thread"):
+    with patch("colight_static.watcher.LiveReloadServer"):
+        with patch("colight_static.watcher.threading.Thread"):
             # Mock watch to raise KeyboardInterrupt after initial build
-            with patch("colight_site.watcher.watch") as mock_watch:
+            with patch("colight_static.watcher.watch") as mock_watch:
                 mock_watch.side_effect = KeyboardInterrupt()
 
                 try:
@@ -88,10 +88,10 @@ def test_watch_build_and_serve_defaults_to_html_format(tmp_path):
     output_dir = tmp_path / "output"
 
     # Mock the server and watch
-    with patch("colight_site.watcher.LiveReloadServer"):
-        with patch("colight_site.watcher.watch") as mock_watch:
-            with patch("colight_site.watcher.threading.Thread"):
-                with patch("colight_site.watcher.api.build_file") as mock_build:
+    with patch("colight_static.watcher.LiveReloadServer"):
+        with patch("colight_static.watcher.watch") as mock_watch:
+            with patch("colight_static.watcher.threading.Thread"):
+                with patch("colight_static.watcher.builder.build_file") as mock_build:
                     # Make watch raise KeyboardInterrupt to exit immediately
                     mock_watch.side_effect = KeyboardInterrupt()
 

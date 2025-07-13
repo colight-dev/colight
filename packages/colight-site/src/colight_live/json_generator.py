@@ -7,7 +7,6 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from colight_site.builder import BuildConfig
 from colight_site.executor import DocumentExecutor
 from colight_site.model import Block, TagSet
 from colight_site.parser import parse_colight_file
@@ -22,7 +21,8 @@ VISUAL_INLINE_THRESHOLD = 50 * 1024  # 50KB
 class JsonDocumentGenerator:
     """Convert parsed documents to JSON representation for client-side rendering."""
 
-    config: BuildConfig = field(default_factory=BuildConfig)
+    verbose: bool = False
+    pragma: set[str] = field(default_factory=set)
     visual_store: Optional[Dict[str, bytes]] = None  # Storage for large visuals
     incremental_executor: Optional[IncrementalExecutor] = (
         None  # For incremental execution
@@ -40,9 +40,9 @@ class JsonDocumentGenerator:
         # Parse the file
         document = parse_colight_file(source_path)
 
-        # Apply config pragma if any
-        if self.config.pragma:
-            document.tags = document.tags | TagSet(frozenset(self.config.pragma))
+        # Apply pragma if any
+        if self.pragma:
+            document.tags = document.tags | TagSet(frozenset(self.pragma))
 
         # Execute document incrementally if we have an executor
         if self.incremental_executor:
@@ -61,7 +61,7 @@ class JsonDocumentGenerator:
                     results.append(ExecutionResult())
         else:
             # Fall back to regular execution
-            executor = DocumentExecutor(verbose=self.config.verbose)
+            executor = DocumentExecutor(verbose=self.verbose)
             results, _ = executor.execute(document, str(source_path))
 
         # Generate file hash for unique block IDs
@@ -95,9 +95,9 @@ class JsonDocumentGenerator:
         # Parse the file
         document = parse_colight_file(source_path)
 
-        # Apply config pragma if any
-        if self.config.pragma:
-            document.tags = document.tags | TagSet(frozenset(self.config.pragma))
+        # Apply pragma if any
+        if self.pragma:
+            document.tags = document.tags | TagSet(frozenset(self.pragma))
 
         # Generate file hash for unique block IDs
         file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
@@ -130,7 +130,7 @@ class JsonDocumentGenerator:
                 i += 1
         else:
             # Fall back to regular execution
-            executor = DocumentExecutor(verbose=self.config.verbose)
+            executor = DocumentExecutor(verbose=self.verbose)
             results, _ = executor.execute(document, str(source_path))
 
             for i, (block, result) in enumerate(zip(document.blocks, results)):
@@ -274,7 +274,3 @@ class JsonDocumentGenerator:
             "stdout": result.output if result.output else None,
             "showsVisual": block.has_expression_result and tags.show_visuals(),
         }
-
-
-# For backwards compatibility, keep the old name as an alias
-JsonFormGenerator = JsonDocumentGenerator

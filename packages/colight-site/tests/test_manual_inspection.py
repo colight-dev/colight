@@ -2,7 +2,7 @@
 
 import pathlib
 
-from colight_site.builder import build_directory
+from colight_static.builder import build_directory
 
 
 def test_generate_artifacts_for_inspection():

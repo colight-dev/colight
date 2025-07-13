@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from colight_live.server import LiveServer
-from colight_site.builder import BuildConfig
 
 
 @pytest.mark.asyncio
@@ -16,8 +15,6 @@ async def test_run_version_increments():
     """Test that run version increments with each build."""
     server = LiveServer(
         input_path=pathlib.Path("."),
-        output_path=pathlib.Path("."),
-        config=BuildConfig(),
         include=["*.py"],
     )
 
@@ -36,8 +33,6 @@ async def test_websocket_messages_with_run_version():
     """Test that WebSocket messages include run version."""
     server = LiveServer(
         input_path=pathlib.Path("."),
-        output_path=pathlib.Path("."),
-        config=BuildConfig(),
         include=["*.py"],
     )
 
@@ -77,8 +72,6 @@ async def test_run_cancellation():
     """Test that in-flight runs can be cancelled."""
     server = LiveServer(
         input_path=pathlib.Path("."),
-        output_path=pathlib.Path("."),
-        config=BuildConfig(),
         include=["*.py"],
     )
 
@@ -125,8 +118,6 @@ async def test_request_load_handling():
     """Test that server handles request-load messages from client."""
     server = LiveServer(
         input_path=pathlib.Path("."),
-        output_path=pathlib.Path("."),
-        config=BuildConfig(),
         include=["*.py"],
     )
 
@@ -162,8 +153,6 @@ async def test_multiple_rapid_changes():
     """Test that rapid file changes cancel previous builds."""
     server = LiveServer(
         input_path=pathlib.Path("."),
-        output_path=pathlib.Path("."),
-        config=BuildConfig(),
         include=["*.py"],
     )
 

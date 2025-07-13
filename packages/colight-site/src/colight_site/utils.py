@@ -2,8 +2,9 @@
 
 import hashlib
 from typing import List, Optional
-from colight_site.constants import DEFAULT_IGNORE_PATTERNS
-from colight_site.model import Block
+
+from .constants import DEFAULT_IGNORE_PATTERNS
+from .model import Block
 
 
 def merge_ignore_patterns(user_patterns: Optional[List[str]] = None) -> List[str]:

@@ -5,9 +5,9 @@ import pathlib
 import tempfile
 
 from colight_live.incremental_executor import IncrementalExecutor
-from colight_live.json_generator import JsonFormGenerator
-from colight_site.builder import BuildConfig
+from colight_live.json_generator import JsonDocumentGenerator
 from colight_site.parser import parse_colight_file
+from colight_static.builder import BuildConfig
 
 
 def test_block_id_format():
@@ -42,9 +42,8 @@ z = x + y
             block_ids.append(stable_id)
 
         # Execute using JSON generator
-        config = BuildConfig()
         executor = IncrementalExecutor()
-        generator = JsonFormGenerator(config=config, incremental_executor=executor)
+        generator = JsonDocumentGenerator(incremental_executor=executor)
 
         # Collect block IDs from execution
         result_ids = []

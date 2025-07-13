@@ -3,7 +3,9 @@
 import pathlib
 import tempfile
 
+import colight_static.builder as builder
 from colight_site import api
+from colight_static.builder import BuildConfig
 
 
 def test_evaluate_python():
@@ -90,31 +92,12 @@ def test_build_file_api():
         output_file = temp_path / "test.md"
 
         # Build the file
-        api.build_file(test_file, output_file, verbose=False)
+        builder.build_file(test_file, output_file, verbose=False)
 
         # Check output exists
         assert output_file.exists()
         content = output_file.read_text()
         assert "Test" in content
-
-
-def test_api_imports():
-    """Test that all public API functions are importable."""
-    # These should all be available from the main module
-    from colight_site import (
-        build_directory,
-        build_file,
-        evaluate_python,
-        get_output_path,
-        init_project,
-    )
-
-    # Verify they are the right types
-    assert callable(evaluate_python)
-    assert callable(build_file)
-    assert callable(build_directory)
-    assert callable(init_project)
-    assert callable(get_output_path)
 
 
 class TestAPIErrorHandling:
@@ -128,7 +111,7 @@ class TestAPIErrorHandling:
             output = temp_path / "output.md"
 
             try:
-                api.build_file(nonexistent, output)
+                builder.build_file(nonexistent, output)
                 assert False, "Should have raised an exception"
             except FileNotFoundError:
                 pass  # Expected
@@ -148,7 +131,7 @@ class TestAPIErrorHandling:
             assert not output_dir.exists()
 
             # Should create directory and file
-            api.build_file(input_file, output_file)
+            builder.build_file(input_file, output_file)
 
             assert output_dir.exists()
             assert output_file.exists()
@@ -210,7 +193,7 @@ print("This might not execute")
             output_dir = temp_path / "output"
 
             # Should complete without raising exceptions
-            api.build_directory(temp_path, output_dir, continue_on_error=True)
+            builder.build_directory(temp_path, output_dir, continue_on_error=True)
 
             # Valid file should be processed
             assert (output_dir / "valid.md").exists()
@@ -222,16 +205,16 @@ print("This might not execute")
     def test_get_output_path_edge_cases(self):
         """Test get_output_path with various edge cases."""
         # Test different input extensions
-        assert api.get_output_path(pathlib.Path("test.py"), "markdown").suffix == ".md"
-        assert api.get_output_path(pathlib.Path("test.py"), "html").suffix == ".html"
+        assert builder.get_output_path(pathlib.Path("test.py"), "markdown").suffix == ".md"
+        assert builder.get_output_path(pathlib.Path("test.py"), "html").suffix == ".html"
 
         # Test file without extension
-        result = api.get_output_path(pathlib.Path("test"), "markdown")
+        result = builder.get_output_path(pathlib.Path("test"), "markdown")
         assert result.suffix == ".md"
 
         # Test with complex paths
         complex_path = pathlib.Path("subdir/test.py")
-        result = api.get_output_path(complex_path, "html")
+        result = builder.get_output_path(complex_path, "html")
         assert result.name == "test.html"
 
 
@@ -248,12 +231,10 @@ class TestAPIConfigurationValidation:
 
             output_file = temp_path / "test.invalid"
 
-            from colight_site.builder import BuildConfig
-
             # Test with invalid format in config
             try:
                 config = BuildConfig(formats={"invalid_format"})
-                api.build_file(test_file, output_file, config=config)
+                builder.build_file(test_file, output_file, config=config)
                 # Behavior depends on implementation - might succeed or fail
             except (ValueError, KeyError):
                 pass  # Expected for invalid format
@@ -271,11 +252,9 @@ print("This should work with pragmas")
 
             output_file = temp_path / "test.md"
 
-            from colight_site.builder import BuildConfig
-
             # Test with various pragma configurations
             config = BuildConfig(pragma={"hide-code", "show-visuals"})
-            api.build_file(test_file, output_file, config=config)
+            builder.build_file(test_file, output_file, config=config)
 
             assert output_file.exists()
             content = output_file.read_text()
@@ -327,12 +306,12 @@ x
             output_file = temp_path / "test.md"
 
             # Test with verbose=True (should not raise exceptions)
-            api.build_file(test_file, output_file, verbose=True)
+            builder.build_file(test_file, output_file, verbose=True)
             assert output_file.exists()
 
             # Test with verbose=False
             output_file.unlink()  # Remove previous output
-            api.build_file(test_file, output_file, verbose=False)
+            builder.build_file(test_file, output_file, verbose=False)
             assert output_file.exists()
 
 
@@ -359,7 +338,7 @@ class TestAPIPerformance:
             import time
 
             start_time = time.time()
-            api.build_file(test_file, output_file)
+            builder.build_file(test_file, output_file)
             end_time = time.time()
 
             assert output_file.exists()
@@ -382,7 +361,7 @@ class TestAPIPerformance:
             import time
 
             start_time = time.time()
-            api.build_directory(temp_path, output_dir)
+            builder.build_directory(temp_path, output_dir)
             end_time = time.time()
 
             # Verify all files were processed

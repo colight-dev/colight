@@ -5,15 +5,16 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .constants import DEFAULT_INLINE_THRESHOLD
-from .executor import DocumentExecutor
-from .file_resolver import find_files
+from colight_site.constants import DEFAULT_INLINE_THRESHOLD
+from colight_site.executor import DocumentExecutor
+from colight_site.file_resolver import find_files
+from colight_site.model import TagSet
+from colight_site.parser import parse_colight_file
+from colight_site.pep723 import detect_pep723_metadata, parse_dependencies
+from colight_site.pragma import parse_pragma_arg
+from colight_site.utils import merge_ignore_patterns
+
 from .generator import HTMLGenerator, MarkdownGenerator, write_colight_files
-from .model import TagSet
-from .parser import parse_colight_file
-from .pep723 import detect_pep723_metadata, parse_dependencies
-from .pragma import parse_pragma_arg
-from .utils import merge_ignore_patterns
 
 
 @dataclass
@@ -105,7 +106,7 @@ class BuildConfig:
         return cls(**config_dict)
 
 
-def _get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
+def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
     """Convert Python file path to output path with correct extension."""
     if input_path.suffix == ".py":
         # For regular .py files, replace .py with the output extension
@@ -323,7 +324,7 @@ def build_directory(
         try:
             # Calculate relative output path
             rel_path = python_file.relative_to(input_dir)
-            output_file_rel = _get_output_path(rel_path, config.format)
+            output_file_rel = get_output_path(rel_path, config.format)
             output_file = output_dir / output_file_rel
 
             build_file(

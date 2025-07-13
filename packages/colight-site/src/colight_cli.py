@@ -6,11 +6,12 @@ from typing import Optional
 
 import click
 
+import colight_static.builder as builder
 from colight_live.server import LiveServer
-from colight_site import api, watcher
-from colight_site.builder import BuildConfig
 from colight_site.constants import DEFAULT_INLINE_THRESHOLD
 from colight_site.pragma import parse_pragma_arg
+from colight_static import watcher
+from colight_static.builder import BuildConfig
 
 
 @click.group()
@@ -100,15 +101,15 @@ def build(
     if input_path.is_file():
         # Single file
         if not output:
-            output = api.get_output_path(input_path, format)
-        api.build_file(input_path, output, config=config)
+            output = builder.get_output_path(input_path, format)
+        builder.build_file(input_path, output, config=config)
         if verbose:
             click.echo(f"Built {input_path} -> {output}")
     else:
         # Directory
         if not output:
             output = pathlib.Path("build")
-        api.build_directory(input_path, output, config=config)
+        builder.build_directory(input_path, output, config=config)
         if verbose:
             click.echo(f"Built {input_path}/ -> {output}/")
 
@@ -274,40 +275,12 @@ def watch(
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
 @click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=pathlib.Path),
-    help="Output directory (default: .colight_cache)",
-)
-@click.option(
     "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
 )
 @click.option(
     "--pragma",
     type=str,
     help="Comma-separated pragma tags (e.g., 'hide-statements,hide-visuals')",
-)
-@click.option(
-    "--continue-on-error",
-    type=bool,
-    default=True,
-    help="Continue building even if forms fail to execute (default: True)",
-)
-@click.option(
-    "--colight-output-path",
-    type=str,
-    help="Template for colight file output paths (e.g., './{basename}/form-{form:03d}.colight')",
-)
-@click.option(
-    "--colight-embed-path",
-    type=str,
-    help="Template for embed src paths in HTML (e.g., 'form-{form:03d}.colight')",
-)
-@click.option(
-    "--inline-threshold",
-    type=int,
-    default=DEFAULT_INLINE_THRESHOLD,
-    help=f"Embed .colight files smaller than this size (in bytes) as script tags (default: {DEFAULT_INLINE_THRESHOLD})",
 )
 @click.option(
     "--include",
@@ -342,13 +315,8 @@ def watch(
 )
 def live(
     input_path: pathlib.Path,
-    output: Optional[pathlib.Path],
     verbose: bool,
     pragma: Optional[str],
-    continue_on_error: bool,
-    colight_output_path: Optional[str],
-    colight_embed_path: Optional[str],
-    inline_threshold: int,
     include: tuple,
     ignore: tuple,
     host: str,
@@ -356,35 +324,20 @@ def live(
     no_open: bool,
 ):
     """Start LiveServer for on-demand building and serving."""
-    # Default output to .colight_cache if not specified
-    if not output:
-        output = pathlib.Path(".colight_cache")
 
     click.echo(f"Starting LiveServer for {input_path}")
-    click.echo(f"Cache directory: {output}")
     click.echo(f"Server: http://{host}:{port}")
-
-    # Create BuildConfig from CLI args
-    config = BuildConfig(
-        verbose=verbose,
-        formats={"html"},  # Always HTML for serving
-        pragma=parse_pragma_arg(pragma),
-        continue_on_error=continue_on_error,
-        colight_output_path=colight_output_path,
-        colight_embed_path=colight_embed_path,
-        inline_threshold=inline_threshold,
-    )
 
     server = LiveServer(
         input_path,
-        output,
-        config=config,
+        verbose=verbose, 
+        pragma=parse_pragma_arg(pragma),
         include=list(include) if include else ["*.py"],
         ignore=list(ignore) if ignore else None,
         host=host,
         http_port=port,
         ws_port=port + 1,  # WebSocket port is HTTP port + 1
-        open_url=not no_open,
+        open_url=not no_open
     )
 
     try:

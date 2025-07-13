@@ -120,7 +120,6 @@ Plot.dot(
 # The serialization process also handles state management for interactive widgets, collecting initial state and synced keys to enable bidirectional updates between Python and JavaScript. For more details on state management, see the [State guide](system-guide/state.py).
 
 
-# %% [markdown]
 # ## Widgets vs HTML
 #
 # Colight offers two rendering modes:

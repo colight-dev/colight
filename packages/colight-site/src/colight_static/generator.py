@@ -7,9 +7,9 @@ from typing import Dict, List, Optional
 import markdown
 from colight.env import VERSIONED_CDN_DIST_URL
 
-from .constants import DEFAULT_INLINE_THRESHOLD
-from .executor import ExecutionResult
-from .model import Block, Document, Element
+from colight_site.constants import DEFAULT_INLINE_THRESHOLD
+from colight_site.executor import ExecutionResult
+from colight_site.model import Block, Document, Element
 
 EMBED_URL = (
     VERSIONED_CDN_DIST_URL + "/embed.js" if VERSIONED_CDN_DIST_URL else "/dist/embed.js"

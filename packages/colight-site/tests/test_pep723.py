@@ -4,9 +4,9 @@ import os
 import pathlib
 import tempfile
 
-from colight_site.builder import build_file
 from colight_site.parser import parse_colight_file
 from colight_site.pep723 import detect_pep723_metadata, parse_dependencies
+from colight_static.builder import build_file
 
 
 def test_detect_pep723_metadata():

@@ -5,7 +5,9 @@ import pathlib
 from typing import Dict, Optional, Union
 
 import colight_site.api as api
-from colight_site.builder import BuildConfig
+import colight_static.builder as builder
+
+from .builder import BuildConfig
 
 
 class BuildHelper:
@@ -125,7 +127,7 @@ class BuildHelper:
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
             # Build the file
-            api.build_file(source_file, output_file, config=config)
+            builder.build_file(source_file, output_file, config=config)
 
             # Save metadata
             BuildHelper.save_build_metadata(output_file, source_file, config)

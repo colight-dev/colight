@@ -1,13 +1,14 @@
 """Tests for the new generator implementation."""
 
 import textwrap
-from colight_site.parser import parse_document
+
 from colight_site.executor import DocumentExecutor, ExecutionResult
-from colight_site.generator import (
-    MarkdownGenerator,
-    HTMLGenerator,
-    write_colight_files,
+from colight_site.parser import parse_document
+from colight_static.generator import (
     EMBED_URL,
+    HTMLGenerator,
+    MarkdownGenerator,
+    write_colight_files,
 )
 
 

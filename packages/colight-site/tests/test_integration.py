@@ -3,7 +3,7 @@
 import pathlib
 import tempfile
 
-from colight_site.builder import build_file, init_project
+from colight_static.builder import build_file
 
 
 def test_end_to_end_build():
@@ -85,29 +85,6 @@ print("Processing complete!")
             json_data, buffers, _ = parse_file(first_colight)
             assert json_data is not None
             assert "ast" in json_data  # Should have AST structure
-
-
-def test_project_initialization():
-    """Test project initialization creates correct structure."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_path = pathlib.Path(temp_dir) / "test_project"
-
-        init_project(project_path)
-
-        # Check directory structure
-        assert project_path.exists()
-        assert (project_path / "src").exists()
-        assert (project_path / "build").exists()
-        assert (project_path / "README.md").exists()
-
-        # Check example file
-        example_file = project_path / "src" / "example.py"
-        assert example_file.exists()
-
-        # Check README content
-        readme_content = (project_path / "README.md").read_text()
-        assert "colight-site" in readme_content
-        assert "build src" in readme_content
 
 
 def test_error_recovery():

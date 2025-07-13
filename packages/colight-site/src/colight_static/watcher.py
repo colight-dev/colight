@@ -8,9 +8,10 @@ from typing import List, Optional
 
 from watchfiles import watch
 
-from . import api
+import colight_static.builder as builder
+from colight_static.server_watch import LiveReloadServer
+
 from .builder import BuildConfig
-from .server_watch import LiveReloadServer
 
 
 def watch_and_build(
@@ -65,9 +66,9 @@ def watch_and_build(
 
     # Build initially
     if input_path.is_file():
-        api.build_file(input_path, output_path, config=config)
+        builder.build_file(input_path, output_path, config=config)
     else:
-        api.build_directory(input_path, output_path, config=config)
+        builder.build_directory(input_path, output_path, config=config)
 
     # Helper function to check if file matches patterns
     def matches_patterns(
@@ -124,7 +125,7 @@ def watch_and_build(
             try:
                 if input_path.is_file():
                     if input_path in matching_changes:
-                        api.build_file(input_path, output_path, config=config)
+                        builder.build_file(input_path, output_path, config=config)
                         if config.verbose:
                             print(f"Rebuilt {input_path}")
                 else:
@@ -142,7 +143,7 @@ def watch_and_build(
                             rel_path = changed_file.relative_to(input_path.resolve())
                             suffix = ".html" if config.format == "html" else ".md"
                             output_file = output_path / rel_path.with_suffix(suffix)
-                            api.build_file(changed_file, output_file, config=config)
+                            builder.build_file(changed_file, output_file, config=config)
                             if config.verbose:
                                 print(f"Rebuilt {changed_file}")
             except Exception as e:
@@ -224,9 +225,9 @@ def watch_build_and_serve(
     if input_path.is_file():
         # For single file, generate proper output file path
         output_file = output_path / input_path.with_suffix(".html").name
-        api.build_file(input_path, output_file, config=config)
+        builder.build_file(input_path, output_file, config=config)
     else:
-        api.build_directory(input_path, output_path, config=config)
+        builder.build_directory(input_path, output_path, config=config)
         # Index is now generated as JSON via API endpoint
 
     # Start the live reload server
@@ -306,7 +307,7 @@ def watch_build_and_serve(
                             output_file = (
                                 output_path / input_path.with_suffix(".html").name
                             )
-                            api.build_file(input_path, output_file, config=config)
+                            builder.build_file(input_path, output_file, config=config)
                             if config.verbose:
                                 print(f"Rebuilt {input_path}")
                     else:
@@ -318,7 +319,7 @@ def watch_build_and_serve(
                                 )
                                 suffix = ".html"  # Always HTML for serving
                                 output_file = output_path / rel_path.with_suffix(suffix)
-                                api.build_file(changed_file, output_file, config=config)
+                                builder.build_file(changed_file, output_file, config=config)
                                 if config.verbose:
                                     print(f"Rebuilt {changed_file}")
 

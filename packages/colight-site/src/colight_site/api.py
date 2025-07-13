@@ -4,10 +4,10 @@ import pathlib
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
-from . import builder  # For internal use only
+from colight_static.generator import HTMLGenerator, MarkdownGenerator
+
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .executor import DocumentExecutor
-from .generator import HTMLGenerator, MarkdownGenerator
 from .model import Block
 from .parser import parse_colight_file
 from .pragma import parse_pragma_arg
@@ -144,36 +144,3 @@ def evaluate_python(
         markdown_content=markdown_content,
         html_content=html_content,
     )
-
-
-# Higher-level convenience functions that match CLI usage
-
-
-def build_file(input_path: pathlib.Path, output_path: pathlib.Path, **kwargs) -> None:
-    """Build a single .py file to markdown/HTML. Convenience wrapper for CLI."""
-    builder.build_file(input_path, output_path, **kwargs)
-
-
-def build_directory(
-    input_dir: pathlib.Path, output_dir: pathlib.Path, **kwargs
-) -> None:
-    """Build all .py files in a directory. Convenience wrapper for CLI."""
-    builder.build_directory(input_dir, output_dir, **kwargs)
-
-
-def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
-    """Get the default output path for a given input file."""
-    return builder._get_output_path(input_path, format)
-
-
-# Re-export commonly used functions
-__all__ = [
-    # Core API
-    "evaluate_python",
-    "EvaluatedBlock",
-    "EvaluatedPython",
-    # CLI convenience functions
-    "build_file",
-    "build_directory",
-    "get_output_path",
-]
