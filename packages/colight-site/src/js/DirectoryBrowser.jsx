@@ -5,22 +5,55 @@ import { tw } from "../../../colight/src/js/utils";
 const DirectoryNode = ({
   node,
   onSelectFile,
+  onNavigateToDirectory,
   level = 0,
-  defaultExpanded = false,
 }) => {
-  const [expanded, setExpanded] = useState(defaultExpanded);
   const isDirectory = node.type === "directory";
   const hasChildren = isDirectory && node.children && node.children.length > 0;
+  const [expanded, setExpanded] = useState(false);
+
+  // Visual collapsing: if this directory has only one child and it's also a directory,
+  // show them collapsed together
+  let displayName = node.name;
+  let collapsedChild = null;
+
+  if (
+    isDirectory &&
+    node.children?.length === 1 &&
+    node.children[0].type === "directory"
+  ) {
+    // Check if the single child also has a single directory child, and so on
+    let current = node;
+    const parts = [node.name];
+
+    while (
+      current.children?.length === 1 &&
+      current.children[0].type === "directory"
+    ) {
+      current = current.children[0];
+      parts.push(current.name);
+    }
+
+    if (parts.length > 1) {
+      displayName = parts.join("/");
+      collapsedChild = current;
+    }
+  }
 
   const handleClick = () => {
     if (isDirectory) {
+      // // If we have a collapsed child, navigate to its path instead
+      // const targetNode = collapsedChild || node;
+      // const targetPath = targetNode.path || targetNode.name;
+      // onNavigateToDirectory(targetPath);
+
+      // Toggle expansion separately
       if (hasChildren) {
         setExpanded(!expanded);
       }
     } else {
-      // Remove .py extension for loading
-      const cleanPath = node.path.replace(/\.py$/, "");
-      onSelectFile(cleanPath);
+      // For files, use the full path
+      onSelectFile(node.path || node.name);
     }
   };
 
@@ -52,25 +85,28 @@ const DirectoryNode = ({
             •
           </span>
         )}
-
         <span
           className={tw(
-            `flex-1 ${isDirectory ? "text-gray-700 font-medium" : "text-gray-600"} text-sm`,
+            `${
+              isDirectory
+                ? "font-medium text-gray-700"
+                : "text-gray-600 hover:text-gray-900"
+            } ${displayName.includes("/") ? "text-blue-600" : ""}`,
           )}
         >
-          {node.name.replace(/\.py$/, "")}
+          {displayName}
         </span>
       </div>
-
       {isDirectory && hasChildren && expanded && (
         <div>
-          {node.children.map((child) => (
+          {/* If we collapsed directories, show the deepest directory's children */}
+          {(collapsedChild?.children || node.children).map((child, idx) => (
             <DirectoryNode
-              key={child.path}
+              key={child.name + "-" + idx}
               node={child}
               onSelectFile={onSelectFile}
+              onNavigateToDirectory={onNavigateToDirectory}
               level={level + 1}
-              defaultExpanded={false}
             />
           ))}
         </div>
@@ -79,56 +115,86 @@ const DirectoryNode = ({
   );
 };
 
-// Main directory browser component
-export const DirectoryBrowser = ({
-  directoryPath,
-  onSelectFile,
-  onClose,
-  tree,
-}) => {
-  // Get the subtree for the current directory
-  let displayTree = tree;
+// Find a specific directory in the tree
+const findDirectory = (tree, targetPath) => {
+  if (!targetPath || targetPath === "/" || targetPath === "") {
+    return tree;
+  }
 
-  if (tree && directoryPath && directoryPath !== "/") {
-    const parts = directoryPath.split("/").filter(Boolean);
-    let current = tree;
+  // Normalize the target path - remove trailing slashes
+  const normalizedTarget = targetPath.endsWith("/")
+    ? targetPath.slice(0, -1)
+    : targetPath;
 
-    for (const part of parts) {
-      if (current.type === "directory" && current.children) {
-        const child = current.children.find((c) => c.name === part);
-        if (child) {
-          current = child;
-        } else {
-          break;
-        }
+  const traverse = (node) => {
+    // Check this node
+    const nodePath = (node.path || node.name || "").replace(/\/$/, "");
+    if (nodePath === normalizedTarget) {
+      return node;
+    }
+
+    // Check children
+    if (node.children) {
+      for (const child of node.children) {
+        const result = traverse(child);
+        if (result) return result;
       }
     }
 
-    displayTree = current;
-  }
-
-  if (!displayTree) {
     return null;
+  };
+
+  return traverse(tree);
+};
+
+export const DirectoryBrowser = ({
+  directoryPath,
+  tree,
+  onSelectFile,
+  onNavigateToDirectory,
+}) => {
+  // Find the subtree for the given directory path
+  const subtree = findDirectory(tree, directoryPath);
+
+  if (!subtree) {
+    return (
+      <div className={tw("text-gray-500")}>
+        Directory not found: {directoryPath}
+      </div>
+    );
   }
 
-  return (
-    <div className={tw("max-w-3xl mx-auto p-4")}>
-      {displayTree.type === "directory" && displayTree.children ? (
-        displayTree.children.map((child) => (
+  // Show children if this is a directory with children
+  if (subtree.children && subtree.children.length > 0) {
+    return (
+      <div>
+        {subtree.children.map((child, idx) => (
           <DirectoryNode
-            key={child.path}
+            key={child.name + "-" + idx}
             node={child}
             onSelectFile={onSelectFile}
-            defaultExpanded={false}
+            onNavigateToDirectory={onNavigateToDirectory}
           />
-        ))
-      ) : (
-        <DirectoryNode
-          node={displayTree}
-          onSelectFile={onSelectFile}
-          defaultExpanded={true}
-        />
-      )}
-    </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Empty directory
+  if (subtree.type === "directory") {
+    return (
+      <div className={tw("text-gray-500 text-center py-8")}>
+        This directory is empty
+      </div>
+    );
+  }
+
+  // Single file (shouldn't happen for directory browser but handle it)
+  return (
+    <DirectoryNode
+      node={subtree}
+      onSelectFile={onSelectFile}
+      onNavigateToDirectory={onNavigateToDirectory}
+    />
   );
 };

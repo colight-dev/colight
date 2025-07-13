@@ -5,7 +5,6 @@ describe("Live Server Integration", () => {
   it("should preserve unchanged blocks when editing a single block", () => {
     // Setup initial state with multiple blocks
     const latestRunRef = { current: 1 };
-    const focusedPathRef = { current: null };
     const changedBlocksRef = { current: new Set() };
 
     // Initial block results - simulating blocks that are already loaded
@@ -49,7 +48,6 @@ describe("Live Server Integration", () => {
 
     const handleMessage = createWebSocketMessageHandler({
       latestRunRef,
-      focusedPathRef,
       blockResultsRef,
       changedBlocksRef,
       setCurrentFile,
@@ -131,7 +129,6 @@ describe("Live Server Integration", () => {
   it("should handle initial load with all unchanged blocks", () => {
     // Setup fresh client state
     const latestRunRef = { current: 0 };
-    const focusedPathRef = { current: null };
     const changedBlocksRef = { current: new Set() };
     const blockResultsRef = { current: {} }; // Empty initially
 
@@ -153,7 +150,6 @@ describe("Live Server Integration", () => {
 
     const handleMessage = createWebSocketMessageHandler({
       latestRunRef,
-      focusedPathRef,
       blockResultsRef,
       changedBlocksRef,
       setCurrentFile,
@@ -217,7 +213,6 @@ describe("Live Server Integration", () => {
   it("should handle ref synchronization issues", () => {
     // This simulates the case where blockResultsRef might be out of sync
     const latestRunRef = { current: 1 };
-    const focusedPathRef = { current: null };
     const changedBlocksRef = { current: new Set() };
 
     // Start with empty ref
@@ -244,7 +239,6 @@ describe("Live Server Integration", () => {
 
     const handleMessage = createWebSocketMessageHandler({
       latestRunRef,
-      focusedPathRef,
       blockResultsRef, // This ref is stale!
       changedBlocksRef,
       setCurrentFile,

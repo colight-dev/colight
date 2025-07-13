@@ -1,11 +1,12 @@
-import React, {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  useTransition,
-} from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import ReactDOM from "react-dom/client";
+import {
+  createBrowserRouter,
+  RouterProvider,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
 import {
   parseColightScript,
@@ -16,37 +17,87 @@ import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import CommandBar from "./CommandBar.jsx";
 import TopBar from "./TopBar.jsx";
 import { processWebSocketMessage } from "./websocket-message-handler.js";
+import { useStateWithDeps } from "./hooks/useStateWithDeps.js";
 import "./bylight.js";
 
 // ========== Constants ==========
 
 const WEBSOCKET_RECONNECT_DELAY = 1000; // ms
-const HISTORY_DEBOUNCE_DELAY = 300; // ms
 
-const splitPath = (path) => path.split("/").filter(Boolean);
+// ========== Route Parsing - Single Source of Truth ==========
 
-// Get the base path for the application (handles sub-path hosting)
-const getBasePath = () => {
-  // In production, this might be set via a meta tag or global variable
-  return window.COLIGHT_BASE_PATH || "";
-};
+/**
+ * Parse the current route into navigation state
+ *
+ * @param {string} path - The route path from params["*"]
+ * @returns {Object} Navigation state
+ */
+function parseRoute(path) {
+  // Normalize path - remove leading/trailing slashes for consistency
+  const normalizedPath = path?.replace(/^\/+|\/+$/g, "") || "";
 
-// Extract the file path from the URL, accounting for base path
-const getFilePathFromUrl = () => {
-  const basePath = getBasePath();
-  const pathname = window.location.pathname;
-
-  if (basePath && pathname.startsWith(basePath)) {
-    return pathname.slice(basePath.length + 1); // +1 for the trailing slash
+  if (normalizedPath === "") {
+    // Root directory
+    return {
+      type: "directory",
+      path: "/",
+      displayPath: "/",
+      segments: [],
+      file: null,
+      directory: "/",
+    };
   }
 
-  return pathname.slice(1); // Default behavior
-};
+  // Check if it's a directory (ends with /)
+  if (path.endsWith("/")) {
+    const segments = normalizedPath.split("/").filter(Boolean);
+    return {
+      type: "directory",
+      path: normalizedPath + "/",
+      displayPath: normalizedPath + "/",
+      segments,
+      file: null,
+      directory: normalizedPath + "/",
+    };
+  }
 
-// ========== Document Processing ==========
-// Removed applyIncrementalUpdate - now using simple state replacement with RunVersion
+  // It's a file
+  const segments = normalizedPath.split("/").filter(Boolean);
+  const dirSegments = segments.slice(0, -1);
 
-// ========== Content Rendering Components ==========
+  return {
+    type: "file",
+    path: normalizedPath,
+    displayPath: normalizedPath,
+    segments,
+    file: normalizedPath,
+    directory: dirSegments.length > 0 ? dirSegments.join("/") + "/" : "/",
+  };
+}
+
+// ========== Navigation Helper ==========
+
+/**
+ * Convert any navigation request to a proper route
+ * This ensures consistency regardless of how navigation is triggered
+ */
+function normalizeNavigationPath(path) {
+  if (!path || path === "/") {
+    return "/"; // Root
+  }
+
+  // Remove leading slash for processing
+  let normalized = path.startsWith("/") ? path.slice(1) : path;
+
+  // Ensure directories end with /
+  if (!normalized.includes(".") && !normalized.endsWith("/")) {
+    normalized += "/";
+  }
+
+  return "/" + normalized;
+}
+
+// ========== Content Components (unchanged) ==========
 
 const ColightVisual = ({ data, dataRef }) => {
   const containerRef = useRef(null);
@@ -66,7 +117,7 @@ const ColightVisual = ({ data, dataRef }) => {
       // We have inline data - parse it directly
       try {
         setMinHeight(containerRef.current?.offsetHeight || 0);
-        setColightData(([i, c, p]) => [
+        setColightData(([i]) => [
           i + 1,
           parseColightScript({ textContent: data }),
           null,
@@ -84,7 +135,7 @@ const ColightVisual = ({ data, dataRef }) => {
           }
           const blob = await response.blob();
           const pending = parseColightData(await blob.arrayBuffer());
-          setColightData(([i, c, p]) => [i, c, pending]);
+          setColightData(([i, c]) => [i, c, pending]);
           setLoadedId(dataRef.id);
         })();
       } catch (error) {
@@ -99,7 +150,7 @@ const ColightVisual = ({ data, dataRef }) => {
   useEffect(() => {
     if (!isLoading && pendingData) {
       setMinHeight(containerRef.current?.offsetHeight || 0);
-      setColightData(([i, c, p]) => [i + 1, pendingData, null]);
+      setColightData(([i]) => [i + 1, pendingData, null]);
     }
   }, [isLoading, pendingData]);
 
@@ -176,7 +227,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
     if (isPending) {
       return (
         <div
-          className={tw(`block-${block.id} opacity-50 animate-pulse`)}
+          className={tw(`opacity-50 animate-pulse`)}
           data-block-id={block.id}
           data-shows-visual={block.showsVisual}
         >
@@ -256,7 +307,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
 
   return (
     <div
-      className={tw(`block-${block.id} ${isPending ? "relative" : ""}`)}
+      className={tw(`${isPending ? "relative" : ""}`)}
       data-block-id={block.id}
       data-shows-visual={block.showsVisual}
     >
@@ -294,7 +345,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
                 )}
             </div>
           );
-        } else if (item.type === "visual-only") {
+        } else if (item.type === "visual-only" && item.element) {
           return !pragmaOverrides.hideVisuals ? (
             <ColightVisual
               key={`visual-only-${idx}`}
@@ -325,7 +376,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
   );
 };
 
-const DocumentRenderer = ({ blocks, currentFile, pragmaOverrides }) => {
+const DocumentRenderer = ({ blocks, pragmaOverrides }) => {
   const docRef = useRef();
 
   useEffect(() => {
@@ -368,42 +419,6 @@ const DocumentRenderer = ({ blocks, currentFile, pragmaOverrides }) => {
     </div>
   );
 };
-
-// ========== Home Page Component ==========
-
-const HomePage = () => {
-  const [watchingPath, setWatchingPath] = useState("");
-
-  useEffect(() => {
-    // Get the directory being watched from the API
-    const getWatchingPath = async () => {
-      try {
-        const response = await fetch("/api/index");
-        if (response.ok) {
-          const data = await response.json();
-          setWatchingPath(data.name || "current directory");
-        }
-      } catch (err) {
-        console.error("Failed to get watching path:", err);
-      }
-    };
-
-    getWatchingPath();
-  }, []);
-
-  return (
-    <div className={tw("p-10 text-center font-mono text-gray-600")}>
-      <div className={tw("text-xl")}>
-        Watching{" "}
-        <span className={tw("font-bold")}>{watchingPath || "..."}</span>
-      </div>
-    </div>
-  );
-};
-
-// ========== Command Bar ==========
-
-// ========== UI Components ==========
 
 // ========== WebSocket Hook ==========
 
@@ -449,33 +464,30 @@ const useWebSocket = (onMessage, wsRefOut) => {
         wsRef.current.close();
       }
     };
-  }, [onMessage]);
+  }, [onMessage, wsRefOut]);
 
   return connected;
 };
 
 // ========== Message Handler Factory ==========
 
-// Factory function to create the WebSocket message handler
-// This allows us to test the handler logic with mock dependencies
 export const createWebSocketMessageHandler = (deps) => {
   const {
     latestRunRef,
-    focusedPathRef,
     blockResultsRef,
     changedBlocksRef,
     setCurrentFile,
     setBlockResults,
-    startTransition = (fn) => fn(), // Default to synchronous for testing
+    currentFile,
   } = deps;
 
   return (message) => {
     // Process the message using the extracted logic
     const state = {
       latestRun: latestRunRef.current,
-      focusedPath: focusedPathRef.current,
       blockResults: blockResultsRef.current || {},
       changedBlocks: changedBlocksRef.current,
+      currentFile,
     };
 
     const action = processWebSocketMessage(message, state);
@@ -487,16 +499,13 @@ export const createWebSocketMessageHandler = (deps) => {
         latestRunRef.current = action.latestRun;
         changedBlocksRef.current = action.changedBlocks;
 
-        if (action.blockResults) {
+        if (action.blockResults !== undefined) {
           // Update state with new block results
           setCurrentFile(action.currentFile);
           setBlockResults(action.blockResults);
         } else {
-          // Legacy behavior - clear blocks
-          startTransition(() => {
-            setCurrentFile(action.currentFile);
-            setBlockResults({});
-          });
+          // Legacy behavior - only update current file, don't clear blocks
+          setCurrentFile(action.currentFile);
         }
         break;
 
@@ -550,12 +559,13 @@ export const createWebSocketMessageHandler = (deps) => {
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
-  const [currentFile, setCurrentFile] = useState(null);
-  const [documentData, setDocumentData] = useState(null);
-  const [blockResults, setBlockResults] = useState({}); // Track block results by ID
-  const [focusedPath, setFocusedPath] = useState(null); // Single focus state - can be file or directory
-  const [browsingDirectory, setBrowsingDirectoryState] = useState(null); // Directory being browsed
-  const [isPending, startTransition] = useTransition(); // For smooth transitions
+  const navigate = useNavigate();
+  const params = useParams();
+
+  // Parse route - SINGLE SOURCE OF TRUTH
+  const routePath = params["*"] || "";
+  const navState = parseRoute(routePath);
+
   const [directoryTree, setDirectoryTree] = useState(null); // Cached directory tree
   const [isLoadingTree, setIsLoadingTree] = useState(false);
   const [pragmaOverrides, setPragmaOverrides] = useState({
@@ -565,76 +575,22 @@ const LiveServerApp = () => {
     hideVisuals: false,
   });
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
+  const [pinnedFile, setPinnedFile] = useState(null); // For pinning current file
+
+  // File-scoped state that resets when file changes
+  const [blockResults, setBlockResults] = useStateWithDeps({}, [navState.file]);
 
   // Refs for WebSocket callback
-  const currentFileRef = useRef(null);
-  const focusedPathRef = useRef(null); // Track focused path for WebSocket callback
   const latestRunRef = useRef(0); // Track latest run version
   const blockResultsRef = useRef({}); // Track block results for WebSocket callback
-
-  // Track if we're still initializing
-  const [isInitialized, setIsInitialized] = useState(false);
-
-  // Debounce timer for history updates
-  const historyUpdateTimerRef = useRef(null);
-
-  // Keep currentFile ref in sync
-  useEffect(() => {
-    currentFileRef.current = currentFile;
-  }, [currentFile]);
+  const loadingFileRef = useRef(null); // Track which file we're loading
 
   // Keep blockResults ref in sync immediately (not in useEffect)
   blockResultsRef.current = blockResults;
 
-  // Handle URL updates
-  useEffect(() => {
-    // Don't update URL during initial load
-    if (!isInitialized) return;
-
-    // Clear existing timer
-    if (historyUpdateTimerRef.current) {
-      clearTimeout(historyUpdateTimerRef.current);
-    }
-
-    // Debounce history updates
-    historyUpdateTimerRef.current = setTimeout(() => {
-      // Update URL when current file changes
-      if (currentFile) {
-        const url = new URL(window.location);
-        url.pathname = `/${currentFile}`;
-        if (focusedPath) {
-          url.searchParams.set("focus", focusedPath);
-        } else {
-          url.searchParams.delete("focus");
-        }
-        window.history.pushState({}, "", url.toString());
-      } else if (window.location.pathname !== "/") {
-        // No file selected, go to root
-        const url = new URL(window.location);
-        url.pathname = "/";
-        if (focusedPath) {
-          url.searchParams.set("focus", focusedPath);
-        } else {
-          url.searchParams.delete("focus");
-        }
-        window.history.pushState({}, "", url.toString());
-      }
-    }, HISTORY_DEBOUNCE_DELAY);
-
-    return () => {
-      if (historyUpdateTimerRef.current) {
-        clearTimeout(historyUpdateTimerRef.current);
-      }
-    };
-  }, [currentFile, focusedPath, isInitialized]);
-
-  useEffect(() => {
-    focusedPathRef.current = focusedPath;
-  }, [focusedPath]);
-
   // Load directory tree
-  const loadDirectoryTree = async () => {
-    if (directoryTree) return; // Already loaded
+  const loadDirectoryTree = useCallback(async () => {
+    if (directoryTree || isLoadingTree) return; // Already loaded or loading
 
     setIsLoadingTree(true);
     try {
@@ -643,38 +599,37 @@ const LiveServerApp = () => {
         throw new Error("Failed to load directory tree");
       }
       const data = await response.json();
-      startTransition(() => {
-        setDirectoryTree(data);
-      });
+      setDirectoryTree(data);
     } catch (error) {
       console.error("Failed to load directory tree:", error);
     } finally {
       setIsLoadingTree(false);
     }
-  };
+  }, [directoryTree, isLoadingTree]);
 
-  // Custom setBrowsingDirectory that loads tree first
-  const setBrowsingDirectory = async (dir) => {
-    // Handle boolean values from TopBar
-    if (dir === true) {
-      dir = "/";
-    } else if (dir === false) {
-      dir = null;
+  // Load directory tree when viewing a directory
+  useEffect(() => {
+    if (navState.type === "directory" && !directoryTree && !isLoadingTree) {
+      loadDirectoryTree();
     }
+  }, [navState.type, directoryTree, isLoadingTree, loadDirectoryTree]);
 
-    if (dir && !directoryTree) {
-      await loadDirectoryTree();
-    }
-    setBrowsingDirectoryState(dir);
-  };
-
-  // Request a file load from the server
-  const requestFileLoad = useCallback((path) => {
-    // Send a synthetic file-changed event to trigger a build
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "request-load", path }));
-    }
-  }, []);
+  // Single navigation function - always updates the route
+  const navigateTo = useCallback(
+    (path) => {
+      const normalized = normalizeNavigationPath(path);
+      // Synchronously update loadingFileRef when navigating
+      if (normalized.endsWith(".py")) {
+        loadingFileRef.current = normalized.substring(1); // Remove leading /
+      } else if (normalized !== "/" && !normalized.endsWith("/")) {
+        loadingFileRef.current = normalized.substring(1) + ".py";
+      } else {
+        loadingFileRef.current = null;
+      }
+      navigate(normalized);
+    },
+    [navigate],
+  );
 
   // Track changed blocks for the current run
   const changedBlocksRef = useRef(new Set());
@@ -687,16 +642,22 @@ const LiveServerApp = () => {
     messageHandlerRef.current = (message) => {
       const handler = createWebSocketMessageHandler({
         latestRunRef,
-        focusedPathRef,
         blockResultsRef,
         changedBlocksRef,
-        setCurrentFile,
+        setCurrentFile: (file) => {
+          // Server sends paths without extension, add .py if needed
+          const filePath = file.endsWith(".py") ? file : file + ".py";
+          // Only navigate if we're not already on this file
+          if (navState.file !== filePath) {
+            navigateTo(filePath);
+          }
+        },
         setBlockResults,
-        startTransition,
+        currentFile: loadingFileRef.current,
       });
       return handler(message);
     };
-  }, [setCurrentFile, setBlockResults, startTransition]);
+  }, [navigateTo, setBlockResults, navState.file]);
 
   // Stable callback that won't cause WebSocket to reconnect
   const handleWebSocketMessage = useCallback((message) => {
@@ -711,66 +672,21 @@ const LiveServerApp = () => {
   // Setup WebSocket connection
   const connected = useWebSocket(handleWebSocketMessage, wsRef);
 
-  // Initial load
+  // Request file load when connected and we're viewing a file
   useEffect(() => {
-    // Handle initial route and focus state
-    const path = getFilePathFromUrl();
-    const params = new URLSearchParams(window.location.search);
-    const focus = params.get("focus");
-
-    if (focus) {
-      setFocusedPath(focus);
-    }
-
-    if (path) {
-      // Set current file - the WebSocket will handle loading when connected
-      setCurrentFile(path);
-    }
-
-    // Mark as initialized after initial load
-    setTimeout(() => setIsInitialized(true), 0);
-  }, []);
-
-  // Request file load when connected and current file changes
-  useEffect(() => {
-    if (connected && currentFile && wsRef.current) {
+    if (connected && navState.type === "file" && wsRef.current) {
+      // Update loadingFileRef when we request a file
+      loadingFileRef.current = navState.file;
       // Request the server to load this file
-      // Include the current run version so server knows if we need full data
       wsRef.current.send(
         JSON.stringify({
           type: "request-load",
-          path: currentFile,
+          path: navState.file,
           clientRun: latestRunRef.current,
         }),
       );
     }
-  }, [connected, currentFile]);
-
-  // Handle popstate (browser back/forward)
-  useEffect(() => {
-    const handlePopState = () => {
-      const path = getFilePathFromUrl();
-      const params = new URLSearchParams(window.location.search);
-      const focus = params.get("focus");
-
-      // Restore focus state
-      setFocusedPath(focus);
-
-      if (path) {
-        setCurrentFile(path);
-      } else {
-        startTransition(() => {
-          setCurrentFile(null);
-          setBlockResults({});
-        });
-      }
-    };
-
-    if (typeof window !== "undefined") {
-      window.addEventListener("popstate", handlePopState);
-      return () => window.removeEventListener("popstate", handlePopState);
-    }
-  }, []);
+  }, [connected, navState.type, navState.file]);
 
   // Handle global keyboard shortcuts
   useEffect(() => {
@@ -785,7 +701,7 @@ const LiveServerApp = () => {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [directoryTree]);
+  }, [directoryTree, loadDirectoryTree]);
 
   return (
     <>
@@ -793,68 +709,95 @@ const LiveServerApp = () => {
         isOpen={isCommandBarOpen}
         onClose={() => setIsCommandBarOpen(false)}
         directoryTree={directoryTree}
-        currentFile={currentFile}
-        onOpenFile={(path) => {
-          setCurrentFile(path);
-          setBrowsingDirectoryState(null);
-        }}
+        currentFile={navState.file}
+        onOpenFile={navigateTo}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}
-        focusedPath={focusedPath}
-        setFocusedPath={setFocusedPath}
+        pinnedFile={pinnedFile}
+        setPinnedFile={setPinnedFile}
       />
 
       <TopBar
-        currentFile={currentFile}
+        currentFile={navState.file}
+        currentPath={navState.path}
+        isDirectory={navState.type === "directory"}
         connected={connected}
-        focusedPath={focusedPath}
-        setFocusedPath={setFocusedPath}
-        browsingDirectory={browsingDirectory}
-        setBrowsingDirectory={setBrowsingDirectory}
+        onNavigate={navigateTo}
         isLoading={false}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}
+        pinnedFile={pinnedFile}
+        setPinnedFile={setPinnedFile}
       />
 
-      <div className={tw("mt-10 relative")}>
-        {browsingDirectory && directoryTree ? (
-          <DirectoryBrowser
-            directoryPath={browsingDirectory}
-            tree={directoryTree}
-            onSelectFile={(path) => {
-              setCurrentFile(path);
-              setBrowsingDirectoryState(null);
-            }}
-            onClose={() => setBrowsingDirectoryState(null)}
-          />
-        ) : currentFile && Object.keys(blockResults).length > 0 ? (
-          <DocumentRenderer
-            key={currentFile}
-            blocks={blockResults}
-            currentFile={currentFile}
-            pragmaOverrides={pragmaOverrides}
-          />
-        ) : currentFile ? (
-          // Loading state for current file
+      <div className={tw("mt-10")}>
+        {navState.type === "directory" && directoryTree ? (
+          <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
+            <DirectoryBrowser
+              directoryPath={navState.directory}
+              tree={directoryTree}
+              onSelectFile={navigateTo}
+              onNavigateToDirectory={navigateTo}
+            />
+          </div>
+        ) : navState.type === "directory" && !directoryTree ? (
+          // Loading state for directory
           <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
             <div className={tw("text-center text-gray-500")}>
-              Loading {currentFile}...
+              Loading directory...
             </div>
           </div>
-        ) : (
-          <HomePage />
-        )}
+        ) : navState.type === "file" && Object.keys(blockResults).length > 0 ? (
+          <DocumentRenderer
+            blocks={blockResults}
+            pragmaOverrides={pragmaOverrides}
+          />
+        ) : navState.type === "file" ? (
+          // Loading state for file
+          <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
+            <div className={tw("text-center text-gray-500")}>
+              Loading {navState.file}...
+            </div>
+            {/* Add hint if loading takes too long */}
+            <div className={tw("text-center text-gray-400 text-sm mt-4")}>
+              If this takes too long, check that the server is running and the
+              file exists.
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   );
 };
+
+// ========== Router Setup ==========
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+const router = createBrowserRouter([
+  {
+    path: "*",
+    element: <LiveServerApp />,
+  },
+]);
 
 // ========== Mount the App ==========
 
 if (typeof window !== "undefined") {
   const root = document.getElementById("root");
   if (root) {
-    ReactDOM.createRoot(root).render(<LiveServerApp />);
+    ReactDOM.createRoot(root).render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
   }
 }
 

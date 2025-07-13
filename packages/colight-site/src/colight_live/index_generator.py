@@ -118,28 +118,14 @@ def build_file_tree_json(
                     # It's a directory
                     children = dict_to_tree(value, current_path)
                     if children:  # Only add non-empty directories
-                        # Check if we should collapse this directory
-                        if len(children) == 1 and children[0]["type"] == "directory":
-                            # This directory has only one subdirectory, merge them
-                            child = children[0]
-                            items.append(
-                                {
-                                    "name": f"{name}/{child['name']}",
-                                    "path": child["path"],
-                                    "type": "directory",
-                                    "children": child["children"],
-                                }
-                            )
-                        else:
-                            # Normal directory with multiple children or files
-                            items.append(
-                                {
-                                    "name": name,
-                                    "path": current_path + "/",
-                                    "type": "directory",
-                                    "children": children,
-                                }
-                            )
+                        items.append(
+                            {
+                                "name": name,
+                                "path": current_path,
+                                "type": "directory",
+                                "children": children,
+                            }
+                        )
 
         return items
 

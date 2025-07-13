@@ -161,11 +161,6 @@ def build_directory(
     builder.build_directory(input_dir, output_dir, **kwargs)
 
 
-def init_project(project_dir: pathlib.Path) -> None:
-    """Initialize a new colight-site project. Convenience wrapper for CLI."""
-    builder.init_project(project_dir)
-
-
 def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
     """Get the default output path for a given input file."""
     return builder._get_output_path(input_path, format)
@@ -180,6 +175,5 @@ __all__ = [
     # CLI convenience functions
     "build_file",
     "build_directory",
-    "init_project",
     "get_output_path",
 ]

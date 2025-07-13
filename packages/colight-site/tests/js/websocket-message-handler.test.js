@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  shouldProcessFileChange,
   processRunStart,
   processBlockResult,
   processRunEnd,
@@ -8,28 +7,11 @@ import {
 } from "../../src/js/websocket-message-handler";
 
 describe("WebSocket Message Handler", () => {
-  describe("shouldProcessFileChange", () => {
-    it("should process all changes when no focus", () => {
-      expect(shouldProcessFileChange("any/file.py", null)).toBe(true);
-    });
-
-    it("should only process focused file when focus is a file", () => {
-      expect(shouldProcessFileChange("focused.py", "focused.py")).toBe(true);
-      expect(shouldProcessFileChange("other.py", "focused.py")).toBe(false);
-    });
-
-    it("should process files within focused directory", () => {
-      expect(shouldProcessFileChange("dir/file.py", "dir/")).toBe(true);
-      expect(shouldProcessFileChange("other/file.py", "dir/")).toBe(false);
-    });
-  });
-
   describe("processRunStart", () => {
     it("should ignore old runs", () => {
       const result = processRunStart(
         { run: 1, file: "test.py" },
         2, // latestRun is 2
-        null,
         {},
       );
       expect(result).toBe(null);
@@ -44,7 +26,6 @@ describe("WebSocket Message Handler", () => {
           dirty: ["block-2"],
         },
         1, // latestRun is 1
-        null,
         { "block-1": { result: "old" } },
       );
 
@@ -104,7 +85,6 @@ describe("WebSocket Message Handler", () => {
     it("should handle run-start messages", () => {
       const state = {
         latestRun: 1,
-        focusedPath: null,
         blockResults: {},
         changedBlocks: new Set(),
       };
@@ -121,7 +101,6 @@ describe("WebSocket Message Handler", () => {
     it("should handle reload messages", () => {
       const state = {
         latestRun: 1,
-        focusedPath: null,
         blockResults: {},
         changedBlocks: new Set(),
       };
@@ -133,7 +112,6 @@ describe("WebSocket Message Handler", () => {
     it("should handle unknown messages", () => {
       const state = {
         latestRun: 1,
-        focusedPath: null,
         blockResults: {},
         changedBlocks: new Set(),
       };

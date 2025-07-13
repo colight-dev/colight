@@ -170,7 +170,7 @@ async def test_multiple_rapid_changes():
     # Track which runs complete
     completed_runs = []
 
-    async def mock_trigger_build(file_path):
+    async def mock_trigger_build(file_path, client_run=None):
         run = next(server._run_counter)
         try:
             # Simulate some work

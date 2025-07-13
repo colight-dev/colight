@@ -272,14 +272,6 @@ def watch(
 
 
 @main.command()
-@click.argument("project_dir", type=click.Path(path_type=pathlib.Path))
-def init(project_dir: pathlib.Path):
-    """Initialize a new colight-site project."""
-    api.init_project(project_dir)
-    click.echo(f"Initialized project in {project_dir}")
-
-
-@main.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
 @click.option(
     "--output",

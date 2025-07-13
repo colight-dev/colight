@@ -25,7 +25,7 @@
     "@mui/base": "5.0.0-beta.61",
     "@observablehq/plot": "^0.6.16",
     "@tailwindcss/typography": "^0.5.15",
-    "@tanstack/react-query": "^5.81.5",
+    "@tanstack/react-query": "^5.82.0",
     "@tanstack/react-router": "^1.125.6",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react-hooks": "^8.0.1",
@@ -45,8 +45,10 @@
     "markdown-it": "^14.1.0",
     "mobx": "^6.13.1",
     "mobx-react-lite": "^4.0.7",
+    "node-fetch": "^3.3.2",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-router-dom": "^7.6.3",
     "tailwindcss": "^3.4.14"
   },
   "scripts": {

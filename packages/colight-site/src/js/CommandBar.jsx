@@ -10,8 +10,8 @@ const CommandBar = ({
   onOpenFile,
   pragmaOverrides,
   setPragmaOverrides,
-  focusedPath,
-  setFocusedPath,
+  pinnedFile,
+  setPinnedFile,
 }) => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -30,9 +30,10 @@ const CommandBar = ({
 
         items.forEach((item) => {
           if (item.type === "file") {
-            const fullPath = currentPath
-              ? `${currentPath}/${item.name}`
-              : item.name;
+            // Use item.path if available, otherwise construct it
+            const fullPath =
+              item.path ||
+              (currentPath ? `${currentPath}/${item.name}` : item.name);
             allFiles.push({
               name: item.name,
               path: fullPath,
@@ -48,9 +49,10 @@ const CommandBar = ({
                 .toLowerCase(),
             });
           } else if (item.type === "directory" && item.children) {
-            const newPath = currentPath
-              ? `${currentPath}/${item.name}`
-              : item.name;
+            // Use item.path if available for collapsed paths
+            const newPath =
+              item.path ||
+              (currentPath ? `${currentPath}/${item.name}` : item.name);
             extractFiles(item.children, newPath);
           }
         });
@@ -134,16 +136,16 @@ const CommandBar = ({
       allCommands.push({
         type: "pin",
         title:
-          focusedPath === currentFile
+          pinnedFile === currentFile
             ? "Unpin Current File"
             : "Pin Current File",
         subtitle:
-          focusedPath === currentFile
-            ? "📌 Remove focus from current file"
-            : "📌 Focus on current file only",
-        searchTerms: ["pin", "unpin", "focus", "file"],
+          pinnedFile === currentFile
+            ? "📌 Unpin the current file"
+            : "📌 Pin the current file",
+        searchTerms: ["pin", "unpin", "file"],
         action: () =>
-          setFocusedPath(focusedPath === currentFile ? null : currentFile),
+          setPinnedFile(pinnedFile === currentFile ? null : currentFile),
       });
     }
 
@@ -179,10 +181,10 @@ const CommandBar = ({
     query,
     pragmaOverrides,
     currentFile,
-    focusedPath,
+    pinnedFile,
     onOpenFile,
     setPragmaOverrides,
-    setFocusedPath,
+    setPinnedFile,
   ]);
 
   // Focus input when opened
@@ -193,32 +195,43 @@ const CommandBar = ({
     }
   }, [isOpen]);
 
-  // Handle keyboard navigation
-  const handleKeyDown = (e) => {
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % commands.length);
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setSelectedIndex(
-          (prev) => (prev - 1 + commands.length) % commands.length,
-        );
-        break;
-      case "Enter":
-        e.preventDefault();
-        if (commands[selectedIndex]) {
-          commands[selectedIndex].action();
+  // Handle keyboard navigation - attached to document when open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setSelectedIndex((prev) =>
+            commands.length > 0 ? (prev + 1) % commands.length : 0,
+          );
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setSelectedIndex((prev) =>
+            commands.length > 0
+              ? (prev - 1 + commands.length) % commands.length
+              : 0,
+          );
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (commands[selectedIndex]) {
+            commands[selectedIndex].action();
+            onClose();
+          }
+          break;
+        case "Escape":
+          e.preventDefault();
           onClose();
-        }
-        break;
-      case "Escape":
-        e.preventDefault();
-        onClose();
-        break;
-    }
-  };
+          break;
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, commands, selectedIndex, onClose]);
 
   if (!isOpen) return null;
 
@@ -242,7 +255,6 @@ const CommandBar = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
             placeholder="Search files or type '>' for commands..."
             className={tw(
               `w-full text-lg focus:outline-none placeholder-gray-400`,
@@ -257,8 +269,7 @@ const CommandBar = ({
               <div
                 key={index}
                 className={tw(
-                  `px-4 py-3 cursor-pointer transition-colors`,
-                  index === selectedIndex ? `bg-blue-50` : `hover:bg-gray-50`,
+                  `px-4 py-3 cursor-pointer transition-colors ${index === selectedIndex ? `bg-blue-50` : `hover:bg-gray-50`}`,
                 )}
                 onClick={() => {
                   cmd.action();

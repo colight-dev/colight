@@ -36,7 +36,6 @@ line_plot + dot_plot + Plot.frame()
 
 line_plot & dot_plot
 
-# %% [markdown]
 # For more advanced layout options, including grids and responsive layouts, see the [Layouts guide](system-guide/layouts.py).
 #
 # ## Supplying Data
@@ -152,6 +151,5 @@ categorical_data = [
     + Plot.colorLegend()
 ).display_as("html")
 
-# %% [markdown]
 # The global setting affects all subsequent plots unless overridden by `.display_as()`.
 # You can switch between modes as needed for different use cases.

@@ -6,11 +6,7 @@ __version__ = "2025.4.1"
 from .api import (
     EvaluatedBlock,
     EvaluatedPython,
-    build_directory,
-    build_file,
     evaluate_python,
-    get_output_path,
-    init_project,
 )
 
 __all__ = [
@@ -19,9 +15,4 @@ __all__ = [
     "evaluate_python",
     "EvaluatedBlock",
     "EvaluatedPython",
-    # CLI convenience functions
-    "build_file",
-    "build_directory",
-    "init_project",
-    "get_output_path",
 ]

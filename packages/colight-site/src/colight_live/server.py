@@ -377,9 +377,11 @@ class LiveServer:
                         )  # Get client's current run version
                         # Find the actual source file
                         if self._api_middleware:
+                            # Remove .py extension if present, then add .html for file resolver
+                            html_path = file_path.removesuffix(".py") + ".html"
                             source_file = (
                                 self._api_middleware.file_resolver.find_source_file(
-                                    file_path + ".html"
+                                    html_path
                                 )
                             )
                             if source_file:

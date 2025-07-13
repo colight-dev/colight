@@ -6,28 +6,30 @@ const splitPath = (path) => path.split("/").filter(Boolean);
 
 const TopBar = ({
   currentFile,
+  currentPath,
+  isDirectory,
   connected,
-  focusedPath,
-  setFocusedPath,
-  browsingDirectory,
-  setBrowsingDirectory,
+  onNavigate,
   isLoading,
   pragmaOverrides,
   setPragmaOverrides,
+  pinnedFile,
+  setPinnedFile,
 }) => {
-  // Build breadcrumb data
-  const pathSegments = currentFile ? splitPath(currentFile) : [];
+  // Build breadcrumb data from current path (works for both files and directories)
+  const pathSegments =
+    currentPath && currentPath !== "/"
+      ? splitPath(currentPath.replace(/\/$/, "")) // Remove trailing slash for consistent splitting
+      : [];
 
   const handleBreadcrumbClick = (index) => {
     if (index === -1) {
-      // Root clicked
-      setBrowsingDirectory(true);
-      setFocusedPath(null);
+      // Root clicked - navigate to root directory (empty path shows root browser)
+      onNavigate("");
     } else {
-      // Directory segment clicked
-      const newPath = pathSegments.slice(0, index + 1).join("/") + "/";
-      setFocusedPath(newPath);
-      setBrowsingDirectory(false);
+      // Directory segment clicked - navigate to that directory
+      const dirPath = pathSegments.slice(0, index + 1).join("/");
+      onNavigate(dirPath + "/");
     }
   };
 
@@ -50,11 +52,13 @@ const TopBar = ({
             root
           </button>
 
-          {/* Show path segments if we have a current file */}
+          {/* Show path segments for both files and directories */}
           {pathSegments.map((segment, index) => (
             <React.Fragment key={index}>
               <span className={tw(`text-gray-500 mx-1`)}>/</span>
-              {index < pathSegments.length - 1 ? (
+              {/* For directories, all segments are clickable */}
+              {/* For files, all segments except the last are clickable */}
+              {isDirectory || index < pathSegments.length - 1 ? (
                 <button
                   onClick={() => handleBreadcrumbClick(index)}
                   className={tw(
@@ -66,17 +70,21 @@ const TopBar = ({
                 </button>
               ) : (
                 <button
-                  onClick={() => setFocusedPath(currentFile)}
+                  onClick={() =>
+                    setPinnedFile(
+                      pinnedFile === currentFile ? null : currentFile,
+                    )
+                  }
                   className={tw(
                     `px-1 py-0.5 transition-colors rounded`,
-                    focusedPath === currentFile
+                    pinnedFile === currentFile
                       ? `bg-blue-100 text-blue-700`
                       : `hover:bg-gray-200`,
                   )}
                   title={
-                    focusedPath === currentFile
-                      ? "File is focused (click to unfocus)"
-                      : "Click to focus"
+                    pinnedFile === currentFile
+                      ? "File is pinned (click to unpin)"
+                      : "Click to pin"
                   }
                 >
                   {segment}
@@ -84,16 +92,6 @@ const TopBar = ({
               )}
             </React.Fragment>
           ))}
-
-          {/* Focus indicator when browsing directory */}
-          {browsingDirectory && focusedPath && (
-            <>
-              <span className={tw(`text-gray-500 mx-1`)}>→</span>
-              <span className={tw(`text-blue-700 text-sm`)}>
-                (browsing {focusedPath})
-              </span>
-            </>
-          )}
         </div>
       </div>
 

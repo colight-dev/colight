@@ -1,43 +1,18 @@
 // WebSocket message processing logic extracted for testability
 
 /**
- * Determines if a file change should be processed based on the focused path
- * @param {string} file - The file that changed
- * @param {string|null} focusedPath - The currently focused path (file or directory)
- * @returns {boolean} Whether the file change should be processed
- */
-export function shouldProcessFileChange(file, focusedPath) {
-  // If no focus, process all changes
-  if (!focusedPath) {
-    return true;
-  }
-
-  // If focused on a specific file, only process if it's that file
-  if (!focusedPath.endsWith("/")) {
-    return file === focusedPath;
-  }
-
-  // If focused on a directory, check if file is within it
-  const normalizedFile = file.startsWith("/") ? file.slice(1) : file;
-  const normalizedFocus = focusedPath.startsWith("/")
-    ? focusedPath.slice(1)
-    : focusedPath;
-  return normalizedFile.startsWith(normalizedFocus);
-}
-
-/**
  * Process a run-start message
  * @param {Object} message - The WebSocket message
  * @param {number} latestRun - The latest run version
- * @param {string|null} focusedPath - The currently focused path
  * @param {Object} currentBlockResults - Current block results state
+ * @param {string} currentFile - The currently viewed file (optional)
  * @returns {Object|null} Updated state or null if no update needed
  */
 export function processRunStart(
   message,
   latestRun,
-  focusedPath,
   currentBlockResults,
+  currentFile,
 ) {
   if (!message.run || message.run < latestRun) {
     return null;
@@ -45,8 +20,14 @@ export function processRunStart(
 
   const file = message.file;
 
-  if (!shouldProcessFileChange(file, focusedPath)) {
-    return null;
+  // If currentFile is provided, validate this message is for the current file
+  // Normalize file paths for comparison (server sends without .py extension)
+  if (currentFile) {
+    const normalizedCurrent = currentFile.replace(/\.py$/, "");
+    const normalizedMessage = file.replace(/\.py$/, "");
+    if (normalizedCurrent !== normalizedMessage) {
+      return null;
+    }
   }
 
   const result = {
@@ -93,8 +74,9 @@ export function processRunStart(
 
     result.blockResults = newResults;
   } else {
-    // Legacy behavior - clear blocks
-    result.blockResults = {};
+    // Legacy behavior - don't include blockResults in the result
+    // This will prevent clearing existing blocks unnecessarily
+    // result.blockResults = {};
   }
 
   return result;
@@ -179,15 +161,15 @@ export function processRunEnd(message, latestRun, changedBlocks) {
  * @returns {Object} Action to take based on the message
  */
 export function processWebSocketMessage(message, state) {
-  const { latestRun, focusedPath, blockResults, changedBlocks } = state;
+  const { latestRun, blockResults, changedBlocks, currentFile } = state;
 
   switch (message.type) {
     case "run-start": {
       const result = processRunStart(
         message,
         latestRun,
-        focusedPath,
         blockResults,
+        currentFile,
       );
       if (result) {
         return {
