@@ -7,6 +7,21 @@ import {
 } from "../../src/js/websocket-message-handler";
 
 describe("WebSocket Message Handler", () => {
+  describe("processWebSocketMessage", () => {
+    it("should handle file-changed messages", () => {
+      const result = processWebSocketMessage(
+        { type: "file-changed", path: "test.py", watched: false },
+        { latestRun: 1, blockResults: {}, changedBlocks: new Set() },
+      );
+
+      expect(result).toEqual({
+        type: "file-changed",
+        path: "test.py",
+        watched: false,
+      });
+    });
+  });
+
   describe("processRunStart", () => {
     it("should ignore old runs", () => {
       const result = processRunStart(

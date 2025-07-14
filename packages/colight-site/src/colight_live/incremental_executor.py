@@ -2,13 +2,14 @@
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from colight_site.executor import BlockExecutor, ExecutionResult
 from colight_site.model import Block, Document
 from colight_site.utils import hash_block_content
 
 from .block_graph import BlockGraph
+from .cache_manager import CacheManager
 
 
 @dataclass
@@ -25,11 +26,15 @@ class BlockState:
 class IncrementalExecutor(BlockExecutor):
     """Execute blocks incrementally based on dependency graph."""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(
+        self, verbose: bool = False, cache_manager: Optional[CacheManager] = None
+    ):
         super().__init__(verbose)
         self.block_states: Dict[str, BlockState] = {}  # block_id -> BlockState
         self.cache_by_key: Dict[str, ExecutionResult] = {}  # cache_key -> result
         self.block_graph: Optional[BlockGraph] = None
+        self.cache_manager = cache_manager or CacheManager()
+        self.current_file: Optional[str] = None  # Track current file being executed
 
     def _get_content_hash(self, block: Block) -> str:
         """Get a hash of block's content including prose."""
@@ -71,6 +76,7 @@ class IncrementalExecutor(BlockExecutor):
         document: Document,
         changed_blocks: Optional[Set[str]] = None,
         filename: str = "<string>",
+        source_file: Optional[str] = None,
     ) -> List[Tuple[Block, ExecutionResult]]:
         """Execute blocks incrementally based on changes.
 
@@ -78,10 +84,13 @@ class IncrementalExecutor(BlockExecutor):
             document: The document to execute
             changed_blocks: Set of block IDs that have changed (None = all changed)
             filename: The filename for error reporting
+            source_file: The source file path for cache tracking
 
         Returns:
             List of (block, result) tuples in document order
         """
+        # Set current file for cache tracking
+        self.current_file = source_file
         # Build dependency graph
         self.block_graph = BlockGraph()
         # Convert blocks to dict format expected by BlockGraph
@@ -192,6 +201,8 @@ class IncrementalExecutor(BlockExecutor):
                 result.cache_hit = True
                 result.content_changed = block_id in content_changed
                 results.append((block, result))
+                # Record cache access
+                self.cache_manager.access_entry(cache_key)
             else:
                 # Execute this block
                 if self.verbose:
@@ -205,6 +216,10 @@ class IncrementalExecutor(BlockExecutor):
                 # Store in cache
                 self.cache_by_key[cache_key] = result
                 results.append((block, result))
+                # Add to cache manager
+                if self.current_file:
+                    size = self.cache_manager.estimate_entry_size(result)
+                    self.cache_manager.add_entry(cache_key, self.current_file, size)
 
             # Update block state
             self.block_states[block_id] = BlockState(
@@ -225,6 +240,28 @@ class IncrementalExecutor(BlockExecutor):
         """Clear all cached execution results."""
         self.block_states.clear()
         self.cache_by_key.clear()
+        # Cache manager keeps its own copy, so we don't clear it here
+
+    def mark_file_for_eviction(self, file_path: str):
+        """Mark a file's cache entries for potential eviction."""
+        self.cache_manager.mark_file_for_eviction(file_path)
+
+    def unmark_file_for_eviction(self, file_path: str):
+        """Remove eviction mark from a file."""
+        self.cache_manager.unmark_file_for_eviction(file_path)
+
+    def evict_unwatched_files(self, force: bool = False):
+        """Evict cache entries from unwatched files."""
+        self.cache_manager.evict_marked_files(force=force)
+
+        # Also remove from our local cache
+        for cache_key in list(self.cache_by_key.keys()):
+            if cache_key not in self.cache_manager.entries:
+                del self.cache_by_key[cache_key]
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        return self.cache_manager.get_stats()
 
     def get_dependent_blocks(self, block_id: str) -> Set[str]:
         """Get all blocks that depend on the given block."""
@@ -276,6 +313,7 @@ class IncrementalExecutor(BlockExecutor):
         document: Document,
         changed_blocks: Optional[Set[str]] = None,
         filename: str = "<string>",
+        source_file: Optional[str] = None,
     ):
         """Execute blocks incrementally in document order, yielding results as they complete.
 
@@ -286,10 +324,13 @@ class IncrementalExecutor(BlockExecutor):
             document: The document to execute
             changed_blocks: Set of block IDs that have changed (None = all changed)
             filename: The filename for error reporting
+            source_file: The source file path for cache tracking
 
         Yields:
             Tuples of (block, result) in document order as they are executed
         """
+        # Set current file for cache tracking
+        self.current_file = source_file
         # Build dependency graph
         self.block_graph = BlockGraph()
         block_dicts = []
@@ -375,6 +416,8 @@ class IncrementalExecutor(BlockExecutor):
                 result = self.cache_by_key[cache_key]
                 result.cache_hit = True
                 result.content_changed = block_id in content_changed
+                # Record cache access
+                self.cache_manager.access_entry(cache_key)
             else:
                 # Execute this block
                 if self.verbose:
@@ -386,6 +429,10 @@ class IncrementalExecutor(BlockExecutor):
 
                 # Store in cache
                 self.cache_by_key[cache_key] = result
+                # Add to cache manager
+                if self.current_file:
+                    size = self.cache_manager.estimate_entry_size(result)
+                    self.cache_manager.add_entry(cache_key, self.current_file, size)
 
             # Update block state
             self.block_states[block_id] = BlockState(

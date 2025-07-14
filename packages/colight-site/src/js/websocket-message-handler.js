@@ -203,6 +203,13 @@ export function processWebSocketMessage(message, state) {
     case "reload":
       return { type: "reload" };
 
+    case "file-changed":
+      return {
+        type: "file-changed",
+        path: message.path,
+        watched: message.watched,
+      };
+
     default:
       return { type: "unknown", messageType: message.type };
   }

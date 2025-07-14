@@ -47,7 +47,7 @@ class JsonDocumentGenerator:
         # Execute document incrementally if we have an executor
         if self.incremental_executor:
             block_results = self.incremental_executor.execute_incremental(
-                document, changed_blocks, str(source_path)
+                document, changed_blocks, str(source_path), str(source_path.name)
             )
             # Create a map of block ID to result for easy lookup
             result_map = {str(block.id): result for block, result in block_results}
@@ -110,7 +110,7 @@ class JsonDocumentGenerator:
                 block,
                 result,
             ) in self.incremental_executor.execute_incremental_streaming(
-                document, None, str(source_path)
+                document, None, str(source_path), str(source_path.name)
             ):
                 json_block = self._block_to_json(
                     block, result, document.tags, i, file_hash, source_path

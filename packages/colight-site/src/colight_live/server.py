@@ -24,6 +24,9 @@ from colight_site.utils import merge_ignore_patterns
 from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
 from .json_generator import JsonDocumentGenerator
+from .client_registry import ClientRegistry
+from .file_dependency_graph import FileDependencyGraph
+from .cache_manager import CacheManager
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -65,12 +68,16 @@ class ApiMiddleware:
         verbose: bool = False,
     ):
         self.app = app
-        self.input_path = input_path
+        self.input_path = input_path.resolve()  # Always use absolute path
         self.include = include
         self.ignore = ignore
         self.visual_store = {}  # Store visual data by ID
-        self.file_resolver = FileResolver(input_path, include, ignore)
-        self.incremental_executor = IncrementalExecutor(verbose=verbose)
+        self.file_resolver = FileResolver(self.input_path, include, ignore)
+        # Create CacheManager with reasonable defaults
+        self.cache_manager = CacheManager(max_size_mb=500, hot_threshold_seconds=300)
+        self.incremental_executor = IncrementalExecutor(
+            verbose=verbose, cache_manager=self.cache_manager
+        )
         self.verbose = verbose
 
     def _get_files(self) -> List[str]:
@@ -179,7 +186,7 @@ class LiveServer:
         verbose: bool = False,
         pragma: Optional[str | set] = set(),
     ):
-        self.input_path = input_path
+        self.input_path = input_path.resolve()  # Always use absolute path
         self.verbose = verbose
         self.pragma = parse_pragma_arg(pragma)
         self.include = include
@@ -190,6 +197,10 @@ class LiveServer:
         self.open_url = open_url
 
         self.connections: Set[Any] = set()  # WebSocket connections
+        self.client_registry = ClientRegistry()  # Track client file watches
+        self.dependency_graph = FileDependencyGraph(
+            self.input_path  # Use resolved path
+        )  # Track file dependencies
         self._http_server = None
         self._http_thread = None
         self._stop_event = asyncio.Event()
@@ -198,6 +209,12 @@ class LiveServer:
         self._api_middleware: Optional[ApiMiddleware] = (
             None  # Reference to API middleware
         )
+        self._eviction_task: Optional[asyncio.Task] = None  # Periodic eviction task
+
+        # File change notification state
+        self._changed_files_buffer = set()
+        self._notification_task = None
+        self._notification_delay = 0.1  # 100ms throttle
 
     def _get_spa_html(self):
         """Get the SPA HTML template."""
@@ -275,12 +292,56 @@ class LiveServer:
     async def _websocket_handler(self, websocket):
         """Handle WebSocket connections."""
         self.connections.add(websocket)
+        client_id = None
         try:
             # Listen for messages from the client
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    if data.get("type") == "request-load" and data.get("path"):
+                    message_type = data.get("type")
+
+                    # Handle watch-file message
+                    if message_type == "watch-file":
+                        client_id = data.get("clientId")
+                        file_path = data.get("path")
+                        if client_id and file_path:
+                            # Register client if not already registered
+                            if client_id not in self.client_registry.clients:
+                                self.client_registry.register_client(
+                                    client_id, websocket
+                                )
+                            # Watch the file
+                            self.client_registry.watch_file(client_id, file_path)
+                            # Log current status
+                            self.client_registry.log_status()
+                            # Unmark file from eviction if it was marked
+                            if (
+                                self._api_middleware
+                                and self._api_middleware.incremental_executor
+                            ):
+                                self._api_middleware.incremental_executor.unmark_file_for_eviction(
+                                    file_path
+                                )
+
+                    # Handle unwatch-file message
+                    elif message_type == "unwatch-file":
+                        client_id = data.get("clientId")
+                        file_path = data.get("path")
+                        if client_id and file_path:
+                            self.client_registry.unwatch_file(client_id, file_path)
+                            self.client_registry.log_status()
+                            # Mark file for potential eviction if no one is watching it
+                            if not self.client_registry.get_watchers(file_path):
+                                if (
+                                    self._api_middleware
+                                    and self._api_middleware.incremental_executor
+                                ):
+                                    self._api_middleware.incremental_executor.mark_file_for_eviction(
+                                        file_path
+                                    )
+
+                    # Handle existing request-load message
+                    elif message_type == "request-load" and data.get("path"):
                         # Client is requesting to load a file
                         file_path = data["path"]
                         client_run = data.get(
@@ -304,16 +365,31 @@ class LiveServer:
             pass
         finally:
             self.connections.remove(websocket)
+            # Unregister client if registered
+            if client_id:
+                self.client_registry.unregister_client(client_id)
 
-    async def _ws_broadcast(self, message: dict):
-        """Broadcast a message to all connected WebSocket clients."""
-        if not self.connections:
+    async def _ws_broadcast_to_file_watchers(self, message: dict, file_path: str):
+        """Broadcast a message only to clients watching a specific file."""
+        # Get clients watching this file
+        watching_clients = self.client_registry.get_watchers(file_path)
+
+        if not watching_clients:
             return
 
         message_str = json.dumps(message)
-        await asyncio.gather(
-            *(ws.send(message_str) for ws in self.connections), return_exceptions=True
-        )
+        # Send only to watching clients
+        websockets_to_send = []
+        for client_id in watching_clients:
+            ws = self.client_registry.clients.get(client_id)
+            if ws and ws in self.connections:
+                websockets_to_send.append(ws)
+
+        if websockets_to_send:
+            await asyncio.gather(
+                *(ws.send(message_str) for ws in websockets_to_send),
+                return_exceptions=True,
+            )
 
     async def _trigger_build(
         self, file_path: pathlib.Path, client_run: Optional[int] = None
@@ -358,11 +434,13 @@ class LiveServer:
                     html_path + ".html"
                 )
                 if not source_file:
-                    await self._ws_broadcast(
-                        {"run": run, "type": "run-start", "file": file_path_str}
+                    await self._ws_broadcast_to_file_watchers(
+                        {"run": run, "type": "run-start", "file": file_path_str},
+                        file_path_str,
                     )
-                    await self._ws_broadcast(
-                        {"run": run, "type": "run-end", "error": "File not found"}
+                    await self._ws_broadcast_to_file_watchers(
+                        {"run": run, "type": "run-end", "error": "File not found"},
+                        file_path_str,
                     )
                     return
 
@@ -404,19 +482,21 @@ class LiveServer:
                     dirty_blocks = block_ids
 
                 # Send enhanced run-start message with block manifest
-                await self._ws_broadcast(
+                await self._ws_broadcast_to_file_watchers(
                     {
                         "run": run,
                         "type": "run-start",
                         "file": file_path_str,
                         "blocks": block_ids,  # All blocks in document order
                         "dirty": dirty_blocks,  # Blocks that will be re-executed
-                    }
+                    },
+                    file_path_str,
                 )
             else:
                 # Fallback to simple run-start
-                await self._ws_broadcast(
-                    {"run": run, "type": "run-start", "file": file_path_str}
+                await self._ws_broadcast_to_file_watchers(
+                    {"run": run, "type": "run-start", "file": file_path_str},
+                    file_path_str,
                 )
 
             # Now continue with execution (we already have document from above)
@@ -448,18 +528,19 @@ class LiveServer:
                     # If client is behind (force_full_data), always send full data
                     if unchanged and not force_full_data:
                         # Send lightweight message for unchanged blocks
-                        await self._ws_broadcast(
+                        await self._ws_broadcast_to_file_watchers(
                             {
                                 "run": run,
                                 "type": "block-result",
                                 "block": block_id,
                                 "unchanged": True,
                                 # Minimal fields - client keeps existing results
-                            }
+                            },
+                            file_path_str,
                         )
                     else:
                         # Send full message for changed blocks
-                        await self._ws_broadcast(
+                        await self._ws_broadcast_to_file_watchers(
                             {
                                 "run": run,
                                 "type": "block-result",
@@ -471,24 +552,32 @@ class LiveServer:
                                 "elements": result.get("elements", []),
                                 "cache_hit": cache_hit,
                                 "content_changed": content_changed,
-                            }
+                            },
+                            file_path_str,
                         )
 
                 # Send run-end message
-                await self._ws_broadcast({"run": run, "type": "run-end"})
+                await self._ws_broadcast_to_file_watchers(
+                    {"run": run, "type": "run-end"}, file_path_str
+                )
             else:
                 # This shouldn't happen in normal operation
-                await self._ws_broadcast(
-                    {"run": run, "type": "run-end", "error": "Server not initialized"}
+                await self._ws_broadcast_to_file_watchers(
+                    {"run": run, "type": "run-end", "error": "Server not initialized"},
+                    file_path_str,
                 )
 
         except asyncio.CancelledError:
             # Task was cancelled, clean up if needed
-            await self._ws_broadcast({"run": run, "type": "run-end", "cancelled": True})
+            await self._ws_broadcast_to_file_watchers(
+                {"run": run, "type": "run-end", "cancelled": True}, file_path_str
+            )
             raise
         except Exception as e:
             # Send error and run-end
-            await self._ws_broadcast({"run": run, "type": "run-end", "error": str(e)})
+            await self._ws_broadcast_to_file_watchers(
+                {"run": run, "type": "run-end", "error": str(e)}, file_path_str
+            )
             if self.verbose:
                 import traceback
 
@@ -512,12 +601,80 @@ class LiveServer:
                 self._trigger_build(changed_file, client_run)
             )
         else:
-            # General reload (shouldn't happen in new architecture)
-            await self._ws_broadcast({"type": "reload"})
+            # General reload - send to all clients watching any file
+            # This is a fallback that shouldn't happen in normal operation
+            for file_path in self.client_registry.get_watched_files():
+                await self._ws_broadcast_to_file_watchers({"type": "reload"}, file_path)
+
+    async def _send_file_change_notification(self):
+        """Send notification about changed files after debounce period."""
+        await asyncio.sleep(self._notification_delay)
+
+        # Get the files that changed
+        changed_files = list(self._changed_files_buffer)
+        self._changed_files_buffer.clear()
+
+        # Only notify if a single file changed
+        if len(changed_files) == 1:
+            file_path = changed_files[0]
+            # Send to all connected clients
+            message = {
+                "type": "file-changed",
+                "path": file_path,
+                "watched": file_path in self.client_registry.get_watched_files(),
+            }
+
+            # Send to all connected clients (not just watchers)
+            if self.connections:
+                message_str = json.dumps(message)
+                await asyncio.gather(
+                    *(ws.send(message_str) for ws in self.connections),
+                    return_exceptions=True,
+                )
+
+                if self.verbose:
+                    print(f"Sent file-changed notification for {file_path}")
+
+    async def _periodic_cache_eviction(self):
+        """Periodically evict cache entries for unwatched files."""
+        while not self._stop_event.is_set():
+            try:
+                # Wait 30 seconds between eviction runs
+                await asyncio.sleep(30)
+
+                if self._api_middleware and self._api_middleware.incremental_executor:
+                    # Evict cache entries for unwatched files
+                    self._api_middleware.incremental_executor.evict_unwatched_files(
+                        force=False
+                    )
+
+                    # Log cache stats if verbose
+                    if self.verbose:
+                        stats = (
+                            self._api_middleware.incremental_executor.get_cache_stats()
+                        )
+                        print(
+                            f"Cache stats: {stats['total_entries']} entries, "
+                            f"{stats['size_mb']:.1f}MB, "
+                            f"hit rate: {stats['hit_rate']:.2%}"
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                if self.verbose:
+                    print(f"Error in cache eviction: {e}")
 
     async def _watch_for_changes(self):
         """Watch for file changes."""
         paths_to_watch = [str(self.input_path)]
+
+        # Initial dependency graph build
+        print("Building initial dependency graph...")
+        self.dependency_graph.analyze_directory(self.input_path)
+        graph_stats = self.dependency_graph.get_graph_stats()
+        print(
+            f"Dependency graph: {graph_stats['total_files']} files, {graph_stats['total_imports']} imports"
+        )
 
         async for changes in awatch(*paths_to_watch, stop_event=self._stop_event):
             changed_files = {pathlib.Path(path) for _, path in changes}
@@ -526,10 +683,80 @@ class LiveServer:
             matching_changes = {f for f in changed_files if self._matches_patterns(f)}
 
             if matching_changes:
-                # Log changes
+                # Update dependency graph for changed files
                 for file_path in matching_changes:
-                    print(f"File changed: {file_path}")
-                    # Send reload signal for each changed file
+                    if file_path.suffix == ".py":
+                        self.dependency_graph.analyze_file(file_path)
+
+                # Buffer changed files for notification
+                for file_path in matching_changes:
+                    try:
+                        relative_path = str(file_path.relative_to(self.input_path))
+                        self._changed_files_buffer.add(relative_path)
+                    except ValueError:
+                        # File is outside input_path, skip it
+                        if self.verbose:
+                            print(f"Ignoring file outside project: {file_path}")
+                        continue
+
+                # Cancel any pending notification task and start a new one
+                if self._notification_task and not self._notification_task.done():
+                    self._notification_task.cancel()
+                self._notification_task = asyncio.create_task(
+                    self._send_file_change_notification()
+                )
+
+                # Track which files need execution
+                files_to_execute = set()
+                watched_files = self.client_registry.get_watched_files()
+
+                # Find affected files and filter by what's being watched
+                for file_path in matching_changes:
+                    try:
+                        relative_path = str(file_path.relative_to(self.input_path))
+                    except ValueError:
+                        # File is outside input_path, skip it
+                        if self.verbose:
+                            print(f"Ignoring file outside project: {file_path}")
+                        continue
+                    affected = self.dependency_graph.get_affected_files(relative_path)
+
+                    # Only execute files that are watched (or affect watched files)
+                    watched_affected = [f for f in affected if f in watched_files]
+
+                    if watched_affected:
+                        # Log with dependency info
+                        if len(affected) > 1:
+                            print(
+                                f"File changed: {file_path} (affects {len(affected)} files, {len(watched_affected)} watched)"
+                            )
+                            print(f"  Executing for: {', '.join(watched_affected)}")
+                        else:
+                            print(f"File changed: {file_path} (watched)")
+
+                        # Add watched affected files to execution set
+                        for watched_file in watched_affected:
+                            # Convert back to Path for execution
+                            watched_path = self.input_path / watched_file
+                            if watched_path.exists():
+                                files_to_execute.add(watched_path)
+                    else:
+                        # File changed but nothing watched is affected
+                        print(
+                            f"File changed: {file_path} (no watched files affected, skipping)"
+                        )
+
+                        # Mark cache entries for eviction if file not watched
+                        if (
+                            self._api_middleware
+                            and self._api_middleware.incremental_executor
+                        ):
+                            self._api_middleware.incremental_executor.mark_file_for_eviction(
+                                relative_path
+                            )
+
+                # Execute only the watched files that are affected
+                for file_path in files_to_execute:
                     await self._send_reload_signal(file_path)
 
     def _matches_patterns(self, file_path: pathlib.Path) -> bool:
@@ -581,11 +808,21 @@ class LiveServer:
             url = f"http://{self.host}:{self.http_port}"
             threading.Timer(1, lambda: webbrowser.open(url)).start()
 
+        # Start periodic cache eviction task
+        self._eviction_task = asyncio.create_task(self._periodic_cache_eviction())
+
         try:
             # Watch for changes
             await self._watch_for_changes()
         finally:
             # Cleanup
+            if self._eviction_task and not self._eviction_task.done():
+                self._eviction_task.cancel()
+                try:
+                    await self._eviction_task
+                except asyncio.CancelledError:
+                    pass
+
             ws_server.close()
             await ws_server.wait_closed()
             if self._http_server:

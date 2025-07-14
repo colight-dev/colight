@@ -182,20 +182,212 @@ The server maintains minimal client knowledge:
 
 ## Things I Noticed
 
-1. **Pin State Visibility**: The pinned state is only visible when hovering over the file name in the breadcrumb (via blue background). There's no persistent visual indicator that a file is pinned.
+1. **Multi-Client Coordination**: The server broadcasts to all clients but has no concept of individual client state. This could lead to confusing behavior if multiple clients have different pinned files.
 
-2. **Multi-Client Coordination**: The server broadcasts to all clients but has no concept of individual client state. This could lead to confusing behavior if multiple clients have different pinned files.
+2. **Race Conditions**: If a user navigates while a file update is in progress, there could be race conditions between the navigation request and incoming updates.
 
-3. **Race Conditions**: If a user navigates while a file update is in progress, there could be race conditions between the navigation request and incoming updates.
+3. **Memory Management**: The `blockResults` state accumulates all received blocks but there's no cleanup for files that are no longer being viewed.
 
-4. **Memory Management**: The `blockResults` state accumulates all received blocks but there's no cleanup for files that are no longer being viewed.
+4. **WebSocket Reconnection**: When the WebSocket reconnects, the client doesn't automatically re-request the current file, potentially leaving stale content displayed.
 
-5. **WebSocket Reconnection**: When the WebSocket reconnects, the client doesn't automatically re-request the current file, potentially leaving stale content displayed.
+5. **Directory Changes**: The system watches for file changes but doesn't update the directory tree when files are added/removed.
 
-6. **Directory Changes**: The system watches for file changes but doesn't update the directory tree when files are added/removed.
+6. **Performance**: Every file change triggers a full execution cycle. For large files or many simultaneous changes, this could impact performance.
 
-7. **Performance**: Every file change triggers a full execution cycle. For large files or many simultaneous changes, this could impact performance.
+7. **Error States**: Limited error feedback to users when file processing fails or WebSocket connection issues occur.
 
-8. **Error States**: Limited error feedback to users when file processing fails or WebSocket connection issues occur.
+## ~~Next Patch~~ IMPLEMENTED: Client-Aware Incremental Execution ✅
 
-## Next Patch: [To be determined]
+### Problem Statement
+
+~~The current implementation has~~ HAD significant inefficiencies:
+
+1. **Over-processing** ✅: ~~Server processes ALL files on every change~~
+   - **FIXED**: Server now only processes files being watched by clients
+2. **Over-broadcasting** ✅: ~~Server sends updates for all changed files to all clients~~
+   - **FIXED**: Server sends updates only to clients watching specific files
+3. **Memory waste** ⏳: Clients maintain state for files they're not viewing
+   - **TODO**: Phase 4 will implement client-side state scoping
+4. **Cache growth** ✅: ~~Server cache grows unbounded~~
+   - **FIXED**: Cache manager evicts entries for unwatched files
+5. **Resource waste** ✅: ~~Server spends cycles checking blocks in unwatched files~~
+   - **FIXED**: Execution filtered by watched files
+
+### Proposed Solution
+
+Implement client-aware execution and targeted updates:
+
+1. **Client Registration**: Clients explicitly register which files they're watching
+2. **Dependency-Aware Execution**: Server only evaluates watched files and their dependencies
+3. **Targeted Updates**: Server only sends updates to clients watching the affected files
+4. **Scoped Client State**: Clients only maintain state for their currently viewed file
+
+### Implementation Details
+
+#### New Client → Server Messages ✅ IMPLEMENTED
+
+1. **`watch-file`**: Register interest in a file
+
+   ```json
+   {
+     "type": "watch-file",
+     "path": "path/to/file.py",
+     "clientId": "unique-client-id"
+   }
+   ```
+
+2. **`unwatch-file`**: Unregister interest in a file
+   ```json
+   {
+     "type": "unwatch-file",
+     "path": "path/to/file.py",
+     "clientId": "unique-client-id"
+   }
+   ```
+
+#### New Server → Client Messages ✅ IMPLEMENTED
+
+1. **`file-changed`**: Notification when a single file changes
+   ```json
+   {
+     "type": "file-changed",
+     "path": "path/to/file.py",
+     "watched": true // Whether any client is watching this file
+   }
+   ```
+   - Sent to ALL clients (not just watchers)
+   - Only sent when exactly one file changes in the throttle window (100ms)
+   - Clients decide whether to navigate based on pin state
+   - Enables "follow mode" for unpinned clients
+
+#### Server State Changes ✅ IMPLEMENTED
+
+1. **Client Registry**:
+
+   ```python
+   class ClientRegistry:
+       def __init__(self):
+           self.clients: Dict[str, WebSocket] = {}  # clientId -> WebSocket
+           self.watched_files: Dict[str, Set[str]] = {}  # file_path -> Set[clientId]
+           self.client_files: Dict[str, str] = {}  # clientId -> current_file
+   ```
+
+2. **Dependency Tracking** ✅:
+
+   - Custom AST-based import analysis implemented
+   - FileDependencyGraph class tracks forward and reverse dependencies
+   - Handles relative and absolute imports, filters external dependencies
+   - Caches results with mtime-based invalidation
+
+3. **Execution Strategy with Cache Management**:
+
+   ```python
+   def on_file_change(changed_file):
+       # Find all files that depend on changed_file
+       affected_files = dependency_graph.get_affected(changed_file)
+
+       # Filter to only watched files
+       files_to_execute = {
+           f for f in affected_files
+           if f in self.watched_files
+       }
+
+       # Execute only what's needed
+       for file in files_to_execute:
+           results = execute_file(file)  # Uses block-level cache
+
+           # Send only to watching clients
+           for client_id in self.watched_files[file]:
+               send_to_client(client_id, results)
+
+       # Mark unwatched affected files for cache eviction
+       unwatched_affected = affected_files - files_to_execute
+       cache_manager.mark_for_eviction(unwatched_affected)
+   ```
+
+4. **Cache Management** ✅:
+   - CacheManager tracks entries by source file
+   - Automatic eviction for unwatched files (30-second intervals)
+   - LRU eviction with 500MB default limit
+   - Hot entry protection based on access count and recency
+
+#### Client State Changes
+
+1. **Single-File State**:
+
+   - Remove the accumulating `blockResults` for all files
+   - Only store results for the currently viewed file
+   - Clear state when navigating away
+
+2. **Navigation Cleanup**:
+
+   ```javascript
+   const navigateTo = (newFile) => {
+     // Unwatch previous file
+     if (currentFile) {
+       ws.send({ type: "unwatch-file", path: currentFile, clientId });
+     }
+
+     // Clear old state
+     setBlockResults({});
+
+     // Watch new file
+     ws.send({ type: "watch-file", path: newFile, clientId });
+
+     // Navigate
+     navigate(newFile);
+   };
+   ```
+
+### Open Questions / TBD
+
+1. **Dependency Detection**:
+
+   - Should we use existing Python reload libraries (e.g., `watchdog`, `jurigged`)?
+   - How deep should dependency tracking go? (stdlib imports? third-party?)
+   - Cache dependency graph or recompute on each change?
+
+2. **Client Identity**:
+
+   - How to generate stable client IDs?
+   - Handle reconnection with same ID?
+   - Clean up state for disconnected clients?
+
+3. **Multi-Client Scenarios**:
+
+   - If multiple clients watch the same file, execute once and broadcast to all?
+   - How to handle different clients with different pragma settings?
+
+4. **Performance Considerations**:
+
+   - Lazy dependency resolution vs upfront graph building?
+   - Should we batch file changes within a time window?
+
+5. **Backwards Compatibility**:
+   - Support clients that don't send watch/unwatch messages?
+   - Graceful degradation to current broadcast-all behavior?
+
+### Benefits
+
+1. **Reduced Server Load**: Only execute what clients need
+2. **Reduced Network Traffic**: Targeted updates instead of broadcast
+3. **Better Client Performance**: Less state to manage, fewer updates to process
+4. **Scalability**: Can support more clients since work scales with watched files, not total files
+
+### Migration Strategy
+
+1. **Phase 1**: Add watch/unwatch protocol without changing execution (measure usage patterns)
+2. **Phase 2**: Implement dependency tracking (but still execute everything)
+3. **Phase 3**: Switch to targeted execution with feature flag
+4. **Phase 4**: Client-side state scoping
+5. **Phase 5**: Remove legacy broadcast behavior
+
+### Related Improvements
+
+Consider leveraging Python auto-reload libraries:
+
+- **watchdog**: File system monitoring
+- **jurigged**: Live code reloading with dependency tracking
+- **reloadr**: Minimal reload with import tracking
+
+These libraries already solve the dependency tracking problem and could provide a solid foundation.

@@ -166,10 +166,14 @@ describe("Directory Navigation", () => {
     // Click on main.py
     fireEvent.click(screen.getByText("main.py"));
 
-    // Should navigate to the file and request it via WebSocket
-    const message = await waitForClientMessage(mockSocket);
-    expect(message.type).toBe("request-load");
-    expect(message.path).toBe("src/main.py");
+    // Should navigate to the file and send watch-file, then request-load
+    const watchMessage = await waitForClientMessage(mockSocket);
+    expect(watchMessage.type).toBe("watch-file");
+    expect(watchMessage.path).toBe("src/main.py");
+
+    const loadMessage = await waitForClientMessage(mockSocket);
+    expect(loadMessage.type).toBe("request-load");
+    expect(loadMessage.path).toBe("src/main.py");
 
     // Navigate to another file in a subdirectory
     fireEvent.click(screen.getByText("src")); // Click breadcrumb to go back
@@ -224,7 +228,11 @@ describe("Directory Navigation", () => {
     expect(screen.getByText("main.py")).toBeTruthy();
     fireEvent.click(screen.getByText("main.py"));
 
-    // Should request the file
+    // Should send watch-file then request-load
+    let watchMsg = await waitForClientMessage(mockSocket);
+    expect(watchMsg.type).toBe("watch-file");
+    expect(watchMsg.path).toBe("src/main.py");
+
     let message = await waitForClientMessage(mockSocket);
     expect(message.type).toBe("request-load");
     expect(message.path).toBe("src/main.py");
@@ -244,18 +252,20 @@ describe("Directory Navigation", () => {
       expect(screen.getByText("button.py")).toBeTruthy();
     });
 
-    // Set up promise to capture next message before clicking
-    const messagePromise = new Promise((resolve) => {
-      mockSocket.on("message", (data) => {
-        resolve(JSON.parse(data));
-      });
-    });
-
+    // Click on button.py
     fireEvent.click(screen.getByText("button.py"));
 
-    // Wait for the message
-    message = await messagePromise;
-    expect(message.type).toBe("request-load");
-    expect(message.path).toBe("src/components/ui/button.py");
+    // Should unwatch previous and watch new file
+    const unwatchMsg = await waitForClientMessage(mockSocket);
+    expect(unwatchMsg.type).toBe("unwatch-file");
+    expect(unwatchMsg.path).toBe("src/main.py");
+
+    const watchMsg2 = await waitForClientMessage(mockSocket);
+    expect(watchMsg2.type).toBe("watch-file");
+    expect(watchMsg2.path).toBe("src/components/ui/button.py");
+
+    const loadMsg = await waitForClientMessage(mockSocket);
+    expect(loadMsg.type).toBe("request-load");
+    expect(loadMsg.path).toBe("src/components/ui/button.py");
   });
 });

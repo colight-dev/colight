@@ -20,6 +20,7 @@ import TopBar from "./TopBar.jsx";
 import { processWebSocketMessage } from "./websocket-message-handler.js";
 import { useStateWithDeps } from "./hooks/useStateWithDeps.js";
 import bylight from "./bylight.ts";
+import { getClientId } from "./client-id.js";
 
 // ========== Constants ==========
 
@@ -413,7 +414,7 @@ const useWebSocket = (onMessage, wsRefOut) => {
       .onError((_, error) => {
         console.error("WebSocket error:", error);
       })
-      .onMessage((ws, event) => {
+      .onMessage((_, event) => {
         const data = JSON.parse(event.data);
         console.log("WebSocket message:", data);
         onMessage(data);
@@ -445,6 +446,9 @@ export const createWebSocketMessageHandler = (deps) => {
     setCurrentFile,
     setBlockResults,
     currentFile,
+    pinnedFile,
+    navState,
+    navigateTo,
   } = deps;
 
   return (message) => {
@@ -511,6 +515,18 @@ export const createWebSocketMessageHandler = (deps) => {
         window.location.reload();
         break;
 
+      case "file-changed":
+        // Only navigate if not pinned and not already viewing this file
+        if (!pinnedFile && navState.file !== action.path) {
+          console.log(`File changed: ${action.path}, navigating...`);
+          navigateTo(action.path);
+        } else if (pinnedFile) {
+          console.log(
+            `File changed: ${action.path}, but view is pinned to ${pinnedFile}`,
+          );
+        }
+        break;
+
       case "unknown":
         console.warn("Unknown WebSocket message type:", action.messageType);
         break;
@@ -550,6 +566,8 @@ const LiveServerApp = () => {
   const latestRunRef = useRef(0); // Track latest run version
   const blockResultsRef = useRef({}); // Track block results for WebSocket callback
   const loadingFileRef = useRef(null); // Track which file we're loading
+  const watchedFileRef = useRef(null); // Track which file we're watching
+  const clientIdRef = useRef(getClientId()); // Get or create client ID
 
   // Keep blockResults ref in sync immediately (not in useEffect)
   blockResultsRef.current = blockResults;
@@ -626,7 +644,10 @@ const LiveServerApp = () => {
           }
         },
         setBlockResults,
-        currentFile: loadingFileRef.current,
+        currentFile: navState.file,
+        pinnedFile,
+        navState,
+        navigateTo,
       });
       return handler(message);
     };
@@ -645,19 +666,58 @@ const LiveServerApp = () => {
   // Setup WebSocket connection
   const connected = useWebSocket(handleWebSocketMessage, wsRef);
 
-  // Request file load when connected and we're viewing a file
+  // Handle file watching when connected and viewing changes
   useEffect(() => {
-    if (connected && navState.type === "file" && wsRef.current) {
-      // Update loadingFileRef when we request a file
-      loadingFileRef.current = navState.file;
-      // Request the server to load this file
-      wsRef.current.send(
-        JSON.stringify({
-          type: "request-load",
-          path: navState.file,
-          clientRun: latestRunRef.current,
-        }),
-      );
+    if (connected && wsRef.current) {
+      const clientId = clientIdRef.current;
+
+      // Unwatch previous file if any
+      if (watchedFileRef.current && watchedFileRef.current !== navState.file) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "unwatch-file",
+            path: watchedFileRef.current,
+            clientId: clientId,
+          }),
+        );
+      }
+
+      // Watch new file if viewing a file
+      if (navState.type === "file") {
+        // Update refs
+        loadingFileRef.current = navState.file;
+        watchedFileRef.current = navState.file;
+
+        // Send watch message
+        wsRef.current.send(
+          JSON.stringify({
+            type: "watch-file",
+            path: navState.file,
+            clientId: clientId,
+          }),
+        );
+
+        // Also request the file load
+        wsRef.current.send(
+          JSON.stringify({
+            type: "request-load",
+            path: navState.file,
+            clientRun: latestRunRef.current,
+          }),
+        );
+      } else {
+        // Viewing directory - unwatch any file
+        if (watchedFileRef.current) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: "unwatch-file",
+              path: watchedFileRef.current,
+              clientId: clientId,
+            }),
+          );
+          watchedFileRef.current = null;
+        }
+      }
     }
   }, [connected, navState.type, navState.file]);
 
