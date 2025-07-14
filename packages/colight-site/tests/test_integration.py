@@ -38,7 +38,7 @@ print("Processing complete!")
 
         # Build the file
         output_file = temp_path / "test.md"
-        build_file(input_file, output_file, verbose=True)
+        build_file(input_file, output_file=output_file, verbose=True)
 
         # Verify markdown output exists
         assert output_file.exists()
@@ -114,7 +114,7 @@ x.sum()
 
         # Build should handle errors gracefully
         try:
-            build_file(input_file, output_file, verbose=True)
+            build_file(input_file, output_file=output_file, verbose=True)
         except Exception:
             pass  # Errors are expected, but shouldn't crash the whole process
 
@@ -160,7 +160,7 @@ combined
         input_file.write_text(input_content)
         output_file = temp_path / "multi_viz.md"
 
-        build_file(input_file, output_file, verbose=True)
+        build_file(input_file, output_file=output_file, verbose=True)
 
         # Check output
         markdown_content = output_file.read_text()
@@ -201,7 +201,7 @@ def test_empty_and_comment_only_forms():
         input_file.write_text(input_content)
         output_file = temp_path / "comments.md"
 
-        build_file(input_file, output_file, verbose=True)
+        build_file(input_file, output_file=output_file, verbose=True)
 
         # Should create markdown even with no executable code
         assert output_file.exists()

@@ -9,7 +9,7 @@ from colight_static.generator import HTMLGenerator, MarkdownGenerator
 from .constants import DEFAULT_INLINE_THRESHOLD
 from .executor import DocumentExecutor
 from .model import Block
-from .parser import parse_colight_file
+from .parser import parse_colight_file, parse_document
 from .pragma import parse_pragma_arg
 
 
@@ -67,7 +67,15 @@ def evaluate_python(
         EvaluatedPython with all processed data
     """
     # Parse the file
-    document = parse_colight_file(input_path)
+    try:
+        document = parse_colight_file(input_path)
+    except Exception as e:
+        if verbose:
+            print("parse error", e)
+
+        document = parse_document(
+            f"""# Error reading file: \n# ```\n# {str(e).replace(chr(10), chr(10) + '# ')}\n# ```"""
+        )
 
     # Parse pragma if provided
     if pragma:

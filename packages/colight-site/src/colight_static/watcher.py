@@ -66,7 +66,10 @@ def watch_and_build(
 
     # Build initially
     if input_path.is_file():
-        builder.build_file(input_path, output_path, config=config)
+        if output_path.suffix:
+            builder.build_file(input_path, output_path, config=config)
+        else:
+            builder.build_file(input_path, output_dir=output_path, config=config)
     else:
         builder.build_directory(input_path, output_path, config=config)
 
@@ -125,7 +128,14 @@ def watch_and_build(
             try:
                 if input_path.is_file():
                     if input_path in matching_changes:
-                        builder.build_file(input_path, output_path, config=config)
+                        if output_path.suffix:
+                            builder.build_file(
+                                input_path, output_file=output_path, config=config
+                            )
+                        else:
+                            builder.build_file(
+                                input_path, output_dir=output_path, config=config
+                            )
                         if config.verbose:
                             print(f"Rebuilt {input_path}")
                 else:
@@ -141,9 +151,11 @@ def watch_and_build(
 
                         if changed_file.is_relative_to(input_path.resolve()):
                             rel_path = changed_file.relative_to(input_path.resolve())
-                            suffix = ".html" if config.format == "html" else ".md"
+                            suffix = ".html" if "html" in config.formats else ".md"
                             output_file = output_path / rel_path.with_suffix(suffix)
-                            builder.build_file(changed_file, output_file, config=config)
+                            builder.build_file(
+                                changed_file, output_file=output_file, config=config
+                            )
                             if config.verbose:
                                 print(f"Rebuilt {changed_file}")
             except Exception as e:
@@ -225,7 +237,7 @@ def watch_build_and_serve(
     if input_path.is_file():
         # For single file, generate proper output file path
         output_file = output_path / input_path.with_suffix(".html").name
-        builder.build_file(input_path, output_file, config=config)
+        builder.build_file(input_path, output_file=output_file, config=config)
     else:
         builder.build_directory(input_path, output_path, config=config)
         # Index is now generated as JSON via API endpoint
@@ -307,7 +319,9 @@ def watch_build_and_serve(
                             output_file = (
                                 output_path / input_path.with_suffix(".html").name
                             )
-                            builder.build_file(input_path, output_file, config=config)
+                            builder.build_file(
+                                input_path, output_file=output_file, config=config
+                            )
                             if config.verbose:
                                 print(f"Rebuilt {input_path}")
                     else:
@@ -319,7 +333,9 @@ def watch_build_and_serve(
                                 )
                                 suffix = ".html"  # Always HTML for serving
                                 output_file = output_path / rel_path.with_suffix(suffix)
-                                builder.build_file(changed_file, output_file, config=config)
+                                builder.build_file(
+                                    changed_file, output_file=output_file, config=config
+                                )
                                 if config.verbose:
                                     print(f"Rebuilt {changed_file}")
 

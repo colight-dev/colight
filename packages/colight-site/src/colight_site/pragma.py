@@ -1,6 +1,6 @@
 """Centralized comment and pragma handling for the parser."""
 
-from typing import Iterable, Iterator, Literal, TypedDict
+from typing import Iterable, Iterator, Literal, Set, TypedDict, Union
 
 import libcst as cst
 
@@ -77,8 +77,15 @@ def iter_comment_lines(
             yield rel_lineno, parse_comment_line(line.comment.value)
 
 
-def parse_pragma_arg(pragma):
-    """Parse pragma tags from comma-separated string"""
+def parse_pragma_arg(pragma: Union[str, Set[str], None]) -> Set[str]:
+    """Parse pragma tags from comma-separated string.
+
+    Args:
+        pragma: Either a string of comma-separated tags, a set of tags, or None
+
+    Returns:
+        Set of pragma tag strings
+    """
     if not pragma:
         return set()
     if isinstance(pragma, set):

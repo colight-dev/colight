@@ -3,7 +3,7 @@
 import pathlib
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Literal, Optional, Set, Union, get_args
 
 from colight_site.constants import DEFAULT_INLINE_THRESHOLD
 from colight_site.executor import DocumentExecutor
@@ -16,6 +16,43 @@ from colight_site.utils import merge_ignore_patterns
 
 from .generator import HTMLGenerator, MarkdownGenerator, write_colight_files
 
+# Define valid format types
+FormatType = Literal["markdown", "html"]
+VALID_FORMATS: Set[str] = set(get_args(FormatType))
+
+
+def parse_formats_arg(formats: Union[str, Set[str], None]) -> Set[FormatType]:
+    """Parse formats from comma-separated string.
+
+    Args:
+        formats: Either a string of comma-separated formats, a set of formats, or None
+
+    Returns:
+        Set of valid format strings
+
+    Raises:
+        ValueError: If any invalid formats are provided
+    """
+    if not formats:
+        return {"markdown"}  # Default format
+
+    # Handle both string and set inputs
+    format_set = (
+        formats
+        if isinstance(formats, set)
+        else {fmt.strip() for fmt in formats.split(",") if fmt.strip()}
+    )
+
+    # Validate against literal type
+    invalid_formats = format_set - VALID_FORMATS
+    if invalid_formats:
+        raise ValueError(
+            f"Invalid formats: {', '.join(sorted(invalid_formats))}. "
+            f"Valid formats are: {', '.join(sorted(VALID_FORMATS))}"
+        )
+
+    return format_set or {"markdown"}  # type: ignore[return-value]
+
 
 @dataclass
 class BuildConfig:
@@ -23,7 +60,7 @@ class BuildConfig:
 
     verbose: bool = False
     pragma: set[str] = field(default_factory=set)
-    formats: set[str] = field(default_factory=lambda: {"markdown"})
+    formats: Set[FormatType] = field(default_factory=lambda: {"markdown"})
     continue_on_error: bool = True
     colight_output_path: Optional[str] = None
     colight_embed_path: Optional[str] = None
@@ -31,7 +68,7 @@ class BuildConfig:
     in_subprocess: bool = False
 
     @property
-    def format(self) -> str:
+    def format(self) -> FormatType:
         """Get the primary format (for backward compatibility)."""
         return next(iter(self.formats))
 
@@ -61,10 +98,9 @@ class BuildConfig:
         if self.pragma:
             args.extend(["--pragma", ",".join(sorted(self.pragma))])
 
-        # Use the first format (CLI only supports one)
-        format = next(iter(self.formats))
-        if format != "markdown":
-            args.extend(["--format", format])
+        # Convert formats to comma-separated list
+        if self.formats and self.formats != {"markdown"}:
+            args.extend(["--formats", ",".join(sorted(self.formats))])
 
         if not self.continue_on_error:
             args.extend(["--continue-on-error", "false"])
@@ -89,12 +125,17 @@ class BuildConfig:
     ) -> "BuildConfig":
         """Create a BuildConfig from an optional existing config and kwargs."""
         if config is None:
+            # Parse pragma and formats if provided
+            if "pragma" in kwargs:
+                kwargs["pragma"] = parse_pragma_arg(kwargs["pragma"])
+            if "formats" in kwargs:
+                kwargs["formats"] = parse_formats_arg(kwargs["formats"])
             return cls(**kwargs)
 
         # Merge config with kwargs
         config_dict = {
             "verbose": config.verbose,
-            "pragma": parse_pragma_arg(config.pragma),
+            "pragma": config.pragma,
             "formats": config.formats.copy(),
             "continue_on_error": config.continue_on_error,
             "colight_output_path": config.colight_output_path,
@@ -103,10 +144,17 @@ class BuildConfig:
             "in_subprocess": config.in_subprocess,
         }
         config_dict.update(kwargs)
+
+        # Parse pragma and formats if provided in kwargs
+        if "pragma" in kwargs:
+            config_dict["pragma"] = parse_pragma_arg(config_dict["pragma"])
+        if "formats" in kwargs:
+            config_dict["formats"] = parse_formats_arg(config_dict["formats"])
+
         return cls(**config_dict)
 
 
-def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
+def get_output_path(input_path: pathlib.Path, format: FormatType) -> pathlib.Path:
     """Convert Python file path to output path with correct extension."""
     if input_path.suffix == ".py":
         # For regular .py files, replace .py with the output extension
@@ -120,7 +168,8 @@ def get_output_path(input_path: pathlib.Path, format: str) -> pathlib.Path:
 
 def build_file(
     input_path: pathlib.Path,
-    output_path: pathlib.Path,
+    output_file: Optional[pathlib.Path] = None,
+    output_dir: Optional[pathlib.Path] = None,
     config: Optional[BuildConfig] = None,
     **kwargs,
 ):
@@ -128,10 +177,17 @@ def build_file(
 
     Args:
         input_path: Path to the Python file to build
-        output_path: Path where the output will be written
+        output_dir: Directory where output files will be written (for multiple formats)
+        output_file: Specific output file path (for single format)
         config: BuildConfig object with build settings
         **kwargs: Additional keyword arguments to override config values
+
+    Raises:
+        ValueError: If both or neither output_dir and output_file are specified
     """
+    # Must specify exactly one output location
+    if (output_dir is None) == (output_file is None):
+        raise ValueError("Must specify either output_dir or output_file, not both")
     # Create config from provided config or kwargs
     config = BuildConfig.from_config_and_kwargs(config, **kwargs)
     if not input_path.suffix == ".py":
@@ -172,10 +228,15 @@ def build_file(
                 "colight_cli",
                 "build",
                 str(input_path),
-                "-o",
-                str(output_path),
             ]
         )
+
+        # Add output argument
+        if output_file:
+            cmd.extend(["-o", str(output_file)])
+        else:
+            assert output_dir is not None  # Guaranteed by the check at function start
+            cmd.extend(["-o", str(output_dir)])
 
         # Add all CLI arguments from config
         config.in_subprocess = True  # Mark that subprocess will be in subprocess mode
@@ -193,7 +254,10 @@ def build_file(
 
     # Not a PEP 723 file or already in PEP 723 environment - continue with normal execution
     if config.verbose:
-        print(f"Building {input_path} -> {output_path}")
+        if output_file:
+            print(f"Building {input_path} -> {output_file}")
+        else:
+            print(f"Building {input_path} -> {output_dir}/")
     try:
         # Parse the file
         document = parse_colight_file(input_path)
@@ -205,9 +269,21 @@ def build_file(
         if config.verbose:
             print(f"Parse error: {e}")
         # Create a minimal output file with error message
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        error_content = f"# Parse Error\n\nCould not parse {input_path.name}: {e}\n"
-        output_path.write_text(error_content)
+        if output_file:
+            # Single file output
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            error_content = f"# Parse Error\n\nCould not parse {input_path.name}: {e}\n"
+            output_file.write_text(error_content)
+        else:
+            # Directory output - create error file for first format
+            assert output_dir is not None  # Guaranteed by the check at function start
+            output_dir.mkdir(parents=True, exist_ok=True)
+            error_format = next(iter(config.formats))
+            error_file = output_dir / get_output_path(
+                pathlib.Path(input_path.name), error_format
+            )
+            error_content = f"# Parse Error\n\nCould not parse {input_path.name}: {e}\n"
+            error_file.write_text(error_content)
         return
 
     # Apply pragma from config
@@ -220,23 +296,30 @@ def build_file(
         config.colight_embed_path or "{basename}_colight/block-{block:03d}.colight"
     )
 
-    # Create output directory for colight files
-    colight_dir = output_path.parent / (output_path.stem + "_colight")
-    if config.verbose:
-        print(f"  Writing .colight files to: {colight_dir}")
-
     # Execute the document
     executor = DocumentExecutor(verbose=config.verbose)
     results, _ = executor.execute(document, str(input_path))
 
+    # Determine colight directory and basename
+    if output_file:
+        colight_dir = output_file.parent / f"{output_file.stem}_colight"
+        colight_basename = output_file.stem
+    else:
+        assert output_dir is not None  # Guaranteed by the check at function start
+        colight_dir = output_dir / f"{input_path.stem}_colight"
+        colight_basename = input_path.stem
+
+    if config.verbose:
+        print(f"  Writing .colight files to: {colight_dir}")
+
     # Prepare path context for templates
     path_context = {
-        "basename": output_path.stem,
-        "filename": output_path.name,
+        "basename": colight_basename,
+        "filename": input_path.name,
     }
 
     # Write colight files if needed
-    colight_paths = write_colight_files(colight_dir, results, basename=output_path.stem)
+    colight_paths = write_colight_files(colight_dir, results, basename=colight_basename)
 
     # Check if we had any errors
     execution_errors = [r.error for r in results if r.error]
@@ -253,33 +336,64 @@ def build_file(
             inline_visuals.append(colight_paths[i] if i < len(colight_paths) else None)
 
     # Generate output
-    generator = MarkdownGenerator(
-        colight_dir,
-        embed_path_template=embed_template,
-        inline_threshold=config.inline_threshold,
-    )
+    if output_file:
+        # Single file output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use formats from config only
-    formats = config.formats
-    final_format = next(iter(formats))
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if final_format == "html":
-        title = input_path.stem.replace(".colight", "").replace("_", " ").title()
-        html_generator = HTMLGenerator(
-            colight_dir,
-            embed_path_template=embed_template,
-            inline_threshold=config.inline_threshold,
-        )
-        html_content = html_generator.generate(document, results, title, path_context)
-        output_path.write_text(html_content)
+        # Determine format from file extension
+        formats_to_build: List[FormatType]
+        if output_file.suffix == ".html":
+            formats_to_build = ["html"]
+        elif output_file.suffix == ".md":
+            formats_to_build = ["markdown"]
+        else:
+            # No/unknown extension - throw if more than one format specified
+            if len(config.formats) > 1:
+                raise ValueError(
+                    f"Output file {output_file} has no/unknown extension and multiple formats specified: "
+                    f"{', '.join(sorted(config.formats))}. Please specify a single format or use a file with .html/.md extension."
+                )
+            formats_to_build = [next(iter(config.formats))]
     else:
-        markdown_content = generator.generate(document, results, path_context)
-        output_path.write_text(markdown_content)
+        # Directory output - build all requested formats
+        assert output_dir is not None  # Guaranteed by the check at function start
+        output_dir.mkdir(parents=True, exist_ok=True)
+        formats_to_build = list(config.formats)
 
-    if config.verbose:
-        print(f"Generated {output_path}")
+    # Build each format
+    for fmt in formats_to_build:
+        if output_file:
+            final_output_path = output_file
+        else:
+            assert output_dir is not None  # Guaranteed by the check at function start
+            final_output_path = output_dir / get_output_path(
+                pathlib.Path(input_path.name), fmt
+            )
+
+        if fmt == "html":
+            title = input_path.stem.replace(".colight", "").replace("_", " ").title()
+            html_generator = HTMLGenerator(
+                colight_dir,
+                embed_path_template=embed_template,
+                inline_threshold=config.inline_threshold,
+            )
+            html_content = html_generator.generate(
+                document, results, title, path_context
+            )
+            final_output_path.write_text(html_content)
+        else:
+            markdown_generator = MarkdownGenerator(
+                colight_dir,
+                embed_path_template=embed_template,
+                inline_threshold=config.inline_threshold,
+            )
+            markdown_content = markdown_generator.generate(
+                document, results, path_context
+            )
+            final_output_path.write_text(markdown_content)
+
+        if config.verbose:
+            print(f"Generated {final_output_path}")
 
 
 def build_directory(
@@ -294,7 +408,7 @@ def build_directory(
 
     Args:
         input_dir: Directory containing Python files to build
-        output_dir: Directory where output will be written
+        output_dir: Directory where output files will be written
         config: BuildConfig object with build settings
         include: List of glob patterns to include
         ignore: List of glob patterns to ignore
@@ -324,12 +438,13 @@ def build_directory(
         try:
             # Calculate relative output path
             rel_path = python_file.relative_to(input_dir)
-            output_file_rel = get_output_path(rel_path, config.format)
-            output_file = output_dir / output_file_rel
+
+            # Build to the appropriate subdirectory
+            output_subdir = output_dir / rel_path.parent
 
             build_file(
                 python_file,
-                output_file,
+                output_dir=output_subdir,
                 config=config,
             )
         except Exception as e:

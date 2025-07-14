@@ -9,9 +9,7 @@ import click
 import colight_static.builder as builder
 from colight_live.server import LiveServer
 from colight_site.constants import DEFAULT_INLINE_THRESHOLD
-from colight_site.pragma import parse_pragma_arg
 from colight_static import watcher
-from colight_static.builder import BuildConfig
 
 
 @click.group()
@@ -33,11 +31,11 @@ def main():
     "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
 )
 @click.option(
-    "--format",
+    "--formats",
     "-f",
-    type=click.Choice(["markdown", "html"]),
+    type=str,
     default="markdown",
-    help="Output format",
+    help="Comma-separated output formats (e.g., 'markdown,html')",
 )
 @click.option(
     "--pragma",
@@ -75,42 +73,46 @@ def main():
 def build(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
-    verbose: bool,
-    format: str,
-    pragma: Optional[set[str] | str],
-    continue_on_error: bool,
-    colight_output_path: Optional[str],
-    colight_embed_path: Optional[str],
-    inline_threshold: int,
-    in_subprocess: bool,
+    formats: str,
+    **kwargs,
 ):
     """Build a .py file into markdown/HTML."""
-
-    # Create BuildConfig from CLI args
-    config = BuildConfig(
-        verbose=verbose,
-        formats={format},
-        pragma=parse_pragma_arg(pragma),
-        continue_on_error=continue_on_error,
-        colight_output_path=colight_output_path,
-        colight_embed_path=colight_embed_path,
-        inline_threshold=inline_threshold,
-        in_subprocess=in_subprocess,
-    )
 
     if input_path.is_file():
         # Single file
         if not output:
-            output = builder.get_output_path(input_path, format)
-        builder.build_file(input_path, output, config=config)
-        if verbose:
-            click.echo(f"Built {input_path} -> {output}")
+            # Default to current directory
+            output = pathlib.Path(".")
+
+        # Pass formats as raw string to build_file
+        try:
+            if output.suffix:
+                # Output is a file
+                builder.build_file(input_path, output, formats=formats, **kwargs)
+            else:
+                # Output is a directory
+                builder.build_file(
+                    input_path, output_dir=output, formats=formats, **kwargs
+                )
+        except ValueError as e:
+            click.echo(f"Error: {e}")
+            return
+
+        if kwargs.get("verbose"):
+            if output.suffix:
+                click.echo(f"Built {input_path} -> {output}")
+            else:
+                click.echo(f"Built {input_path} -> {output}/")
     else:
         # Directory
         if not output:
             output = pathlib.Path("build")
-        builder.build_directory(input_path, output, config=config)
-        if verbose:
+        try:
+            builder.build_directory(input_path, output, formats=formats, **kwargs)
+        except ValueError as e:
+            click.echo(f"Error: {e}")
+            return
+        if kwargs.get("verbose"):
             click.echo(f"Built {input_path}/ -> {output}/")
 
 
@@ -126,11 +128,11 @@ def build(
     "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
 )
 @click.option(
-    "--format",
+    "--formats",
     "-f",
-    type=click.Choice(["markdown", "html"]),
+    type=str,
     default="markdown",
-    help="Output format (ignored when dev server is enabled)",
+    help="Comma-separated output formats (ignored when dev server is enabled)",
 )
 @click.option(
     "--pragma",
@@ -198,21 +200,17 @@ def build(
 def watch(
     input_path: pathlib.Path,
     output: Optional[pathlib.Path],
-    verbose: bool,
-    format: str,
-    pragma: Optional[str | set[str]],
-    continue_on_error: bool,
-    colight_output_path: Optional[str],
-    colight_embed_path: Optional[str],
-    inline_threshold: int,
+    formats: str,
     include: tuple,
     ignore: tuple,
     dev_server: bool,
     host: str,
     port: int,
     no_open: bool,
+    **kwargs,
 ):
     """Watch for changes and rebuild automatically, optionally with dev server."""
+
     if dev_server:
         # Default output to .colight_cache if not specified
         if not output:
@@ -222,27 +220,23 @@ def watch(
         click.echo(f"Output: {output}")
         click.echo(f"Server: http://{host}:{port}")
 
-        # Create BuildConfig from CLI args
-        config = BuildConfig(
-            verbose=verbose,
-            formats={"html"},  # Always HTML for serving
-            pragma=parse_pragma_arg(pragma),
-            continue_on_error=continue_on_error,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-        )
+        # Ensure HTML is included in formats for serving
+        if "html" not in formats:
+            formats_with_html = f"{formats},html" if formats else "html"
+        else:
+            formats_with_html = formats
 
         watcher.watch_build_and_serve(
             input_path,
             output,
-            config=config,
+            formats=formats_with_html,  # Include HTML for serving
             include=list(include) if include else None,
             ignore=list(ignore) if ignore else None,
             host=host,
             http_port=port,
             ws_port=port + 1,  # WebSocket port is HTTP port + 1
             open_url=not no_open,
+            **kwargs,
         )
     else:
         # Default output to build if not specified
@@ -252,23 +246,13 @@ def watch(
         click.echo(f"Watching {input_path} for changes...")
         click.echo(f"Output: {output}")
 
-        # Create BuildConfig from CLI args
-        config = BuildConfig(
-            verbose=verbose,
-            formats={format},
-            pragma=parse_pragma_arg(pragma),
-            continue_on_error=continue_on_error,
-            colight_output_path=colight_output_path,
-            colight_embed_path=colight_embed_path,
-            inline_threshold=inline_threshold,
-        )
-
         watcher.watch_and_build(
             input_path,
             output,
-            config=config,
+            formats=formats,  # Pass the formats string directly, builder will parse it
             include=list(include) if include else None,
             ignore=list(ignore) if ignore else None,
+            **kwargs,
         )
 
 
@@ -330,14 +314,14 @@ def live(
 
     server = LiveServer(
         input_path,
-        verbose=verbose, 
-        pragma=parse_pragma_arg(pragma),
+        verbose=verbose,
+        pragma=pragma,
         include=list(include) if include else ["*.py"],
         ignore=list(ignore) if ignore else None,
         host=host,
         http_port=port,
         ws_port=port + 1,  # WebSocket port is HTTP port + 1
-        open_url=not no_open
+        open_url=not no_open,
     )
 
     try:

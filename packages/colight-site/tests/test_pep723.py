@@ -145,7 +145,7 @@ data
     output_file = tmp_path / "test_pep723.md"
 
     # Build the file with in_subprocess=True to prevent subprocess execution during tests
-    build_file(test_file, output_file, verbose=False, in_subprocess=True)
+    build_file(test_file, output_file=output_file, verbose=False, in_subprocess=True)
 
     # Check output was created
     assert output_file.exists()
@@ -181,7 +181,7 @@ result
     output_file = tmp_path / "test_regular.md"
 
     # Build the file
-    build_file(test_file, output_file, verbose=False)
+    build_file(test_file, output_file=output_file, verbose=False)
 
     # Check output was created
     assert output_file.exists()
@@ -229,7 +229,7 @@ print("test")
     monkeypatch.setattr("subprocess.run", mock_run)
 
     # Build the file (should trigger subprocess)
-    build_file(test_file, output_file, verbose=False)
+    build_file(test_file, output_file=output_file, verbose=False)
 
     # Check that subprocess was called
     assert len(subprocess_calls) == 1
