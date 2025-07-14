@@ -20,15 +20,8 @@ export function processRunStart(
 
   const file = message.file;
 
-  // If currentFile is provided, validate this message is for the current file
-  // Normalize file paths for comparison (server sends without .py extension)
-  if (currentFile) {
-    const normalizedCurrent = currentFile.replace(/\.py$/, "");
-    const normalizedMessage = file.replace(/\.py$/, "");
-    if (normalizedCurrent !== normalizedMessage) {
-      return null;
-    }
-  }
+  // Always process run-start messages - navigation decisions are made by the client
+  // based on pinning state
 
   const result = {
     latestRun: message.run,

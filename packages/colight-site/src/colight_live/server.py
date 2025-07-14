@@ -324,9 +324,10 @@ class LiveServer:
         # If client_run is provided and less than current run, send full data
         force_full_data = client_run is not None and client_run < run
 
-        # Convert to relative path without extension
+        # Convert to relative path - keep .py extension for file_path
         if self.input_path.is_file():
-            html_path = self.input_path.stem
+            file_path_str = self.input_path.name  # Keep .py extension
+            html_path = self.input_path.stem  # Remove .py for HTML path
         else:
             try:
                 # Make sure we have absolute paths for comparison
@@ -338,12 +339,14 @@ class LiveServer:
                 )
 
                 rel_path = abs_file.relative_to(abs_input)
+                file_path_str = str(rel_path)  # Keep .py extension
                 html_path = str(rel_path)
-                # Remove .py extension
+                # Remove .py extension for HTML path only
                 if html_path.endswith(".py"):
                     html_path = html_path[:-3]
             except ValueError:
                 # File is not relative to input path
+                file_path_str = file_path.name  # Keep .py extension
                 html_path = file_path.stem
 
         source_file = None
@@ -356,7 +359,7 @@ class LiveServer:
                 )
                 if not source_file:
                     await self._ws_broadcast(
-                        {"run": run, "type": "run-start", "file": html_path}
+                        {"run": run, "type": "run-start", "file": file_path_str}
                     )
                     await self._ws_broadcast(
                         {"run": run, "type": "run-end", "error": "File not found"}
@@ -405,7 +408,7 @@ class LiveServer:
                     {
                         "run": run,
                         "type": "run-start",
-                        "file": html_path,
+                        "file": file_path_str,
                         "blocks": block_ids,  # All blocks in document order
                         "dirty": dirty_blocks,  # Blocks that will be re-executed
                     }
@@ -413,7 +416,7 @@ class LiveServer:
             else:
                 # Fallback to simple run-start
                 await self._ws_broadcast(
-                    {"run": run, "type": "run-start", "file": html_path}
+                    {"run": run, "type": "run-start", "file": file_path_str}
                 )
 
             # Now continue with execution (we already have document from above)

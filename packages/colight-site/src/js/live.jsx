@@ -612,11 +612,18 @@ const LiveServerApp = () => {
         blockResultsRef,
         changedBlocksRef,
         setCurrentFile: (file) => {
-          // Server sends paths without extension, add .py if needed
-          const filePath = file.endsWith(".py") ? file : file + ".py";
-          // Only navigate if we're not already on this file
-          if (navState.file !== filePath) {
-            navigateTo(filePath);
+          // Check if we should navigate based on pinning state
+          if (pinnedFile) {
+            // If a file is pinned, only navigate if it's the pinned file that changed
+            if (file === pinnedFile) {
+              navigateTo(file);
+            }
+            // Otherwise, don't navigate (but still process the update in the background)
+          } else {
+            // No file is pinned, navigate to any changed file
+            if (navState.file !== file) {
+              navigateTo(file);
+            }
           }
         },
         setBlockResults,
@@ -624,7 +631,7 @@ const LiveServerApp = () => {
       });
       return handler(message);
     };
-  }, [navigateTo, setBlockResults, navState.file]);
+  }, [navigateTo, setBlockResults, navState.file, pinnedFile]);
 
   // Stable callback that won't cause WebSocket to reconnect
   const handleWebSocketMessage = useCallback((message) => {

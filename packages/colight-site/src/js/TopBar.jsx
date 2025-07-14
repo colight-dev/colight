@@ -4,6 +4,16 @@ import { tw } from "../../../colight/src/js/api.jsx";
 // Helper function to split path into segments
 const splitPath = (path) => path.split("/").filter(Boolean);
 
+// Component to declaratively set document title
+const DocumentTitle = ({ title }) => {
+  React.useEffect(() => {
+    if (title) {
+      document.title = title;
+    }
+  }, [title]);
+  return null;
+};
+
 const TopBar = ({
   currentFile,
   currentPath,
@@ -33,12 +43,16 @@ const TopBar = ({
     }
   };
 
+  // Get the leaf segment for the document title
+  const leafSegment = pathSegments[pathSegments.length - 1] || "Colight";
+
   return (
     <div
       className={tw(
         `sticky px-4 py-2 bg-white shadow-sm flex items-center left-0 right-0 top-0 z-[1000] border-b`,
       )}
     >
+      <DocumentTitle title={leafSegment} />
       {/* Breadcrumb Navigation */}
       <div className={tw(`flex-1`)}>
         <div className={tw(`flex text-sm font-mono items-center`)}>
@@ -95,6 +109,7 @@ const TopBar = ({
                             : "Click to pin"
                         }
                       >
+                        {pinnedFile === currentFile && "📌 "}
                         {segment}
                       </button>
                     )}
@@ -137,6 +152,7 @@ const TopBar = ({
                         : "Click to pin"
                     }
                   >
+                    {pinnedFile === currentFile && "📌 "}
                     {segment}
                   </button>
                 )}

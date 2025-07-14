@@ -146,7 +146,7 @@ describe("Server Integration Tests", () => {
     const fileRequest = new Promise((resolve) => {
       ws.on("message", (data) => {
         const message = JSON.parse(data);
-        if (message.type === "run-start" && message.file === "main") {
+        if (message.type === "run-start" && message.file === "main.py") {
           resolve(message);
         }
       });
