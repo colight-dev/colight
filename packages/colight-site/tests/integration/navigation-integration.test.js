@@ -20,7 +20,16 @@ describe("Server Integration Tests", () => {
     // Start the server
     serverProcess = spawn(
       "uv",
-      ["run", "python", "-m", "colight_cli", "live", testDir, "--port", String(port)],
+      [
+        "run",
+        "python",
+        "-m",
+        "colight_cli",
+        "live",
+        testDir,
+        "--port",
+        String(port),
+      ],
       {
         stdio: ["ignore", "pipe", "pipe"],
         cwd: join(__dirname, "..", "..", "..", ".."), // Go to project root
@@ -40,19 +49,21 @@ describe("Server Integration Tests", () => {
       const maxAttempts = 3; // Only 3 attempts, fail fast
       let attempts = 0;
       let serverFailed = false;
-      
+
       // Check if server process exited
-      serverProcess.on('exit', (code) => {
+      serverProcess.on("exit", (code) => {
         serverFailed = true;
         reject(new Error(`Server process exited with code ${code}`));
       });
-      
+
       const checkServer = async () => {
         if (serverFailed) return;
-        
+
         attempts++;
-        console.log(`Checking server availability (attempt ${attempts}/${maxAttempts})...`);
-        
+        console.log(
+          `Checking server availability (attempt ${attempts}/${maxAttempts})...`,
+        );
+
         try {
           const response = await fetch(baseUrl);
           // Accept any response from the server (including 404) as "server is ready"
@@ -64,9 +75,13 @@ describe("Server Integration Tests", () => {
         } catch (error) {
           console.log(`Server not ready yet: ${error.message}`);
         }
-        
+
         if (attempts >= maxAttempts) {
-          reject(new Error(`Server startup timeout after ${maxAttempts} attempts (${maxAttempts} seconds)`));
+          reject(
+            new Error(
+              `Server startup timeout after ${maxAttempts} attempts (${maxAttempts} seconds)`,
+            ),
+          );
         } else {
           setTimeout(checkServer, 1000);
         }

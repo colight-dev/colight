@@ -71,7 +71,7 @@ class ApiMiddleware:
         self.visual_store = {}  # Store visual data by ID
         self.file_resolver = FileResolver(input_path, include, ignore)
         self.incremental_executor = IncrementalExecutor(verbose=verbose)
-        self.verbose = verbose 
+        self.verbose = verbose
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
@@ -110,7 +110,6 @@ class ApiMiddleware:
             source_file = self.file_resolver.find_source_file(file_path + ".html")
             if source_file:
                 try:
-
                     generator = JsonDocumentGenerator(
                         verbose=self.verbose,
                         visual_store=self.visual_store,
@@ -251,11 +250,7 @@ class LiveServer:
 
         # Add API middleware
         self._api_middleware = ApiMiddleware(
-            app,
-            self.input_path,
-            self.include,
-            self.ignore,
-            self.verbose
+            app, self.input_path, self.include, self.ignore, self.verbose
         )
         app = self._api_middleware
 
@@ -373,9 +368,7 @@ class LiveServer:
 
                 # Apply config pragma if any
                 if self.pragma:
-                    document.tags = document.tags | TagSet(
-                        frozenset(self.pragma)
-                    )
+                    document.tags = document.tags | TagSet(frozenset(self.pragma))
 
                 # Generate file hash for stable block IDs (same as in JSON generator)
                 import hashlib

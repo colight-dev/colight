@@ -185,7 +185,7 @@ const ColightVisual = ({ data, dataRef }) => {
   );
 };
 
-const ElementRenderer = ({ element, pragmaOverrides }) => {
+const ElementRenderer = ({ element }) => {
   // Skip if element shouldn't be shown
   if (!element.show) return null;
 
@@ -196,26 +196,58 @@ const ElementRenderer = ({ element, pragmaOverrides }) => {
     case "statement":
     case "expression":
       return (
-        <>
-          <pre
-            className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}
-          >
-            <code className="language-python">{element.value}</code>
-          </pre>
-          {/* Render visual if it's an expression with visual data */}
-          {(element.visual || element.visual_ref) &&
-            !pragmaOverrides.hideVisuals && (
-              <ColightVisual
-                data={element.visual}
-                dataRef={element.visual_ref}
-              />
-            )}
-        </>
+        <pre className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4")}>
+          <code className="language-python">{element.value}</code>
+        </pre>
       );
 
     default:
       return null;
   }
+};
+
+// Group consecutive code elements and extract visuals
+const groupBlockElements = (elements) => {
+  const groupedElements = [];
+  let currentCodeGroup = [];
+
+  elements.forEach((element) => {
+    if (element.type === "statement" || element.type === "expression") {
+      currentCodeGroup.push(element);
+    } else {
+      // Non-code element (prose) - flush the current group
+      if (currentCodeGroup.length > 0) {
+        groupedElements.push({
+          type: "code-group",
+          elements: currentCodeGroup,
+        });
+        currentCodeGroup = [];
+      }
+      groupedElements.push(element);
+    }
+  });
+
+  // Don't forget the last group if it exists
+  if (currentCodeGroup.length > 0) {
+    groupedElements.push({ type: "code-group", elements: currentCodeGroup });
+  }
+
+  // Check if the last element is an expression with a visual
+  const lastElement = elements[elements.length - 1];
+  if (
+    lastElement &&
+    lastElement.type === "expression" &&
+    (lastElement.visual || lastElement.visual_ref)
+  ) {
+    // Add a separate visual element
+    groupedElements.push({
+      type: "visual",
+      visual: lastElement.visual,
+      visual_ref: lastElement.visual_ref,
+    });
+  }
+
+  return groupedElements;
 };
 
 const BlockRenderer = ({ block, pragmaOverrides }) => {
@@ -240,70 +272,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
     return null;
   }
 
-  // Group consecutive statement/expression elements
-  const groupedElements = [];
-  let currentCodeGroup = [];
-
-  block.elements.forEach((element) => {
-    // Apply pragma overrides to element visibility
-    let shouldShow = element.show;
-    if (pragmaOverrides.hideStatements && element.type === "statement") {
-      shouldShow = false;
-    }
-    if (
-      pragmaOverrides.hideCode &&
-      (element.type === "expression" || element.type === "statement")
-    ) {
-      shouldShow = false;
-    }
-    if (pragmaOverrides.hideProse && element.type === "prose") {
-      shouldShow = false;
-    }
-
-    // Process all elements to maintain proper grouping boundaries
-    if (element.type === "statement" || element.type === "expression") {
-      if (shouldShow) {
-        currentCodeGroup.push(element);
-      } else {
-        // Hidden code element - still breaks the group
-        if (currentCodeGroup.length > 0) {
-          groupedElements.push({
-            type: "code-group",
-            elements: currentCodeGroup,
-          });
-          currentCodeGroup = [];
-        }
-        // If this is a hidden expression with a visual, show just the visual
-        if (
-          element.type === "expression" &&
-          (element.visual || element.visual_ref)
-        ) {
-          groupedElements.push({
-            type: "visual-only",
-            element: element,
-          });
-        }
-      }
-    } else {
-      // Non-code element (prose) - always breaks the code group
-      if (currentCodeGroup.length > 0) {
-        groupedElements.push({
-          type: "code-group",
-          elements: currentCodeGroup,
-        });
-        currentCodeGroup = [];
-      }
-      // Only add visible non-code elements
-      if (shouldShow) {
-        groupedElements.push(element);
-      }
-    }
-  });
-
-  // Don't forget the last group if it exists
-  if (currentCodeGroup.length > 0) {
-    groupedElements.push({ type: "code-group", elements: currentCodeGroup });
-  }
+  const groupedElements = groupBlockElements(block.elements);
 
   return (
     <div
@@ -321,6 +290,17 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
       )}
       {groupedElements.map((item, idx) => {
         if (item.type === "code-group") {
+          // Filter elements based on pragma overrides
+          const visibleElements = item.elements.filter((el) => {
+            if (pragmaOverrides.hideCode) return false;
+            if (pragmaOverrides.hideStatements && el.type === "statement")
+              return false;
+            return el.show;
+          });
+
+          // Only render if there are visible elements
+          if (visibleElements.length === 0) return null;
+
           return (
             <div key={idx}>
               <pre
@@ -329,38 +309,23 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
                 )}
               >
                 <code className="language-python">
-                  {item.elements.map((el) => el.value).join("\n")}
+                  {visibleElements.map((el) => el.value).join("\n")}
                 </code>
               </pre>
-              {/* Render visuals for any expressions in the group */}
-              {!pragmaOverrides.hideVisuals &&
-                item.elements.map((el, elIdx) =>
-                  el.type === "expression" && (el.visual || el.visual_ref) ? (
-                    <ColightVisual
-                      key={`visual-${idx}-${elIdx}`}
-                      data={el.visual}
-                      dataRef={el.visual_ref}
-                    />
-                  ) : null,
-                )}
             </div>
           );
-        } else if (item.type === "visual-only" && item.element) {
+        } else if (item.type === "visual") {
           return !pragmaOverrides.hideVisuals ? (
             <ColightVisual
-              key={`visual-only-${idx}`}
-              data={item.element.visual}
-              dataRef={item.element.visual_ref}
+              key={`visual-${idx}`}
+              data={item.visual}
+              dataRef={item.visual_ref}
             />
           ) : null;
         } else {
-          return (
-            <ElementRenderer
-              key={idx}
-              element={item}
-              pragmaOverrides={pragmaOverrides}
-            />
-          );
+          // Prose elements - check visibility
+          if (pragmaOverrides.hideProse) return null;
+          return <ElementRenderer key={idx} element={item} />;
         }
       })}
       {block.error && (

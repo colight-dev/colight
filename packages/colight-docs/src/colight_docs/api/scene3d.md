@@ -20,14 +20,11 @@ The component supports:
 - Component click selection
 - Optional FPS display (set controls=['fps'])
 
-
-
 <h3 class='api api-member'>PointCloud</h3>
 
 Create a point cloud element.
 
 <h4 class='api api-section'>Parameters</h4>
-
 
 - `centers` (ArrayLike): Nx3 array of point centers or flattened array
 
@@ -45,14 +42,11 @@ Create a point cloud element.
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
-
-
 <h3 class='api api-member'>Ellipsoid</h3>
 
 Create an ellipsoid element.
 
 <h4 class='api api-section'>Parameters</h4>
-
 
 - `centers` (ArrayLike): Nx3 array of ellipsoid centers or flattened array
 
@@ -74,20 +68,17 @@ Create an ellipsoid element.
 
 - `fill_mode` (str | None): How the shape is drawn. One of:
 
-    - "Solid": Filled surface with solid color
+  - "Solid": Filled surface with solid color
 
-    - "MajorWireframe": Three axis-aligned ellipse cross-sections
+  - "MajorWireframe": Three axis-aligned ellipse cross-sections
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
-
-
 
 <h3 class='api api-member'>Cuboid</h3>
 
 Create a cuboid element.
 
 <h4 class='api api-section'>Parameters</h4>
-
 
 - `centers` (ArrayLike): Nx3 array of cuboid centers or flattened array
 
@@ -109,14 +100,11 @@ Create a cuboid element.
 
 - `**kwargs` (Any): Additional arguments like decorations, onHover, onClick
 
-
-
 <h3 class='api api-member'>LineBeams</h3>
 
 Create a line beams element.
 
 <h4 class='api api-section'>Parameters</h4>
-
 
 - `points` (ArrayLike): Array of quadruples [x,y,z,i, x,y,z,i, ...] where points sharing the same i value are connected in sequence
 
@@ -136,19 +124,15 @@ Create a line beams element.
 
 <h4 class='api api-section'>Returns</h4>
 
-
 - A LineBeams scene component that renders connected beam segments. (SceneComponent)
 
 - Points are connected in sequence within groups sharing the same i value. (SceneComponent)
-
-
 
 <h3 class='api api-member'>deco</h3>
 
 Create a decoration for scene components.
 
 <h4 class='api api-section'>Parameters</h4>
-
 
 - `indexes` (Union[int, np.integer, ArrayLike]): Single index or list of indices to decorate
 
@@ -160,7 +144,4 @@ Create a decoration for scene components.
 
 <h4 class='api api-section'>Returns</h4>
 
-
 - Dictionary containing decoration settings (Decoration)
-
-

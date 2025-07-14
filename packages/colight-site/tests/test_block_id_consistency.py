@@ -7,7 +7,6 @@ import tempfile
 from colight_live.incremental_executor import IncrementalExecutor
 from colight_live.json_generator import JsonDocumentGenerator
 from colight_site.parser import parse_colight_file
-from colight_static.builder import BuildConfig
 
 
 def test_block_id_format():

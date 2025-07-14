@@ -4,7 +4,6 @@ import json
 import pathlib
 from typing import Dict, Optional, Union
 
-import colight_site.api as api
 import colight_static.builder as builder
 
 from .builder import BuildConfig
