@@ -120,7 +120,9 @@ function findSingleMatch(
     }
   }
 
-  return patternPosition === pattern.length ? [startPosition, textPosition] : null;
+  return patternPosition === pattern.length
+    ? [startPosition, textPosition]
+    : null;
 }
 
 // Highlighting functions
@@ -149,38 +151,53 @@ function highlight(
   target: string | HTMLPreElement | NodeListOf<HTMLPreElement>,
   patterns: string | (string | PatternObject)[] | PatternObject,
   options: HighlightOptions = {},
-  colorScheme: string[] = DefaultColors
+  colorScheme: string[] = DefaultColors,
 ): void {
   if (!patterns || (Array.isArray(patterns) && patterns.length === 0)) {
     return;
   }
 
   const patternsArray = Array.isArray(patterns) ? patterns : [patterns];
-  const elements = typeof target === 'string'
-    ? document.querySelectorAll<HTMLPreElement>(target)
-    : target instanceof HTMLElement
-      ? [target]
-      : target;
+  const elements =
+    typeof target === "string"
+      ? document.querySelectorAll<HTMLPreElement>(target)
+      : target instanceof HTMLElement
+        ? [target]
+        : target;
 
   const { matchId = generateUniqueId() } = options;
 
   const processedPatterns = patternsArray.map((pattern, index) => {
-    if (typeof pattern === 'string') {
+    if (typeof pattern === "string") {
       return { match: pattern, color: colorScheme[index % colorScheme.length] };
     }
     return {
       match: pattern.match,
-      color: pattern.color || colorScheme[index % colorScheme.length]
+      color: pattern.color || colorScheme[index % colorScheme.length],
     };
   });
 
-  elements.forEach(element => {
+  elements.forEach((element) => {
     const text = element.textContent || "";
 
     const allMatches = processedPatterns.flatMap((pattern, index) => {
-      const subPatterns = pattern.match.split(',').map(p => p.trim()).filter(p => p !== '');
-      return findMatchesForPatterns(text, subPatterns, `${matchId}-${index}`)
-        .map(match => [...match, `--bylight-color: ${pattern.color};`] as [number, number, string, string]);
+      const subPatterns = pattern.match
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      return findMatchesForPatterns(
+        text,
+        subPatterns,
+        `${matchId}-${index}`,
+      ).map(
+        (match) =>
+          [...match, `--bylight-color: ${pattern.color};`] as [
+            number,
+            number,
+            string,
+            string,
+          ],
+      );
     });
 
     if (allMatches.length > 0) {
@@ -213,15 +230,18 @@ function applyHighlights(
 
 // Link processing and hover effect functions
 // Simplify the processLinksAndHighlight function
-function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: string[] = DefaultColors): void {
+function processLinksAndHighlight(
+  targetElement: HTMLElement,
+  colorScheme: string[] = DefaultColors,
+): void {
   // Clear any existing highlights in pre elements
-  targetElement.querySelectorAll('pre code').forEach(codeElement => {
+  targetElement.querySelectorAll("pre code").forEach((codeElement) => {
     const preElement = codeElement.parentElement as HTMLPreElement;
-    if (preElement && codeElement.innerHTML.includes('bylight-code')) {
-      preElement.textContent = preElement.textContent || '';
+    if (preElement && codeElement.innerHTML.includes("bylight-code")) {
+      preElement.textContent = preElement.textContent || "";
     }
   });
-  
+
   // Include both new links and already-processed spans
   const elements = targetElement.querySelectorAll<
     HTMLPreElement | HTMLAnchorElement | HTMLSpanElement
@@ -238,11 +258,19 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
       preMap.set(element as HTMLPreElement, []);
     } else if (element.tagName === "A") {
       const anchorElement = element as HTMLAnchorElement;
-      const linkData = processAnchorElement(anchorElement, index, colorScheme, colorIndex);
+      const linkData = processAnchorElement(
+        anchorElement,
+        index,
+        colorScheme,
+        colorIndex,
+      );
       linkMap.set(anchorElement, linkData);
       colorMap.set(linkData.matchId, colorIndex);
       colorIndex = (colorIndex + 1) % colorScheme.length;
-    } else if (element.tagName === "SPAN" && element.classList.contains("bylight-link")) {
+    } else if (
+      element.tagName === "SPAN" &&
+      element.classList.contains("bylight-link")
+    ) {
       const spanElement = element as HTMLSpanElement;
       const linkData = processSpanElement(spanElement, index);
       linkMap.set(spanElement, linkData);
@@ -256,16 +284,21 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
     ({ targetIndices, patterns, index, matchId, color }, linkElement) => {
       const findMatchingPres = (
         indices: number[] | "all" | "up" | "down",
-        index: number
+        index: number,
       ): HTMLPreElement[] => {
         if (indices === "all") {
           return Array.from(preMap.keys());
         }
         if (indices === "up" || indices === "down") {
-          return findPreElementsInDirection(elements, index, indices, parseInt(indices));
+          return findPreElementsInDirection(
+            elements,
+            index,
+            indices,
+            parseInt(indices),
+          );
         }
         return indices
-          .map(offset => findPreElementByOffset(elements, index, offset))
+          .map((offset) => findPreElementByOffset(elements, index, offset))
           .filter((el): el is HTMLPreElement => el !== null);
       };
 
@@ -279,24 +312,22 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
     },
   );
 
-
-
   // Apply highlights to pre elements
   preMap.forEach((matches, preElement) => {
     if (matches.length > 0) {
-      
-      const allMatches = matches.map(
-        ([start, end, matchId]) => {
-          const linkData = Array.from(linkMap.values()).find(data => data.matchId === matchId);
-          const color = linkData?.color || colorScheme[colorMap.get(matchId) || 0];
-          return [
-            start,
-            end,
-            matchId,
-            `--bylight-color: ${color};`,
-          ] as [number, number, string, string];
-        }
-      );
+      const allMatches = matches.map(([start, end, matchId]) => {
+        const linkData = Array.from(linkMap.values()).find(
+          (data) => data.matchId === matchId,
+        );
+        const color =
+          linkData?.color || colorScheme[colorMap.get(matchId) || 0];
+        return [start, end, matchId, `--bylight-color: ${color};`] as [
+          number,
+          number,
+          string,
+          string,
+        ];
+      });
       preElement.innerHTML = `<code>${applyHighlights(preElement.textContent || "", allMatches)}</code>`;
       // preElement.bylightRefresh = () => preElement.innerHTML = `<code>${applyHighlights(preElement.textContent || "", allMatches)}</code>`;
       // preElement.bylightRefresh()
@@ -307,11 +338,11 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
   linkMap.forEach((linkData, linkElement) => {
     const { matchId, color, targetIndices, patterns } = linkData;
     const finalColor = color || colorScheme[colorMap.get(matchId) || 0];
-    
+
     // Only process if it's an anchor (not already a span)
     if (linkElement.tagName === "A") {
       // Create a new span element
-      const spanElement = document.createElement('span');
+      const spanElement = document.createElement("span");
       spanElement.innerHTML = linkElement.innerHTML;
       spanElement.dataset.matchId = matchId;
       spanElement.dataset.patterns = JSON.stringify(patterns);
@@ -319,7 +350,7 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
       spanElement.dataset.color = finalColor;
       spanElement.classList.add("bylight-link");
       spanElement.style.setProperty("--bylight-color", finalColor);
-      
+
       // Replace the link with the span
       linkElement.parentNode?.replaceChild(spanElement, linkElement);
     }
@@ -327,7 +358,12 @@ function processLinksAndHighlight(targetElement: HTMLElement, colorScheme: strin
 }
 
 // Add a helper function to process anchor elements
-function processAnchorElement(anchorElement: HTMLAnchorElement, index: number, colorScheme: string[], colorIndex: number): LinkData {
+function processAnchorElement(
+  anchorElement: HTMLAnchorElement,
+  index: number,
+  colorScheme: string[],
+  colorIndex: number,
+): LinkData {
   const url = new URL(anchorElement.href);
   const matchId = generateUniqueId();
   const inParam = url.searchParams.get("in");
@@ -340,7 +376,11 @@ function processAnchorElement(anchorElement: HTMLAnchorElement, index: number, c
 
   return {
     targetIndices,
-    patterns: (url.searchParams.get("match") || anchorElement.textContent || "").split(","),
+    patterns: (
+      url.searchParams.get("match") ||
+      anchorElement.textContent ||
+      ""
+    ).split(","),
     index,
     matchId,
     color,
@@ -348,11 +388,14 @@ function processAnchorElement(anchorElement: HTMLAnchorElement, index: number, c
 }
 
 // Add a helper function to process span elements (already processed links)
-function processSpanElement(spanElement: HTMLSpanElement, index: number): LinkData {
-  const patterns = JSON.parse(spanElement.dataset.patterns || '[]');
-  const targetIndices = JSON.parse(spanElement.dataset.targetIndices || '[]');
+function processSpanElement(
+  spanElement: HTMLSpanElement,
+  index: number,
+): LinkData {
+  const patterns = JSON.parse(spanElement.dataset.patterns || "[]");
+  const targetIndices = JSON.parse(spanElement.dataset.targetIndices || "[]");
   const matchId = spanElement.dataset.matchId || generateUniqueId();
-  const color = spanElement.dataset.color || '';
+  const color = spanElement.dataset.color || "";
 
   return {
     targetIndices,
@@ -363,7 +406,10 @@ function processSpanElement(spanElement: HTMLSpanElement, index: number): LinkDa
   };
 }
 
-function getTargetIndices(inParam: string | null, dirParam: string | null): number[] | "all" | "up" | "down" {
+function getTargetIndices(
+  inParam: string | null,
+  dirParam: string | null,
+): number[] | "all" | "up" | "down" {
   if (inParam) {
     return inParam === "all" ? "all" : inParam.split(",").map(Number);
   } else if (dirParam) {
@@ -385,12 +431,12 @@ function findPreElementsInDirection(
   elements: NodeListOf<HTMLPreElement | HTMLAnchorElement>,
   startIndex: number,
   direction: "up" | "down",
-  count: number
+  count: number,
 ): HTMLPreElement[] {
   const dir = direction === "up" ? -1 : 1;
   const matchingPres: HTMLPreElement[] = [];
   let preCount = 0;
-  
+
   for (let i = startIndex + dir; i >= 0 && i < elements.length; i += dir) {
     if (elements[i].tagName === "PRE") {
       matchingPres.push(elements[i] as HTMLPreElement);
@@ -398,18 +444,18 @@ function findPreElementsInDirection(
       if (preCount === count) break;
     }
   }
-  
+
   return matchingPres;
 }
 
 function findPreElementByOffset(
   elements: NodeListOf<HTMLPreElement | HTMLAnchorElement>,
   startIndex: number,
-  offset: number
+  offset: number,
 ): HTMLPreElement | null {
   let preCount = 0;
   const dir = Math.sign(offset);
-  
+
   for (let i = startIndex + dir; i >= 0 && i < elements.length; i += dir) {
     if (elements[i].tagName === "PRE") {
       preCount++;
@@ -418,7 +464,7 @@ function findPreElementByOffset(
       }
     }
   }
-  
+
   return null;
 }
 

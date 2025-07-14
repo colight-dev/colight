@@ -53,45 +53,96 @@ const TopBar = ({
           </button>
 
           {/* Show path segments for both files and directories */}
-          {pathSegments.map((segment, index) => (
-            <React.Fragment key={index}>
+          {pathSegments.length > 3 ? (
+            <>
+              {/* Show ellipsis after root when more than 3 segments */}
               <span className={tw(`text-gray-500 mx-1`)}>/</span>
-              {/* For directories, all segments are clickable */}
-              {/* For files, all segments except the last are clickable */}
-              {isDirectory || index < pathSegments.length - 1 ? (
-                <button
-                  onClick={() => handleBreadcrumbClick(index)}
-                  className={tw(
-                    `px-1 py-0.5 transition-colors rounded hover:bg-gray-200`,
-                  )}
-                  title={`Browse ${segment} directory`}
-                >
-                  {segment}
-                </button>
-              ) : (
-                <button
-                  onClick={() =>
-                    setPinnedFile(
-                      pinnedFile === currentFile ? null : currentFile,
-                    )
-                  }
-                  className={tw(
-                    `px-1 py-0.5 transition-colors rounded`,
-                    pinnedFile === currentFile
-                      ? `bg-blue-100 text-blue-700`
-                      : `hover:bg-gray-200`,
-                  )}
-                  title={
-                    pinnedFile === currentFile
-                      ? "File is pinned (click to unpin)"
-                      : "Click to pin"
-                  }
-                >
-                  {segment}
-                </button>
-              )}
-            </React.Fragment>
-          ))}
+              <span className={tw(`text-gray-500 px-1`)}>...</span>
+              {/* Show last 3 segments */}
+              {pathSegments.slice(-3).map((segment, idx) => {
+                const index = pathSegments.length - 3 + idx;
+                return (
+                  <React.Fragment key={index}>
+                    <span className={tw(`text-gray-500 mx-1`)}>/</span>
+                    {/* For directories, all segments are clickable */}
+                    {/* For files, all segments except the last are clickable */}
+                    {isDirectory || index < pathSegments.length - 1 ? (
+                      <button
+                        onClick={() => handleBreadcrumbClick(index)}
+                        className={tw(
+                          `px-1 py-0.5 transition-colors rounded hover:bg-gray-200`,
+                        )}
+                        title={`Browse ${segment} directory`}
+                      >
+                        {segment}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          setPinnedFile(
+                            pinnedFile === currentFile ? null : currentFile,
+                          )
+                        }
+                        className={tw(
+                          `px-1 py-0.5 transition-colors rounded`,
+                          pinnedFile === currentFile
+                            ? `bg-blue-100 text-blue-700`
+                            : `hover:bg-gray-200`,
+                        )}
+                        title={
+                          pinnedFile === currentFile
+                            ? "File is pinned (click to unpin)"
+                            : "Click to pin"
+                        }
+                      >
+                        {segment}
+                      </button>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </>
+          ) : (
+            pathSegments.map((segment, index) => (
+              <React.Fragment key={index}>
+                <span className={tw(`text-gray-500 mx-1`)}>/</span>
+                {/* For directories, all segments are clickable */}
+                {/* For files, all segments except the last are clickable */}
+                {isDirectory || index < pathSegments.length - 1 ? (
+                  <button
+                    onClick={() => handleBreadcrumbClick(index)}
+                    className={tw(
+                      `px-1 py-0.5 transition-colors rounded hover:bg-gray-200`,
+                    )}
+                    title={`Browse ${segment} directory`}
+                  >
+                    {segment}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() =>
+                      setPinnedFile(
+                        pinnedFile === currentFile ? null : currentFile,
+                      )
+                    }
+                    className={tw(
+                      `px-1 py-0.5 transition-colors rounded`,
+                      pinnedFile === currentFile
+                        ? `bg-blue-100 text-blue-700`
+                        : `hover:bg-gray-200`,
+                    )}
+                    title={
+                      pinnedFile === currentFile
+                        ? "File is pinned (click to unpin)"
+                        : "Click to pin"
+                    }
+                  >
+                    {segment}
+                  </button>
+                )}
+              </React.Fragment>
+            ))
+          )}
         </div>
       </div>
 

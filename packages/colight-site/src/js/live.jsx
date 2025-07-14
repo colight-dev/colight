@@ -187,10 +187,15 @@ const ColightVisual = ({ data, dataRef }) => {
 
 const Code = ({ source }) => {
   return (
-    <pre className={tw("bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4 language-python")}
-  >{source}</pre>
-  )
-}
+    <pre
+      className={tw(
+        "bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4 language-python",
+      )}
+    >
+      {source}
+    </pre>
+  );
+};
 
 const ElementRenderer = ({ element }) => {
   // Skip if element shouldn't be shown
@@ -304,7 +309,12 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
           // Only render if there are visible elements
           if (visibleElements.length === 0) return null;
 
-          return <Code key={idx} source={visibleElements.map((el) => el.value).join("\n")}/>;
+          return (
+            <Code
+              key={idx}
+              source={visibleElements.map((el) => el.value).join("\n")}
+            />
+          );
         } else if (item.type === "visual") {
           return !pragmaOverrides.hideVisuals ? (
             <ColightVisual
@@ -338,7 +348,7 @@ const DocumentRenderer = ({ blocks, pragmaOverrides }) => {
   useEffect(() => {
     // Run bylight on the entire document after render
     if (docRef.current) {
-      console.log("Run bylight on docRef")
+      console.log("Run bylight on docRef");
       bylight({ target: docRef.current });
     }
   }, [blocks]); // Re-run when blocks change
