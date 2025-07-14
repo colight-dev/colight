@@ -183,15 +183,21 @@ class TestDocumentExecutor:
         """).strip()
 
         doc = parse_document(source)
-        # The parser creates just 1 block since there's no blank line separation
-        assert len(doc.blocks) == 1
+        # With blank lines, this creates 3 blocks
+        assert len(doc.blocks) == 3
 
         executor = DocumentExecutor()
         results, _ = executor.execute(doc)
 
-        assert len(results) == 1
-        assert results[0].error is not None
-        assert "ZeroDivisionError" in results[0].error
+        # Execution should stop at the error in block 2
+        assert len(results) == 3  # Always returns results for all blocks
+        assert results[0].error is None  # First block succeeds
+        assert results[1].error is not None  # Second block has error
+        assert "ZeroDivisionError" in results[1].error
+        # Third block should have empty result (execution stopped)
+        assert results[2].error is None
+        assert results[2].output == ""
+        assert results[2].value is None
 
     def test_execute_single(self):
         """Test execute_single method."""

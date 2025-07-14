@@ -312,7 +312,7 @@ def _group_blocks_generator(elements: List[ParsedLine]) -> Iterator[RawBlock]:
             block.code_nodes.append(el.content)
         # BlankLine is handled separately in state machine
 
-    def _blank_ends_block(idx: int, current_block: RawBlock) -> bool:
+    def _blank_ends_block(current_block: RawBlock) -> bool:
         """Check if a blank line should end the current block."""
         # If we only have pragmas so far, don't end the block
         if (
@@ -322,23 +322,7 @@ def _group_blocks_generator(elements: List[ParsedLine]) -> Iterator[RawBlock]:
         ):
             return False
 
-        # Look ahead to see if next non-blank line is code
-        j = idx + 1
-        while j < len(elements) and isinstance(elements[j], BlankLine):
-            j += 1
-
-        if (
-            j < len(elements)
-            and isinstance(elements[j], CodeLine)
-            and current_block.code_nodes
-        ):
-            # Next non-blank is code and we have code - might be continuation
-            # Only continue if there's exactly one blank line
-            if j == idx + 1:
-                # Single blank line - continue block by adding sentinel
-                current_block.code_nodes.append(EmptyLine())
-                return False
-
+        # Blank lines always end blocks
         return True
 
     # Process all elements
@@ -355,12 +339,11 @@ def _group_blocks_generator(elements: List[ParsedLine]) -> Iterator[RawBlock]:
                 state = _BlockState.IN_BLOCK
 
             case (_BlockState.IN_BLOCK, "BlankLine"):
-                if current and _blank_ends_block(i, current):
+                if current and _blank_ends_block(current):
                     if current.prose_lines or current.code_nodes:
                         yield current
                     current = None
                     state = _BlockState.SEARCHING
-                # else: blank was handled as continuation
 
             case (_BlockState.IN_BLOCK, _):
                 if current:

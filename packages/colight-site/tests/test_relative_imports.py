@@ -33,10 +33,8 @@ def helper():
         test_file.write_text("""
 # Test relative imports
 from ..utils import helper
-
 result = helper()
 print(f"Got: {result}")
-
 # Also test explicit relative import
 from . import __init__
 """)
@@ -106,7 +104,6 @@ def test_nested_package_structure():
 from ...top_utils import TOP
 from ..mid_utils import MID
 from . import __init__
-
 print(f"TOP: {TOP}")
 print(f"MID: {MID}")
 """)

@@ -1,4 +1,3 @@
-# %% [markdown]
 # # Visual Update Test
 # This tests if visuals update when code changes
 
