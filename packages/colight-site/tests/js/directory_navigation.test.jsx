@@ -1,32 +1,22 @@
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LiveServerApp } from "../../src/js/live.jsx";
+import {
+  setupMockWebSocketServer,
+  cleanupMockWebSocketServer,
+  sendServerMessage,
+  waitForConnection,
+  waitForClientMessage,
+} from "./test-utils/websocket-test-setup.js";
 
 // Mock fetch
 global.fetch = vi.fn();
 
-// Mock WebSocket
-let mockWsInstance;
-class MockWebSocket {
-  constructor(url) {
-    this.url = url;
-    this.readyState = WebSocket.CONNECTING;
-    this.send = vi.fn();
-    this.close = vi.fn();
-    mockWsInstance = this;
-
-    // Simulate connection after a small delay
-    setTimeout(() => {
-      this.readyState = WebSocket.OPEN;
-      if (this.onopen) this.onopen();
-    }, 10);
-  }
-}
-
-global.WebSocket = MockWebSocket;
+let mockServer;
+let mockSocket;
 
 // Mock directory structure
 const mockDirectoryTree = {
@@ -89,20 +79,39 @@ const mockDirectoryTree = {
 describe("Directory Navigation", () => {
   let queryClient;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Setup mock WebSocket server
+    mockServer = setupMockWebSocketServer();
+
+    // Set up connection handler to capture socket
+    mockServer.on("connection", (socket) => {
+      mockSocket = socket;
+    });
+
     vi.clearAllMocks();
-    mockWsInstance = null;
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
     });
 
-    // Mock directory tree API response
-    fetch.mockResolvedValue({
-      ok: true,
-      json: async () => mockDirectoryTree,
+    // Mock fetch to return our directory structure
+    global.fetch.mockImplementation((url) => {
+      if (url.includes("/api/index")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockDirectoryTree),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve(""),
+      });
     });
+  });
+
+  afterEach(() => {
+    cleanupMockWebSocketServer();
   });
 
   const renderApp = (initialPath = "/") => {
@@ -151,16 +160,16 @@ describe("Directory Navigation", () => {
       expect(screen.getByText("main.py")).toBeTruthy();
     });
 
+    // Wait for WebSocket connection
+    await waitForConnection(mockServer);
+
     // Click on main.py
     fireEvent.click(screen.getByText("main.py"));
 
-    // Should navigate to the file and request it
-    await waitFor(() => {
-      expect(mockWsInstance).toBeDefined();
-      expect(mockWsInstance.send).toHaveBeenCalledWith(
-        expect.stringContaining('"path":"src/main.py"'),
-      );
-    });
+    // Should navigate to the file and request it via WebSocket
+    const message = await waitForClientMessage(mockSocket);
+    expect(message.type).toBe("request-load");
+    expect(message.path).toBe("src/main.py");
 
     // Navigate to another file in a subdirectory
     fireEvent.click(screen.getByText("src")); // Click breadcrumb to go back
@@ -207,17 +216,18 @@ describe("Directory Navigation", () => {
       expect(screen.getByText("src")).toBeTruthy();
     });
 
+    // Wait for WebSocket connection
+    await waitForConnection(mockServer);
+
     // Click on file
     fireEvent.click(screen.getByText("src"));
     expect(screen.getByText("main.py")).toBeTruthy();
     fireEvent.click(screen.getByText("main.py"));
 
     // Should request the file
-    await waitFor(() => {
-      expect(mockWsInstance.send).toHaveBeenCalledWith(
-        expect.stringContaining('"path":"src/main.py"'),
-      );
-    });
+    let message = await waitForClientMessage(mockSocket);
+    expect(message.type).toBe("request-load");
+    expect(message.path).toBe("src/main.py");
 
     // Open command bar
     fireEvent.keyDown(document, { key: "k", metaKey: true });
@@ -234,13 +244,18 @@ describe("Directory Navigation", () => {
       expect(screen.getByText("button.py")).toBeTruthy();
     });
 
+    // Set up promise to capture next message before clicking
+    const messagePromise = new Promise((resolve) => {
+      mockSocket.on("message", (data) => {
+        resolve(JSON.parse(data));
+      });
+    });
+
     fireEvent.click(screen.getByText("button.py"));
 
-    // Should navigate using the same flow
-    await waitFor(() => {
-      expect(mockWsInstance.send).toHaveBeenCalledWith(
-        expect.stringContaining('"path":"src/components/ui/button.py"'),
-      );
-    });
+    // Wait for the message
+    message = await messagePromise;
+    expect(message.type).toBe("request-load");
+    expect(message.path).toBe("src/components/ui/button.py");
   });
 });

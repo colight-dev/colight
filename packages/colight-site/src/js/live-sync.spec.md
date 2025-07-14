@@ -1,5 +1,12 @@
 # Live Sync Specification
 
+## Overview
+
+This specification describes the live sync behavior between the colight-site server and client. The implementation is located in:
+
+- **Client**: `packages/colight-site/src/js/live.jsx` (main app), `websocket-message-handler.js` (message processing), `TopBar.jsx` (UI components)
+- **Server**: `packages/colight-site/src/colight_live/server.py` (WebSocket server and file watching)
+
 ## Core Principles
 
 The live sync system enables real-time updates between the server (watching files) and client (displaying content). The system should balance automatic navigation with user control through pinning.
@@ -27,8 +34,10 @@ The live sync system enables real-time updates between the server (watching file
    - Other files' updates are processed in the background but don't cause navigation
 
 3. **Pin State Visibility**:
-   - The UI must clearly indicate when a file is pinned
-   - Users can toggle pin state through the breadcrumb or command bar
+   - A pin emoji (📌) appears next to the filename in the breadcrumb when pinned
+   - The filename button has a blue background when pinned
+   - Hovering shows tooltip text indicating pin state
+   - Users can toggle pin state by clicking the filename in breadcrumb or using command bar (Cmd/Ctrl+K)
 
 ## State Management
 
@@ -99,12 +108,14 @@ The server maintains minimal client knowledge:
    ```json
    {
      "type": "run-start",
-     "file": "path/to/file",
+     "file": "path/to/file.py",
      "run": 124,
      "blocks": ["block1", "block2"],
      "dirty": ["block1"]
    }
    ```
+
+   Note: File paths now include the `.py` extension
 
 2. **`block-result`**: Individual block execution results
 
@@ -186,3 +197,5 @@ The server maintains minimal client knowledge:
 7. **Performance**: Every file change triggers a full execution cycle. For large files or many simultaneous changes, this could impact performance.
 
 8. **Error States**: Limited error feedback to users when file processing fails or WebSocket connection issues occur.
+
+## Next Patch: [To be determined]

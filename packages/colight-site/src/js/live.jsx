@@ -7,6 +7,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { WebsocketBuilder, ExponentialBackoff, ArrayQueue } from "websocket-ts";
 import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
 import {
   parseColightScript,
@@ -18,11 +19,9 @@ import CommandBar from "./CommandBar.jsx";
 import TopBar from "./TopBar.jsx";
 import { processWebSocketMessage } from "./websocket-message-handler.js";
 import { useStateWithDeps } from "./hooks/useStateWithDeps.js";
-import bylight from "./bylight.js";
+import bylight from "./bylight.ts";
 
 // ========== Constants ==========
-
-const WEBSOCKET_RECONNECT_DELAY = 1000; // ms
 
 // ========== Route Parsing - Single Source of Truth ==========
 
@@ -394,37 +393,37 @@ const useWebSocket = (onMessage, wsRefOut) => {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    const connect = () => {
-      const wsPort = parseInt(window.location.port) + 1;
-      const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
-      wsRef.current = ws;
+    const wsPort = parseInt(window.location.port) + 1;
 
-      ws.onopen = () => {
+    // Build WebSocket with exponential backoff and message buffering
+    const ws = new WebsocketBuilder(`ws://127.0.0.1:${wsPort}`)
+      .withBackoff(new ExponentialBackoff(1000, 2, 30000)) // 1s initial, 2x multiplier, 30s max
+      .withBuffer(new ArrayQueue()) // Buffer messages when disconnected
+      .onOpen(() => {
         console.log("LiveServer connected");
         setConnected(true);
         if (wsRefOut) {
           wsRefOut.current = ws;
         }
-      };
-
-      ws.onmessage = (event) => {
+      })
+      .onClose(() => {
+        console.log("LiveServer disconnected");
+        setConnected(false);
+      })
+      .onError((_, error) => {
+        console.error("WebSocket error:", error);
+      })
+      .onMessage((ws, event) => {
         const data = JSON.parse(event.data);
         console.log("WebSocket message:", data);
         onMessage(data);
-      };
+      })
+      .onRetry(() => {
+        console.log("WebSocket reconnecting...");
+      })
+      .build();
 
-      ws.onclose = () => {
-        console.log("LiveServer disconnected");
-        setConnected(false);
-        setTimeout(connect, WEBSOCKET_RECONNECT_DELAY);
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
-    };
-
-    connect();
+    wsRef.current = ws;
 
     return () => {
       if (wsRef.current) {
