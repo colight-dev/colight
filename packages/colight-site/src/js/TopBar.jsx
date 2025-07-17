@@ -23,8 +23,6 @@ const TopBar = ({
   isLoading,
   pragmaOverrides,
   setPragmaOverrides,
-  pinnedFile,
-  setPinnedFile,
 }) => {
   // Build breadcrumb data from current path (works for both files and directories)
   const pathSegments =
@@ -91,27 +89,9 @@ const TopBar = ({
                         {segment}
                       </button>
                     ) : (
-                      <button
-                        onClick={() =>
-                          setPinnedFile(
-                            pinnedFile === currentFile ? null : currentFile,
-                          )
-                        }
-                        className={tw(
-                          `px-1 py-0.5 transition-colors rounded`,
-                          pinnedFile === currentFile
-                            ? `bg-blue-100 text-blue-700`
-                            : `hover:bg-gray-200`,
-                        )}
-                        title={
-                          pinnedFile === currentFile
-                            ? "File is pinned (click to unpin)"
-                            : "Click to pin"
-                        }
-                      >
-                        {pinnedFile === currentFile && "📌 "}
+                      <span className={tw(`px-1 py-0.5 text-gray-900`)}>
                         {segment}
-                      </button>
+                      </span>
                     )}
                   </React.Fragment>
                 );
@@ -134,27 +114,9 @@ const TopBar = ({
                     {segment}
                   </button>
                 ) : (
-                  <button
-                    onClick={() =>
-                      setPinnedFile(
-                        pinnedFile === currentFile ? null : currentFile,
-                      )
-                    }
-                    className={tw(
-                      `px-1 py-0.5 transition-colors rounded`,
-                      pinnedFile === currentFile
-                        ? `bg-blue-100 text-blue-700`
-                        : `hover:bg-gray-200`,
-                    )}
-                    title={
-                      pinnedFile === currentFile
-                        ? "File is pinned (click to unpin)"
-                        : "Click to pin"
-                    }
-                  >
-                    {pinnedFile === currentFile && "📌 "}
+                  <span className={tw(`px-1 py-0.5 text-gray-900`)}>
                     {segment}
-                  </button>
+                  </span>
                 )}
               </React.Fragment>
             ))

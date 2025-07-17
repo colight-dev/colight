@@ -282,3 +282,65 @@ except ImportError:
     # The bad_import.py should be analyzed but have no valid imports
     bad_imports = graph.get_dependencies("bad_import.py")
     assert len(bad_imports) == 0
+
+
+def test_import_resolution_with_different_watched_dir():
+    """Test that imports are resolved correctly when watched dir != Python project root.
+
+    This reproduces the issue where watching packages/colight-site/tests/examples/
+    doesn't recognize that visual_update.py depends on visual_update_dep.py.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a project structure similar to the real one
+        project_root = pathlib.Path(tmpdir)
+        packages_dir = project_root / "packages" / "colight-site"
+        tests_dir = packages_dir / "tests"
+        examples_dir = tests_dir / "examples"
+        examples_dir.mkdir(parents=True)
+
+        # Create the dependent module
+        dep_file = examples_dir / "visual_update_dep.py"
+        dep_file.write_text("x = 173333\n")
+
+        # Create the main module that imports from the dependent module
+        main_file = examples_dir / "visual_update.py"
+        main_file.write_text("""
+import colight.plot as Plot
+from examples.visual_update_dep import x
+
+value = 1234455
+x
+""")
+
+        # Create __init__.py files to make it a proper package
+        (examples_dir / "__init__.py").write_text("")
+        (tests_dir / "__init__.py").write_text("")
+
+        # Simulate running from the tests directory (common pattern)
+        # and watching the examples subdirectory
+        import sys
+
+        original_path = sys.path.copy()
+        try:
+            # Add tests directory to sys.path to mimic real environment
+            sys.path.insert(0, str(tests_dir))
+
+            # Create dependency graph watching only the examples directory
+            graph = FileDependencyGraph(examples_dir)
+
+            # Analyze the main file
+            deps = graph.analyze_file(main_file)
+
+            # The main file should depend on visual_update_dep.py
+            expected_dep = "visual_update_dep.py"
+            assert (
+                expected_dep in deps
+            ), f"Expected {expected_dep} in dependencies, got {deps}"
+
+            # Check that changes to dep file affect main file
+            affected = graph.get_affected_files("visual_update_dep.py")
+            assert (
+                "visual_update.py" in affected
+            ), f"Expected visual_update.py to be affected, got {affected}"
+        finally:
+            sys.path[:] = original_path

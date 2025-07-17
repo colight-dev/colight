@@ -5,6 +5,7 @@ import {
   RouterProvider,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WebsocketBuilder, ExponentialBackoff, ArrayQueue } from "websocket-ts";
@@ -446,7 +447,6 @@ export const createWebSocketMessageHandler = (deps) => {
     setCurrentFile,
     setBlockResults,
     currentFile,
-    pinnedFile,
     navState,
     navigateTo,
   } = deps;
@@ -516,13 +516,13 @@ export const createWebSocketMessageHandler = (deps) => {
         break;
 
       case "file-changed":
-        // Only navigate if not pinned and not already viewing this file
-        if (!pinnedFile && navState.file !== action.path) {
-          console.log(`File changed: ${action.path}, navigating...`);
+        // Navigate to changed file only if we're viewing the root directory
+        if (navState.type === "directory" && navState.directory === "/") {
+          console.log(`File changed: ${action.path}, navigating from root...`);
           navigateTo(action.path);
-        } else if (pinnedFile) {
+        } else if (navState.type === "file") {
           console.log(
-            `File changed: ${action.path}, but view is pinned to ${pinnedFile}`,
+            `File changed: ${action.path}, but already viewing ${navState.file}`,
           );
         }
         break;
@@ -543,6 +543,7 @@ export const createWebSocketMessageHandler = (deps) => {
 const LiveServerApp = () => {
   const navigate = useNavigate();
   const params = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Parse route - SINGLE SOURCE OF TRUTH
   const routePath = params["*"] || "";
@@ -557,7 +558,6 @@ const LiveServerApp = () => {
     hideVisuals: false,
   });
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
-  const [pinnedFile, setPinnedFile] = useState(null); // For pinning current file
 
   // File-scoped state that resets when file changes
   const [blockResults, setBlockResults] = useStateWithDeps({}, [navState.file]);
@@ -629,29 +629,17 @@ const LiveServerApp = () => {
         blockResultsRef,
         changedBlocksRef,
         setCurrentFile: (file) => {
-          // Check if we should navigate based on pinning state
-          if (pinnedFile) {
-            // If a file is pinned, only navigate if it's the pinned file that changed
-            if (file === pinnedFile) {
-              navigateTo(file);
-            }
-            // Otherwise, don't navigate (but still process the update in the background)
-          } else {
-            // No file is pinned, navigate to any changed file
-            if (navState.file !== file) {
-              navigateTo(file);
-            }
-          }
+          // Navigation is now handled by the file-changed message
+          // This is just for tracking
         },
         setBlockResults,
         currentFile: navState.file,
-        pinnedFile,
         navState,
         navigateTo,
       });
       return handler(message);
     };
-  }, [navigateTo, setBlockResults, navState.file, pinnedFile]);
+  }, [navigateTo, setBlockResults, navState.file]);
 
   // Stable callback that won't cause WebSocket to reconnect
   const handleWebSocketMessage = useCallback((message) => {
@@ -746,8 +734,6 @@ const LiveServerApp = () => {
         onOpenFile={navigateTo}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}
-        pinnedFile={pinnedFile}
-        setPinnedFile={setPinnedFile}
       />
 
       <TopBar
@@ -759,8 +745,6 @@ const LiveServerApp = () => {
         isLoading={false}
         pragmaOverrides={pragmaOverrides}
         setPragmaOverrides={setPragmaOverrides}
-        pinnedFile={pinnedFile}
-        setPinnedFile={setPinnedFile}
       />
 
       <div className={tw("mt-10")}>

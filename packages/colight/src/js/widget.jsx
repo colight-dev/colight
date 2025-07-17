@@ -404,8 +404,9 @@ export function StateProvider(data) {
     if (currentAst) {
       globals.colight.instances[id] = $state;
       if (data.onMount) {
-        setTimeout(() => {
-          $state.whenReady(data.onMount);
+        setTimeout(async () => {
+          await $state.whenReady();
+          data.onMount();
         }, 10);
       }
       return () => delete globals.colight.instances[id];

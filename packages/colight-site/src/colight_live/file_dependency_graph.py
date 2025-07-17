@@ -1,20 +1,23 @@
 """File-level dependency graph for tracking import relationships."""
 
 import ast
+import logging
 import pathlib
 from collections import defaultdict
-from typing import Dict, Optional, Set, Tuple
-import logging
 from importlib.util import find_spec
+from typing import Dict, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class FileDependencyGraph:
-    """Track dependencies between Python files based on imports."""
+    """Track dependencies between Python files based on imports.
 
-    def __init__(self, base_path: pathlib.Path):
-        self.base_path = base_path.resolve()
+    watched_path: The directory being watched for changes
+    """
+
+    def __init__(self, watched_path: pathlib.Path):
+        self.watched_path = watched_path.resolve()
         # Forward dependencies: file -> files it imports
         self.imports: Dict[str, Set[str]] = defaultdict(set)
         # Reverse dependencies: file -> files that import it
@@ -42,7 +45,9 @@ class FileDependencyGraph:
                 return cached_imports
 
         try:
+            logger.debug(f"Analyzing file: {file_path}")
             imports = self._extract_imports(file_path)
+            logger.debug(f"File {relative_path} imports: {imports}")
             # Update cache
             self._cache[relative_path] = (imports, file_path.stat().st_mtime)
             # Update graph
@@ -89,46 +94,65 @@ class FileDependencyGraph:
     def _resolve_import(
         self, module_name: str, from_file: pathlib.Path
     ) -> Optional[str]:
-        """Resolve an import to a file path within the project.
+        """Resolve an import to a file path as Python would, using sys.path and the importing file's directory."""
+        import sys
 
-        Args:
-            module_name: The imported module name (e.g., 'foo.bar')
-            from_file: The file doing the importing
-
-        Returns:
-            Relative path to the imported file, or None if not found
-        """
-        # First, try to resolve as a file in the project
         parts = module_name.split(".")
+        candidates = []
 
-        # Try different possible paths
-        candidates = [
-            # Direct file import
-            self.base_path / pathlib.Path(*parts).with_suffix(".py"),
-            # Package import (__init__.py)
-            self.base_path / pathlib.Path(*parts) / "__init__.py",
-        ]
+        # DEBUG: Print what we're trying to resolve
+        logger.debug(f"Resolving import '{module_name}' from {from_file}")
 
-        # Also check relative to the importing file's directory
+        # 1. Try relative to the importing file's directory (most common for local imports)
         from_dir = from_file.parent
-        candidates.extend(
-            [
-                from_dir / pathlib.Path(*parts).with_suffix(".py"),
-                from_dir / pathlib.Path(*parts) / "__init__.py",
-            ]
-        )
+        candidates.append(from_dir / pathlib.Path(*parts).with_suffix(".py"))
+        candidates.append(from_dir / pathlib.Path(*parts) / "__init__.py")
+
+        # 2. Check if the importing file is in a package (has __init__.py files)
+        # Walk up directory tree to find package roots
+        current = from_dir
+        while self._is_within_base(current):
+            parent = current.parent
+            if (current / "__init__.py").exists():
+                # This is a package, try importing relative to its parent
+                candidates.append(parent / pathlib.Path(*parts).with_suffix(".py"))
+                candidates.append(parent / pathlib.Path(*parts) / "__init__.py")
+                current = parent
+            else:
+                break
+
+        # 3. Try all sys.path entries (mimics Python's import system)
+        for sys_path_entry in sys.path:
+            if not sys_path_entry:  # Empty string means current directory
+                sys_path_entry = "."
+            try:
+                sys_path_dir = pathlib.Path(sys_path_entry).resolve()
+            except Exception:
+                continue
+            candidates.append(sys_path_dir / pathlib.Path(*parts).with_suffix(".py"))
+            candidates.append(sys_path_dir / pathlib.Path(*parts) / "__init__.py")
+
+        # 4. Try watched_path as a fallback (for compatibility)
+        candidates.append(self.watched_path / pathlib.Path(*parts).with_suffix(".py"))
+        candidates.append(self.watched_path / pathlib.Path(*parts) / "__init__.py")
 
         for candidate in candidates:
+            logger.debug(f"Checking candidate: {candidate}")
             if candidate.exists() and candidate.is_file():
-                return self._get_relative_path(candidate)
+                # Only return files within our watched directory
+                if self._is_within_base(candidate):
+                    result = self._get_relative_path(candidate)
+                    logger.debug(f"Found import: {module_name} -> {result}")
+                    return result
+                else:
+                    logger.debug(f"Found external import: {module_name} -> {candidate}")
+                    return None
 
         # If we couldn't find it locally, check if it's an external import
-        # This way we only use find_spec for modules we can't find locally
         if self._is_external_import(module_name):
+            logger.debug(f"External import detected: {module_name}")
             return None
-
-        # If it's not external but we still can't find it, it's probably
-        # a missing import, so return None
+        logger.debug(f"Import not found: {module_name}")
         return None
 
     def _resolve_relative_import(
@@ -204,17 +228,17 @@ class FileDependencyGraph:
             return True
 
     def _is_within_base(self, path: pathlib.Path) -> bool:
-        """Check if a path is within the base directory."""
+        """Check if a path is within the watched directory."""
         try:
-            path.relative_to(self.base_path)
+            path.relative_to(self.watched_path)
             return True
         except ValueError:
             return False
 
     def _get_relative_path(self, path: pathlib.Path) -> str:
-        """Get relative path from base directory."""
+        """Get relative path from watched directory."""
         try:
-            return str(path.relative_to(self.base_path))
+            return str(path.relative_to(self.watched_path))
         except ValueError:
             return str(path)
 
@@ -229,10 +253,16 @@ class FileDependencyGraph:
         # This is a safety check to ensure we never track external files
         valid_imports = set()
         for imp in imports:
-            # Convert relative path to absolute for checking
-            abs_path = (self.base_path / imp).resolve()
+            # Check if imp is already an absolute path
+            if pathlib.Path(imp).is_absolute():
+                abs_path = pathlib.Path(imp)
+            else:
+                # Convert relative path to absolute for checking
+                abs_path = (self.watched_path / imp).resolve()
+
             if self._is_within_base(abs_path):
-                valid_imports.add(imp)
+                # Store as relative path within watched directory
+                valid_imports.add(self._get_relative_path(abs_path))
             else:
                 logger.debug(f"Skipping external import reference: {imp}")
 
@@ -305,7 +335,7 @@ class FileDependencyGraph:
                 skipped_count += 1
                 continue
 
-            # Skip files outside our base directory (safety check)
+            # Skip files outside our watched directory (safety check)
             if not self._is_within_base(py_file):
                 skipped_count += 1
                 continue

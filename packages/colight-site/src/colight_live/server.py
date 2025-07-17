@@ -21,12 +21,12 @@ from colight_site.parser import parse_colight_file
 from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
+from .cache_manager import CacheManager
+from .client_registry import ClientRegistry
+from .file_dependency_graph import FileDependencyGraph
 from .incremental_executor import IncrementalExecutor
 from .index_generator import build_file_tree_json
 from .json_generator import JsonDocumentGenerator
-from .client_registry import ClientRegistry
-from .file_dependency_graph import FileDependencyGraph
-from .cache_manager import CacheManager
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -197,10 +197,12 @@ class LiveServer:
         self.open_url = open_url
 
         self.connections: Set[Any] = set()  # WebSocket connections
-        self.client_registry = ClientRegistry()  # Track client file watches
+        self.client_registry = (
+            ClientRegistry()
+        )  # Track client file watches (absolute paths)
         self.dependency_graph = FileDependencyGraph(
-            self.input_path  # Use resolved path
-        )  # Track file dependencies
+            self.input_path
+        )  # Track file dependencies (absolute paths)
         self._http_server = None
         self._http_thread = None
         self._stop_event = asyncio.Event()
@@ -303,61 +305,60 @@ class LiveServer:
                     # Handle watch-file message
                     if message_type == "watch-file":
                         client_id = data.get("clientId")
-                        file_path = data.get("path")
-                        if client_id and file_path:
+                        rel_path = data.get("path")
+                        if client_id and rel_path:
+                            abs_path = (self.input_path / rel_path).resolve()
                             # Register client if not already registered
                             if client_id not in self.client_registry.clients:
                                 self.client_registry.register_client(
                                     client_id, websocket
                                 )
-                            # Watch the file
-                            self.client_registry.watch_file(client_id, file_path)
-                            # Log current status
+                            # Watch the file (absolute path)
+                            self.client_registry.watch_file(client_id, str(abs_path))
                             self.client_registry.log_status()
+                            if self.verbose:
+                                print(
+                                    f"DEBUG: Client {client_id} watching path: '{abs_path}'"
+                                )
                             # Unmark file from eviction if it was marked
                             if (
                                 self._api_middleware
                                 and self._api_middleware.incremental_executor
                             ):
                                 self._api_middleware.incremental_executor.unmark_file_for_eviction(
-                                    file_path
+                                    str(abs_path)
                                 )
 
                     # Handle unwatch-file message
                     elif message_type == "unwatch-file":
                         client_id = data.get("clientId")
-                        file_path = data.get("path")
-                        if client_id and file_path:
-                            self.client_registry.unwatch_file(client_id, file_path)
+                        rel_path = data.get("path")
+                        if client_id and rel_path:
+                            abs_path = (self.input_path / rel_path).resolve()
+                            self.client_registry.unwatch_file(client_id, str(abs_path))
                             self.client_registry.log_status()
                             # Mark file for potential eviction if no one is watching it
-                            if not self.client_registry.get_watchers(file_path):
+                            if not self.client_registry.get_watchers(str(abs_path)):
                                 if (
                                     self._api_middleware
                                     and self._api_middleware.incremental_executor
                                 ):
                                     self._api_middleware.incremental_executor.mark_file_for_eviction(
-                                        file_path
+                                        str(abs_path)
                                     )
 
                     # Handle existing request-load message
                     elif message_type == "request-load" and data.get("path"):
-                        # Client is requesting to load a file
-                        file_path = data["path"]
-                        client_run = data.get(
-                            "clientRun", 0
-                        )  # Get client's current run version
-                        # Find the actual source file
+                        rel_path = data["path"]
+                        client_run = data.get("clientRun", 0)
                         if self._api_middleware:
-                            # Remove .py extension if present, then add .html for file resolver
-                            html_path = file_path.removesuffix(".py") + ".html"
+                            html_path = rel_path.removesuffix(".py") + ".html"
                             source_file = (
                                 self._api_middleware.file_resolver.find_source_file(
                                     html_path
                                 )
                             )
                             if source_file:
-                                # Trigger a build for this file with client run info
                                 await self._send_reload_signal(source_file, client_run)
                 except json.JSONDecodeError:
                     pass  # Ignore invalid messages
@@ -365,20 +366,27 @@ class LiveServer:
             pass
         finally:
             self.connections.remove(websocket)
-            # Unregister client if registered
             if client_id:
                 self.client_registry.unregister_client(client_id)
 
     async def _ws_broadcast_to_file_watchers(self, message: dict, file_path: str):
         """Broadcast a message only to clients watching a specific file."""
-        # Get clients watching this file
-        watching_clients = self.client_registry.get_watchers(file_path)
+        # file_path is relative; convert to absolute for registry lookup
+        abs_path = (self.input_path / file_path).resolve()
+        watching_clients = self.client_registry.get_watchers(str(abs_path))
 
         if not watching_clients:
             return
 
+        # Convert any absolute paths in outgoing message to relative (for client)
+        if "file" in message:
+            try:
+                abs_file = (self.input_path / message["file"]).resolve()
+                message["file"] = str(abs_file.relative_to(self.input_path))
+            except Exception:
+                pass
+
         message_str = json.dumps(message)
-        # Send only to watching clients
         websockets_to_send = []
         for client_id in watching_clients:
             ws = self.client_registry.clients.get(client_id)
@@ -390,6 +398,69 @@ class LiveServer:
                 *(ws.send(message_str) for ws in websockets_to_send),
                 return_exceptions=True,
             )
+
+    def _reload_module(self, file_path: pathlib.Path):
+        """Reload a module by executing it through the document generator without sending updates."""
+        try:
+            rel_path = file_path.relative_to(self.input_path)
+            print(f"Reloading unwatched file: {rel_path}")
+
+            # Use the same execution path as watched files, but don't send updates
+            if self._api_middleware:
+                generator = JsonDocumentGenerator(
+                    verbose=self.verbose,
+                    visual_store=self._api_middleware.visual_store,
+                    incremental_executor=self._api_middleware.incremental_executor,
+                )
+                # Execute the file with changed_blocks=None to force full re-execution
+                # This ensures the module state is fully updated
+                generator.generate_json(file_path, None)
+                print(f"  Reloaded: {rel_path}")
+
+        except Exception as e:
+            print(f"Error reloading module {file_path}: {e}")
+            if self.verbose:
+                import traceback
+
+                traceback.print_exc()
+
+    async def _process_multiple_files(self, files_to_execute: Set[pathlib.Path]):
+        """Process multiple files that need execution."""
+        # Cancel any in-flight build
+        if self._current_run_task and not self._current_run_task.done():
+            self._current_run_task.cancel()
+            try:
+                await asyncio.wait_for(self._current_run_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+
+        # Separate watched and unwatched files
+        watched_files = self.client_registry.get_watched_files()
+        watched_to_execute = []
+        unwatched_to_execute = []
+
+        for file_path in files_to_execute:
+            if str(file_path) in watched_files:
+                watched_to_execute.append(file_path)
+            else:
+                unwatched_to_execute.append(file_path)
+
+        # First, reload unwatched files using importlib to update their module state
+        for file_path in unwatched_to_execute:
+            self._reload_module(file_path)
+
+        # Then, fully execute watched files with visual tracking
+        if watched_to_execute:
+            # TODO: When a dependency changes, we should force full re-execution
+            # of watched files to ensure they don't use stale cached results.
+            # For now, the execution environment is updated by reloading dependencies,
+            # but blocks that import from them may still use cached results if their
+            # content hasn't changed. This needs a proper fix in the incremental executor
+            # to track inter-file dependencies in cache keys.
+
+            # Trigger normal builds for watched files
+            for file_path in watched_to_execute:
+                await self._send_reload_signal(file_path)
 
     async def _trigger_build(
         self, file_path: pathlib.Path, client_run: Optional[int] = None
@@ -616,15 +687,17 @@ class LiveServer:
 
         # Only notify if a single file changed
         if len(changed_files) == 1:
-            file_path = changed_files[0]
-            # Send to all connected clients
+            abs_path = changed_files[0]
+            try:
+                rel_path = str(pathlib.Path(abs_path).relative_to(self.input_path))
+            except Exception:
+                rel_path = str(abs_path)
             message = {
                 "type": "file-changed",
-                "path": file_path,
-                "watched": file_path in self.client_registry.get_watched_files(),
+                "path": rel_path,
+                "watched": str(abs_path) in self.client_registry.get_watched_files(),
             }
 
-            # Send to all connected clients (not just watchers)
             if self.connections:
                 message_str = json.dumps(message)
                 await asyncio.gather(
@@ -633,7 +706,7 @@ class LiveServer:
                 )
 
                 if self.verbose:
-                    print(f"Sent file-changed notification for {file_path}")
+                    print(f"Sent file-changed notification for {rel_path}")
 
     async def _periodic_cache_eviction(self):
         """Periodically evict cache entries for unwatched files."""
@@ -671,13 +744,17 @@ class LiveServer:
         # Initial dependency graph build
         print("Building initial dependency graph...")
         self.dependency_graph.analyze_directory(self.input_path)
+        if self.verbose:
+            print("Dependency graph imports:", self.dependency_graph.imports)
+            print("Dependency graph imported_by:", self.dependency_graph.imported_by)
+
         graph_stats = self.dependency_graph.get_graph_stats()
         print(
             f"Dependency graph: {graph_stats['total_files']} files, {graph_stats['total_imports']} imports"
         )
 
         async for changes in awatch(*paths_to_watch, stop_event=self._stop_event):
-            changed_files = {pathlib.Path(path) for _, path in changes}
+            changed_files = {pathlib.Path(path).resolve() for _, path in changes}
 
             # Filter for matching files
             matching_changes = {f for f in changed_files if self._matches_patterns(f)}
@@ -688,16 +765,9 @@ class LiveServer:
                     if file_path.suffix == ".py":
                         self.dependency_graph.analyze_file(file_path)
 
-                # Buffer changed files for notification
+                # Buffer changed files for notification (absolute paths)
                 for file_path in matching_changes:
-                    try:
-                        relative_path = str(file_path.relative_to(self.input_path))
-                        self._changed_files_buffer.add(relative_path)
-                    except ValueError:
-                        # File is outside input_path, skip it
-                        if self.verbose:
-                            print(f"Ignoring file outside project: {file_path}")
-                        continue
+                    self._changed_files_buffer.add(str(file_path))
 
                 # Cancel any pending notification task and start a new one
                 if self._notification_task and not self._notification_task.done():
@@ -715,49 +785,55 @@ class LiveServer:
                     try:
                         relative_path = str(file_path.relative_to(self.input_path))
                     except ValueError:
-                        # File is outside input_path, skip it
                         if self.verbose:
                             print(f"Ignoring file outside project: {file_path}")
                         continue
-                    affected = self.dependency_graph.get_affected_files(relative_path)
+                    affected = self.dependency_graph.get_affected_files(
+                        str(relative_path)
+                    )
+                    if self.verbose:
+                        print("affected", affected)
+                        print("watched", watched_files)
 
-                    # Only execute files that are watched (or affect watched files)
-                    watched_affected = [f for f in affected if f in watched_files]
+                    # Execute ALL affected files to update their cached results
+                    # This ensures the cache stays consistent even for files not currently being watched
+                    if affected:
+                        # Check which affected files are being watched by clients
+                        watched_affected = [
+                            f
+                            for f in affected
+                            if str((self.input_path / f).resolve()) in watched_files
+                        ]
 
-                    if watched_affected:
-                        # Log with dependency info
                         if len(affected) > 1:
                             print(
                                 f"File changed: {file_path} (affects {len(affected)} files, {len(watched_affected)} watched)"
                             )
-                            print(f"  Executing for: {', '.join(watched_affected)}")
+                            print(f"  Executing for: {', '.join(affected)}")
                         else:
-                            print(f"File changed: {file_path} (watched)")
+                            print(f"File changed: {file_path}")
 
-                        # Add watched affected files to execution set
-                        for watched_file in watched_affected:
-                            # Convert back to Path for execution
-                            watched_path = self.input_path / watched_file
-                            if watched_path.exists():
-                                files_to_execute.add(watched_path)
+                        # Execute ALL affected files (not just watched ones)
+                        for affected_file in affected:
+                            affected_path = (self.input_path / affected_file).resolve()
+                            if affected_path.exists():
+                                files_to_execute.add(affected_path)
                     else:
-                        # File changed but nothing watched is affected
-                        print(
-                            f"File changed: {file_path} (no watched files affected, skipping)"
+                        print(f"File changed: {file_path} (no dependencies)")
+
+                    # Mark file for eviction if needed
+                    if (
+                        self._api_middleware
+                        and self._api_middleware.incremental_executor
+                        and not watched_files
+                    ):
+                        self._api_middleware.incremental_executor.mark_file_for_eviction(
+                            str(file_path)
                         )
 
-                        # Mark cache entries for eviction if file not watched
-                        if (
-                            self._api_middleware
-                            and self._api_middleware.incremental_executor
-                        ):
-                            self._api_middleware.incremental_executor.mark_file_for_eviction(
-                                relative_path
-                            )
-
-                # Execute only the watched files that are affected
-                for file_path in files_to_execute:
-                    await self._send_reload_signal(file_path)
+                # Process all affected files
+                if files_to_execute:
+                    await self._process_multiple_files(files_to_execute)
 
     def _matches_patterns(self, file_path: pathlib.Path) -> bool:
         """Check if file matches include/ignore patterns."""

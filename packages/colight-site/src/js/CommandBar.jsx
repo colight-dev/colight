@@ -10,8 +10,6 @@ const CommandBar = ({
   onOpenFile,
   pragmaOverrides,
   setPragmaOverrides,
-  pinnedFile,
-  setPinnedFile,
 }) => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -132,23 +130,6 @@ const CommandBar = ({
       },
     ];
 
-    if (currentFile) {
-      allCommands.push({
-        type: "pin",
-        title:
-          pinnedFile === currentFile
-            ? "Unpin Current File"
-            : "Pin Current File",
-        subtitle:
-          pinnedFile === currentFile
-            ? "📌 Unpin the current file"
-            : "📌 Pin the current file",
-        searchTerms: ["pin", "unpin", "file"],
-        action: () =>
-          setPinnedFile(pinnedFile === currentFile ? null : currentFile),
-      });
-    }
-
     if (lowerQuery) {
       // Filter commands that match the query
       const matchingCommands = allCommands.filter(
@@ -177,15 +158,7 @@ const CommandBar = ({
 
     setCommands(newCommands);
     setSelectedIndex(0);
-  }, [
-    query,
-    pragmaOverrides,
-    currentFile,
-    pinnedFile,
-    onOpenFile,
-    setPragmaOverrides,
-    setPinnedFile,
-  ]);
+  }, [query, pragmaOverrides, currentFile, onOpenFile, setPragmaOverrides]);
 
   // Focus input when opened
   useEffect(() => {
