@@ -242,6 +242,21 @@ class IncrementalExecutor(BlockExecutor):
         self.cache_by_key.clear()
         # Cache manager keeps its own copy, so we don't clear it here
 
+    def clear_file_cache(self, file_path: str):
+        """Clear all cache entries for a specific file.
+
+        This is called when a file's dependencies change.
+        """
+        # Clear from cache manager (which tracks by file)
+        self.cache_manager.clear_file_cache(file_path)
+
+        # Also remove from our local cache
+        # We need to track which cache keys belong to which file
+        # For now, clear entries that are no longer in cache manager
+        for cache_key in list(self.cache_by_key.keys()):
+            if cache_key not in self.cache_manager.entries:
+                del self.cache_by_key[cache_key]
+
     def mark_file_for_eviction(self, file_path: str):
         """Mark a file's cache entries for potential eviction."""
         self.cache_manager.mark_file_for_eviction(file_path)

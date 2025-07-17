@@ -6,6 +6,9 @@ import colight.plot as Plot
 
 from examples.visual_update_dep import x
 
+x + 1
+
+
 # Change this value to test visual updates
 value = 1234455  # <-- EDIT THIS NUMBER
 
@@ -28,5 +31,3 @@ value = 1234455  # <-- EDIT THIS NUMBER
 )
 
 # When you change the `value` variable above, the plot should update to show the new data.
-
-x + 1

@@ -399,31 +399,6 @@ class LiveServer:
                 return_exceptions=True,
             )
 
-    def _reload_module(self, file_path: pathlib.Path):
-        """Reload a module by executing it through the document generator without sending updates."""
-        try:
-            rel_path = file_path.relative_to(self.input_path)
-            print(f"Reloading unwatched file: {rel_path}")
-
-            # Use the same execution path as watched files, but don't send updates
-            if self._api_middleware:
-                generator = JsonDocumentGenerator(
-                    verbose=self.verbose,
-                    visual_store=self._api_middleware.visual_store,
-                    incremental_executor=self._api_middleware.incremental_executor,
-                )
-                # Execute the file with changed_blocks=None to force full re-execution
-                # This ensures the module state is fully updated
-                generator.generate_json(file_path, None)
-                print(f"  Reloaded: {rel_path}")
-
-        except Exception as e:
-            print(f"Error reloading module {file_path}: {e}")
-            if self.verbose:
-                import traceback
-
-                traceback.print_exc()
-
     async def _process_multiple_files(self, files_to_execute: Set[pathlib.Path]):
         """Process multiple files that need execution."""
         # Cancel any in-flight build
@@ -445,19 +420,39 @@ class LiveServer:
             else:
                 unwatched_to_execute.append(file_path)
 
-        # First, reload unwatched files using importlib to update their module state
-        for file_path in unwatched_to_execute:
-            self._reload_module(file_path)
+        # Clear Python's import cache for changed files
+        import sys
+
+        for file_path in files_to_execute:
+            # Remove from sys.modules to force fresh import
+            abs_path = str(file_path.resolve())
+            modules_to_remove = []
+            for module_name, module in sys.modules.items():
+                if module and hasattr(module, "__file__") and module.__file__:
+                    if (
+                        module.__file__ == abs_path
+                        or module.__file__ == abs_path.replace(".py", ".pyc")
+                    ):
+                        modules_to_remove.append(module_name)
+
+            for module_name in modules_to_remove:
+                print(f"  Removing {module_name} from sys.modules")
+                del sys.modules[module_name]
+
+        # Clear cache for all affected files to ensure they re-execute
+        if self._api_middleware and self._api_middleware.incremental_executor:
+            for file_path in files_to_execute:
+                # Convert to relative path for cache manager
+                try:
+                    rel_path = str(file_path.relative_to(self.input_path))
+                except ValueError:
+                    rel_path = str(file_path)
+                self._api_middleware.incremental_executor.clear_file_cache(rel_path)
+                if self.verbose:
+                    print(f"  Cleared cache for: {rel_path}")
 
         # Then, fully execute watched files with visual tracking
         if watched_to_execute:
-            # TODO: When a dependency changes, we should force full re-execution
-            # of watched files to ensure they don't use stale cached results.
-            # For now, the execution environment is updated by reloading dependencies,
-            # but blocks that import from them may still use cached results if their
-            # content hasn't changed. This needs a proper fix in the incremental executor
-            # to track inter-file dependencies in cache keys.
-
             # Trigger normal builds for watched files
             for file_path in watched_to_execute:
                 await self._send_reload_signal(file_path)
