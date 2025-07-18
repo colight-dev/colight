@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 
 from colight_live.incremental_executor import IncrementalExecutor
-from colight_live.json_generator import JsonDocumentGenerator
+from colight_live.json_api import JsonDocumentGenerator
 from colight_site.parser import parse_colight_file
 
 

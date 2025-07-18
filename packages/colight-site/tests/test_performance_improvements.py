@@ -3,7 +3,8 @@
 import pathlib
 import tempfile
 import time
-from colight_live.file_dependency_graph import FileDependencyGraph
+
+from colight_live.file_graph import FileDependencyGraph
 
 
 def test_external_imports_not_analyzed():

@@ -210,6 +210,9 @@ export function processWebSocketMessage(message, state) {
         watched: message.watched,
       };
 
+    case "directory-changed":
+      return { type: "directory-changed" };
+
     default:
       return { type: "unknown", messageType: message.type };
   }

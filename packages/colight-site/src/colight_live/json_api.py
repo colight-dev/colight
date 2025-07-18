@@ -1,11 +1,11 @@
-"""Generate JSON representation of documents for LiveServer."""
+"""Generate JSON representation of documents and file indexes for the frontend."""
 
 import base64
 import hashlib
 import json
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from colight_site.executor import DocumentExecutor
 from colight_site.model import Block, TagSet
@@ -274,3 +274,100 @@ class JsonDocumentGenerator:
             "stdout": result.output if result.output else None,
             "showsVisual": block.has_expression_result and tags.show_visuals(),
         }
+
+
+def build_file_tree_json(
+    files: List[pathlib.Path],
+    input_path: pathlib.Path,
+) -> Dict[str, Any]:
+    """Build a nested dictionary representing the file tree in JSON format.
+
+    Returns a structure like:
+    {
+        "name": "root",
+        "path": "/",
+        "type": "directory",
+        "children": [
+            {
+                "name": "example.py",
+                "path": "example.py",
+                "type": "file",
+                "htmlPath": "example.html"
+            },
+            {
+                "name": "subfolder",
+                "path": "subfolder/",
+                "type": "directory",
+                "children": [...]
+            }
+        ]
+    }
+    """
+    root = {
+        "name": input_path.name or "root",
+        "path": "/",
+        "type": "directory",
+        "children": [],
+    }
+
+    # Build a temporary nested dict structure
+    tree_dict = {}
+
+    for file_path in files:
+        # Get relative path from input directory
+        try:
+            rel_path = file_path.relative_to(input_path)
+        except ValueError:
+            # File is not relative to input path (single file mode)
+            rel_path = pathlib.Path(file_path.name)
+
+        # Build nested structure
+        parts = rel_path.parts
+        current_dict = tree_dict
+
+        # Create nested directories
+        for i, part in enumerate(parts[:-1]):
+            if part not in current_dict:
+                current_dict[part] = {}
+            current_dict = current_dict[part]
+
+        # Add file
+        file_name = parts[-1]
+        html_path = str(rel_path.with_suffix(".html"))
+        current_dict[file_name] = {"type": "file", "htmlPath": html_path}
+
+    # Convert the dict structure to the desired JSON format
+    def dict_to_tree(d: dict, path: str = "") -> List[Dict[str, Any]]:
+        items = []
+
+        for name, value in sorted(d.items()):
+            current_path = f"{path}/{name}" if path else name
+
+            if isinstance(value, dict):
+                if value.get("type") == "file":
+                    # It's a file
+                    items.append(
+                        {
+                            "name": name,
+                            "path": current_path,
+                            "type": "file",
+                            "htmlPath": value["htmlPath"],
+                        }
+                    )
+                else:
+                    # It's a directory
+                    children = dict_to_tree(value, current_path)
+                    if children:  # Only add non-empty directories
+                        items.append(
+                            {
+                                "name": name,
+                                "path": current_path,
+                                "type": "directory",
+                                "children": children,
+                            }
+                        )
+
+        return items
+
+    root["children"] = dict_to_tree(tree_dict)
+    return root

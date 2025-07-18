@@ -61,7 +61,7 @@ Implementing client-aware incremental execution to optimize the LiveServer by on
 - Reviewed existing codebase structure
 - Identified key files to modify:
   - Client: `live.jsx`, `websocket-message-handler.js`
-  - Server: `server.py`, `json_generator.py`
+  - Server: `server.py`, `json_api.py`
 
 ### 2025-01-14: Phase 1 Complete
 
@@ -229,7 +229,7 @@ Successfully implemented targeted execution with cache management:
 
 3. **Cache Management**:
 
-   - Created `CacheManager` class with file-aware eviction
+   - Created `BlockCache` class with file-aware eviction
    - Tracks cache entries by source file
    - LRU eviction with hot entry protection
    - Files marked for eviction when unwatched

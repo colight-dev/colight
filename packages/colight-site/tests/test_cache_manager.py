@@ -2,15 +2,15 @@
 
 import time
 
-from colight_live.cache_manager import CacheManager
+from colight_live.block_cache import BlockCache
 
 
-class TestCacheManager:
+class TestBlockCache:
     """Test cache management functionality."""
 
     def test_basic_operations(self):
         """Test basic add, access, remove operations."""
-        cache = CacheManager(max_size_mb=10)
+        cache = BlockCache(max_size_mb=10)
 
         # Add entry
         cache.add_entry("key1", "file1.py", 1024)
@@ -34,7 +34,7 @@ class TestCacheManager:
 
     def test_file_tracking(self):
         """Test that entries are properly tracked by file."""
-        cache = CacheManager()
+        cache = BlockCache()
 
         # Add entries from different files
         cache.add_entry("key1", "file1.py", 1024)
@@ -53,7 +53,7 @@ class TestCacheManager:
 
     def test_eviction_marking(self):
         """Test marking files for eviction."""
-        cache = CacheManager()
+        cache = BlockCache()
 
         # Add entries
         cache.add_entry("key1", "file1.py", 1024)
@@ -71,7 +71,7 @@ class TestCacheManager:
 
     def test_hot_entry_protection(self):
         """Test that hot entries are protected from eviction."""
-        cache = CacheManager(hot_threshold_seconds=300)
+        cache = BlockCache(hot_threshold_seconds=300)
 
         # Add entry and make it hot
         cache.add_entry("key1", "file1.py", 1024)
@@ -93,7 +93,7 @@ class TestCacheManager:
 
     def test_size_limit_eviction(self):
         """Test automatic eviction when size limit exceeded."""
-        cache = CacheManager(max_size_mb=1)  # 1MB limit
+        cache = BlockCache(max_size_mb=1)  # 1MB limit
 
         # Add entries that exceed limit
         cache.add_entry("key1", "file1.py", 500 * 1024)  # 500KB
@@ -106,7 +106,7 @@ class TestCacheManager:
 
     def test_lru_eviction(self):
         """Test LRU eviction policy."""
-        cache = CacheManager(max_size_mb=1)
+        cache = BlockCache(max_size_mb=1)
 
         # Add entries
         cache.add_entry("key1", "file1.py", 400 * 1024)  # 400KB
@@ -133,7 +133,7 @@ class TestCacheManager:
 
     def test_statistics(self):
         """Test cache statistics."""
-        cache = CacheManager()
+        cache = BlockCache()
 
         # Add entries
         cache.add_entry("key1", "file1.py", 1024)
@@ -158,7 +158,7 @@ class TestCacheManager:
 
     def test_entry_size_estimation(self):
         """Test entry size estimation."""
-        cache = CacheManager()
+        cache = BlockCache()
 
         # Mock result object
         class MockResult:

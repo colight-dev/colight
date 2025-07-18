@@ -1,7 +1,9 @@
 """Tests comparing hash implementations across modules."""
 
 import hashlib
+
 import libcst as cst
+
 from colight_live.incremental_executor import IncrementalExecutor
 from colight_site.model import Block, BlockInterface, Element, TagSet
 
@@ -89,8 +91,8 @@ def test_shared_hash_function_matches_incremental_executor():
         assert executor_hash == shared_hash, "Hash mismatch for block"
 
 
-def test_json_generator_vs_incremental_executor_content():
-    """Test that json_generator and incremental_executor hash content the same way."""
+def test_json_api_vs_incremental_executor_content():
+    """Test that json_api and incremental_executor hash content the same way."""
     # Create blocks with different element types
     blocks = [
         create_test_block_with_elements(

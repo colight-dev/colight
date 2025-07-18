@@ -359,3 +359,28 @@ class FileDependencyGraph:
             "files_with_imports": len(self.imports),
             "files_imported": len(self.imported_by),
         }
+
+    def remove_file(self, file_path: str):
+        """Remove a file and its dependencies from the graph."""
+        try:
+            relative_path = self._get_relative_path(pathlib.Path(file_path))
+        except ValueError:
+            relative_path = file_path
+
+        # Remove from cache
+        if relative_path in self._cache:
+            del self._cache[relative_path]
+
+        # Get the files this file imported and remove the reverse dependency
+        imports_to_clear = self.imports.get(relative_path, set())
+        for imported_file in imports_to_clear:
+            if imported_file in self.imported_by:
+                self.imported_by[imported_file].discard(relative_path)
+                if not self.imported_by[imported_file]:
+                    del self.imported_by[imported_file]
+
+        # Remove the file's own entries
+        if relative_path in self.imports:
+            del self.imports[relative_path]
+
+        logger.debug(f"Removed {relative_path} from dependency graph.")

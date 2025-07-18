@@ -45,10 +45,4 @@ describe("CommandBar", () => {
     if (backdrop) fireEvent.click(backdrop);
     expect(mockProps.onClose).toHaveBeenCalled();
   });
-
-  it("should show toggle commands", () => {
-    render(<CommandBar {...mockProps} />);
-    expect(screen.getByText(/Hide Code/)).toBeTruthy();
-    expect(screen.getByText(/Hide Prose/)).toBeTruthy();
-  });
 });

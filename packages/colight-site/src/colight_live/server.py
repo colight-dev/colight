@@ -21,12 +21,11 @@ from colight_site.parser import parse_colight_file
 from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
-from .cache_manager import CacheManager
+from .block_cache import BlockCache
 from .client_registry import ClientRegistry
-from .file_dependency_graph import FileDependencyGraph
+from .file_graph import FileDependencyGraph
 from .incremental_executor import IncrementalExecutor
-from .index_generator import build_file_tree_json
-from .json_generator import JsonDocumentGenerator
+from .json_api import JsonDocumentGenerator, build_file_tree_json
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -73,10 +72,10 @@ class ApiMiddleware:
         self.ignore = ignore
         self.visual_store = {}  # Store visual data by ID
         self.file_resolver = FileResolver(self.input_path, include, ignore)
-        # Create CacheManager with reasonable defaults
-        self.cache_manager = CacheManager(max_size_mb=500, hot_threshold_seconds=300)
+        # Create BlockCache with reasonable defaults
+        self.block_cache = BlockCache(max_size_mb=500, hot_threshold_seconds=300)
         self.incremental_executor = IncrementalExecutor(
-            verbose=verbose, cache_manager=self.cache_manager
+            verbose=verbose, block_cache=self.block_cache
         )
         self.verbose = verbose
 
@@ -399,6 +398,17 @@ class LiveServer:
                 return_exceptions=True,
             )
 
+    async def _ws_broadcast_all(self, message: dict):
+        """Broadcast a message to all connected clients."""
+        if not self.connections:
+            return
+
+        message_str = json.dumps(message)
+        await asyncio.gather(
+            *(ws.send(message_str) for ws in self.connections),
+            return_exceptions=True,
+        )
+
     async def _process_multiple_files(self, files_to_execute: Set[pathlib.Path]):
         """Process multiple files that need execution."""
         # Cancel any in-flight build
@@ -567,7 +577,7 @@ class LiveServer:
 
             # Now continue with execution (we already have document from above)
             if self._api_middleware and "document" in locals() and source_file:
-                from .json_generator import JsonDocumentGenerator
+                from .json_api import JsonDocumentGenerator
 
                 generator = JsonDocumentGenerator(
                     verbose=self.verbose,
@@ -749,86 +759,58 @@ class LiveServer:
         )
 
         async for changes in awatch(*paths_to_watch, stop_event=self._stop_event):
-            changed_files = {pathlib.Path(path).resolve() for _, path in changes}
+            directory_changed = False
+            files_to_execute = set()
 
-            # Filter for matching files
-            matching_changes = {f for f in changed_files if self._matches_patterns(f)}
+            # First, update the dependency graph based on the changes
+            for change_type, path_str in changes:
+                file_path = pathlib.Path(path_str)
+                if not self._matches_patterns(file_path):
+                    continue
 
-            if matching_changes:
-                # Update dependency graph for changed files
-                for file_path in matching_changes:
+                if change_type == 1:  # Added
+                    directory_changed = True
+                    if file_path.suffix == ".py" and file_path.exists():
+                        self.dependency_graph.analyze_file(file_path)
+                elif change_type == 2:  # Deleted
+                    directory_changed = True
                     if file_path.suffix == ".py":
+                        self.dependency_graph.remove_file(str(file_path))
+                elif change_type == 3:  # Modified
+                    if file_path.suffix == ".py" and file_path.exists():
                         self.dependency_graph.analyze_file(file_path)
 
-                # Buffer changed files for notification (absolute paths)
-                for file_path in matching_changes:
-                    self._changed_files_buffer.add(str(file_path))
+            # If the directory structure changed, notify all clients
+            if directory_changed:
+                print("Directory structure changed, notifying clients.")
+                await self._ws_broadcast_all({"type": "directory-changed"})
 
-                # Cancel any pending notification task and start a new one
-                if self._notification_task and not self._notification_task.done():
-                    self._notification_task.cancel()
-                self._notification_task = asyncio.create_task(
-                    self._send_file_change_notification()
-                )
+            # Determine which files need re-execution based on modifications
+            modified_files = {
+                pathlib.Path(path_str).resolve()
+                for change_type, path_str in changes
+                if change_type == 3 and self._matches_patterns(pathlib.Path(path_str))
+            }
 
-                # Track which files need execution
-                files_to_execute = set()
-                watched_files = self.client_registry.get_watched_files()
+            if not modified_files:
+                continue
 
-                # Find affected files and filter by what's being watched
-                for file_path in matching_changes:
-                    try:
-                        relative_path = str(file_path.relative_to(self.input_path))
-                    except ValueError:
-                        if self.verbose:
-                            print(f"Ignoring file outside project: {file_path}")
-                        continue
-                    affected = self.dependency_graph.get_affected_files(
-                        str(relative_path)
-                    )
-                    if self.verbose:
-                        print("affected", affected)
-                        print("watched", watched_files)
+            # Find all files affected by the modifications
+            for file_path in modified_files:
+                try:
+                    relative_path = str(file_path.relative_to(self.input_path))
+                except ValueError:
+                    continue
 
-                    # Execute ALL affected files to update their cached results
-                    # This ensures the cache stays consistent even for files not currently being watched
-                    if affected:
-                        # Check which affected files are being watched by clients
-                        watched_affected = [
-                            f
-                            for f in affected
-                            if str((self.input_path / f).resolve()) in watched_files
-                        ]
+                affected = self.dependency_graph.get_affected_files(relative_path)
+                for affected_file in affected:
+                    affected_path = (self.input_path / affected_file).resolve()
+                    if affected_path.exists():
+                        files_to_execute.add(affected_path)
 
-                        if len(affected) > 1:
-                            print(
-                                f"File changed: {file_path} (affects {len(affected)} files, {len(watched_affected)} watched)"
-                            )
-                            print(f"  Executing for: {', '.join(affected)}")
-                        else:
-                            print(f"File changed: {file_path}")
-
-                        # Execute ALL affected files (not just watched ones)
-                        for affected_file in affected:
-                            affected_path = (self.input_path / affected_file).resolve()
-                            if affected_path.exists():
-                                files_to_execute.add(affected_path)
-                    else:
-                        print(f"File changed: {file_path} (no dependencies)")
-
-                    # Mark file for eviction if needed
-                    if (
-                        self._api_middleware
-                        and self._api_middleware.incremental_executor
-                        and not watched_files
-                    ):
-                        self._api_middleware.incremental_executor.mark_file_for_eviction(
-                            str(file_path)
-                        )
-
-                # Process all affected files
-                if files_to_execute:
-                    await self._process_multiple_files(files_to_execute)
+            # Process all affected files
+            if files_to_execute:
+                await self._process_multiple_files(files_to_execute)
 
     def _matches_patterns(self, file_path: pathlib.Path) -> bool:
         """Check if file matches include/ignore patterns."""

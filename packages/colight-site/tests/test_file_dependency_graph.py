@@ -2,8 +2,10 @@
 
 import pathlib
 import tempfile
+
 import pytest
-from colight_live.file_dependency_graph import FileDependencyGraph
+
+from colight_live.file_graph import FileDependencyGraph
 
 
 @pytest.fixture

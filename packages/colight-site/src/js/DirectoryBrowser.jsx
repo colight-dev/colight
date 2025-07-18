@@ -40,17 +40,19 @@ const DirectoryNode = ({
     }
   }
 
-  const handleClick = () => {
-    if (isDirectory) {
-      // // If we have a collapsed child, navigate to its path instead
-      // const targetNode = collapsedChild || node;
-      // const targetPath = targetNode.path || targetNode.name;
-      // onNavigateToDirectory(targetPath);
+  const handleIconClick = (e) => {
+    e.stopPropagation(); // Prevent the name click from firing
+    if (hasChildren) {
+      setExpanded(!expanded);
+    }
+  };
 
-      // Toggle expansion separately
-      if (hasChildren) {
-        setExpanded(!expanded);
-      }
+  const handleNameClick = () => {
+    if (isDirectory) {
+      // If we have a collapsed child, navigate to its path instead
+      const targetNode = collapsedChild || node;
+      const targetPath = targetNode.path || targetNode.name;
+      onNavigateToDirectory(targetPath);
     } else {
       // For files, use the full path
       onSelectFile(node.path || node.name);
@@ -63,36 +65,23 @@ const DirectoryNode = ({
         className={tw(
           "flex items-center py-1.5 px-2 cursor-pointer transition-all duration-200 hover:bg-gray-50 rounded",
         )}
-        onClick={handleClick}
       >
-        {isDirectory && (
-          <span
-            className={tw(
-              `mr-2 text-xs transition-transform duration-200 ${
-                expanded ? "" : "-rotate-90"
-              }`,
-            )}
-            style={{ width: "12px", display: "inline-block" }}
-          >
-            {hasChildren ? "▼" : ""}
-          </span>
-        )}
-        {!isDirectory && (
-          <span
-            className={tw("mr-2 text-gray-300")}
-            style={{ width: "12px", display: "inline-block" }}
-          >
-            •
-          </span>
-        )}
         <span
           className={tw(
-            `${
-              isDirectory
-                ? "font-medium text-gray-700"
-                : "text-gray-600 hover:text-gray-900"
-            } ${displayName.includes("/") ? "text-blue-600" : ""}`,
+            `mr-2 text-xs transition-transform duration-200 ${expanded ? "" : "-rotate-90"}`,
           )}
+          style={{ width: "12px", display: "inline-block" }}
+          onClick={handleIconClick} // Use the new handler here
+        >
+          {isDirectory && hasChildren ? "▼" : isDirectory ? "" : "•"}
+        </span>
+        <span
+          className={tw(
+            `${isDirectory ? "font-medium text-gray-700" : "text-gray-600 hover:text-gray-900"} ${
+              displayName.includes("/") ? "text-blue-600" : ""
+            }`,
+          )}
+          onClick={handleNameClick} // Use the new handler here
         >
           {displayName}
         </span>

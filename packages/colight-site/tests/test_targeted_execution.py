@@ -1,8 +1,10 @@
 """Tests for targeted execution with client-aware filtering."""
 
 import pathlib
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+
 from colight_live.server import LiveServer
 
 
@@ -111,11 +113,11 @@ print("Other module")
         )
 
         # Setup API middleware with cache manager
-        from colight_live.cache_manager import CacheManager
+        from colight_live.block_cache import BlockCache
         from colight_live.incremental_executor import IncrementalExecutor
 
-        cache_manager = CacheManager()
-        incremental_executor = IncrementalExecutor(cache_manager=cache_manager)
+        block_cache = BlockCache()
+        incremental_executor = IncrementalExecutor(block_cache=block_cache)
 
         # Mock the API middleware
         server._api_middleware = Mock()
@@ -129,7 +131,7 @@ print("Other module")
         # Mark main.py for eviction (should be unmarked since it's watched)
         incremental_executor.mark_file_for_eviction("main.py")
         incremental_executor.unmark_file_for_eviction("main.py")
-        assert "main.py" not in cache_manager.marked_for_eviction
+        assert "main.py" not in block_cache.marked_for_eviction
 
         # Client unwatches main.py
         server.client_registry.unwatch_file("client1", "main.py")
@@ -139,7 +141,7 @@ print("Other module")
             incremental_executor.mark_file_for_eviction("main.py")
 
         # Verify main.py is marked for eviction
-        assert "main.py" in cache_manager.marked_for_eviction
+        assert "main.py" in block_cache.marked_for_eviction
 
     @pytest.mark.asyncio
     async def test_targeted_broadcast(self, temp_project):

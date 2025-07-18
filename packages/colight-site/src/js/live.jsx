@@ -349,7 +349,6 @@ const DocumentRenderer = ({ blocks, pragmaOverrides }) => {
   useEffect(() => {
     // Run bylight on the entire document after render
     if (docRef.current) {
-      console.log("Run bylight on docRef");
       bylight({ target: docRef.current });
     }
   }, [blocks]); // Re-run when blocks change
@@ -449,6 +448,7 @@ export const createWebSocketMessageHandler = (deps) => {
     currentFile,
     navState,
     navigateTo,
+    loadDirectoryTree,
   } = deps;
 
   return (message) => {
@@ -527,8 +527,16 @@ export const createWebSocketMessageHandler = (deps) => {
         }
         break;
 
+      case "directory-changed":
+        loadDirectoryTree();
+        break;
+
       case "unknown":
-        console.warn("Unknown WebSocket message type:", action.messageType);
+        console.warn(
+          "Unknown WebSocket message type:",
+          action.messageType,
+          action.type,
+        );
         break;
 
       case "no-op":
@@ -551,6 +559,7 @@ const LiveServerApp = () => {
 
   const [directoryTree, setDirectoryTree] = useState(null); // Cached directory tree
   const [isLoadingTree, setIsLoadingTree] = useState(false);
+
   const [pragmaOverrides, setPragmaOverrides] = useState({
     hideStatements: false,
     hideCode: false,
@@ -572,11 +581,8 @@ const LiveServerApp = () => {
   // Keep blockResults ref in sync immediately (not in useEffect)
   blockResultsRef.current = blockResults;
 
-  // Load directory tree
   const loadDirectoryTree = useCallback(async () => {
-    if (directoryTree || isLoadingTree) return; // Already loaded or loading
-
-    setIsLoadingTree(true);
+    if (!directoryTree) setIsLoadingTree(true);
     try {
       const response = await fetch("/api/index");
       if (!response.ok) {
@@ -589,14 +595,20 @@ const LiveServerApp = () => {
     } finally {
       setIsLoadingTree(false);
     }
+  }, [setDirectoryTree]);
+
+  // Load directory tree
+  const ensureDirectoryTree = useCallback(() => {
+    if (directoryTree || isLoadingTree) return; // Already loaded or loading
+    loadDirectoryTree();
   }, [directoryTree, isLoadingTree]);
 
-  // Load directory tree when viewing a directory
+  // Load directory tree when viewing a directory or when it's invalidated
   useEffect(() => {
     if (navState.type === "directory" && !directoryTree && !isLoadingTree) {
       loadDirectoryTree();
     }
-  }, [navState.type, directoryTree, isLoadingTree, loadDirectoryTree]);
+  }, [navState.type, directoryTree, isLoadingTree, ensureDirectoryTree]);
 
   // Single navigation function - always updates the route
   const navigateTo = useCallback(
@@ -636,10 +648,11 @@ const LiveServerApp = () => {
         currentFile: navState.file,
         navState,
         navigateTo,
+        loadDirectoryTree,
       });
       return handler(message);
     };
-  }, [navigateTo, setBlockResults, navState.file]);
+  }, [navigateTo, setBlockResults, navState.file, loadDirectoryTree]);
 
   // Stable callback that won't cause WebSocket to reconnect
   const handleWebSocketMessage = useCallback((message) => {
@@ -716,13 +729,13 @@ const LiveServerApp = () => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setIsCommandBarOpen((x) => !x);
-        if (!directoryTree) loadDirectoryTree();
+        if (!directoryTree) ensureDirectoryTree();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [directoryTree, loadDirectoryTree]);
+  }, [directoryTree, ensureDirectoryTree]);
 
   return (
     <>

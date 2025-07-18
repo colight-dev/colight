@@ -302,11 +302,11 @@ Implement client-aware execution and targeted updates:
 
        # Mark unwatched affected files for cache eviction
        unwatched_affected = affected_files - files_to_execute
-       cache_manager.mark_for_eviction(unwatched_affected)
+       block_cache.mark_for_eviction(unwatched_affected)
    ```
 
 4. **Cache Management** ✅:
-   - CacheManager tracks entries by source file
+   - BlockCache tracks entries by source file
    - Automatic eviction for unwatched files (30-second intervals)
    - LRU eviction with 500MB default limit
    - Hot entry protection based on access count and recency

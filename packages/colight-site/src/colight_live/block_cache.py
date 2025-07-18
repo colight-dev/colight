@@ -1,10 +1,10 @@
 """Cache management for incremental execution with file-aware eviction."""
 
+import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Set
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class CacheEntry:
             self.is_hot = True
 
 
-class CacheManager:
+class BlockCache:
     """Manages block execution cache with file-aware eviction policies."""
 
     def __init__(self, max_size_mb: int = 500, hot_threshold_seconds: int = 300):
