@@ -1,6 +1,35 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Fuse from "fuse.js";
 import { tw } from "../../../colight/src/js/api.jsx";
+import { getCommands } from "./commands.js";
+
+const RECENT_FILES_KEY = "colight-recent-files";
+const MAX_RECENT_FILES = 5;
+
+// Helper to get recent file paths from localStorage
+const getRecentPaths = () => {
+  try {
+    const stored = localStorage.getItem(RECENT_FILES_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Helper to update recent file paths
+const updateRecentPaths = (path) => {
+  try {
+    const recent = getRecentPaths();
+    const updated = [path, ...recent.filter((p) => p !== path)].slice(
+      0,
+      MAX_RECENT_FILES,
+    );
+    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+};
 
 const CommandBar = ({
   isOpen,
@@ -15,24 +44,22 @@ const CommandBar = ({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [commands, setCommands] = useState([]);
   const inputRef = useRef(null);
-  const fuse = useRef(null);
 
-  // Initialize Fuse.js for file search
-  useEffect(() => {
-    if (directoryTree && directoryTree !== null) {
-      const allFiles = [];
+  const allItems = useMemo(() => {
+    const items = [];
+    if (directoryTree !== null) {
+      // Recursive function to extract all .py files and directories
+      const extractItems = (nextItems, currentPath = "") => {
+        if (!nextItems || !Array.isArray(nextItems)) return;
 
-      // Recursive function to extract all .py files
-      const extractFiles = (items, currentPath = "") => {
-        if (!items || !Array.isArray(items)) return;
+        nextItems.forEach((item) => {
+          const fullPath =
+            item.path ||
+            (currentPath ? `${currentPath}/${item.name}` : item.name);
 
-        items.forEach((item) => {
           if (item.type === "file") {
-            // Use item.path if available, otherwise construct it
-            const fullPath =
-              item.path ||
-              (currentPath ? `${currentPath}/${item.name}` : item.name);
-            allFiles.push({
+            items.push({
+              type: "file",
               name: item.name,
               path: fullPath,
               relativePath: fullPath,
@@ -46,89 +73,64 @@ const CommandBar = ({
                 .join(" ")
                 .toLowerCase(),
             });
-          } else if (item.type === "directory" && item.children) {
-            // Use item.path if available for collapsed paths
-            const newPath =
-              item.path ||
-              (currentPath ? `${currentPath}/${item.name}` : item.name);
-            extractFiles(item.children, newPath);
+          } else if (item.type === "directory") {
+            // Add the directory itself as a searchable item
+            items.push({
+              type: "directory",
+              name: item.name,
+              path: fullPath,
+              relativePath: fullPath,
+              // Add searchable terms for directories
+              searchTerms: [
+                item.name,
+                fullPath,
+                ...fullPath.split("/").filter(Boolean),
+              ]
+                .join(" ")
+                .toLowerCase(),
+            });
+
+            // Recursively extract children
+            if (item.children) {
+              extractItems(item.children, fullPath);
+            }
           }
         });
       };
 
       // Start extraction - handle both root with children or direct array
       if (directoryTree.children) {
-        extractFiles(directoryTree.children);
+        extractItems(directoryTree.children);
       } else if (Array.isArray(directoryTree)) {
-        extractFiles(directoryTree);
+        extractItems(directoryTree);
       } else {
-        extractFiles([directoryTree]);
+        extractItems([directoryTree]);
       }
-
-      fuse.current = new Fuse(allFiles, {
-        keys: ["name", "path", "searchTerms"],
-        threshold: 0.4,
-        includeScore: true,
-        minMatchCharLength: 2,
-        // More fuzzy search options
-        location: 0,
-        distance: 100,
-        useExtendedSearch: false,
-        ignoreLocation: true,
-        findAllMatches: true,
-      });
     }
+    return items;
   }, [directoryTree]);
+
+  const fuse = useMemo(() => {
+    return new Fuse(allItems, {
+      keys: ["searchTerms"],
+      threshold: 0.4,
+      includeScore: true,
+      minMatchCharLength: 2,
+      // More fuzzy search options
+      location: 0,
+      distance: 100,
+      useExtendedSearch: false,
+      ignoreLocation: true,
+      findAllMatches: true,
+    });
+  }, [allItems]);
 
   // Generate commands based on query
   useEffect(() => {
+    if (!isOpen || !fuse) return;
     const newCommands = [];
     const lowerQuery = query.toLowerCase().trim();
-
-    // Always define available commands
-    const allCommands = [
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideStatements ? "Show" : "Hide"} Statements`,
-        subtitle: `${pragmaOverrides.hideStatements ? "○" : "●"} Toggle statement visibility`,
-        searchTerms: ["statements", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideStatements: !prev.hideStatements,
-          })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideCode ? "Show" : "Hide"} Code`,
-        subtitle: `${pragmaOverrides.hideCode ? "○" : "●"} Toggle code visibility`,
-        searchTerms: ["code", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({ ...prev, hideCode: !prev.hideCode })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideProse ? "Show" : "Hide"} Prose`,
-        subtitle: `${pragmaOverrides.hideProse ? "○" : "●"} Toggle prose visibility`,
-        searchTerms: ["prose", "text", "markdown", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideProse: !prev.hideProse,
-          })),
-      },
-      {
-        type: "toggle",
-        title: `${pragmaOverrides.hideVisuals ? "Show" : "Hide"} Visuals`,
-        subtitle: `${pragmaOverrides.hideVisuals ? "○" : "●"} Toggle visual outputs`,
-        searchTerms: ["visuals", "visual", "output", "hide", "show", "toggle"],
-        action: () =>
-          setPragmaOverrides((prev) => ({
-            ...prev,
-            hideVisuals: !prev.hideVisuals,
-          })),
-      },
-    ];
+    const allCommands = getCommands({ pragmaOverrides, setPragmaOverrides });
 
     if (lowerQuery) {
       // Filter commands that match the query
@@ -140,25 +142,69 @@ const CommandBar = ({
       );
       newCommands.push(...matchingCommands);
 
-      // File search results
-      if (fuse.current) {
-        const results = fuse.current.search(lowerQuery);
-        const fileCommands = results.slice(0, 10).map((result) => ({
-          type: "file",
-          title: result.item.name,
-          subtitle: result.item.relativePath,
-          action: () => onOpenFile(result.item.path),
-        }));
-        newCommands.push(...fileCommands);
-      }
+      // File and directory search results
+      const results = fuse.search(lowerQuery);
+      const itemCommands = results.slice(0, 10).map((result) => ({
+        type: result.item.type,
+        title: result.item.name,
+        subtitle:
+          result.item.type === "directory"
+            ? `📁 ${result.item.relativePath}`
+            : result.item.relativePath,
+        action: () => {
+          if (result.item.type === "file") {
+            updateRecentPaths(result.item.path);
+          }
+          onOpenFile(result.item.path);
+        },
+      }));
+      newCommands.push(...itemCommands);
     } else {
-      // Show all commands when no query
+      // Show recent files first when no query
+
+      const recentPaths = getRecentPaths();
+      const recentItems = recentPaths
+        .map((path) => allItems.find((item) => item.path === path))
+        .filter(Boolean)
+        .map((item) => ({
+          type: item.type,
+          title: item.name,
+          subtitle:
+            item.type === "directory"
+              ? `📁 ${item.relativePath} (recent)`
+              : `${item.relativePath} (recent)`,
+          action: () => {
+            if (item.type === "file") {
+              updateRecentPaths(item.path);
+            }
+            onOpenFile(item.path);
+          },
+        }));
+
+      newCommands.push(...recentItems);
+
+      // Then show all commands
       newCommands.push(...allCommands);
     }
 
     setCommands(newCommands);
     setSelectedIndex(0);
-  }, [query, pragmaOverrides, currentFile, onOpenFile, setPragmaOverrides]);
+  }, [
+    query,
+    pragmaOverrides,
+    currentFile,
+    onOpenFile,
+    setPragmaOverrides,
+    isOpen,
+    fuse,
+  ]);
+
+  // Track current file changes
+  useEffect(() => {
+    if (currentFile && currentFile.endsWith(".py")) {
+      updateRecentPaths(currentFile);
+    }
+  }, [currentFile]);
 
   // Focus input when opened
   useEffect(() => {
@@ -228,7 +274,7 @@ const CommandBar = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search files or type '>' for commands..."
+            placeholder="Search files, directories or type '>' for commands..."
             className={tw(
               `w-full text-lg focus:outline-none placeholder-gray-400`,
             )}

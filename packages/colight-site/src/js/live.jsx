@@ -416,7 +416,7 @@ const useWebSocket = (onMessage, wsRefOut) => {
       })
       .onMessage((_, event) => {
         const data = JSON.parse(event.data);
-        console.log("WebSocket message:", data);
+        // console.log("WebSocket message:", data);
         onMessage(data);
       })
       .onRetry(() => {
@@ -487,7 +487,7 @@ export const createWebSocketMessageHandler = (deps) => {
         break;
 
       case "run-end":
-        console.log(`Run ${action.run} completed`);
+        // console.log(`Run ${action.run} completed`);
         if (action.error) {
           console.error("Run error:", action.error);
         }
