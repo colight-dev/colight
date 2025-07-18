@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import Fuse from "fuse.js";
 import { tw } from "../../../colight/src/js/api.jsx";
 import { getCommands } from "./commands.js";
+import createLogger from "./logger.js";
 
+const logger = createLogger("CommandBar");
 const RECENT_FILES_KEY = "colight-recent-files";
 const MAX_RECENT_FILES = 5;
 
@@ -11,7 +13,8 @@ const getRecentPaths = () => {
   try {
     const stored = localStorage.getItem(RECENT_FILES_KEY);
     return stored ? JSON.parse(stored) : [];
-  } catch {
+  } catch (e) {
+    logger.error("Failed to get recent paths from localStorage", e);
     return [];
   }
 };
@@ -25,8 +28,10 @@ const updateRecentPaths = (path) => {
       MAX_RECENT_FILES,
     );
     localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+    logger.debug("Updated recent paths", updated);
     return updated;
-  } catch {
+  } catch (e) {
+    logger.error("Failed to update recent paths in localStorage", e);
     return [];
   }
 };
@@ -128,6 +133,7 @@ const CommandBar = ({
   // Generate commands based on query
   useEffect(() => {
     if (!isOpen || !fuse) return;
+    logger.debug("Generating commands for query:", query);
     const newCommands = [];
     const lowerQuery = query.toLowerCase().trim();
     const allCommands = getCommands({ pragmaOverrides, setPragmaOverrides });
@@ -144,6 +150,7 @@ const CommandBar = ({
 
       // File and directory search results
       const results = fuse.search(lowerQuery);
+      logger.debug("Fuse search results:", results);
       const itemCommands = results.slice(0, 10).map((result) => ({
         type: result.item.type,
         title: result.item.name,
@@ -209,6 +216,7 @@ const CommandBar = ({
   // Focus input when opened
   useEffect(() => {
     if (isOpen) {
+      logger.info("CommandBar opened");
       inputRef.current?.focus();
       setQuery("");
     }

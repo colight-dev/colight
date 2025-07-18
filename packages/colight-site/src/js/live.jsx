@@ -22,6 +22,9 @@ import { processWebSocketMessage } from "./websocket-message-handler.js";
 import { useStateWithDeps } from "./hooks/useStateWithDeps.js";
 import bylight from "./bylight.ts";
 import { getClientId } from "./client-id.js";
+import createLogger from "./logger.js";
+
+const logger = createLogger("live");
 
 // ========== Constants ==========
 
@@ -124,7 +127,7 @@ const ColightVisual = ({ data, dataRef }) => {
           null,
         ]);
       } catch (error) {
-        console.error("Error parsing Colight visual:", error);
+        logger.error("Error parsing Colight visual:", error);
       }
     } else {
       setIsLoading(true);
@@ -140,7 +143,7 @@ const ColightVisual = ({ data, dataRef }) => {
           setLoadedId(dataRef.id);
         })();
       } catch (error) {
-        console.error("Error loading visual:", error);
+        logger.error("Error loading visual:", error);
       } finally {
         setIsLoading(false);
       }
@@ -401,26 +404,26 @@ const useWebSocket = (onMessage, wsRefOut) => {
       .withBackoff(new ExponentialBackoff(1000, 2, 30000)) // 1s initial, 2x multiplier, 30s max
       .withBuffer(new ArrayQueue()) // Buffer messages when disconnected
       .onOpen(() => {
-        console.log("LiveServer connected");
+        logger.info("LiveServer connected");
         setConnected(true);
         if (wsRefOut) {
           wsRefOut.current = ws;
         }
       })
       .onClose(() => {
-        console.log("LiveServer disconnected");
+        logger.info("LiveServer disconnected");
         setConnected(false);
       })
       .onError((_, error) => {
-        console.error("WebSocket error:", error);
+        logger.error("WebSocket error:", error);
       })
       .onMessage((_, event) => {
         const data = JSON.parse(event.data);
-        // console.log("WebSocket message:", data);
+        logger.debug("WebSocket message:", data);
         onMessage(data);
       })
       .onRetry(() => {
-        console.log("WebSocket reconnecting...");
+        logger.info("WebSocket reconnecting...");
       })
       .build();
 
@@ -487,9 +490,9 @@ export const createWebSocketMessageHandler = (deps) => {
         break;
 
       case "run-end":
-        // console.log(`Run ${action.run} completed`);
+        logger.info(`Run ${action.run} completed`);
         if (action.error) {
-          console.error("Run error:", action.error);
+          logger.error("Run error:", action.error);
         }
 
         // Check if we should auto-scroll to a changed block
@@ -518,10 +521,10 @@ export const createWebSocketMessageHandler = (deps) => {
       case "file-changed":
         // Navigate to changed file only if we're viewing the root directory
         if (navState.type === "directory" && navState.directory === "/") {
-          console.log(`File changed: ${action.path}, navigating from root...`);
+          logger.info(`File changed: ${action.path}, navigating from root...`);
           navigateTo(action.path);
         } else if (navState.type === "file") {
-          console.log(
+          logger.info(
             `File changed: ${action.path}, but already viewing ${navState.file}`,
           );
         }
@@ -532,7 +535,7 @@ export const createWebSocketMessageHandler = (deps) => {
         break;
 
       case "unknown":
-        console.warn(
+        logger.warn(
           "Unknown WebSocket message type:",
           action.messageType,
           action.type,
