@@ -29,6 +29,7 @@ describe("Server Integration Tests", () => {
         testDir,
         "--port",
         String(port),
+        "--no-open",
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
@@ -136,13 +137,26 @@ describe("Server Integration Tests", () => {
 
   it("should handle WebSocket connections for file updates", async () => {
     const ws = new WebSocket(wsUrl);
+    const clientId = "test-client-" + Date.now();
 
     await new Promise((resolve, reject) => {
       ws.on("open", resolve);
       ws.on("error", reject);
     });
 
-    // Request a file
+    // First, register the client to watch the file
+    ws.send(
+      JSON.stringify({
+        type: "watch-file",
+        clientId: clientId,
+        path: "main.py",
+      }),
+    );
+
+    // Wait a bit for the watch registration to process
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Now request the file
     const fileRequest = new Promise((resolve) => {
       ws.on("message", (data) => {
         const message = JSON.parse(data);

@@ -1,2 +1,0 @@
-# Test Project
-print("README")

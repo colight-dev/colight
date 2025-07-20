@@ -6,7 +6,7 @@ from colight_live.dependency_analyzer import analyze_block
 def test_attribute_access_basic():
     """Test basic attribute access detection."""
     code = "result = math.sqrt(16)"
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Should require 'math', not 'sqrt'
     assert "math" in requires
@@ -21,7 +21,7 @@ def test_attribute_access_false_positive():
 foo = SomeNamespace()
 result = foo.bar
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Expected behavior: foo is provided but NOT required
     assert "foo" in provides  # Correct
@@ -35,7 +35,7 @@ result = foo.bar
 def test_nested_attribute_access():
     """Test nested attribute access."""
     code = "value = obj.attr1.attr2.method()"
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Should only require the base object
     assert "obj" in requires
@@ -48,7 +48,7 @@ def test_nested_attribute_access():
 def test_attribute_assignment():
     """Test attribute assignment."""
     code = "obj.attr = 42"
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Current behavior: doesn't track attribute assignments as requires
     # This could be considered correct (we're not reading obj, just modifying it)
@@ -61,7 +61,7 @@ def test_attribute_assignment():
 def test_method_call_on_literal():
     """Test method calls on literals."""
     code = 'result = "hello".upper()'
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Should not require anything (literal has the method)
     assert len(requires) == 0
@@ -74,7 +74,7 @@ def test_chained_attribute_access():
 config = get_config()
 debug_mode = config.debug.enabled
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     assert "get_config" in requires
     assert "config" in provides
@@ -96,7 +96,7 @@ x = obj.value + 10
 if obj.flag:
     pass
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     assert "create_object" in requires
     assert "print" not in requires  # builtins are excluded
@@ -113,7 +113,7 @@ def test_self_attribute_access():
 def method(self):
     return self.attribute
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Should provide the method
     assert "method" in provides
@@ -128,7 +128,7 @@ def test_imported_module_attribute():
 import os
 path = os.path.join("a", "b")
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     assert "os" in provides  # Import provides os
     assert "path" in provides

@@ -87,6 +87,8 @@ class DependencyVisitor(libcst.CSTVisitor):
                             )
                             if file_path:
                                 self.file_dependencies.add(file_path)
+                            # Debug
+                            # print(f"Import {module_name}: resolved to {file_path}")
 
                     if alias.asname:
                         # import foo as bar -> provides 'bar'
@@ -131,6 +133,8 @@ class DependencyVisitor(libcst.CSTVisitor):
                 )
                 if file_path:
                     self.file_dependencies.add(file_path)
+                # Debug
+                # print(f"ImportFrom {module_name} (level={relative_level}): resolved to {file_path}")
 
         # Handle imported names
         if isinstance(node.names, libcst.ImportStar):

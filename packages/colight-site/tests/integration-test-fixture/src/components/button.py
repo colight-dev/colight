@@ -1,3 +1,0 @@
-# Button
-class Button:
-    pass

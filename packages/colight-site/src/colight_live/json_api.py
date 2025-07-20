@@ -50,12 +50,12 @@ class JsonDocumentGenerator:
                 document, changed_blocks, str(source_path), str(source_path.name)
             )
             # Create a map of block ID to result for easy lookup
-            result_map = {str(block.id): result for block, result in block_results}
+            result_map = {block.id: result for block, result in block_results}
             # Create results list in document order
             results = []
             for block in document.blocks:
-                if str(block.id) in result_map:
-                    results.append(result_map[str(block.id)])
+                if block.id in result_map:
+                    results.append(result_map[block.id])
                 else:
                     # Shouldn't happen, but handle gracefully
                     results.append(ExecutionResult())
@@ -63,9 +63,6 @@ class JsonDocumentGenerator:
             # Fall back to regular execution
             executor = DocumentExecutor(verbose=self.verbose)
             results, _ = executor.execute(document, str(source_path))
-
-        # Generate file hash for unique block IDs
-        file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
 
         # Build JSON structure
         doc = {
@@ -79,8 +76,9 @@ class JsonDocumentGenerator:
 
         # Convert each block to JSON
         for i, (block, result) in enumerate(zip(document.blocks, results)):
+            # Use block's ID (which is its cache key)
             json_block = self._block_to_json(
-                block, result, document.tags, i, file_hash, source_path
+                block, result, document.tags, i, block.id, source_path
             )
             if json_block:  # Skip empty blocks
                 doc["blocks"].append(json_block)
@@ -106,9 +104,6 @@ class JsonDocumentGenerator:
         if self.pragma:
             document.tags = document.tags | TagSet(frozenset(self.pragma))
 
-        # Generate file hash for unique block IDs
-        file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
-
         # Execute incrementally in document order (streaming)
         if self.incremental_executor:
             # Use the new streaming method that executes in document order
@@ -119,8 +114,9 @@ class JsonDocumentGenerator:
             ) in self.incremental_executor.execute_incremental_streaming(
                 document, None, str(source_path), str(source_path.name)
             ):
+                # Use block's ID (which is its cache key)
                 json_block = self._block_to_json(
-                    block, result, document.tags, i, file_hash, source_path
+                    block, result, document.tags, i, block.id, source_path
                 )
                 if json_block:
                     # Extract the parts we need for the WebSocket message
@@ -132,17 +128,20 @@ class JsonDocumentGenerator:
                         "elements": json_block.get("elements", []),
                         "cache_hit": getattr(result, "cache_hit", False),
                         "content_changed": getattr(result, "content_changed", False),
+                        "ordinal": i,  # Position in document
                     }
-                    yield json_block["id"], result_dict
+                    yield block.id, result_dict
                 i += 1
         else:
             # Fall back to regular execution
             executor = DocumentExecutor(verbose=self.verbose)
             results, _ = executor.execute(document, str(source_path))
 
+            # For non-incremental execution
             for i, (block, result) in enumerate(zip(document.blocks, results)):
+                # Use block's ID (cache key)
                 json_block = self._block_to_json(
-                    block, result, document.tags, i, file_hash, source_path
+                    block, result, document.tags, i, block.id, source_path
                 )
                 if json_block:
                     result_dict = {
@@ -151,21 +150,22 @@ class JsonDocumentGenerator:
                         "error": json_block.get("error"),
                         "showsVisual": json_block.get("showsVisual", False),
                         "elements": json_block.get("elements", []),
-                        "cache_hit": getattr(result, "cache_hit", False),
-                        "content_changed": getattr(result, "content_changed", False),
+                        "cache_hit": False,
+                        "content_changed": False,
+                        "ordinal": i,  # Position in document
                     }
-                    yield json_block["id"], result_dict
+                    yield block.id, result_dict
 
     def _block_to_json(
         self,
         block: Block,
         result,
         file_tags: TagSet,
-        block_id: int,
-        file_hash: str,
+        block_ordinal: int,
+        block_id: str,
         source_path: pathlib.Path,
     ) -> Optional[Dict[str, Any]]:
-        """Convert a single block to JSON representation with stable IDs and hashing."""
+        """Convert a single block to JSON representation using cache key as ID."""
 
         # Merge file and block tags
         tags = file_tags | block.tags
@@ -219,7 +219,6 @@ class JsonDocumentGenerator:
             for elem in reversed(elements):
                 if elem["type"] == "expression":
                     visual_size = len(result.colight_bytes)
-                    visual_id = f"{file_hash}-{block.id}"
 
                     # Include metadata
                     elem["visual_meta"] = {"size": visual_size, "format": "colight"}
@@ -253,11 +252,6 @@ class JsonDocumentGenerator:
         if not elements:
             return None
 
-        # Generate stable block ID
-        # Use block.id if available (should be unique), otherwise use ordinal
-        unique_id = block.id if block.id != 0 else block_id
-        stable_id = f"{file_hash}-B{unique_id:05d}"
-
         # Generate interface hash (for future dependency tracking)
         interface_text = "\n".join(sorted(interface_parts)) if interface_parts else ""
         interface_hash = hashlib.sha256(interface_text.encode()).hexdigest()[:16]
@@ -267,7 +261,7 @@ class JsonDocumentGenerator:
         content_hash = hashlib.sha256(content_text.encode()).hexdigest()[:16]
 
         return {
-            "id": stable_id,
+            "id": block_id,  # Now using cache key as ID
             "interface": {
                 "provides": block.interface.provides,
                 "requires": block.interface.requires,
@@ -275,7 +269,7 @@ class JsonDocumentGenerator:
             "interface_hash": interface_hash,
             "content_hash": content_hash,
             "line": block.start_line,
-            "ordinal": block_id,
+            "ordinal": block_ordinal,
             "elements": elements,
             "error": result.error if result.error else None,
             "stdout": result.output if result.output else None,

@@ -216,7 +216,7 @@ class Block:
     elements: List[Element]
     tags: TagSet
     start_line: int
-    id: int = field(default=0)
+    id: str = field(default="")  # Cache key as ID
     interface: BlockInterface = field(default_factory=BlockInterface)
 
     # Cached compiled code (populated on demand)
@@ -376,3 +376,7 @@ class Document:
     def get_executable_blocks(self) -> List[Block]:
         """Get only blocks that contain code to execute."""
         return [block for block in self.blocks if not block.is_empty]
+
+    def get_cache_keys(self) -> List[str]:
+        """Get all cache keys (block IDs) in document order."""
+        return [block.id for block in self.blocks]

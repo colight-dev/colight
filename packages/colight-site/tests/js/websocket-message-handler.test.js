@@ -37,8 +37,7 @@ describe("WebSocket Message Handler", () => {
         {
           run: 2,
           file: "test.py",
-          blocks: ["block-1", "block-2"],
-          dirty: ["block-2"],
+          block_ids: ["block-1", "block-2"],
         },
         1, // latestRun is 1
         { "block-1": { result: "old" } },
@@ -48,9 +47,10 @@ describe("WebSocket Message Handler", () => {
         latestRun: 2,
         currentFile: "test.py",
         changedBlocks: new Set(),
+        block_ids: ["block-1", "block-2"],
         blockResults: {
-          "block-1": { result: "old", pending: false },
-          "block-2": { pending: true, elements: [], ok: true },
+          "block-1": { result: "old", ordinal: 0 },
+          "block-2": { elements: [], ok: true, ordinal: 1 },
         },
       });
     });
@@ -60,7 +60,7 @@ describe("WebSocket Message Handler", () => {
     it("should handle unchanged blocks", () => {
       const changedBlocks = new Set();
       const result = processBlockResult(
-        { run: 1, block: "block-1", unchanged: true },
+        { run: 1, block: "block-1", cache_hit: true },
         1,
         { "block-1": { result: "old", pending: true } },
         changedBlocks,
@@ -68,7 +68,7 @@ describe("WebSocket Message Handler", () => {
 
       expect(result).toEqual({
         blockId: "block-1",
-        blockResult: { result: "old", pending: false },
+        blockResult: { result: "old", pending: true },
         changed: false,
       });
       expect(changedBlocks.size).toBe(0);

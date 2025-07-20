@@ -5,6 +5,7 @@ import fnmatch
 import itertools
 import json
 import pathlib
+import sys
 import threading
 import webbrowser
 from typing import Any, List, Optional, Set
@@ -17,7 +18,7 @@ from werkzeug.wrappers import Request, Response
 
 from colight_site.file_resolver import FileResolver, find_files
 from colight_site.model import TagSet
-from colight_site.parser import parse_document
+from colight_site.parser import parse_file
 from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
@@ -301,6 +302,7 @@ class LiveServer:
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")
+                    print("Received message", data)
 
                     # Handle watch-file message
                     if message_type == "watch-file":
@@ -432,8 +434,6 @@ class LiveServer:
                 unwatched_to_execute.append(file_path)
 
         # Clear Python's import cache for changed files
-        import sys
-
         for file_path in files_to_execute:
             # Remove from sys.modules to force fresh import
             abs_path = str(file_path.resolve())
@@ -499,6 +499,7 @@ class LiveServer:
                     html_path + ".html"
                 )
                 if not source_file:
+                    # TODO, do not use run-start here, use an error message that shows itself..
                     await self._ws_broadcast_to_file_watchers(
                         {"run": run, "type": "run-start", "file": file_path_str},
                         file_path_str,
@@ -508,69 +509,29 @@ class LiveServer:
                         file_path_str,
                     )
                     return
+                doc = parse_file(source_file)
 
-                # Parse the document with file path information
-                source_code = source_file.read_text(encoding="utf-8")
-                try:
-                    rel_path = str(source_file.relative_to(self.input_path))
-                except ValueError:
-                    rel_path = str(source_file)
-                document = parse_document(source_code, rel_path, str(self.input_path))
-
-                # Apply config pragma if any
+                # Apply pragma if any
                 if self.pragma:
-                    document.tags = document.tags | TagSet(frozenset(self.pragma))
+                    doc.tags = doc.tags | TagSet(frozenset(self.pragma))
 
-                # Generate file hash for stable block IDs (same as in JSON generator)
-                import hashlib
+                # Get block IDs from analyzed document
+                all_block_ids = doc.get_cache_keys()
 
-                file_hash = hashlib.sha256(str(source_file).encode()).hexdigest()[:6]
-
-                # Get block IDs in document order with proper format
-                block_ids = []
-                for i, block in enumerate(document.blocks):
-                    unique_id = block.id if block.id != 0 else i
-                    stable_id = f"{file_hash}-B{unique_id:05d}"
-                    block_ids.append(stable_id)
-
-                # Determine which blocks are dirty (will be re-executed)
-                if self._api_middleware.incremental_executor:
-                    dirty_blocks_raw = (
-                        self._api_middleware.incremental_executor.get_dirty_blocks(
-                            document
-                        )
-                    )
-                    # Convert raw block IDs to stable IDs
-                    dirty_blocks = []
-                    for i, block in enumerate(document.blocks):
-                        if str(block.id) in dirty_blocks_raw:
-                            unique_id = block.id if block.id != 0 else i
-                            stable_id = f"{file_hash}-B{unique_id:05d}"
-                            dirty_blocks.append(stable_id)
-                else:
-                    # If no incremental executor, all blocks are dirty
-                    dirty_blocks = block_ids
-
-                # Send enhanced run-start message with block manifest
+                # Send run-start message with block manifest
+                # Note: We don't pre-compute dirty blocks anymore - cache hit/miss during
+                # execution will determine what actually runs
                 await self._ws_broadcast_to_file_watchers(
                     {
                         "run": run,
                         "type": "run-start",
                         "file": file_path_str,
-                        "blocks": block_ids,  # All blocks in document order
-                        "dirty": dirty_blocks,  # Blocks that will be re-executed
+                        "block_ids": all_block_ids,  # All block IDs (cache keys) in document order
                     },
                     file_path_str,
                 )
-            else:
-                # Fallback to simple run-start
-                await self._ws_broadcast_to_file_watchers(
-                    {"run": run, "type": "run-start", "file": file_path_str},
-                    file_path_str,
-                )
 
-            # Now continue with execution (we already have document from above)
-            if self._api_middleware and "document" in locals() and source_file:
+                # Execute incrementally and stream results
                 from .json_api import JsonDocumentGenerator
 
                 generator = JsonDocumentGenerator(
@@ -580,9 +541,9 @@ class LiveServer:
                     incremental_executor=self._api_middleware.incremental_executor,
                 )
 
-                # Execute incrementally and stream results
+                # Pass the analyzed document
                 for block_id, result in generator.execute_incremental_with_results(
-                    source_file, document
+                    source_file, doc
                 ):
                     # Check if task was cancelled
                     task = asyncio.current_task()
@@ -594,9 +555,16 @@ class LiveServer:
                     content_changed = result.get("content_changed", False)
                     unchanged = cache_hit and not content_changed
 
-                    # Always send block-result for dirty blocks, but optimize payload
-                    # If client is behind (force_full_data), always send full data
-                    if unchanged and not force_full_data:
+                    # Optimize payload for unchanged blocks
+                    # ONLY send lightweight message if:
+                    # 1. Block execution was unchanged (cache hit)
+                    # 2. Client is not behind (force_full_data is false)
+                    # 3. AND this is not the first run after a reload
+                    #
+                    # Send lightweight message when block is unchanged and client is up to date
+                    send_lightweight = unchanged and not force_full_data
+
+                    if send_lightweight:
                         # Send lightweight message for unchanged blocks
                         await self._ws_broadcast_to_file_watchers(
                             {
@@ -622,6 +590,9 @@ class LiveServer:
                                 "elements": result.get("elements", []),
                                 "cache_hit": cache_hit,
                                 "content_changed": content_changed,
+                                "ordinal": result.get(
+                                    "ordinal"
+                                ),  # Position in document
                             },
                             file_path_str,
                         )
@@ -631,6 +602,11 @@ class LiveServer:
                     {"run": run, "type": "run-end"}, file_path_str
                 )
             else:
+                # Fallback to simple run-start when no API middleware
+                await self._ws_broadcast_to_file_watchers(
+                    {"run": run, "type": "run-start", "file": file_path_str},
+                    file_path_str,
+                )
                 # This shouldn't happen in normal operation
                 await self._ws_broadcast_to_file_watchers(
                     {"run": run, "type": "run-end", "error": "Server not initialized"},

@@ -8,7 +8,7 @@ def test_star_import_sentinel():
     """Test that star imports create the __star_import__ sentinel."""
     # Code with star import
     code = "from math import *"
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
 
     # Should have the sentinel in provides
     assert "__star_import__" in provides
@@ -19,11 +19,11 @@ def test_star_import_with_usage():
     """Test star import with symbols that might come from it."""
     # Block 1: star import
     code1 = "from math import *"
-    provides1, requires1 = analyze_block(code1)
+    provides1, requires1, _ = analyze_block(code1)
 
     # Block 2: uses something that might come from the star import
     code2 = "result = sin(pi / 2)"
-    provides2, requires2 = analyze_block(code2)
+    provides2, requires2, _ = analyze_block(code2)
 
     # Current behavior: sin and pi are required but not provided
     assert "sin" in requires2

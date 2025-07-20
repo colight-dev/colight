@@ -1,5 +1,6 @@
 // WebSocket message processing logic extracted for testability
-
+import createLogger from "./logger.js";
+const logger = createLogger("websocket-message-handler");
 /**
  * Process a run-start message
  * @param {Object} message - The WebSocket message
@@ -27,49 +28,36 @@ export function processRunStart(
     latestRun: message.run,
     currentFile: file,
     changedBlocks: new Set(),
+    block_ids: message.block_ids || [], // Store the block IDs list
   };
 
-  // Handle the new manifest-based update
-  if (message.blocks && message.dirty) {
+  // Handle the new cache-key-based system
+  if (message.block_ids) {
     const newResults = {};
-    const blockSet = new Set(message.blocks);
-    const dirtySet = new Set(message.dirty);
 
-    // Process each block in the manifest
-    for (const blockId of message.blocks) {
+    // Simple logic:
+    // - If we have the block ID already, keep that data
+    // - If we don't have it, create empty placeholder
+
+    for (let i = 0; i < message.block_ids.length; i++) {
+      const blockId = message.block_ids[i];
       if (currentBlockResults[blockId]) {
-        // Existing block
-        if (dirtySet.has(blockId)) {
-          // Mark as pending (will be re-executed)
-          newResults[blockId] = {
-            ...currentBlockResults[blockId],
-            pending: true,
-            cache_hit: false,
-          };
-        } else {
-          // Keep unchanged, but clear any pending state
-          newResults[blockId] = {
-            ...currentBlockResults[blockId],
-            pending: false,
-          };
-        }
-      } else {
-        // New block - create placeholder
-        // Always mark as pending since we don't have data for it yet
-        // The server will send either full data or "unchanged"
+        // Same block ID = unchanged content, just update ordinal
         newResults[blockId] = {
-          pending: true,
+          ...currentBlockResults[blockId],
+          ordinal: i,
+        };
+      } else {
+        // New block ID = content changed, wait for data
+        newResults[blockId] = {
           elements: [],
           ok: true,
+          ordinal: i,
         };
       }
     }
 
     result.blockResults = newResults;
-  } else {
-    // Legacy behavior - don't include blockResults in the result
-    // This will prevent clearing existing blocks unnecessarily
-    // result.blockResults = {};
   }
 
   return result;
@@ -93,25 +81,32 @@ export function processBlockResult(
     return null;
   }
 
-  // Handle unchanged blocks (lightweight message)
+  // The backend sends either:
+  // 1. unchanged: true - block had same ID, so cache hit
+  // 2. Full data - block had new ID or was forced to send full data
+
   if (message.unchanged) {
+    // Backend says unchanged, which means the block ID hasn't changed
+    // We should already have the data from a previous run
+    if (!currentBlockResults[message.block]) {
+      // This shouldn't happen - unchanged means we've seen this ID before
+      console.warn(`Got unchanged for unknown block ${message.block}`);
+      return null;
+    }
+
     return {
       blockId: message.block,
-      blockResult: {
-        ...currentBlockResults[message.block],
-        pending: false,
-      },
+      blockResult: currentBlockResults[message.block],
       changed: false,
     };
   }
 
-  // Track changed blocks
-  const changed = message.content_changed || false;
-  if (changed) {
+  // Full data - either new block or forced full data
+  const isNewBlock = !currentBlockResults[message.block];
+  if (isNewBlock) {
     changedBlocks.add(message.block);
   }
 
-  // Update block result with new data
   return {
     blockId: message.block,
     blockResult: {
@@ -120,11 +115,10 @@ export function processBlockResult(
       error: message.error,
       showsVisual: message.showsVisual,
       elements: message.elements || [],
-      cache_hit: message.cache_hit,
-      content_changed: message.content_changed,
-      pending: false,
+      cache_hit: message.cache_hit || false,
+      ordinal: message.ordinal,
     },
-    changed,
+    changed: isNewBlock,
   };
 }
 
@@ -155,7 +149,6 @@ export function processRunEnd(message, latestRun, changedBlocks) {
  */
 export function processWebSocketMessage(message, state) {
   const { latestRun, blockResults, changedBlocks, currentFile } = state;
-
   switch (message.type) {
     case "run-start": {
       const result = processRunStart(

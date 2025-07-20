@@ -1,3 +1,8 @@
-# Utils
-def helper():
-    return 42
+# Utility functions
+
+
+def greet(name):
+    return f"Hello, {name}!"
+
+
+print(greet("World"))

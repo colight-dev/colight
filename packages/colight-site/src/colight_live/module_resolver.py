@@ -1,5 +1,6 @@
 """Module name to file path resolution."""
 
+import pathlib
 from pathlib import Path
 from typing import Optional
 
@@ -47,19 +48,41 @@ def resolve_module_to_file(
         module_parts = module_name.split(".")
         target_path = project_root_path.joinpath(*module_parts)
 
-    # Try different file extensions and locations
-    candidates = [
-        target_path.with_suffix(".py"),  # Direct .py file
-        target_path / "__init__.py",  # Package directory
-    ]
+    # Build list of candidates
+    candidates = []
+    parts = module_parts  # Use the module_parts we already split
+
+    # 1. Try relative to the importing file's directory (most common for local imports)
+    from_dir = current_file_path.parent
+    candidates.append(from_dir / pathlib.Path(*parts).with_suffix(".py"))
+    candidates.append(from_dir / pathlib.Path(*parts) / "__init__.py")
+
+    # 2. Check if the importing file is in a package (has __init__.py files)
+    # Walk up directory tree to find package roots
+    current = from_dir
+    while current.is_relative_to(project_root_path):
+        parent = current.parent
+        if (current / "__init__.py").exists():
+            # This is a package, try importing relative to its parent
+            candidates.append(parent / pathlib.Path(*parts).with_suffix(".py"))
+            candidates.append(parent / pathlib.Path(*parts) / "__init__.py")
+            current = parent
+        else:
+            break
+
+    # 3. Try from project root (absolute import)
+    candidates.append(target_path.with_suffix(".py"))
+    candidates.append(target_path / "__init__.py")
 
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             # Return relative path from project root
             try:
-                return str(candidate.relative_to(project_root_path))
+                rel_path = str(candidate.relative_to(project_root_path))
+                return rel_path
             except ValueError:
                 # File is outside project root
+                # print(f"Outside project: {candidate}")
                 return None
 
     # Module not found in project - likely external

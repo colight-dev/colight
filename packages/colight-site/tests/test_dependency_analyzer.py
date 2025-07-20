@@ -14,7 +14,7 @@ def foo():
 class Bar:
     pass
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"x", "y", "foo", "Bar"}
     assert requires == set()
 
@@ -24,7 +24,7 @@ def test_simple_requires():
     code = """
 result = foo(x, y)
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"result"}
     assert requires == {"foo", "x", "y"}
 
@@ -40,7 +40,7 @@ array = np.array([1, 2, 3])
 root = sqrt(16)
 d = dd(list)
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"np", "sqrt", "dd", "array", "root", "d"}
     # array, list are builtins, so not in requires
     assert requires == set()
@@ -54,7 +54,7 @@ def process(data):
 
 result = process(input_data)
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"process", "result"}
     assert requires == {"input_data"}
     # 'data' should not be in requires (it's a parameter)
@@ -66,7 +66,7 @@ def test_augmented_assignment():
 x += 1
 y = y + 1
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"y"}  # y is assigned
     assert requires == {
         "x"
@@ -79,7 +79,7 @@ def test_tuple_unpacking():
 a, b, c = get_values()
 x, *rest = some_list
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"a", "b", "c", "x", "rest"}
     assert requires == {"get_values", "some_list"}
 
@@ -90,7 +90,7 @@ def test_attribute_access():
 result = np.array([1, 2, 3])
 df_sorted = df.sort_values()
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"result", "df_sorted"}
     assert requires == {"np", "df"}
 
@@ -102,7 +102,7 @@ items = list(range(10))
 text = str(42)
 size = len(items)
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"items", "text", "size"}
     assert requires == set()  # list, range, str, len are all builtins
 
@@ -119,7 +119,7 @@ class Calculator:
 
 calc = Calculator()
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"Calculator", "calc"}
     assert requires == set()
 
@@ -135,7 +135,7 @@ def callee():
 
 result = caller()
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"caller", "callee", "result"}
     assert requires == set()  # callee is provided in same block
 
@@ -145,7 +145,7 @@ def test_parse_error_handling():
     code = """
 this is not valid python code
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == set()
     assert requires == set()
 
@@ -156,7 +156,7 @@ def test_import_star():
 from module import *
 import another_module
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     # We can't know what * imports, but regular imports work
     assert "another_module" in provides
 
@@ -170,6 +170,6 @@ x = compute_value()
 # Expression (would show visual)
 x + 10
 """
-    provides, requires = analyze_block(code)
+    provides, requires, _ = analyze_block(code)
     assert provides == {"x"}
     assert requires == {"compute_value"}  # x is already provided

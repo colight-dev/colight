@@ -3,8 +3,6 @@ import ReactDOM from "react-dom/client";
 import {
   createBrowserRouter,
   RouterProvider,
-  useNavigate,
-  useParams,
   useSearchParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -18,88 +16,21 @@ import { tw, md } from "../../../colight/src/js/api.jsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import CommandBar from "./CommandBar.jsx";
 import TopBar from "./TopBar.jsx";
-import { processWebSocketMessage } from "./websocket-message-handler.js";
-import { useStateWithDeps } from "./hooks/useStateWithDeps.js";
 import bylight from "./bylight.ts";
 import { getClientId } from "./client-id.js";
 import createLogger from "./logger.js";
+
+// Custom hooks
+import { useNavigation } from "./hooks/useNavigation.js";
+import { useBlockManager } from "./hooks/useBlockManager.js";
+import { useWebSocketHandler } from "./hooks/useWebSocketHandler.js";
+import { useDirectoryTree } from "./hooks/useDirectoryTree.js";
 
 const logger = createLogger("live");
 window.setColightLogLevel("info");
 // ========== Constants ==========
 
-// ========== Route Parsing - Single Source of Truth ==========
-
-/**
- * Parse the current route into navigation state
- *
- * @param {string} path - The route path from params["*"]
- * @returns {Object} Navigation state
- */
-function parseRoute(path) {
-  // Normalize path - remove leading/trailing slashes for consistency
-  const normalizedPath = path?.replace(/^\/+|\/+$/g, "") || "";
-
-  if (normalizedPath === "") {
-    // Root directory
-    return {
-      type: "directory",
-      path: "/",
-      displayPath: "/",
-      segments: [],
-      file: null,
-      directory: "/",
-    };
-  }
-
-  // Check if it's a directory (ends with /)
-  if (path.endsWith("/")) {
-    const segments = normalizedPath.split("/").filter(Boolean);
-    return {
-      type: "directory",
-      path: normalizedPath + "/",
-      displayPath: normalizedPath + "/",
-      segments,
-      file: null,
-      directory: normalizedPath + "/",
-    };
-  }
-
-  // It's a file
-  const segments = normalizedPath.split("/").filter(Boolean);
-  const dirSegments = segments.slice(0, -1);
-
-  return {
-    type: "file",
-    path: normalizedPath,
-    displayPath: normalizedPath,
-    segments,
-    file: normalizedPath,
-    directory: dirSegments.length > 0 ? dirSegments.join("/") + "/" : "/",
-  };
-}
-
-// ========== Navigation Helper ==========
-
-/**
- * Convert any navigation request to a proper route
- * This ensures consistency regardless of how navigation is triggered
- */
-function normalizeNavigationPath(path) {
-  if (!path || path === "/") {
-    return "/"; // Root
-  }
-
-  // Remove leading slash for processing
-  let normalized = path.startsWith("/") ? path.slice(1) : path;
-
-  // Ensure directories end with /
-  if (!normalized.includes(".") && !normalized.endsWith("/")) {
-    normalized += "/";
-  }
-
-  return "/" + normalized;
-}
+// ========== Constants ==========
 
 // ========== Content Components (unchanged) ==========
 
@@ -358,8 +289,12 @@ const DocumentRenderer = ({ blocks, pragmaOverrides }) => {
 
   if (!blocks || Object.keys(blocks).length === 0) return null;
 
-  // Sort blocks by their ID to maintain order
-  const sortedBlockIds = Object.keys(blocks).sort();
+  // Sort blocks by their ordinal to maintain document order
+  const sortedBlockIds = Object.keys(blocks).sort((a, b) => {
+    const ordinalA = blocks[a].ordinal ?? 0;
+    const ordinalB = blocks[b].ordinal ?? 0;
+    return ordinalA - ordinalB;
+  });
 
   return (
     <div
@@ -439,130 +374,24 @@ const useWebSocket = (onMessage, wsRefOut) => {
   return connected;
 };
 
-// ========== Message Handler Factory ==========
-
-export const createWebSocketMessageHandler = (deps) => {
-  const {
-    latestRunRef,
-    blockResultsRef,
-    changedBlocksRef,
-    setCurrentFile,
-    setBlockResults,
-    currentFile,
-    navState,
-    navigateTo,
-    loadDirectoryTree,
-  } = deps;
-
-  return (message) => {
-    // Process the message using the extracted logic
-    const state = {
-      latestRun: latestRunRef.current,
-      blockResults: blockResultsRef.current || {},
-      changedBlocks: changedBlocksRef.current,
-      currentFile,
-    };
-
-    const action = processWebSocketMessage(message, state);
-
-    // Handle the action
-    switch (action.type) {
-      case "run-start":
-        // Update latest run version
-        latestRunRef.current = action.latestRun;
-        changedBlocksRef.current = action.changedBlocks;
-
-        if (action.blockResults !== undefined) {
-          // Update state with new block results
-          setCurrentFile(action.currentFile);
-          setBlockResults(action.blockResults);
-        } else {
-          // Legacy behavior - only update current file, don't clear blocks
-          setCurrentFile(action.currentFile);
-        }
-        break;
-
-      case "block-result":
-        setBlockResults((prev) => ({
-          ...prev,
-          [action.blockId]: action.blockResult,
-        }));
-        break;
-
-      case "run-end":
-        logger.info(`Run ${action.run} completed`);
-        if (action.error) {
-          logger.error("Run error:", action.error);
-        }
-
-        // Check if we should auto-scroll to a changed block
-        if (action.changedBlocks.length === 1) {
-          setTimeout(() => {
-            const blockId = action.changedBlocks[0];
-            const element = document.querySelector(
-              `[data-block-id="${blockId}"]`,
-            );
-            if (element) {
-              element.scrollIntoView({ behavior: "smooth", block: "center" });
-              // Briefly highlight the block
-              element.style.backgroundColor = "#fffbdd";
-              setTimeout(() => {
-                element.style.backgroundColor = "";
-              }, 1000);
-            }
-          }, 100); // Small delay to ensure DOM is updated
-        }
-        break;
-
-      case "reload":
-        window.location.reload();
-        break;
-
-      case "file-changed":
-        // Navigate to changed file only if we're viewing the root directory
-        if (navState.type === "directory" && navState.directory === "/") {
-          logger.info(`File changed: ${action.path}, navigating from root...`);
-          navigateTo(action.path);
-        } else if (navState.type === "file") {
-          logger.info(
-            `File changed: ${action.path}, but already viewing ${navState.file}`,
-          );
-        }
-        break;
-
-      case "directory-changed":
-        loadDirectoryTree();
-        break;
-
-      case "unknown":
-        logger.warn(
-          "Unknown WebSocket message type:",
-          action.messageType,
-          action.type,
-        );
-        break;
-
-      case "no-op":
-        // No action needed
-        break;
-    }
-  };
-};
+// ========== WebSocket Hook ==========
 
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
-  const navigate = useNavigate();
-  const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Parse route - SINGLE SOURCE OF TRUTH
-  const routePath = params["*"] || "";
-  const navState = parseRoute(routePath);
+  // Navigation state
+  const { navState, navigateTo, loadingFileRef } = useNavigation();
 
-  const [directoryTree, setDirectoryTree] = useState(null); // Cached directory tree
-  const [isLoadingTree, setIsLoadingTree] = useState(false);
+  // Directory tree management
+  const { directoryTree, isLoadingTree, loadDirectoryTree } =
+    useDirectoryTree(navState);
 
+  // Block management
+  const blockManager = useBlockManager(navState.file);
+
+  // UI state
   const [pragmaOverrides, setPragmaOverrides] = useState({
     hideStatements: false,
     hideCode: false,
@@ -571,98 +400,17 @@ const LiveServerApp = () => {
   });
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
 
-  // File-scoped state that resets when file changes
-  const [blockResults, setBlockResults] = useStateWithDeps({}, [navState.file]);
-
-  // Refs for WebSocket callback
-  const latestRunRef = useRef(0); // Track latest run version
-  const blockResultsRef = useRef({}); // Track block results for WebSocket callback
-  const loadingFileRef = useRef(null); // Track which file we're loading
+  // Client tracking
   const watchedFileRef = useRef(null); // Track which file we're watching
   const clientIdRef = useRef(getClientId()); // Get or create client ID
 
-  // Keep blockResults ref in sync immediately (not in useEffect)
-  blockResultsRef.current = blockResults;
-
-  const loadDirectoryTree = useCallback(async () => {
-    if (!directoryTree) setIsLoadingTree(true);
-    try {
-      const response = await fetch("/api/index");
-      if (!response.ok) {
-        throw new Error("Failed to load directory tree");
-      }
-      const data = await response.json();
-      setDirectoryTree(data);
-    } catch (error) {
-      console.error("Failed to load directory tree:", error);
-    } finally {
-      setIsLoadingTree(false);
-    }
-  }, [setDirectoryTree]);
-
-  // Load directory tree
-  const ensureDirectoryTree = useCallback(() => {
-    if (directoryTree || isLoadingTree) return; // Already loaded or loading
-    loadDirectoryTree();
-  }, [directoryTree, isLoadingTree]);
-
-  // Load directory tree when viewing a directory or when it's invalidated
-  useEffect(() => {
-    if (navState.type === "directory" && !directoryTree && !isLoadingTree) {
-      loadDirectoryTree();
-    }
-  }, [navState.type, directoryTree, isLoadingTree, ensureDirectoryTree]);
-
-  // Single navigation function - always updates the route
-  const navigateTo = useCallback(
-    (path) => {
-      const normalized = normalizeNavigationPath(path);
-      // Synchronously update loadingFileRef when navigating
-      if (normalized.endsWith(".py")) {
-        loadingFileRef.current = normalized.substring(1); // Remove leading /
-      } else if (normalized !== "/" && !normalized.endsWith("/")) {
-        loadingFileRef.current = normalized.substring(1) + ".py";
-      } else {
-        loadingFileRef.current = null;
-      }
-      navigate(normalized);
-    },
-    [navigate],
-  );
-
-  // Track changed blocks for the current run
-  const changedBlocksRef = useRef(new Set());
-
-  // Create a stable message handler that doesn't change
-  const messageHandlerRef = useRef();
-
-  // Update the handler whenever dependencies change, but don't recreate the callback
-  useEffect(() => {
-    messageHandlerRef.current = (message) => {
-      const handler = createWebSocketMessageHandler({
-        latestRunRef,
-        blockResultsRef,
-        changedBlocksRef,
-        setCurrentFile: (file) => {
-          // Navigation is now handled by the file-changed message
-          // This is just for tracking
-        },
-        setBlockResults,
-        currentFile: navState.file,
-        navState,
-        navigateTo,
-        loadDirectoryTree,
-      });
-      return handler(message);
-    };
-  }, [navigateTo, setBlockResults, navState.file, loadDirectoryTree]);
-
-  // Stable callback that won't cause WebSocket to reconnect
-  const handleWebSocketMessage = useCallback((message) => {
-    if (messageHandlerRef.current) {
-      messageHandlerRef.current(message);
-    }
-  }, []);
+  // WebSocket message handler
+  const handleWebSocketMessage = useWebSocketHandler({
+    blockManager,
+    navState,
+    navigateTo,
+    loadDirectoryTree,
+  });
 
   // WebSocket ref for sending messages
   const wsRef = useRef(null);
@@ -706,7 +454,7 @@ const LiveServerApp = () => {
           JSON.stringify({
             type: "request-load",
             path: navState.file,
-            clientRun: latestRunRef.current,
+            clientRun: blockManager.refs.latestRunRef.current,
           }),
         );
       } else {
@@ -732,13 +480,13 @@ const LiveServerApp = () => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setIsCommandBarOpen((x) => !x);
-        if (!directoryTree) ensureDirectoryTree();
+        if (!directoryTree) loadDirectoryTree();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [directoryTree, ensureDirectoryTree]);
+  }, [directoryTree, loadDirectoryTree]);
 
   return (
     <>
@@ -780,9 +528,10 @@ const LiveServerApp = () => {
               Loading directory...
             </div>
           </div>
-        ) : navState.type === "file" && Object.keys(blockResults).length > 0 ? (
+        ) : navState.type === "file" &&
+          Object.keys(blockManager.blockResults).length > 0 ? (
           <DocumentRenderer
-            blocks={blockResults}
+            blocks={blockManager.blockResults}
             pragmaOverrides={pragmaOverrides}
           />
         ) : navState.type === "file" ? (

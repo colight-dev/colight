@@ -1,62 +1,56 @@
-# `colight_live` Architecture
+# Colight Live
 
-This document provides a high-level overview of the `colight_live` development server's architecture for future developers.
+A development server that executes Python notebooks with live reloading and incremental computation.
 
-## Overview
+## What it does
 
-`colight_live` is a sophisticated live-reloading development server for `.py` documents. Its primary goal is to provide a fast and interactive development experience by intelligently re-executing only the necessary parts of a document when code changes are made. It combines a web server, a WebSocket server, and a multi-layered dependency analysis and caching system to achieve this.
+Colight Live watches your Python files and automatically re-executes code when you make changes. Unlike traditional approaches that re-run everything, it only executes what actually changed - making iteration fast even with expensive computations.
 
-## System Workflow
+## How it works
 
-Understanding the flow of events from a file change to a UI update is key to understanding the system.
+Write Python files where comments become prose and code generates visualizations:
 
-1.  **File Change Detection**: The `LiveServer` in `server.py` uses the `watchfiles` library to monitor the filesystem for changes to any `.py` files in the target directory.
+```python
+# Exploring sine waves
+# Let's visualize how frequency affects sine waves
 
-2.  **File-Level Dependency Analysis**: When a file is changed, the `FileDependencyGraph` (`file_graph.py`) is consulted. This graph, built by analyzing `import` statements, determines the "blast radius" of the change—i.e., all other files that import the changed file, directly or indirectly.
+import numpy as np
 
-3.  **Client Notification (Run Start)**: For each file that is affected and currently being watched by a client, the server sends a `run-start` message via WebSocket. This tells the frontend to prepare for incoming results.
+frequency = 2  # Try changing this value
 
-4.  **Block-Level Dependency Analysis**: The server then parses the changed file into a series of code and prose blocks.
+x = np.linspace(0, 2 * np.pi, 100)
+y = np.sin(frequency * x)
 
-    - The `DependencyAnalyzer` (`dependency_analyzer.py`) uses a Concrete Syntax Tree (`libcst`) to perform static analysis on each code block, determining what variables/functions it `provides` and what it `requires`.
-    - This information is fed into a `BlockGraph` (`block_graph.py`), which builds a dependency graph of the blocks _within that single file_.
+# The plot updates instantly when you change the frequency
+{"x": x, "y": y, "title": f"sin({frequency}x)"}
+```
 
-5.  **Incremental Execution**:
+Run the server:
 
-    - The `BlockGraph` identifies the set of "dirty" blocks—the block that was directly changed plus any blocks that depend on it.
-    - The `IncrementalExecutor` (`incremental_executor.py`) is tasked with executing the document. It will only re-run the dirty blocks.
-    - For any block that is _not_ dirty, it retrieves the previous result from the `BlockCache`.
+```bash
+colight-site live your_file.py
+```
 
-6.  **Content-Addressable Caching**: The `BlockCache` (`block_cache.py`) uses a powerful caching strategy. The cache key for a block's result is a hash of its own content _plus the cache keys of all its dependencies_. This ensures that if a block or any code it depends on changes, the cache is automatically invalidated.
+## Key features
 
-7.  **Streaming Results**: As each block is executed (or retrieved from cache), the `JsonDocumentGenerator` (`json_api.py`) converts the result into a JSON payload. This payload is immediately sent to the client via a `block-result` WebSocket message. This allows the UI to update progressively as the document executes.
+- **Incremental execution**: Only changed code blocks re-run
+- **Dependency tracking**: Automatically determines execution order
+- **Import awareness**: Updates cascade through file imports
+- **Content caching**: Results cached by code content, not timestamps
+- **WebSocket sync**: Browser updates without refresh
 
-8.  **Client Notification (Run End)**: Once all blocks in the file have been processed, the server sends a `run-end` message, signaling that the execution cycle is complete.
+## Architecture
 
-## Component Breakdown
+The system builds two dependency graphs:
 
-The architecture is decoupled into several components, each with a clear responsibility:
+1. **File graph**: Tracks imports between Python files
+2. **Block graph**: Analyzes variable usage within files
 
-- **`server.py`**: The main conductor. Contains the `LiveServer` class that initializes the HTTP and WebSocket servers, manages file watching, and orchestrates the overall workflow. It also contains the `ApiMiddleware` for serving document JSON to the frontend.
+When you save a file, it:
 
-- **`client_registry.py`**: A simple but vital registry that tracks which WebSocket clients are currently watching which files. This ensures that updates are only sent to relevant clients.
+1. Identifies which blocks changed
+2. Finds all blocks that depend on those changes
+3. Re-executes only affected blocks in dependency order
+4. Streams results to connected browsers
 
-- **`dependency_analyzer.py`**: The "code intelligence" layer. It uses `libcst` to parse Python code and understand the symbols each block provides and requires.
-
-- **`block_graph.py`**: Manages **intra-file** dependencies (between blocks in one file). It is responsible for the topological sort of blocks for execution and for identifying the "dirty" downstream blocks after a change.
-
-- **`file_graph.py`**: Manages **inter-file** dependencies (between `.py` files). It parses `import` statements to build a graph of how files relate to each other, defining the "blast radius" of any change.
-
-- **`incremental_executor.py`**: The smart execution engine. It uses the `BlockGraph` and `BlockCache` to execute a document as efficiently as possible, skipping any work that has already been done and is still valid.
-
-- **`block_cache.py`**: An intelligent, in-memory cache for block execution results. It is file-aware and can evict entries for files that are no longer being watched by any client to conserve memory.
-
-- **`json_api.py`**: The presentation layer for the backend. These components are responsible for converting parsed documents, execution results, and file structures into the JSON format that the frontend SPA consumes.
-
-## Design Philosophy
-
-The complexity of this architecture is a direct result of its primary goal: **performance**. A naive implementation would re-execute the entire document on every change. This system goes to great lengths to minimize work, providing a near-instant feedback loop. The key principles are:
-
-- **Decoupling**: Each component has a single responsibility and is unaware of the others' internal workings.
-- **Accuracy**: Using a proper CST parser for dependency analysis is more robust than regex or other heuristics.
-- **Efficiency**: The multi-layered caching and dependency analysis ensure that the minimum amount of code is re-run on any given change.
+This design enables near-instant feedback loops while maintaining correctness.

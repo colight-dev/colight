@@ -1,5 +1,7 @@
 """Clean parser implementation for colight files."""
 
+import hashlib
+import os
 import pathlib
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -17,6 +19,7 @@ from .pragma import (
     extract_pragma_content,
     parse_comment_line,
 )
+from .utils import hash_block_content
 
 
 # Element type enumeration
@@ -90,6 +93,59 @@ class _BlockState(Enum):
 
     SEARCHING = auto()
     IN_BLOCK = auto()
+
+
+def _compute_block_cache_key(
+    block: Block,
+    symbol_providers: dict[str, str],
+    project_root: Optional[str] = None,
+) -> str:
+    """Compute cache key for a block based on content and dependencies.
+
+    The cache key includes:
+    - Block's content hash
+    - Cache keys of dependencies
+    - File modification times
+    """
+    # Start with content hash
+    content = hash_block_content(block).encode()
+
+    # Add dependency cache keys
+    dep_keys = []
+    for dep_name in sorted(block.interface.requires):
+        if dep_name in symbol_providers:
+            dep_keys.append(f"{dep_name}:{symbol_providers[dep_name]}")
+
+    # Add file dependencies with mtimes
+    file_deps = []
+    if (
+        hasattr(block.interface, "file_dependencies")
+        and block.interface.file_dependencies
+    ):
+        for file_path in sorted(block.interface.file_dependencies):
+            # File path is relative to project root
+            if project_root:
+                abs_path = os.path.join(project_root, file_path)
+            else:
+                abs_path = file_path
+
+            try:
+                mtime = os.path.getmtime(abs_path)
+                file_deps.append(f"file:{file_path}:{mtime}")
+            except OSError:
+                # File doesn't exist or can't be accessed
+                file_deps.append(f"file:{file_path}:missing")
+
+    # Combine all parts
+    combined = (
+        content
+        + b"::"
+        + "\n".join(dep_keys).encode()
+        + b"::"
+        + "\n".join(file_deps).encode()
+    )
+    cache_key = hashlib.sha256(combined).hexdigest()[:16]
+    return cache_key
 
 
 def _classify_code_node(node: cst.CSTNode) -> Literal["STATEMENT", "EXPRESSION"]:
@@ -382,6 +438,9 @@ def build_document(
 
     blocks = []
 
+    # Track which block provides each symbol (for dependency resolution)
+    symbol_providers = {}  # symbol -> block_cache_key
+
     for block_idx, raw_block in enumerate(raw_blocks):
         # Parse block-level pragmas
         block_pragma = TagSet()
@@ -483,11 +542,12 @@ def build_document(
                     )
                 ]
 
+            # Create block initially with temporary ID
             block = Block(
                 elements=elements,
                 tags=block_pragma,
                 start_line=raw_block.start_line,
-                id=block_idx,
+                id=f"temp-{block_idx}",  # Temporary ID
             )
 
             # Analyze dependencies for blocks with code
@@ -505,6 +565,14 @@ def build_document(
                 except Exception:
                     # If analysis fails, just use empty interface
                     pass
+
+            # Compute cache key as the block's ID
+            cache_key = _compute_block_cache_key(block, symbol_providers, project_root)
+            block.id = cache_key
+
+            # Update symbol providers with this block's provides
+            for symbol in block.interface.provides:
+                symbol_providers[symbol] = cache_key
 
             blocks.append(block)
 
