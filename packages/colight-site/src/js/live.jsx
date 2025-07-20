@@ -25,7 +25,7 @@ import { getClientId } from "./client-id.js";
 import createLogger from "./logger.js";
 
 const logger = createLogger("live");
-
+window.setColightLogLevel("info");
 // ========== Constants ==========
 
 // ========== Route Parsing - Single Source of Truth ==========

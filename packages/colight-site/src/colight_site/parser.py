@@ -8,7 +8,9 @@ from typing import Iterator, List, Literal, Optional, Union
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
-from colight_live.dependency_analyzer import analyze_block_dependencies
+from colight_live.dependency_analyzer import (
+    analyze_block,
+)
 
 from .model import Block, BlockInterface, Document, Element, EmptyLine, TagSet
 from .pragma import (
@@ -362,9 +364,19 @@ def group_blocks(elements: List[ParsedLine]) -> List[RawBlock]:
 
 
 def build_document(
-    raw_blocks: List[RawBlock], file_pragma: Optional[TagSet] = None
+    raw_blocks: List[RawBlock],
+    file_pragma: Optional[TagSet] = None,
+    current_file: Optional[str] = None,
+    project_root: Optional[str] = None,
 ) -> Document:
-    """Step 3: Convert raw blocks into a Document with proper Elements and Tags."""
+    """Step 3: Convert raw blocks into a Document with proper Elements and Tags.
+
+    Args:
+        raw_blocks: List of raw blocks to process
+        file_pragma: Optional file-level pragma tags
+        current_file: Optional path to current file (relative to project root)
+        project_root: Optional path to project root directory
+    """
     if file_pragma is None:
         file_pragma = TagSet()
 
@@ -482,9 +494,13 @@ def build_document(
             if block.get_code_elements():
                 try:
                     code_text = block.get_code_text()
-                    provides, requires = analyze_block_dependencies(code_text)
+                    provides, requires, file_deps = analyze_block(
+                        code_text, current_file, project_root
+                    )
                     block.interface = BlockInterface(
-                        provides=sorted(list(provides)), requires=sorted(list(requires))
+                        provides=sorted(list(provides)),
+                        requires=sorted(list(requires)),
+                        file_dependencies=file_deps,
                     )
                 except Exception:
                     # If analysis fails, just use empty interface
@@ -515,10 +531,19 @@ def extract_file_pragma(elements: List[ParsedLine]) -> TagSet:
     return pragma
 
 
-def parse_document(source_code: str) -> Document:
+def parse_document(
+    source_code: str,
+    current_file: Optional[str] = None,
+    project_root: Optional[str] = None,
+) -> Document:
     """Parse source code into a Document.
 
     This is the main API for the new parser.
+
+    Args:
+        source_code: The source code to parse
+        current_file: Optional path to current file (relative to project root)
+        project_root: Optional path to project root directory
     """
     # Step 1: Lex into classified elements
     elements = lex(source_code)
@@ -530,7 +555,7 @@ def parse_document(source_code: str) -> Document:
     raw_blocks = list(_group_blocks_generator(elements))
 
     # Step 4: Build document
-    document = build_document(raw_blocks, file_pragma)
+    document = build_document(raw_blocks, file_pragma, current_file, project_root)
 
     return document
 
@@ -538,7 +563,22 @@ def parse_document(source_code: str) -> Document:
 def parse_file(file_path: pathlib.Path) -> Document:
     """Parse a colight file into a Document."""
     source_code = file_path.read_text(encoding="utf-8")
-    return parse_document(source_code)
+    # Get project root - walk up to find a directory with .git or pyproject.toml
+    project_root = file_path.parent
+    for parent in file_path.parents:
+        if (parent / ".git").exists() or (parent / "pyproject.toml").exists():
+            project_root = parent
+            break
+
+    # Pass file path information for dependency tracking
+    try:
+        relative_path = str(file_path.relative_to(project_root))
+    except ValueError:
+        relative_path = str(file_path)
+
+    return parse_document(
+        source_code, current_file=relative_path, project_root=str(project_root)
+    )
 
 
 # Convenience exports for compatibility

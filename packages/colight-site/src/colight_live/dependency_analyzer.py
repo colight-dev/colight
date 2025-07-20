@@ -5,6 +5,8 @@ from typing import Optional, Set, Tuple
 
 import libcst
 
+from .module_resolver import is_stdlib_module, resolve_module_to_file
+
 # Python builtin names to exclude from dependencies
 BUILTIN_NAMES = set(dir(builtins))
 
@@ -12,12 +14,17 @@ BUILTIN_NAMES = set(dir(builtins))
 class DependencyVisitor(libcst.CSTVisitor):
     """Extract provides and requires sets from a code block using AST analysis."""
 
-    def __init__(self):
+    def __init__(
+        self, current_file: Optional[str] = None, project_root: Optional[str] = None
+    ):
         self.provides: Set[str] = set()
         self.requires: Set[str] = set()
+        self.file_dependencies: Set[str] = set()  # Track file dependencies
         self.scope_stack: list[Set[str]] = [set()]  # Track nested scopes
         self.function_depth = 0
         self.class_depth = 0
+        self.current_file = current_file
+        self.project_root = project_root
 
     def visit_FunctionDef(self, node: libcst.FunctionDef) -> Optional[bool]:
         """Function definitions provide their name."""
@@ -62,13 +69,25 @@ class DependencyVisitor(libcst.CSTVisitor):
         self.class_depth -= 1
 
     def visit_Import(self, node: libcst.Import) -> Optional[bool]:
-        """Imports provide the imported names."""
+        """Imports provide the imported names and track file dependencies."""
         if isinstance(node.names, libcst.ImportStar):
             # Mark that this block has star imports
             self.provides.add("__star_import__")
         else:
             for alias in node.names:
                 if isinstance(alias, libcst.ImportAlias):
+                    # Extract the module name
+                    module_name = self._get_full_name(alias.name)
+
+                    # Track file dependency if we can resolve it
+                    if module_name and self.current_file and self.project_root:
+                        if not is_stdlib_module(module_name):
+                            file_path = resolve_module_to_file(
+                                module_name, self.current_file, self.project_root
+                            )
+                            if file_path:
+                                self.file_dependencies.add(file_path)
+
                     if alias.asname:
                         # import foo as bar -> provides 'bar'
                         asname = alias.asname.name
@@ -88,7 +107,32 @@ class DependencyVisitor(libcst.CSTVisitor):
         return False  # Don't visit children of import statements
 
     def visit_ImportFrom(self, node: libcst.ImportFrom) -> Optional[bool]:
-        """From imports provide the imported names."""
+        """From imports provide the imported names and track file dependencies."""
+        # Extract module name and relative level
+        module_name = ""
+        relative_level = 0
+
+        if node.module:
+            module_name = self._get_full_name(node.module)
+
+        # Count relative import dots
+        if node.relative:
+            for dot in node.relative:
+                relative_level += 1
+
+        # Track file dependency if we can resolve it
+        if self.current_file and self.project_root:
+            if not module_name or not is_stdlib_module(module_name):
+                file_path = resolve_module_to_file(
+                    module_name or "",
+                    self.current_file,
+                    self.project_root,
+                    relative_level,
+                )
+                if file_path:
+                    self.file_dependencies.add(file_path)
+
+        # Handle imported names
         if isinstance(node.names, libcst.ImportStar):
             # Mark that this block has star imports
             self.provides.add("__star_import__")
@@ -361,6 +405,22 @@ class DependencyVisitor(libcst.CSTVisitor):
             return current.value
         return None
 
+    def _get_full_name(self, node) -> Optional[str]:
+        """Get the full dotted name from a node (e.g., 'package.module')."""
+        if isinstance(node, libcst.Name):
+            return node.value
+        elif isinstance(node, libcst.Attribute):
+            parts = []
+            current = node
+            while isinstance(current, libcst.Attribute):
+                if isinstance(current.attr, libcst.Name):
+                    parts.append(current.attr.value)
+                current = current.value
+            if isinstance(current, libcst.Name):
+                parts.append(current.value)
+            return ".".join(reversed(parts))
+        return None
+
     def _is_name_in_scope(self, name: str) -> bool:
         """Check if a name is in any current scope."""
         for scope in self.scope_stack:
@@ -395,14 +455,19 @@ class DependencyVisitor(libcst.CSTVisitor):
             return set(), set()
 
 
-def analyze_block_dependencies(code: str) -> Tuple[Set[str], Set[str]]:
-    """Convenience function to analyze a code block's dependencies.
+def analyze_block(
+    code: str, current_file: Optional[str] = None, project_root: Optional[str] = None
+) -> Tuple[Set[str], Set[str], Set[str]]:
+    """Analyze a code block's dependencies including file dependencies.
 
     Args:
         code: Python source code
+        current_file: Path to the current file (relative to project root)
+        project_root: Path to the project root directory
 
     Returns:
-        Tuple of (provides, requires) sets
+        Tuple of (provides, requires, file_dependencies) sets
     """
-    visitor = DependencyVisitor()
-    return visitor.analyze(code)
+    visitor = DependencyVisitor(current_file, project_root)
+    provides, requires = visitor.analyze(code)
+    return provides, requires, visitor.file_dependencies

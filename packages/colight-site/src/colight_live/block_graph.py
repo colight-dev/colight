@@ -1,7 +1,7 @@
 """Block dependency graph for topological execution ordering."""
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
 
@@ -11,6 +11,9 @@ class BlockInterface:
 
     provides: List[str]  # Symbols this block provides
     requires: List[str]  # Symbols this block requires
+    file_dependencies: Set[str] = field(
+        default_factory=set
+    )  # External files this block depends on
 
 
 class BlockGraph:

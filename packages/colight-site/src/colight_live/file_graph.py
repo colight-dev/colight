@@ -286,6 +286,8 @@ class FileDependencyGraph:
         Returns:
             Set of all affected file paths
         """
+        # Normalize the changed file path - it should match what's in our dictionaries
+        # The keys in imported_by are relative to base_path
         affected = {changed_file}
         to_check = [changed_file]
 

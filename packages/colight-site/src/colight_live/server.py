@@ -17,7 +17,7 @@ from werkzeug.wrappers import Request, Response
 
 from colight_site.file_resolver import FileResolver, find_files
 from colight_site.model import TagSet
-from colight_site.parser import parse_colight_file
+from colight_site.parser import parse_document
 from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
@@ -77,6 +77,7 @@ class ApiMiddleware:
         self.incremental_executor = IncrementalExecutor(
             verbose=verbose, block_cache=self.block_cache
         )
+        self.incremental_executor.project_root = str(self.input_path)
         self.verbose = verbose
 
     def _get_files(self) -> List[str]:
@@ -449,18 +450,6 @@ class LiveServer:
                 print(f"  Removing {module_name} from sys.modules")
                 del sys.modules[module_name]
 
-        # Clear cache for all affected files to ensure they re-execute
-        if self._api_middleware and self._api_middleware.incremental_executor:
-            for file_path in files_to_execute:
-                # Convert to relative path for cache manager
-                try:
-                    rel_path = str(file_path.relative_to(self.input_path))
-                except ValueError:
-                    rel_path = str(file_path)
-                self._api_middleware.incremental_executor.clear_file_cache(rel_path)
-                if self.verbose:
-                    print(f"  Cleared cache for: {rel_path}")
-
         # Then, fully execute watched files with visual tracking
         if watched_to_execute:
             # Trigger normal builds for watched files
@@ -520,8 +509,13 @@ class LiveServer:
                     )
                     return
 
-                # Parse the document
-                document = parse_colight_file(source_file)
+                # Parse the document with file path information
+                source_code = source_file.read_text(encoding="utf-8")
+                try:
+                    rel_path = str(source_file.relative_to(self.input_path))
+                except ValueError:
+                    rel_path = str(source_file)
+                document = parse_document(source_code, rel_path, str(self.input_path))
 
                 # Apply config pragma if any
                 if self.pragma:
@@ -588,7 +582,7 @@ class LiveServer:
 
                 # Execute incrementally and stream results
                 for block_id, result in generator.execute_incremental_with_results(
-                    source_file
+                    source_file, document
                 ):
                     # Check if task was cancelled
                     task = asyncio.current_task()
@@ -750,8 +744,15 @@ class LiveServer:
         print("Building initial dependency graph...")
         self.dependency_graph.analyze_directory(self.input_path)
         if self.verbose:
-            print("Dependency graph imports:", self.dependency_graph.imports)
-            print("Dependency graph imported_by:", self.dependency_graph.imported_by)
+            print(f"\nDependency graph watching: {self.dependency_graph.watched_path}")
+            print("\nDependency graph imports:")
+            for file, imports in sorted(self.dependency_graph.imports.items()):
+                if imports:
+                    print(f"  {file} -> {imports}")
+            print("\nDependency graph imported_by:")
+            for file, imported_by in sorted(self.dependency_graph.imported_by.items()):
+                if imported_by:
+                    print(f"  {file} <- {imported_by}")
 
         graph_stats = self.dependency_graph.get_graph_stats()
         print(
@@ -773,9 +774,16 @@ class LiveServer:
                     if file_path.suffix == ".py" and file_path.exists():
                         self.dependency_graph.analyze_file(file_path)
                 elif change_type == 2:  # Deleted
-                    directory_changed = True
+                    # Some editors (like VSCode) delete and recreate files when saving
+                    # Check if the file actually exists - if so, treat as modified
                     if file_path.suffix == ".py":
-                        self.dependency_graph.remove_file(str(file_path))
+                        if file_path.exists():
+                            # File was recreated immediately - treat as modification
+                            self.dependency_graph.analyze_file(file_path)
+                        else:
+                            # File was actually deleted
+                            directory_changed = True
+                            self.dependency_graph.remove_file(str(file_path))
                 elif change_type == 3:  # Modified
                     if file_path.suffix == ".py" and file_path.exists():
                         self.dependency_graph.analyze_file(file_path)
@@ -786,27 +794,44 @@ class LiveServer:
                 await self._ws_broadcast_all({"type": "directory-changed"})
 
             # Determine which files need re-execution based on modifications
-            modified_files = {
-                pathlib.Path(path_str).resolve()
-                for change_type, path_str in changes
-                if change_type == 3 and self._matches_patterns(pathlib.Path(path_str))
-            }
+            modified_files = set()
+            for change_type, path_str in changes:
+                file_path = pathlib.Path(path_str)
+                if self._matches_patterns(file_path):
+                    if change_type == 3:  # Normal modification
+                        modified_files.add(file_path.resolve())
+                    elif (
+                        change_type == 2 and file_path.exists()
+                    ):  # Delete+recreate pattern
+                        modified_files.add(file_path.resolve())
 
             if not modified_files:
                 continue
 
             # Find all files affected by the modifications
+            if self.verbose and modified_files:
+                print(f"\nProcessing {len(modified_files)} modified file(s)...")
             for file_path in modified_files:
                 try:
                     relative_path = str(file_path.relative_to(self.input_path))
                 except ValueError:
+                    if self.verbose:
+                        print(f"  Skipping {file_path} - not relative to input path")
                     continue
 
+                if self.verbose:
+                    print(f"  Modified: {relative_path}")
+
                 affected = self.dependency_graph.get_affected_files(relative_path)
+                if self.verbose:
+                    print(f"    Affected files: {affected}")
+
                 for affected_file in affected:
                     affected_path = (self.input_path / affected_file).resolve()
                     if affected_path.exists():
                         files_to_execute.add(affected_path)
+                        if self.verbose:
+                            print(f"    Will execute: {affected_file}")
 
             # Process all affected files
             if files_to_execute:

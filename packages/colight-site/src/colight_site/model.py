@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 from types import CodeType
-from typing import FrozenSet, List, Literal, Optional, Sequence, Union, cast
+from typing import FrozenSet, List, Literal, Optional, Sequence, Set, Union, cast
 
 import libcst as cst
 
@@ -202,6 +202,7 @@ class BlockInterface:
 
     provides: List[str] = field(default_factory=list)
     requires: List[str] = field(default_factory=list)
+    file_dependencies: Set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)

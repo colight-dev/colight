@@ -1,6 +1,6 @@
 """Tests for Python-correct scoping in dependency analysis."""
 
-from colight_live.dependency_analyzer import analyze_block_dependencies
+from colight_live.dependency_analyzer import analyze_block
 
 
 def test_list_comprehension_scoping():
@@ -13,7 +13,7 @@ matrix = [[x*y for x in row] for y in cols]
 
 # With condition
 evens = [n for n in numbers if n % 2 == 0]"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"squares", "matrix", "evens"}
     # x, y, n should NOT be in requires - they're local to comprehensions
     assert "x" not in requires
@@ -27,7 +27,7 @@ def test_set_comprehension_scoping():
     """Test that set comprehension variables don't leak out."""
     code = """unique_squares = {x**2 for x in data}
 filtered = {item for item in items if item > threshold}"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"unique_squares", "filtered"}
     assert "x" not in requires
     assert "item" not in requires
@@ -38,7 +38,7 @@ def test_dict_comprehension_scoping():
     """Test that dict comprehension variables don't leak out."""
     code = """squared_dict = {k: v**2 for k, v in pairs.items()}
 name_map = {person.id: person.name for person in people}"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"squared_dict", "name_map"}
     assert "k" not in requires
     assert "v" not in requires
@@ -50,7 +50,7 @@ def test_generator_expression_scoping():
     """Test that generator expression variables don't leak out."""
     code = """gen = (x*2 for x in sequence)
 filtered_gen = (item for item in data if predicate(item))"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"gen", "filtered_gen"}
     assert "x" not in requires
     assert "item" not in requires
@@ -63,7 +63,7 @@ def test_lambda_parameter_scoping():
 add = lambda a, b: a + b
 transform = lambda item: item.value * scale
 items.sort(key=lambda obj: obj.priority)"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"double", "add", "transform"}
     assert "x" not in requires
     assert "a" not in requires
@@ -83,7 +83,7 @@ print(f)  # f is closed but still exists
 
 with resource_manager() as (conn, cursor):
     cursor.execute(query)"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     # with targets should be in provides
     assert "f" in provides
     assert "conn" in provides
@@ -105,7 +105,7 @@ except (TypeError, KeyError) as err:
 # e and err should NOT be available here
 # print(e) would fail
 # print(err) would fail"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     # Exception variables should NOT be in provides
     assert "e" not in provides
     assert "err" not in provides
@@ -123,7 +123,7 @@ from os.path import *
 # These might come from star imports
 arr = array([1, 2, 3])
 matrix = zeros((3, 3))"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     # Should have the star import marker
     assert "__star_import__" in provides
     # Regular imports should still work
@@ -160,7 +160,7 @@ except AnalysisError as e:
 
 # Generator with multiple variables
 pairs = ((i, val) for i, val in enumerate(data))"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
 
     # Imports and assignments
     assert "np" in provides
@@ -190,7 +190,7 @@ def test_nested_comprehensions_with_same_variable():
     """Test that nested comprehensions with same variable names work correctly."""
     code = """# Both use 'x' but in different scopes
 outer = [sum(x*x for x in row) for x in matrix]"""
-    provides, requires = analyze_block_dependencies(code)
+    provides, requires = analyze_block(code)
     assert provides == {"outer"}
     assert "x" not in requires  # Neither x should leak
     assert requires == {"row", "matrix"}  # Unclear semantics, but this is what we get

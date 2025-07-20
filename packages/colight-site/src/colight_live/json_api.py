@@ -87,13 +87,20 @@ class JsonDocumentGenerator:
 
         return json.dumps(doc, indent=2)
 
-    def execute_incremental_with_results(self, source_path: pathlib.Path):
+    def execute_incremental_with_results(
+        self, source_path: pathlib.Path, document=None
+    ):
         """Execute a document incrementally and yield (block_id, result_dict) pairs.
 
         This method is used by the LiveServer to stream results as they are executed.
+
+        Args:
+            source_path: Path to the source file
+            document: Optional pre-parsed document (if not provided, will parse the file)
         """
-        # Parse the file
-        document = parse_colight_file(source_path)
+        # Parse the file if document not provided
+        if document is None:
+            document = parse_colight_file(source_path)
 
         # Apply pragma if any
         if self.pragma:

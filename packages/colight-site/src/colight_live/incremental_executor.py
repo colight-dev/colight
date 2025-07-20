@@ -1,6 +1,7 @@
 """Incremental executor using dependency graph for smart re-execution."""
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -33,6 +34,7 @@ class IncrementalExecutor(BlockExecutor):
         self.block_graph: Optional[BlockGraph] = None
         self.block_cache = block_cache or BlockCache()
         self.current_file: Optional[str] = None  # Track current file being executed
+        self.project_root: Optional[str] = None  # Track project root directory
 
     def _get_content_hash(self, block: Block) -> str:
         """Get a hash of block's content including prose."""
@@ -44,6 +46,7 @@ class IncrementalExecutor(BlockExecutor):
         The key is based on:
         - The block's own content (including prose)
         - The cache keys of all its dependencies
+        - The modification times of file dependencies
 
         This ensures that if any dependency changes, this block's key changes too.
         """
@@ -61,8 +64,31 @@ class IncrementalExecutor(BlockExecutor):
             if dep_block_id and dep_block_id in dependency_keys:
                 dep_keys.append(f"{dep_name}:{dependency_keys[dep_block_id]}")
 
-        # Combine content and dependencies
-        combined = content + b"::" + "\n".join(dep_keys).encode()
+        # Add file dependencies (modification times)
+        file_deps = []
+        if hasattr(block.interface, "file_dependencies"):
+            for file_path in sorted(block.interface.file_dependencies):
+                # File path is relative to project root
+                if self.project_root:
+                    abs_path = os.path.join(self.project_root, file_path)
+                else:
+                    abs_path = file_path
+
+                try:
+                    mtime = os.path.getmtime(abs_path)
+                    file_deps.append(f"file:{file_path}:{mtime}")
+                except OSError:
+                    # File doesn't exist or can't be accessed
+                    file_deps.append(f"file:{file_path}:missing")
+
+        # Combine content, dependencies, and file dependencies
+        combined = (
+            content
+            + b"::"
+            + "\n".join(dep_keys).encode()
+            + b"::"
+            + "\n".join(file_deps).encode()
+        )
         return hashlib.sha256(combined).hexdigest()[:16]  # Use first 16 chars
 
     def _has_always_eval_pragma(self, block: Block) -> bool:
@@ -406,18 +432,9 @@ class IncrementalExecutor(BlockExecutor):
         for block in document.blocks:
             block_id = str(block.id)
 
-            # Compute cache key
-            if block_id in all_dirty or (
-                block_id in self.block_states
-                and self.block_states[block_id].content_hash != content_hashes[block_id]
-            ):
-                cache_key = self._compute_cache_key(block, dependency_keys)
-            else:
-                cache_key = self.block_states.get(
-                    block_id, BlockState("", "", ExecutionResult())
-                ).cache_key
-                if not cache_key:
-                    cache_key = self._compute_cache_key(block, dependency_keys)
+            # Always compute cache key - it includes file modification times
+            # which may have changed even if block content hasn't
+            cache_key = self._compute_cache_key(block, dependency_keys)
 
             dependency_keys[block_id] = cache_key
 
