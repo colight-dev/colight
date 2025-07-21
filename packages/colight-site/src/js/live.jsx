@@ -6,7 +6,6 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WebsocketBuilder, ExponentialBackoff, ArrayQueue } from "websocket-ts";
 import { DraggableViewer } from "../../../colight/src/js/widget.jsx";
 import {
   parseColightScript,
@@ -22,9 +21,17 @@ import createLogger from "./logger.js";
 
 // Custom hooks
 import { useNavigation } from "./hooks/useNavigation.js";
-import { useBlockManager } from "./hooks/useBlockManager.js";
-import { useWebSocketHandler } from "./hooks/useWebSocketHandler.js";
 import { useDirectoryTree } from "./hooks/useDirectoryTree.js";
+
+// Context
+import {
+  WebSocketProvider,
+  useWebSocket,
+  useMessageHandler,
+} from "./contexts/WebSocketContext.jsx";
+
+// Components
+import { DocumentViewer } from "./DocumentViewer.jsx";
 
 const logger = createLogger("live");
 window.setColightLogLevel("info");
@@ -196,10 +203,11 @@ const groupBlockElements = (elements) => {
 const BlockRenderer = ({ block, pragmaOverrides }) => {
   // If block is pending but has content, show content with pending indicator
   const isPending = block.pending;
+  const isPendingReplacement = block.pendingReplacement;
 
   if (!block.elements || block.elements.length === 0) {
     // Only show placeholder if block truly has no content yet
-    if (isPending) {
+    if (isPending && !isPendingReplacement) {
       return (
         <div
           className={tw(`opacity-50 animate-pulse`)}
@@ -223,11 +231,13 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
       data-block-id={block.id}
       data-shows-visual={block.showsVisual}
     >
-      {/* Show pending indicator overlay */}
+      {/* Show pending indicator overlay - more subtle for replacements */}
       {isPending && (
         <div
           className={tw(
-            "absolute inset-0 bg-yellow-100 bg-opacity-30 rounded-lg pointer-events-none z-10 animate-pulse",
+            isPendingReplacement
+              ? "absolute inset-0 bg-blue-100 bg-opacity-20 rounded-lg pointer-events-none z-10"
+              : "absolute inset-0 bg-yellow-100 bg-opacity-30 rounded-lg pointer-events-none z-10 animate-pulse",
           )}
         />
       )}
@@ -277,119 +287,15 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
   );
 };
 
-const DocumentRenderer = ({ blocks, pragmaOverrides }) => {
-  const docRef = useRef();
-
-  useEffect(() => {
-    // Run bylight on the entire document after render
-    if (docRef.current) {
-      bylight({ target: docRef.current });
-    }
-  }, [blocks]); // Re-run when blocks change
-
-  if (!blocks || Object.keys(blocks).length === 0) return null;
-
-  // Sort blocks by their ordinal to maintain document order
-  const sortedBlockIds = Object.keys(blocks).sort((a, b) => {
-    const ordinalA = blocks[a].ordinal ?? 0;
-    const ordinalB = blocks[b].ordinal ?? 0;
-    return ordinalA - ordinalB;
-  });
-
-  return (
-    <div
-      ref={docRef}
-      className={tw("max-w-4xl mx-auto px-4 py-8  [&_pre]:text-sm")}
-    >
-      {sortedBlockIds.map((blockId) => {
-        const result = blocks[blockId];
-        // Create a simplified block structure from the result
-        const block = {
-          id: blockId,
-          elements: result.elements || [],
-          error: result.error,
-          stdout: result.stdout,
-          showsVisual: result.showsVisual,
-          pending: result.pending,
-        };
-
-        return (
-          <BlockRenderer
-            key={blockId}
-            block={block}
-            pragmaOverrides={pragmaOverrides}
-          />
-        );
-      })}
-    </div>
-  );
-};
-
-// ========== WebSocket Hook ==========
-
-const useWebSocket = (onMessage, wsRefOut) => {
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef(null);
-
-  useEffect(() => {
-    const wsPort = parseInt(window.location.port) + 1;
-
-    // Build WebSocket with exponential backoff and message buffering
-    const ws = new WebsocketBuilder(`ws://127.0.0.1:${wsPort}`)
-      .withBackoff(new ExponentialBackoff(1000, 2, 30000)) // 1s initial, 2x multiplier, 30s max
-      .withBuffer(new ArrayQueue()) // Buffer messages when disconnected
-      .onOpen(() => {
-        logger.info("LiveServer connected");
-        setConnected(true);
-        if (wsRefOut) {
-          wsRefOut.current = ws;
-        }
-      })
-      .onClose(() => {
-        logger.info("LiveServer disconnected");
-        setConnected(false);
-      })
-      .onError((_, error) => {
-        logger.error("WebSocket error:", error);
-      })
-      .onMessage((_, event) => {
-        const data = JSON.parse(event.data);
-        logger.debug("WebSocket message:", data);
-        onMessage(data);
-      })
-      .onRetry(() => {
-        logger.info("WebSocket reconnecting...");
-      })
-      .build();
-
-    wsRef.current = ws;
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [onMessage, wsRefOut]);
-
-  return connected;
-};
-
-// ========== WebSocket Hook ==========
-
 // ========== Main App Component ==========
 
 const LiveServerApp = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-
   // Navigation state
   const { navState, navigateTo, loadingFileRef } = useNavigation();
 
   // Directory tree management
   const { directoryTree, isLoadingTree, loadDirectoryTree } =
     useDirectoryTree(navState);
-
-  // Block management
-  const blockManager = useBlockManager(navState.file);
 
   // UI state
   const [pragmaOverrides, setPragmaOverrides] = useState({
@@ -400,78 +306,23 @@ const LiveServerApp = () => {
   });
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
 
-  // Client tracking
-  const watchedFileRef = useRef(null); // Track which file we're watching
-  const clientIdRef = useRef(getClientId()); // Get or create client ID
+  // Get WebSocket connection status
+  const { connected } = useWebSocket();
 
-  // WebSocket message handler
-  const handleWebSocketMessage = useWebSocketHandler({
-    blockManager,
-    navState,
-    navigateTo,
-    loadDirectoryTree,
-  });
-
-  // WebSocket ref for sending messages
-  const wsRef = useRef(null);
-
-  // Setup WebSocket connection
-  const connected = useWebSocket(handleWebSocketMessage, wsRef);
-
-  // Handle file watching when connected and viewing changes
-  useEffect(() => {
-    if (connected && wsRef.current) {
-      const clientId = clientIdRef.current;
-
-      // Unwatch previous file if any
-      if (watchedFileRef.current && watchedFileRef.current !== navState.file) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "unwatch-file",
-            path: watchedFileRef.current,
-            clientId: clientId,
-          }),
-        );
-      }
-
-      // Watch new file if viewing a file
-      if (navState.type === "file") {
-        // Update refs
-        loadingFileRef.current = navState.file;
-        watchedFileRef.current = navState.file;
-
-        // Send watch message
-        wsRef.current.send(
-          JSON.stringify({
-            type: "watch-file",
-            path: navState.file,
-            clientId: clientId,
-          }),
-        );
-
-        // Also request the file load
-        wsRef.current.send(
-          JSON.stringify({
-            type: "request-load",
-            path: navState.file,
-            clientRun: blockManager.refs.latestRunRef.current,
-          }),
-        );
-      } else {
-        // Viewing directory - unwatch any file
-        if (watchedFileRef.current) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "unwatch-file",
-              path: watchedFileRef.current,
-              clientId: clientId,
-            }),
-          );
-          watchedFileRef.current = null;
+  // Handle file-changed messages for navigation
+  useMessageHandler({
+    types: ["file-changed"],
+    handler: (message) => {
+      if (message.type === "file-changed") {
+        // Navigate to changed file only if we're viewing the root directory
+        if (navState.type === "directory" && navState.directory === "/") {
+          logger.info(`File changed: ${message.path}, navigating from root...`);
+          navigateTo(message.path);
         }
       }
-    }
-  }, [connected, navState.type, navState.file]);
+    },
+    priority: 10,
+  });
 
   // Handle global keyboard shortcuts
   useEffect(() => {
@@ -512,40 +363,22 @@ const LiveServerApp = () => {
       />
 
       <div className={tw("mt-10")}>
-        {navState.type === "directory" && directoryTree ? (
+        {navState.type === "directory" ? (
           <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
             <DirectoryBrowser
               directoryPath={navState.directory}
               tree={directoryTree}
               onSelectFile={navigateTo}
               onNavigateToDirectory={navigateTo}
+              loadDirectoryTree={loadDirectoryTree}
             />
           </div>
-        ) : navState.type === "directory" && !directoryTree ? (
-          // Loading state for directory
-          <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
-            <div className={tw("text-center text-gray-500")}>
-              Loading directory...
-            </div>
-          </div>
-        ) : navState.type === "file" &&
-          Object.keys(blockManager.blockResults).length > 0 ? (
-          <DocumentRenderer
-            blocks={blockManager.blockResults}
-            pragmaOverrides={pragmaOverrides}
-          />
         ) : navState.type === "file" ? (
-          // Loading state for file
-          <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
-            <div className={tw("text-center text-gray-500")}>
-              Loading {navState.file}...
-            </div>
-            {/* Add hint if loading takes too long */}
-            <div className={tw("text-center text-gray-400 text-sm mt-4")}>
-              If this takes too long, check that the server is running and the
-              file exists.
-            </div>
-          </div>
+          <DocumentViewer
+            file={navState.file}
+            pragmaOverrides={pragmaOverrides}
+            navigateTo={navigateTo}
+          />
         ) : null}
       </div>
     </>
@@ -566,7 +399,11 @@ const queryClient = new QueryClient({
 const router = createBrowserRouter([
   {
     path: "*",
-    element: <LiveServerApp />,
+    element: (
+      <WebSocketProvider>
+        <LiveServerApp />
+      </WebSocketProvider>
+    ),
   },
 ]);
 

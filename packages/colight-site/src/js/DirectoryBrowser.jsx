@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { tw } from "../../../colight/src/js/utils";
+import { useMessageHandler } from "./contexts/WebSocketContext.jsx";
 
 // Individual node in the directory tree
 const DirectoryNode = ({
@@ -141,7 +142,34 @@ export const DirectoryBrowser = ({
   tree,
   onSelectFile,
   onNavigateToDirectory,
+  loadDirectoryTree,
 }) => {
+  // Register handler for directory changes
+  useMessageHandler({
+    types: ["directory-changed"],
+    handler: (message) => {
+      if (message.type === "directory-changed") {
+        loadDirectoryTree();
+      }
+    },
+    priority: 5,
+  });
+
+  // Load directory tree on mount if not already loaded
+  useEffect(() => {
+    if (!tree) {
+      loadDirectoryTree();
+    }
+  }, [tree, loadDirectoryTree]);
+
+  if (!tree) {
+    return (
+      <div className={tw("text-center text-gray-500")}>
+        Loading directory...
+      </div>
+    );
+  }
+
   // Find the subtree for the given directory path
   const subtree = findDirectory(tree, directoryPath);
 

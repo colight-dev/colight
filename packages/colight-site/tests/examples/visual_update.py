@@ -9,10 +9,11 @@ from examples.visual_update_dep import x
 x + 1
 
 
-# Change this value to test visual updates
-value = 1234455  # <-- EDIT THIS NUMBER
+# Change this value to test visual updates.
+value = 12  # <-- EDIT THIS NUMBER
 
 # Create a simple plot using Observable Plot
+
 
 (
     Plot.dot(

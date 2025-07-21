@@ -112,7 +112,7 @@ class JsonDocumentGenerator:
                 block,
                 result,
             ) in self.incremental_executor.execute_incremental_streaming(
-                document, None, str(source_path), str(source_path.name)
+                document, None, str(source_path), str(source_path)
             ):
                 # Use block's ID (which is its cache key)
                 json_block = self._block_to_json(

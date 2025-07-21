@@ -19,3 +19,4 @@ dist
 **/**.colight
 docs/api/
 .colight_cache
+.ruff_cache

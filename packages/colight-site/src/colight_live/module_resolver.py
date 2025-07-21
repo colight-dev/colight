@@ -1,135 +1,135 @@
 """Module name to file path resolution."""
 
-import pathlib
+import sys
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Optional
+
+
+def is_stdlib_module(module_name: str) -> bool:
+    """Check if a module name refers to a standard library module."""
+    if module_name in sys.builtin_module_names:
+        return True
+    try:
+        spec = find_spec(module_name)
+        if spec is None:
+            return False  # Not found, can't be stdlib
+        # This is a robust way to check for stdlib modules
+        return (
+            spec.origin is not None and "lib" in spec.origin and "python" in spec.origin
+        )
+    except (ImportError, ValueError, AttributeError):
+        return False
 
 
 def resolve_module_to_file(
     module_name: str, current_file: str, project_root: str, relative_level: int = 0
 ) -> Optional[str]:
-    """Resolve a module name to a file path within the project.
+    """Resolve a module name to a file path within the project."""
+    log_messages = []
+    tried_paths = []
+    is_debug_target = True  # can be used for debugging a specific issue
 
-    Args:
-        module_name: The module name to resolve (e.g., 'mymodule', 'package.submodule')
-        current_file: The file containing the import statement (relative to project root)
-        project_root: The root directory of the project
-        relative_level: Number of dots for relative imports (0 for absolute imports)
+    def log(message):
+        if is_debug_target:
+            log_messages.append(message)
 
-    Returns:
-        Relative path from project root to the module file, or None if:
-        - Module is external (stdlib or third-party)
-        - Module file doesn't exist
-    """
-    project_root_path = Path(project_root)
-    current_file_path = project_root_path / current_file
+    log(
+        f"🔍 Resolving '{module_name}' from {Path(current_file).name} (level={relative_level})"
+    )
 
-    # Handle relative imports
+    project_root_path = Path(project_root).resolve()
+    current_file_path = (project_root_path / current_file).resolve()
+
+    if relative_level == 0 and is_stdlib_module(module_name):
+        return None
+
+    search_paths = []
     if relative_level > 0:
-        # Start from the directory containing the current file
         start_dir = current_file_path.parent
-
-        # Go up the directory tree based on the number of dots
         for _ in range(relative_level - 1):
             start_dir = start_dir.parent
-
-        # If module_name is empty (e.g., "from . import x"), we're importing from __init__.py
-        if not module_name:
-            target_path = start_dir / "__init__.py"
-        else:
-            # Convert module name to path
-            module_parts = module_name.split(".")
-            target_path = start_dir.joinpath(*module_parts)
+        search_paths.append(start_dir)
     else:
-        # Absolute import - start from project root
-        if not module_name:
-            return None
-
-        module_parts = module_name.split(".")
-        target_path = project_root_path.joinpath(*module_parts)
-
-    # Build list of candidates
-    candidates = []
-    parts = module_parts  # Use the module_parts we already split
-
-    # 1. Try relative to the importing file's directory (most common for local imports)
-    from_dir = current_file_path.parent
-    candidates.append(from_dir / pathlib.Path(*parts).with_suffix(".py"))
-    candidates.append(from_dir / pathlib.Path(*parts) / "__init__.py")
-
-    # 2. Check if the importing file is in a package (has __init__.py files)
-    # Walk up directory tree to find package roots
-    current = from_dir
-    while current.is_relative_to(project_root_path):
-        parent = current.parent
-        if (current / "__init__.py").exists():
-            # This is a package, try importing relative to its parent
-            candidates.append(parent / pathlib.Path(*parts).with_suffix(".py"))
-            candidates.append(parent / pathlib.Path(*parts) / "__init__.py")
-            current = parent
-        else:
-            break
-
-    # 3. Try from project root (absolute import)
-    candidates.append(target_path.with_suffix(".py"))
-    candidates.append(target_path / "__init__.py")
-
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            # Return relative path from project root
+        search_paths.append(current_file_path.parent)
+        search_paths.append(project_root_path)
+        for p in sys.path:
             try:
-                rel_path = str(candidate.relative_to(project_root_path))
-                return rel_path
-            except ValueError:
-                # File is outside project root
-                # print(f"Outside project: {candidate}")
+                resolved_p = Path(p).resolve()
+                if (
+                    project_root_path in resolved_p.parents
+                    or project_root_path == resolved_p
+                ):
+                    if resolved_p not in search_paths:
+                        search_paths.append(resolved_p)
+            except (FileNotFoundError, Exception):
+                continue
+
+    module_parts = module_name.split(".") if module_name else []
+
+    # Primary search
+    for search_path in search_paths:
+        candidate_base = search_path.joinpath(*module_parts)
+
+        candidate_pkg = candidate_base / "__init__.py"
+        tried_paths.append(candidate_pkg)
+        if candidate_pkg.is_file() and candidate_pkg.is_relative_to(project_root_path):
+            resolved_path = str(candidate_pkg.relative_to(project_root_path))
+            return resolved_path
+
+        candidate_file = candidate_base.with_suffix(".py")
+        tried_paths.append(candidate_file)
+        if candidate_file.is_file() and candidate_file.is_relative_to(
+            project_root_path
+        ):
+            resolved_path = str(candidate_file.relative_to(project_root_path))
+            return resolved_path
+
+    # Fallback: Upward traversal for absolute imports
+    if relative_level == 0:
+        try:
+            spec = find_spec(module_name)
+            if spec is not None:
                 return None
+        except (ImportError, ValueError, AttributeError):
+            pass
 
-    # Module not found in project - likely external
+        current_dir = current_file_path.parent
+        while current_dir != project_root_path and current_dir.parent != current_dir:
+            candidate_base = current_dir.joinpath(*module_parts)
+
+            candidate_pkg = candidate_base / "__init__.py"
+            tried_paths.append(candidate_pkg)
+            if candidate_pkg.is_file() and candidate_pkg.is_relative_to(
+                project_root_path
+            ):
+                resolved_path = str(candidate_pkg.relative_to(project_root_path))
+                return resolved_path
+
+            candidate_file = candidate_base.with_suffix(".py")
+            tried_paths.append(candidate_file)
+            if candidate_file.is_file() and candidate_file.is_relative_to(
+                project_root_path
+            ):
+                resolved_path = str(candidate_file.relative_to(project_root_path))
+                return resolved_path
+
+            current_dir = current_dir.parent
+
+    log(f"❌ Not found. Tried: {', '.join(tried_paths)}")
+    if is_debug_target:
+        print("\n".join(log_messages))
+
+    if relative_level == 0:
+        try:
+            spec = find_spec(module_name)
+            if (
+                spec
+                and spec.origin
+                and not Path(spec.origin).is_relative_to(project_root_path)
+            ):
+                return None
+        except (ImportError, ValueError, AttributeError):
+            pass
+
     return None
-
-
-def is_stdlib_module(module_name: str) -> bool:
-    """Check if a module name refers to a standard library module.
-
-    This is a simple heuristic - a more complete implementation would
-    check against the actual list of stdlib modules.
-    """
-    # Common stdlib modules
-    stdlib_modules = {
-        "os",
-        "sys",
-        "json",
-        "math",
-        "random",
-        "datetime",
-        "collections",
-        "itertools",
-        "functools",
-        "pathlib",
-        "typing",
-        "re",
-        "ast",
-        "dataclasses",
-        "enum",
-        "abc",
-        "asyncio",
-        "subprocess",
-        "shutil",
-        "tempfile",
-        "unittest",
-        "logging",
-        "argparse",
-        "configparser",
-        "csv",
-        "sqlite3",
-        "urllib",
-        "http",
-        "email",
-        "html",
-        "xml",
-    }
-
-    # Check if it's a known stdlib module or submodule
-    top_level = module_name.split(".")[0]
-    return top_level in stdlib_modules

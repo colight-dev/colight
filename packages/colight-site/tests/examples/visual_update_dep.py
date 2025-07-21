@@ -1,1 +1,4 @@
-x = 53
+import time
+
+time.sleep(1)
+x = 9999

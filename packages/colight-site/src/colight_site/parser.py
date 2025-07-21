@@ -628,15 +628,26 @@ def parse_document(
     return document
 
 
-def parse_file(file_path: pathlib.Path) -> Document:
+def find_project_root(
+    start_path: pathlib.Path,
+    markers: tuple[str, ...] = (".git", "pyproject.toml", "setup.py"),
+) -> pathlib.Path:
+    """Find project root by looking for marker files/directories."""
+    for parent in [start_path] + list(start_path.parents):
+        if any((parent / marker).exists() for marker in markers):
+            return parent
+    return start_path.parent  # Default to parent directory
+
+
+def parse_file(
+    file_path: pathlib.Path, project_root: Optional[pathlib.Path] = None
+) -> Document:
     """Parse a colight file into a Document."""
     source_code = file_path.read_text(encoding="utf-8")
-    # Get project root - walk up to find a directory with .git or pyproject.toml
-    project_root = file_path.parent
-    for parent in file_path.parents:
-        if (parent / ".git").exists() or (parent / "pyproject.toml").exists():
-            project_root = parent
-            break
+
+    # Determine project root if not provided
+    if project_root is None:
+        project_root = find_project_root(file_path)
 
     # Pass file path information for dependency tracking
     try:
@@ -650,6 +661,8 @@ def parse_file(file_path: pathlib.Path) -> Document:
 
 
 # Convenience exports for compatibility
-def parse_colight_file(file_path: pathlib.Path) -> Document:
+def parse_colight_file(
+    file_path: pathlib.Path, project_root: Optional[pathlib.Path] = None
+) -> Document:
     """Parse a colight file (compatibility alias)."""
-    return parse_file(file_path)
+    return parse_file(file_path, project_root=project_root)

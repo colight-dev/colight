@@ -4,6 +4,7 @@ import asyncio
 import fnmatch
 import itertools
 import json
+import logging
 import pathlib
 import sys
 import threading
@@ -22,11 +23,12 @@ from colight_site.parser import parse_file
 from colight_site.pragma import parse_pragma_arg
 from colight_site.utils import merge_ignore_patterns
 
-from .block_cache import BlockCache
 from .client_registry import ClientRegistry
 from .file_graph import FileDependencyGraph
 from .incremental_executor import IncrementalExecutor
 from .json_api import JsonDocumentGenerator, build_file_tree_json
+
+logger = logging.getLogger(__name__)
 
 # DocumentCache removed - no longer needed with RunVersion architecture
 
@@ -73,13 +75,11 @@ class ApiMiddleware:
         self.ignore = ignore
         self.visual_store = {}  # Store visual data by ID
         self.file_resolver = FileResolver(self.input_path, include, ignore)
-        # Create BlockCache with reasonable defaults
-        self.block_cache = BlockCache(max_size_mb=500, hot_threshold_seconds=300)
-        self.incremental_executor = IncrementalExecutor(
-            verbose=verbose, block_cache=self.block_cache
-        )
+        self.incremental_executor = IncrementalExecutor(verbose=verbose)
         self.incremental_executor.project_root = str(self.input_path)
         self.verbose = verbose
+        if self.verbose:
+            logging.basicConfig(level=logging.INFO)
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
@@ -189,6 +189,8 @@ class LiveServer:
     ):
         self.input_path = input_path.resolve()  # Always use absolute path
         self.verbose = verbose
+        if self.verbose:
+            logging.basicConfig(level=logging.INFO)
         self.pragma = parse_pragma_arg(pragma)
         self.include = include
         self.ignore = ignore
@@ -345,6 +347,7 @@ class LiveServer:
                                     self._api_middleware
                                     and self._api_middleware.incremental_executor
                                 ):
+                                    # Use the absolute Python file path directly
                                     self._api_middleware.incremental_executor.mark_file_for_eviction(
                                         str(abs_path)
                                     )
@@ -354,14 +357,15 @@ class LiveServer:
                         rel_path = data["path"]
                         client_run = data.get("clientRun", 0)
                         if self._api_middleware:
-                            html_path = rel_path.removesuffix(".py") + ".html"
-                            source_file = (
-                                self._api_middleware.file_resolver.find_source_file(
-                                    html_path
+                            # Convert relative path to absolute Python file path
+                            abs_path = (self.input_path / rel_path).resolve()
+                            if (
+                                abs_path.exists()
+                                and self._api_middleware.file_resolver.matches_patterns(
+                                    abs_path
                                 )
-                            )
-                            if source_file:
-                                await self._send_reload_signal(source_file, client_run)
+                            ):
+                                await self._send_reload_signal(abs_path, client_run)
                 except json.JSONDecodeError:
                     pass  # Ignore invalid messages
         except websockets.exceptions.ConnectionClosed:
@@ -465,40 +469,34 @@ class LiveServer:
         # If client_run is provided and less than current run, send full data
         force_full_data = client_run is not None and client_run < run
 
-        # Convert to relative path - keep .py extension for file_path
+        source_file = file_path if file_path.is_absolute() else file_path.resolve()
+
+        # Convert to relative path for client messages
         if self.input_path.is_file():
-            file_path_str = self.input_path.name  # Keep .py extension
-            html_path = self.input_path.stem  # Remove .py for HTML path
+            file_path_str = self.input_path.name
         else:
             try:
-                # Make sure we have absolute paths for comparison
-                abs_file = file_path if file_path.is_absolute() else file_path.resolve()
+                abs_file = source_file
                 abs_input = (
                     self.input_path
                     if self.input_path.is_absolute()
                     else self.input_path.resolve()
                 )
-
                 rel_path = abs_file.relative_to(abs_input)
-                file_path_str = str(rel_path)  # Keep .py extension
-                html_path = str(rel_path)
-                # Remove .py extension for HTML path only
-                if html_path.endswith(".py"):
-                    html_path = html_path[:-3]
+                file_path_str = str(rel_path)
             except ValueError:
                 # File is not relative to input path
-                file_path_str = file_path.name  # Keep .py extension
-                html_path = file_path.stem
-
-        source_file = None
+                file_path_str = source_file.name
 
         try:
-            # Find source file
+            # Verify the file exists and matches patterns
             if self._api_middleware:
-                source_file = self._api_middleware.file_resolver.find_source_file(
-                    html_path + ".html"
-                )
-                if not source_file:
+                if (
+                    not source_file.exists()
+                    or not self._api_middleware.file_resolver.matches_patterns(
+                        source_file
+                    )
+                ):
                     # TODO, do not use run-start here, use an error message that shows itself..
                     await self._ws_broadcast_to_file_watchers(
                         {"run": run, "type": "run-start", "file": file_path_str},
@@ -509,7 +507,7 @@ class LiveServer:
                         file_path_str,
                     )
                     return
-                doc = parse_file(source_file)
+                doc = parse_file(source_file, project_root=self.input_path)
 
                 # Apply pragma if any
                 if self.pragma:
@@ -517,6 +515,18 @@ class LiveServer:
 
                 # Get block IDs from analyzed document
                 all_block_ids = doc.get_cache_keys()
+
+                # Clean up cache entries for blocks that no longer exist
+                if self._api_middleware and self._api_middleware.incremental_executor:
+                    # IMPORTANT: Must use absolute path to match what incremental_executor stores
+                    # source_file is the absolute path that will be used as current_file
+                    if self.verbose:
+                        logger.info(
+                            f"Cleaning stale entries for: source_file={source_file}, file_path_str={file_path_str}"
+                        )
+                    self._api_middleware.incremental_executor.clean_stale_entries(
+                        str(source_file), set(all_block_ids)
+                    )
 
                 # Send run-start message with block manifest
                 # Note: We don't pre-compute dirty blocks anymore - cache hit/miss during
@@ -629,28 +639,21 @@ class LiveServer:
 
                 traceback.print_exc()
 
-    async def _send_reload_signal(self, changed_file=None, client_run=None):
-        """Send reload signal to all connected clients."""
-        # This method is now simplified - just trigger a build
-        if changed_file:
-            # Cancel any in-flight build
-            if self._current_run_task and not self._current_run_task.done():
-                self._current_run_task.cancel()
-                # Wait a bit for cancellation to complete
-                try:
-                    await asyncio.wait_for(self._current_run_task, timeout=0.5)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
+    async def _send_reload_signal(self, changed_file, client_run=None):
+        """Trigger a build for the changed file."""
+        # Cancel any in-flight build
+        if self._current_run_task and not self._current_run_task.done():
+            self._current_run_task.cancel()
+            # Wait a bit for cancellation to complete
+            try:
+                await asyncio.wait_for(self._current_run_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
-            # Start new build task
-            self._current_run_task = asyncio.create_task(
-                self._trigger_build(changed_file, client_run)
-            )
-        else:
-            # General reload - send to all clients watching any file
-            # This is a fallback that shouldn't happen in normal operation
-            for file_path in self.client_registry.get_watched_files():
-                await self._ws_broadcast_to_file_watchers({"type": "reload"}, file_path)
+        # Start new build task
+        self._current_run_task = asyncio.create_task(
+            self._trigger_build(changed_file, client_run)
+        )
 
     async def _send_file_change_notification(self):
         """Send notification about changed files after debounce period."""
@@ -703,7 +706,6 @@ class LiveServer:
                         )
                         print(
                             f"Cache stats: {stats['total_entries']} entries, "
-                            f"{stats['size_mb']:.1f}MB, "
                             f"hit rate: {stats['hit_rate']:.2%}"
                         )
             except asyncio.CancelledError:

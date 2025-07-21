@@ -1,183 +1,184 @@
-"""Cache management for incremental execution with file-aware eviction."""
+"""Unified cache for incremental execution with delayed file eviction.
+
+IMPORTANT: Cache keys are based ONLY on the source code of blocks (transitively),
+not on runtime values. This means:
+- A block with the same source will always have the same cache key
+- We never attempt to serialize/hash Python runtime values
+- Changing any source code invalidates the cache for affected blocks
+"""
 
 import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
+
+from colight_site.executor import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
+logger.setLevel("INFO")
+
 
 @dataclass
-class CacheEntry:
-    """A single cache entry with metadata."""
+class CachedResult:
+    """A cached execution result."""
 
-    cache_key: str
+    cache_key: str  # Based on source code only
     file_path: str
-    size_bytes: int
-    last_access: float = field(default_factory=time.time)
-    access_count: int = 0
-    is_hot: bool = False  # Frequently accessed
-
-    def access(self):
-        """Record an access to this cache entry."""
-        self.last_access = time.time()
-        self.access_count += 1
-        # Mark as hot if accessed frequently
-        if self.access_count > 5:
-            self.is_hot = True
+    result: ExecutionResult
+    timestamp: float = field(default_factory=time.time)
 
 
 class BlockCache:
-    """Manages block execution cache with file-aware eviction policies."""
+    """Single cache for block execution results with delayed file eviction.
 
-    def __init__(self, max_size_mb: int = 500, hot_threshold_seconds: int = 300):
-        self.max_size_bytes = max_size_mb * 1024 * 1024
-        self.hot_threshold_seconds = hot_threshold_seconds
+    The cache stores execution results keyed by source-based cache keys.
+    Files marked for eviction are not immediately cleared to handle
+    temporary unwatching (e.g., browser reload).
+    """
 
-        # Core data structures
-        self.entries: Dict[str, CacheEntry] = {}  # cache_key -> CacheEntry
+    def __init__(self, eviction_delay_seconds: int = 30):
+        self.eviction_delay_seconds = eviction_delay_seconds
+
+        # Core data structure - single source of truth
+        self.cache: Dict[str, CachedResult] = {}  # cache_key -> CachedResult
+
+        # Indexes for efficient lookups
         self.file_entries: Dict[str, Set[str]] = defaultdict(
             set
         )  # file_path -> Set[cache_key]
-        self.marked_for_eviction: Set[str] = set()  # file paths marked for eviction
+        self.eviction_times: Dict[str, float] = {}  # file_path -> time when marked
 
         # Statistics
-        self.total_size = 0
         self.hit_count = 0
         self.miss_count = 0
         self.eviction_count = 0
 
-    def add_entry(self, cache_key: str, file_path: str, size_bytes: int):
-        """Add a new cache entry."""
-        # Remove old entry if exists
-        if cache_key in self.entries:
-            self.remove_entry(cache_key)
-
-        # Check if we need to make space BEFORE adding
-        if self.total_size + size_bytes > self.max_size_bytes:
-            self._evict_to_make_space(size_bytes)
-
-        entry = CacheEntry(cache_key, file_path, size_bytes)
-        self.entries[cache_key] = entry
-        self.file_entries[file_path].add(cache_key)
-        self.total_size += size_bytes
-
-    def access_entry(self, cache_key: str) -> bool:
-        """Record access to a cache entry. Returns True if found."""
-        if cache_key in self.entries:
-            self.entries[cache_key].access()
+    def get(self, cache_key: str) -> Optional[ExecutionResult]:
+        """Get a cached result."""
+        if cache_key in self.cache:
             self.hit_count += 1
-            return True
+            return self.cache[cache_key].result
         else:
             self.miss_count += 1
-            return False
+            return None
 
-    def remove_entry(self, cache_key: str):
-        """Remove a cache entry."""
-        if cache_key not in self.entries:
-            return
+    def put(self, cache_key: str, file_path: str, result: ExecutionResult):
+        """Add or update a cache entry."""
+        # Remove old entry if exists
+        if cache_key in self.cache:
+            self._remove_entry(cache_key)
 
-        entry = self.entries[cache_key]
-        self.total_size -= entry.size_bytes
+        # Add new entry
+        entry = CachedResult(cache_key, file_path, result)
+        self.cache[cache_key] = entry
+        self.file_entries[file_path].add(cache_key)
+
+    def remove(self, cache_key: str) -> bool:
+        """Remove a cache entry. Returns True if entry existed."""
+        if cache_key in self.cache:
+            self._remove_entry(cache_key)
+            return True
+        return False
+
+    def _remove_entry(self, cache_key: str):
+        """Internal method to remove an entry and update indexes."""
+        entry = self.cache[cache_key]
         self.file_entries[entry.file_path].discard(cache_key)
         if not self.file_entries[entry.file_path]:
             del self.file_entries[entry.file_path]
-        del self.entries[cache_key]
+        del self.cache[cache_key]
+
+    def clear_file(self, file_path: str) -> Set[str]:
+        """Clear all cache entries for a file. Returns removed keys."""
+        if file_path not in self.file_entries:
+            return set()
+
+        removed_keys = set()
+        for cache_key in list(self.file_entries[file_path]):
+            self._remove_entry(cache_key)
+            removed_keys.add(cache_key)
+
+        logger.debug(f"Cleared {len(removed_keys)} entries for {file_path}")
+        return removed_keys
+
+    def clean_stale_entries(
+        self, file_path: str, current_block_ids: Set[str]
+    ) -> Set[str]:
+        """Remove entries for blocks no longer in the document. Returns removed keys.
+
+        NOTE: This method has a known limitation - if a block is deleted and then
+        recreated with identical source code, it will have the same cache key and
+        won't be considered "stale". This can cause the server to send "unchanged"
+        messages for blocks the client doesn't have. Consider using clear_file()
+        instead when the file has been modified.
+        """
+        if file_path not in self.file_entries:
+            return set()
+
+        # Find stale entries
+        file_cache_keys = self.file_entries[file_path].copy()
+        stale_keys = file_cache_keys - current_block_ids
+
+        # Remove stale entries
+        removed_keys = set()
+        for cache_key in stale_keys:
+            self._remove_entry(cache_key)
+            removed_keys.add(cache_key)
+
+        if True or removed_keys:
+            print(f"Removed {len(removed_keys)} stale entries for {file_path}")
+            print(f"Stale keys removed: {[k[:8] + '...' for k in removed_keys]}")
+            print(f"Current block IDs: {[k[:8] + '...' for k in current_block_ids]}")
+            print(
+                f"Remaining cached: {[k[:8] + '...' for k in self.file_entries.get(file_path, set())]}"
+            )
+
+        return removed_keys
 
     def mark_file_for_eviction(self, file_path: str):
-        """Mark all entries from a file for potential eviction."""
-        self.marked_for_eviction.add(file_path)
-        logger.debug(f"Marked {file_path} for cache eviction")
+        """Mark a file for delayed eviction."""
+        self.eviction_times[file_path] = time.time()
+        logger.debug(f"Marked {file_path} for eviction")
 
     def unmark_file_for_eviction(self, file_path: str):
-        """Remove eviction mark from a file (e.g., it became watched again)."""
-        self.marked_for_eviction.discard(file_path)
+        """Cancel pending eviction for a file."""
+        self.eviction_times.pop(file_path, None)
 
-    def evict_marked_files(self, force: bool = False):
-        """Evict cache entries from marked files.
+    def evict_marked_files(self, force: bool = False) -> Set[str]:
+        """Evict entries from files marked for eviction after delay.
 
         Args:
-            force: If True, evict even hot entries. If False, keep hot entries.
+            force: If True, evict immediately regardless of delay
         """
-        evicted = 0
-        for file_path in list(self.marked_for_eviction):
-            if file_path in self.file_entries:
-                for cache_key in list(self.file_entries[file_path]):
-                    entry = self.entries.get(cache_key)
-                    if entry and (force or not self._is_hot(entry)):
-                        self.remove_entry(cache_key)
-                        evicted += 1
+        evicted_keys = set()
+        current_time = time.time()
+
+        for file_path, mark_time in list(self.eviction_times.items()):
+            # Check if enough time has passed or force eviction
+            if force or (current_time - mark_time) >= self.eviction_delay_seconds:
+                # Evict all entries for this file
+                if file_path in self.file_entries:
+                    keys_to_evict = list(self.file_entries[file_path])
+                    for cache_key in keys_to_evict:
+                        self._remove_entry(cache_key)
+                        evicted_keys.add(cache_key)
                         self.eviction_count += 1
 
-            # Remove from marked set if all entries evicted
-            if file_path not in self.file_entries:
-                self.marked_for_eviction.discard(file_path)
+                # Remove from eviction times
+                del self.eviction_times[file_path]
 
-        if evicted > 0:
-            logger.info(f"Evicted {evicted} cache entries from unwatched files")
+        if evicted_keys:
+            logger.info(f"Evicted {len(evicted_keys)} entries from unwatched files")
 
-    def _is_hot(self, entry: CacheEntry) -> bool:
-        """Check if an entry is hot (recently/frequently accessed)."""
-        if entry.is_hot:
-            return True
-
-        # Only consider it hot if it's been accessed (not just created)
-        if entry.access_count == 0:
-            return False
-
-        # Check if accessed recently
-        age = time.time() - entry.last_access
-        return age < self.hot_threshold_seconds
-
-    def _evict_to_make_space(self, needed_bytes: int):
-        """Evict entries to make space for new entry."""
-        target_size = self.max_size_bytes - needed_bytes
-
-        # First try evicting from marked files
-        self.evict_marked_files(force=False)
-
-        if self.total_size <= target_size:
-            return
-
-        # Sort entries for eviction (least valuable first)
-        # Priority: non-hot & never-accessed < non-hot & accessed < hot
-        def eviction_priority(entry):
-            if entry.is_hot:
-                return (2, -entry.last_access)  # Hot entries last
-            elif entry.access_count > 0:
-                return (1, -entry.last_access)  # Accessed entries second
-            else:
-                return (0, -entry.last_access)  # Never accessed first
-
-        sorted_entries = sorted(self.entries.values(), key=eviction_priority)
-
-        # Evict until we have enough space
-        for entry in sorted_entries:
-            if self.total_size <= target_size:
-                break
-
-            # Skip hot entries unless desperate
-            if entry.is_hot and self.total_size < self.max_size_bytes * 1.2:
-                continue
-
-            self.remove_entry(entry.cache_key)
-            self.eviction_count += 1
-
-        if self.total_size > target_size:
-            logger.warning(
-                f"Could not evict enough entries. Need {needed_bytes / 1024 / 1024:.1f}MB, current size: {self.total_size / 1024 / 1024:.1f}MB"
-            )
+        return evicted_keys
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
-        total_entries = len(self.entries)
-        hot_entries = sum(1 for e in self.entries.values() if self._is_hot(e))
+        total_entries = len(self.cache)
         watched_entries = sum(
-            1
-            for e in self.entries.values()
-            if e.file_path not in self.marked_for_eviction
+            1 for e in self.cache.values() if e.file_path not in self.eviction_times
         )
 
         hit_rate = (
@@ -188,44 +189,10 @@ class BlockCache:
 
         return {
             "total_entries": total_entries,
-            "hot_entries": hot_entries,
             "watched_entries": watched_entries,
-            "marked_files": len(self.marked_for_eviction),
-            "size_mb": self.total_size / 1024 / 1024,
+            "files_marked_for_eviction": len(self.eviction_times),
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
             "hit_rate": hit_rate,
             "eviction_count": self.eviction_count,
         }
-
-    def clear_file_cache(self, file_path: str):
-        """Clear all cache entries for a specific file."""
-        if file_path in self.file_entries:
-            for cache_key in list(self.file_entries[file_path]):
-                self.remove_entry(cache_key)
-            logger.debug(f"Cleared cache for {file_path}")
-
-    def estimate_entry_size(self, result) -> int:
-        """Estimate the memory size of a cache entry.
-
-        This is a rough estimate based on the result content.
-        """
-        # Base size
-        size = 1024  # 1KB base
-
-        # Add size for output
-        if hasattr(result, "output") and result.output:
-            size += len(result.output.encode("utf-8"))
-
-        # Add size for error
-        if hasattr(result, "error") and result.error:
-            size += len(result.error.encode("utf-8"))
-
-        # Add size for colight bytes
-        if hasattr(result, "colight_bytes") and result.colight_bytes:
-            size += len(result.colight_bytes)
-
-        # Add overhead estimate
-        size += 512  # Python object overhead
-
-        return size

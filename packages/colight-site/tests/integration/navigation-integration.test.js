@@ -175,8 +175,8 @@ describe("Server Integration Tests", () => {
     );
 
     const runStart = await fileRequest;
-    expect(runStart.blocks).toBeDefined();
-    expect(runStart.blocks.length).toBeGreaterThan(0);
+    expect(runStart.block_ids).toBeDefined();
+    expect(runStart.block_ids.length).toBeGreaterThan(0);
 
     ws.close();
   });

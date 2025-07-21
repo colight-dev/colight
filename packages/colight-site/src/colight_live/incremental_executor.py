@@ -1,6 +1,6 @@
 """Simplified incremental executor using cache-key-based block IDs."""
 
-from typing import Any, Dict, Iterator, Optional, Set, Tuple
+from typing import Iterator, Optional, Set, Tuple
 
 from colight_site.executor import BlockExecutor, ExecutionResult
 from colight_site.model import Block, Document
@@ -11,10 +11,9 @@ from .block_cache import BlockCache
 class IncrementalExecutor(BlockExecutor):
     """Execute blocks incrementally using cache-key-based IDs."""
 
-    def __init__(self, verbose: bool = False, block_cache: Optional[BlockCache] = None):
+    def __init__(self, verbose: bool = False):
         super().__init__(verbose)
-        self.cache: Dict[str, ExecutionResult] = {}  # cache_key -> result
-        self.block_cache = block_cache or BlockCache()
+        self.cache = BlockCache(eviction_delay_seconds=30)
         self.current_file: Optional[str] = None
         self.project_root: Optional[str] = None
 
@@ -38,15 +37,14 @@ class IncrementalExecutor(BlockExecutor):
             # Check cache using the block's ID (which is its cache key)
             cache_key = block.id
 
-            if cache_key in self.cache:
+            # Try to get from cache
+            result = self.cache.get(cache_key)
+
+            if result is not None:
                 # Cache hit
                 if self.verbose:
                     print(f"Cache hit for block {cache_key[:8]}... in {filename}")
-                result = self.cache[cache_key]
                 result.cache_hit = True
-
-                # Record cache access
-                self.block_cache.access_entry(cache_key)
             else:
                 # Cache miss - execute the block
                 if self.verbose:
@@ -58,12 +56,8 @@ class IncrementalExecutor(BlockExecutor):
                 result.cache_hit = False
 
                 # Store in cache
-                self.cache[cache_key] = result
-
-                # Add to cache manager
                 if self.current_file:
-                    size = self.block_cache.estimate_entry_size(result)
-                    self.block_cache.add_entry(cache_key, self.current_file, size)
+                    self.cache.put(cache_key, self.current_file, result)
 
             # Add cache key to result
             result.cache_key = cache_key
@@ -73,31 +67,28 @@ class IncrementalExecutor(BlockExecutor):
 
     def clear_cache(self):
         """Clear all cached results."""
-        self.cache.clear()
+        self.cache = BlockCache()
 
     def evict_cached_entries(self, file_path: str):
         """Evict cache entries for a specific file."""
-        evicted = self.block_cache.evict_file(file_path)
+        self.cache.clear_file(file_path)
 
-        # Remove from local cache
-        for cache_key in evicted:
-            self.cache.pop(cache_key, None)
-
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self):
         """Get cache statistics."""
-        return self.block_cache.get_stats()
+        return self.cache.get_stats()
 
     def mark_file_for_eviction(self, file_path: str):
         """Mark a file's cache entries for potential eviction."""
-        self.block_cache.mark_file_for_eviction(file_path)
+        self.cache.mark_file_for_eviction(file_path)
 
     def unmark_file_for_eviction(self, file_path: str):
         """Remove eviction mark from a file."""
-        self.block_cache.unmark_file_for_eviction(file_path)
+        self.cache.unmark_file_for_eviction(file_path)
 
     def evict_unwatched_files(self, force: bool = False):
         """Evict cache entries for files marked for eviction."""
-        evicted = self.block_cache.evict_marked_files(force)
-        # Remove from local cache
-        for cache_key in evicted:
-            self.cache.pop(cache_key, None)
+        self.cache.evict_marked_files(force)
+
+    def clean_stale_entries(self, file_path: str, current_block_ids: Set[str]):
+        """Remove cache entries for blocks no longer in the document."""
+        self.cache.clean_stale_entries(file_path, current_block_ids)
