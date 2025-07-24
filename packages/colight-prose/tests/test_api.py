@@ -3,6 +3,8 @@
 import pathlib
 import tempfile
 
+import pytest
+
 import colight_prose.static.builder as builder
 from colight_prose import api
 from colight_prose.static.builder import BuildConfig
@@ -236,12 +238,9 @@ class TestAPIConfigurationValidation:
             output_file = temp_path / "test.invalid"
 
             # Test with invalid format in config
-            try:
-                config = BuildConfig(formats={"invalid_format"})
+            with pytest.raises((ValueError, KeyError)):
+                config = BuildConfig(formats={"invalid_format"})  # type: ignore
                 builder.build_file(test_file, output_file=output_file, config=config)
-                # Behavior depends on implementation - might succeed or fail
-            except (ValueError, KeyError):
-                pass  # Expected for invalid format
 
     def test_pragma_configuration_validation(self):
         """Test pragma configuration validation."""

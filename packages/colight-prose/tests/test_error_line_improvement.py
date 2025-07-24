@@ -14,7 +14,7 @@ def test_line_numbers_not_string_1():
     # Create a block that starts at line 20
     stmt = cst.parse_statement("undefined_variable")
     elem = Element(kind="EXPRESSION", content=stmt, lineno=20)
-    block = Block(elements=[elem], tags=TagSet(), start_line=20, id=0)
+    block = Block(elements=[elem], tags=TagSet(), start_line=20, id="0")
 
     executor = BlockExecutor()
 
@@ -100,7 +100,7 @@ def test_comparison_with_without_line_tracking():
     # New way - with our block that has line tracking
     stmt = cst.parse_statement(code)
     elem = Element(kind="STATEMENT", content=stmt, lineno=42)
-    block = Block(elements=[elem], tags=TagSet(), start_line=42, id=0)
+    block = Block(elements=[elem], tags=TagSet(), start_line=42, id="0")
 
     executor = BlockExecutor()
     result = executor.execute_block(block, "test.py")
