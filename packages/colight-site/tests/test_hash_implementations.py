@@ -1,11 +1,11 @@
-"""Tests comparing hash implementations across modules."""
+"""Tests for block ID (cache key) generation."""
 
 import hashlib
 
 import libcst as cst
 
-from colight_live.incremental_executor import IncrementalExecutor
 from colight_site.model import Block, BlockInterface, Element, TagSet
+from colight_site.parser import parse_document
 
 
 def create_test_block_with_elements(elements_spec):
@@ -23,205 +23,118 @@ def create_test_block_with_elements(elements_spec):
         elements=elements,
         tags=TagSet(),
         start_line=1,
-        id=1,
+        id="test-id",  # This will be replaced by parser
         interface=BlockInterface(provides=[], requires=[]),
     )
 
 
-def hash_block_content(block):
-    """Shared implementation for hashing block content."""
-    content_parts = []
-    for elem in block.elements:
-        content_parts.append(f"{elem.kind}:{elem.get_source()}")
-    content = "\n".join(content_parts)
-    return hashlib.sha256(content.encode()).hexdigest()
+def test_block_id_consistency():
+    """Test that block IDs are consistent for the same content."""
+    # Parse the same content twice
+    code = """# First block
+x = 1
+
+# Second block
+y = x + 1"""
+
+    doc1 = parse_document(code)
+    doc2 = parse_document(code)
+
+    # Block IDs should be the same for the same content
+    assert len(doc1.blocks) == len(doc2.blocks)
+    for b1, b2 in zip(doc1.blocks, doc2.blocks):
+        assert b1.id == b2.id, "Block IDs should be consistent for same content"
 
 
-def test_incremental_executor_hash_consistency():
-    """Test that IncrementalExecutor's two hash methods are consistent."""
-    executor = IncrementalExecutor()
+def test_block_id_changes_with_content():
+    """Test that block IDs change when content changes."""
+    code1 = """# Block
+x = 1"""
 
-    # Create a test block
-    block = create_test_block_with_elements(
-        [
-            ("PROSE", "# This is a comment"),
-            ("STATEMENT", "x = 42"),
-            ("EXPRESSION", "x * 2"),
-        ]
-    )
+    code2 = """# Block
+x = 2"""
 
-    # Get content hash using _get_content_hash
-    content_hash = executor._get_content_hash(block)
+    doc1 = parse_document(code1)
+    doc2 = parse_document(code2)
 
-    # Manually compute what _compute_cache_key would compute for content
-    content_parts = []
-    for elem in block.elements:
-        content_parts.append(f"{elem.kind}:{elem.get_source()}")
-    content = "\n".join(content_parts)
-    manual_hash = hashlib.sha256(content.encode()).hexdigest()
-
-    # They should be identical
-    assert content_hash == manual_hash, "Hash methods produce different results"
+    # Block IDs should be different for different content
+    assert doc1.blocks[0].id != doc2.blocks[0].id, "Block IDs should differ for different content"
 
 
-def test_shared_hash_function_matches_incremental_executor():
-    """Test that our shared hash function matches IncrementalExecutor."""
-    executor = IncrementalExecutor()
+def test_block_id_format():
+    """Test that block IDs are valid SHA256 hashes."""
+    code = """# Test
+x = 1
 
-    test_blocks = [
-        create_test_block_with_elements([("STATEMENT", "x = 1")]),
-        create_test_block_with_elements(
-            [
-                ("PROSE", "# Comment"),
-                ("STATEMENT", "y = 2"),
-            ]
-        ),
-        create_test_block_with_elements(
-            [
-                ("STATEMENT", "def foo():\n    pass"),
-                ("EXPRESSION", "foo()"),
-            ]
-        ),
-    ]
+# Another block
+y = 2"""
 
-    for block in test_blocks:
-        executor_hash = executor._get_content_hash(block)
-        shared_hash = hash_block_content(block)
+    doc = parse_document(code)
 
-        assert executor_hash == shared_hash, "Hash mismatch for block"
+    for block in doc.blocks:
+        # Block IDs should be 16-character hex strings (truncated SHA256)
+        assert len(block.id) == 16, f"Block ID should be 16 chars, got {len(block.id)}"
+        assert all(c in '0123456789abcdef' for c in block.id), "Block ID should be valid hex"
 
 
-def test_json_api_vs_incremental_executor_content():
-    """Test that json_api and incremental_executor hash content the same way."""
-    # Create blocks with different element types
-    blocks = [
-        create_test_block_with_elements(
-            [
-                ("PROSE", "# This is prose"),
-                ("STATEMENT", "x = 10"),
-            ]
-        ),
-        create_test_block_with_elements(
-            [
-                ("EXPRESSION", "2 + 2"),
-            ]
-        ),
-        create_test_block_with_elements(
-            [
-                ("STATEMENT", "def func():\n    return 42"),
-                ("EXPRESSION", "func()"),
-                ("PROSE", "# Another comment"),
-            ]
-        ),
-    ]
+def test_block_id_includes_dependencies():
+    """Test that block IDs include dependency information."""
+    # Two blocks with same code but different dependencies
+    code1 = """# First x
+x = 1
 
-    executor = IncrementalExecutor()
+# Use x
+result = x + 1"""
 
-    for block in blocks:
-        # IncrementalExecutor's way
-        executor_hash = executor._get_content_hash(block)
+    code2 = """# Different x
+x = 2
 
-        # JSON generator's way (simulated)
-        content_parts = []
-        for elem in block.elements:
-            if elem.kind == "PROSE":
-                # JSON generator uses the raw prose text
-                content_parts.append(elem.get_source())
-            else:
-                # JSON generator strips the code
-                content_parts.append(elem.get_source().strip())
+# Use x (same code as above)
+result = x + 1"""
 
-        json_content = "\n".join(content_parts)
-        json_hash = hashlib.sha256(json_content.encode()).hexdigest()
+    doc1 = parse_document(code1)
+    doc2 = parse_document(code2)
 
-        # These will likely be different due to different formatting
-        # This test documents the difference
-        print(f"Executor hash: {executor_hash[:16]}")
-        print(f"JSON gen hash: {json_hash[:16]}")
-        print(f"Content differs: {executor_hash != json_hash}")
-        print()
+    # The second block in each document has the same code
+    # but depends on different values of x
+    block1_second = doc1.blocks[1]
+    block2_second = doc2.blocks[1]
+
+    # Since the dependencies are different (x=1 vs x=2),
+    # the block IDs should be different even though the code is the same
+    assert block1_second.id != block2_second.id, "Block IDs should include dependency context"
 
 
-def test_interface_hash_differences():
-    """Test how interface hashing differs between implementations."""
-    # The JSON generator has special logic for interface hashing
-    # that differs from the incremental executor
+def test_block_id_stability_with_whitespace():
+    """Test that block IDs are stable with respect to meaningful whitespace."""
+    # Same logic, different whitespace
+    code1 = """# Block
+x = 1
+y = 2"""
 
-    block = Block(
-        elements=[
-            Element(
-                kind="STATEMENT",
-                content=cst.parse_module("def foo(): pass").body[0],
-                lineno=1,
-            ),
-            Element(
-                kind="EXPRESSION", content=cst.parse_module("foo()").body[0], lineno=1
-            ),
-        ],
-        tags=TagSet(),
-        start_line=1,
-        id=1,
-        interface=BlockInterface(provides=["foo"], requires=[]),
-    )
+    code2 = """# Block
+x = 1
 
-    # JSON generator's interface hash logic (simulated)
-    interface_parts = []
-    for elem in block.elements:
-        code = elem.get_source().strip()
-        if elem.kind == "STATEMENT":
-            # Only includes function/class definitions
-            if code.startswith(("def ", "class ", "async def ")):
-                parts = code.split()
-                if len(parts) > 1:
-                    interface_parts.append(f"stmt:{parts[1].split('(')[0]}")
-        else:  # EXPRESSION
-            interface_parts.append(f"expr:{code}")
+y = 2"""
 
-    interface_text = "\n".join(sorted(interface_parts))
-    json_interface_hash = hashlib.sha256(interface_text.encode()).hexdigest()[:16]
+    doc1 = parse_document(code1)
+    doc2 = parse_document(code2)
 
-    print(f"Interface parts: {interface_parts}")
-    print(f"Interface hash: {json_interface_hash}")
-
-    # The incremental executor doesn't have a separate interface hash
-    # It includes everything in the content hash
+    # These create different blocks due to the blank line
+    assert len(doc1.blocks) != len(doc2.blocks), "Blank lines create block boundaries"
 
 
-def test_propose_unified_hash_function():
-    """Test a proposed unified hash function for block content."""
+def test_block_id_with_pragmas():
+    """Test that block IDs include pragma information."""
+    code1 = """# Normal block
+x = 1"""
 
-    def unified_hash_block_content(block, include_kind=True):
-        """Unified hash function for block content.
+    code2 = """# %% pragma: always-eval
+# Block with pragma
+x = 1"""
 
-        Args:
-            block: The block to hash
-            include_kind: Whether to include element kind in hash (for stricter matching)
-        """
-        content_parts = []
-        for elem in block.elements:
-            source = elem.get_source().strip()  # Always strip for consistency
-            if include_kind:
-                content_parts.append(f"{elem.kind}:{source}")
-            else:
-                content_parts.append(source)
+    doc1 = parse_document(code1)
+    doc2 = parse_document(code2)
 
-        content = "\n".join(content_parts)
-        return hashlib.sha256(content.encode()).hexdigest()
-
-    # Test with various blocks
-    block = create_test_block_with_elements(
-        [
-            ("PROSE", "  # Indented comment  "),
-            ("STATEMENT", "x = 1"),
-            ("EXPRESSION", "x + 1"),
-        ]
-    )
-
-    hash_with_kind = unified_hash_block_content(block, include_kind=True)
-    hash_without_kind = unified_hash_block_content(block, include_kind=False)
-
-    # These should be different
-    assert hash_with_kind != hash_without_kind
-
-    print(f"Hash with kind: {hash_with_kind[:16]}")
-    print(f"Hash without kind: {hash_without_kind[:16]}")
+    # Different pragmas should result in different IDs
+    assert doc1.blocks[0].id != doc2.blocks[0].id, "Pragmas should affect block IDs"

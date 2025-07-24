@@ -46,19 +46,11 @@ class JsonDocumentGenerator:
 
         # Execute document incrementally if we have an executor
         if self.incremental_executor:
-            block_results = self.incremental_executor.execute_incremental(
-                document, changed_blocks, str(source_path), str(source_path.name)
-            )
-            # Create a map of block ID to result for easy lookup
-            result_map = {block.id: result for block, result in block_results}
-            # Create results list in document order
-            results = []
-            for block in document.blocks:
-                if block.id in result_map:
-                    results.append(result_map[block.id])
-                else:
-                    # Shouldn't happen, but handle gracefully
-                    results.append(ExecutionResult())
+            block_results = list(self.incremental_executor.execute_incremental_streaming(
+                document, changed_blocks, str(source_path), str(source_path)
+            ))
+            # Extract just the results in order
+            results = [result for block, result in block_results]
         else:
             # Fall back to regular execution
             executor = DocumentExecutor(verbose=self.verbose)
@@ -112,7 +104,7 @@ class JsonDocumentGenerator:
                 block,
                 result,
             ) in self.incremental_executor.execute_incremental_streaming(
-                document, None, str(source_path), str(source_path)
+                document, str(source_path), str(source_path)
             ):
                 # Use block's ID (which is its cache key)
                 json_block = self._block_to_json(

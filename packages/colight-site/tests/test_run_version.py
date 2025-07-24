@@ -41,13 +41,13 @@ async def test_websocket_messages_with_run_version():
     server.connections.add(mock_ws)
 
     # Test run-start message
-    await server._ws_broadcast({"run": 1, "type": "run-start", "file": "test.py"})
+    await server._ws_broadcast_all({"run": 1, "type": "run-start", "file": "test.py"})
     mock_ws.send.assert_called_with(
         json.dumps({"run": 1, "type": "run-start", "file": "test.py"})
     )
 
     # Test block-result message
-    await server._ws_broadcast(
+    await server._ws_broadcast_all(
         {
             "run": 1,
             "type": "block-result",
@@ -61,7 +61,7 @@ async def test_websocket_messages_with_run_version():
     )
 
     # Test run-end message
-    await server._ws_broadcast({"run": 1, "type": "run-end"})
+    await server._ws_broadcast_all({"run": 1, "type": "run-end"})
 
     # Verify all messages were sent
     assert mock_ws.send.call_count == 3

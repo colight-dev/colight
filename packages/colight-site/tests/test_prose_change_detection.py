@@ -1,4 +1,4 @@
-"""Test that prose changes are properly detected."""
+"""Test that prose changes affect cache keys."""
 
 import pathlib
 import tempfile
@@ -9,7 +9,7 @@ from colight_site.parser import parse_colight_file
 
 
 def test_prose_change_detection():
-    """Test that changes to prose are detected."""
+    """Test that changes to prose result in different cache keys."""
     executor = IncrementalExecutor(verbose=True)
 
     # Create a document with prose
@@ -30,11 +30,14 @@ x = 1
 
         # First execution
         doc = parse_colight_file(pathlib.Path(f.name))
-        results1 = executor.execute_incremental(doc)
+        results1 = list(executor.execute_incremental_streaming(doc))
 
-        # All should be new
+        # All should be cache misses on first run
         for block, result in results1:
-            assert result.content_changed == True
+            assert result.cache_hit == False
+
+        # Store block IDs from first run
+        block_ids1 = [block.id for block, _ in results1]
 
         # Change only prose
         content2 = """# %% [markdown]
@@ -47,23 +50,24 @@ x = 1
 # %% [markdown]
 # More prose here
 """
-        f2 = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-        f2.write(content2)
-        f2.flush()
+        
+        # Parse the changed content
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f2:
+            f2.write(content2)
+            f2.flush()
+            doc2 = parse_colight_file(pathlib.Path(f2.name))
+            
+        # Get block IDs from changed content
+        block_ids2 = [block.id for block in doc2.blocks]
 
-        doc2 = parse_colight_file(pathlib.Path(f2.name))
-        results2 = executor.execute_incremental(doc2)
+        # First block (prose) should have different ID due to content change
+        assert block_ids1[0] != block_ids2[0], "Prose change should result in different block ID"
 
-        results_dict = {str(block.id): result for block, result in results2}
+        # Second block (code) should have same ID - no change
+        assert block_ids1[1] == block_ids2[1], "Unchanged code should have same block ID"
 
-        # First block (prose) should show content changed
-        assert results_dict["0"].content_changed == True
-
-        # Second block (code) should not show content changed
-        assert results_dict["1"].content_changed == False
-
-        # Third block (prose) should not show content changed
-        assert results_dict["2"].content_changed == False
+        # Third block (prose) should have same ID - no change
+        assert block_ids1[2] == block_ids2[2], "Unchanged prose should have same block ID"
 
         # Clean up
         pathlib.Path(f.name).unlink()
@@ -71,7 +75,7 @@ x = 1
 
 
 def test_trailing_prose_change():
-    """Test that trailing prose changes are detected."""
+    """Test that trailing prose changes affect cache keys."""
     executor = IncrementalExecutor(verbose=True)
 
     content = """# %%
@@ -85,10 +89,13 @@ def test_trailing_prose_change():
         f.flush()
 
         doc = parse_colight_file(pathlib.Path(f.name))
-        results1 = executor.execute_incremental(doc)
+        results1 = list(executor.execute_incremental_streaming(doc))
 
-        # Should have 2 blocks
+        # Should have 2 blocks (code and prose)
         assert len(results1) == 2
+
+        # Store block IDs
+        block_ids1 = [block.id for block, _ in results1]
 
         # Change the trailing prose
         content2 = """# %%
@@ -96,20 +103,18 @@ def test_trailing_prose_change():
 
 # Hello World
 """
-        f2 = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-        f2.write(content2)
-        f2.flush()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f2:
+            f2.write(content2)
+            f2.flush()
 
-        doc2 = parse_colight_file(pathlib.Path(f2.name))
-        results2 = executor.execute_incremental(doc2)
+            doc2 = parse_colight_file(pathlib.Path(f2.name))
+            block_ids2 = [block.id for block in doc2.blocks]
 
-        results_dict = {str(block.id): result for block, result in results2}
+        # Code block should have same ID - no change
+        assert block_ids1[0] == block_ids2[0], "Unchanged code should have same block ID"
 
-        # Code block should not show content changed
-        assert results_dict["0"].content_changed == False
-
-        # Prose block should show content changed
-        assert results_dict["1"].content_changed == True
+        # Prose block should have different ID due to content change
+        assert block_ids1[1] != block_ids2[1], "Changed prose should have different block ID"
 
         # Clean up
         pathlib.Path(f.name).unlink()

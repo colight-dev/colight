@@ -143,7 +143,7 @@ def helper():
 
         # Verify input_path was resolved to absolute
         assert server.input_path.is_absolute()
-        assert server.dependency_graph.base_path.is_absolute()
+        assert server.dependency_graph.watched_path.is_absolute()
 
     @pytest.mark.asyncio
     async def test_integration_with_watch_loop(self, temp_project, monkeypatch):

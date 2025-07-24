@@ -1,6 +1,5 @@
 """Test that block IDs are consistent between manifest and results."""
 
-import hashlib
 import pathlib
 import tempfile
 
@@ -30,15 +29,8 @@ z = x + y
         # Parse document
         document = parse_colight_file(source_path)
 
-        # Generate file hash (same as server does)
-        file_hash = hashlib.sha256(str(source_path).encode()).hexdigest()[:6]
-
-        # Generate block IDs as server does
-        block_ids = []
-        for i, block in enumerate(document.blocks):
-            unique_id = block.id if block.id != 0 else i
-            stable_id = f"{file_hash}-B{unique_id:05d}"
-            block_ids.append(stable_id)
+        # Get block IDs (which are now cache keys)
+        block_ids = [block.id for block in document.blocks]
 
         # Execute using JSON generator
         executor = IncrementalExecutor()
@@ -54,10 +46,13 @@ z = x + y
             result_ids
         ), f"Block count mismatch: {len(block_ids)} vs {len(result_ids)}"
 
-        for expected, actual in zip(block_ids, result_ids):
-            assert (
-                expected == actual
-            ), f"Block ID mismatch: expected {expected}, got {actual}"
+        # Block IDs should be non-empty strings (cache keys)
+        for block_id in result_ids:
+            assert isinstance(block_id, str), f"Block ID should be string, got {type(block_id)}"
+            assert len(block_id) > 0, "Block ID should not be empty"
+
+        # The block IDs from parsing and execution should match
+        assert block_ids == result_ids, f"Block IDs don't match: {block_ids} vs {result_ids}"
 
         # Clean up
         source_path.unlink()

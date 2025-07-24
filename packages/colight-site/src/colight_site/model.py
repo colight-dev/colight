@@ -101,9 +101,19 @@ class TagSet:
         Example:
             TagSet.from_pragma_content("hide-code show-visuals")
             # Returns TagSet with {"hide-code", "show-visuals"}
+            TagSet.from_pragma_content("pragma: always-eval")
+            # Returns TagSet with {"always-eval"}
         """
-        # Extract all pragma tags using regex
-        tags = set(re.findall(r"\b(?:hide|show)(?:-all)?-\w+\b", content.lower()))
+        # Handle different pragma formats
+        normalized_content = content.lower().strip()
+        
+        # Handle "pragma: <flag>" format
+        if normalized_content.startswith("pragma:"):
+            flag = normalized_content[7:].strip()
+            return cls(frozenset({flag}) if flag else frozenset())
+        
+        # Extract all pragma tags using regex for hide/show format
+        tags = set(re.findall(r"\b(?:hide|show)(?:-all)?-\w+\b", normalized_content))
 
         # Normalize singular to plural for consistency
         normalized = set()

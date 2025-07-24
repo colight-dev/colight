@@ -20,7 +20,6 @@ class IncrementalExecutor(BlockExecutor):
     def execute_incremental_streaming(
         self,
         document: Document,
-        changed_blocks: Optional[Set[str]] = None,
         filename: str = "<string>",
         source_file: Optional[str] = None,
     ) -> Iterator[Tuple[Block, ExecutionResult]]:
@@ -37,8 +36,11 @@ class IncrementalExecutor(BlockExecutor):
             # Check cache using the block's ID (which is its cache key)
             cache_key = block.id
 
+            # Check if block has always-eval pragma (never cache)
+            should_skip_cache = "always-eval" in block.tags.flags
+            
             # Try to get from cache
-            result = self.cache.get(cache_key)
+            result = None if should_skip_cache else self.cache.get(cache_key)
 
             if result is not None:
                 # Cache hit
@@ -55,19 +57,18 @@ class IncrementalExecutor(BlockExecutor):
                 result = self.execute_block(block, filename)
                 result.cache_hit = False
 
-                # Store in cache
-                if self.current_file:
+                # Store in cache (unless always-eval)
+                if self.current_file and not should_skip_cache:
                     self.cache.put(cache_key, self.current_file, result)
 
-            # Add cache key to result
-            result.cache_key = cache_key
+            # Cache key is tracked separately, not on the result object
 
             # Yield the result
             yield block, result
 
     def clear_cache(self):
         """Clear all cached results."""
-        self.cache = BlockCache()
+        self.cache = BlockCache(eviction_delay_seconds=30)
 
     def evict_cached_entries(self, file_path: str):
         """Evict cache entries for a specific file."""

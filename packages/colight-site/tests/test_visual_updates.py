@@ -72,13 +72,11 @@ Plot.dot([[1, value], [2, value + 10]])
         assert (
             result2.cache_hit == False
         ), "Block should be re-executed when content changes"
-        assert result2.content_changed == True, "Content change should be detected"
 
         print("✓ Block execution behavior is correct")
         print(f"  - V1 visual size: {len(visual_bytes_v1)} bytes")
         print(f"  - V2 visual size: {len(visual_bytes_v2)} bytes")
         print(f"  - Cache hit: {result2.cache_hit}")
-        print(f"  - Content changed: {result2.content_changed}")
 
 
 if __name__ == "__main__":
