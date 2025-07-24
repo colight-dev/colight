@@ -1,3 +1,7 @@
+### [2025.7.1] - Jul 24, 2025
+
+- debug release
+
 ### [2025.4.1] - Apr 24, 2025
 
 - screen capture: render to texture for all screen capture modes, handle gpu errors, add --disable-vulkan-surface
