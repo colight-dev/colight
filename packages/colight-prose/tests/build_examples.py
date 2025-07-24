@@ -5,7 +5,7 @@ import pathlib
 from colight_prose.static.builder import build_directory
 
 
-def test_generate_artifacts_for_inspection():
+def build_examples():
     """Generate various colight-prose examples in test-artifacts for manual inspection."""
 
     # Get paths
@@ -44,4 +44,4 @@ def test_generate_artifacts_for_inspection():
 
 
 if __name__ == "__main__":
-    test_generate_artifacts_for_inspection()
+    build_examples()

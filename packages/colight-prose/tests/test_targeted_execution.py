@@ -160,9 +160,12 @@ print("Other module")
         server.client_registry.register_client("client3", ws3)
 
         # Client 1 and 2 watch main.py, client 3 watches other.py
-        server.client_registry.watch_file("client1", "main.py")
-        server.client_registry.watch_file("client2", "main.py")
-        server.client_registry.watch_file("client3", "other.py")
+        # Use absolute paths as the server does
+        main_path = str((temp_project / "main.py").resolve())
+        other_path = str((temp_project / "other.py").resolve())
+        server.client_registry.watch_file("client1", main_path)
+        server.client_registry.watch_file("client2", main_path)
+        server.client_registry.watch_file("client3", other_path)
 
         # Add websockets to connections
         server.connections = {ws1, ws2, ws3}

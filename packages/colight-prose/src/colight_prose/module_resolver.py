@@ -116,7 +116,7 @@ def resolve_module_to_file(
 
             current_dir = current_dir.parent
 
-    log(f"❌ Not found. Tried: {', '.join(tried_paths)}")
+    log(f"❌ Not found. Tried: {', '.join(str(p) for p in tried_paths)}")
     if is_debug_target:
         print("\n".join(log_messages))
 

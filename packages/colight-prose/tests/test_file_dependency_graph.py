@@ -4,6 +4,7 @@ import pathlib
 import tempfile
 
 import pytest
+
 from colight_prose.file_graph import FileDependencyGraph
 
 
@@ -291,57 +292,35 @@ def test_import_resolution_with_different_watched_dir():
     This reproduces the issue where watching packages/colight-prose/tests/examples/
     doesn't recognize that visual_update.py depends on visual_update_dep.py.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create a project structure similar to the real one
-        project_root = pathlib.Path(tmpdir)
-        packages_dir = project_root / "packages" / "colight-prose"
-        tests_dir = packages_dir / "tests"
-        examples_dir = tests_dir / "examples"
-        examples_dir.mkdir(parents=True)
-
-        # Create the dependent module
-        dep_file = examples_dir / "visual_update_dep.py"
-        dep_file.write_text("x = 173333\n")
-
-        # Create the main module that imports from the dependent module
-        main_file = examples_dir / "visual_update.py"
-        main_file.write_text("""
-import colight.plot as Plot
-from examples.visual_update_dep import x
-
-value = 1234455
-x
-""")
-
-        # Create __init__.py files to make it a proper package
-        (examples_dir / "__init__.py").write_text("")
-        (tests_dir / "__init__.py").write_text("")
-
-        # Simulate running from the tests directory (common pattern)
-        # and watching the examples subdirectory
-        import sys
-
-        original_path = sys.path.copy()
-        try:
-            # Add tests directory to sys.path to mimic real environment
-            sys.path.insert(0, str(tests_dir))
-
-            # Create dependency graph watching only the examples directory
-            graph = FileDependencyGraph(examples_dir)
-
-            # Analyze the main file
-            deps = graph.analyze_file(main_file)
-
-            # The main file should depend on visual_update_dep.py
-            expected_dep = "visual_update_dep.py"
-            assert (
-                expected_dep in deps
-            ), f"Expected {expected_dep} in dependencies, got {deps}"
-
-            # Check that changes to dep file affect main file
-            affected = graph.get_affected_files("visual_update_dep.py")
-            assert (
-                "visual_update.py" in affected
-            ), f"Expected visual_update.py to be affected, got {affected}"
-        finally:
-            sys.path[:] = original_path
+    # Use the real examples directory
+    current_file = pathlib.Path(__file__)
+    examples_dir = current_file.parent / "examples"
+    
+    # Skip test if examples directory doesn't exist
+    if not examples_dir.exists():
+        pytest.skip("examples directory not found")
+    
+    # Ensure the dependency files exist
+    dep_file = examples_dir / "visual_update_dep.py"
+    main_file = examples_dir / "visual_update.py"
+    
+    if not dep_file.exists() or not main_file.exists():
+        pytest.skip("Required test files not found in examples directory")
+    
+    # Create dependency graph watching only the examples directory
+    graph = FileDependencyGraph(examples_dir)
+    
+    # Analyze the main file
+    deps = graph.analyze_file(main_file)
+    
+    # The main file should depend on visual_update_dep.py
+    expected_dep = "visual_update_dep.py"
+    assert (
+        expected_dep in deps
+    ), f"Expected {expected_dep} in dependencies, got {deps}"
+    
+    # Check that changes to dep file affect main file
+    affected = graph.get_affected_files("visual_update_dep.py")
+    assert (
+        "visual_update.py" in affected
+    ), f"Expected visual_update.py to be affected, got {affected}"

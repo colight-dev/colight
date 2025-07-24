@@ -156,26 +156,26 @@ def helper():
         # Mock dependencies
         ws = AsyncMock()
         server.connections = {ws}
+        
+        # Register a client watching main.py
+        server.client_registry.register_client("test_client", ws)
+        server.client_registry.watch_file("test_client", str(temp_project / "main.py"))
 
         # Mock the awatch generator to simulate file changes
         async def mock_awatch(*args, **kwargs):
-            # Yield a single file change
-            yield [(None, str(temp_project / "main.py"))]
+            # Yield a single file change (3 = Modified)
+            yield [(3, str(temp_project / "main.py"))]
             # Then stop
             server._stop_event.set()
 
         # Patch various methods
         with patch("colight_prose.server.awatch", mock_awatch):
-            with patch.object(server, "_send_reload_signal", new_callable=AsyncMock):
+            with patch.object(server, "_send_reload_signal", new_callable=AsyncMock) as mock_reload:
                 # Run watch loop
                 await server._watch_for_changes()
 
-        # Wait a bit for debounce
-        await asyncio.sleep(0.2)
-
-        # Verify notification was sent
-        assert ws.send.called
-        call_args = ws.send.call_args[0][0]
-        message = json.loads(call_args)
-        assert message["type"] == "file-changed"
-        assert message["path"] == "main.py"
+        # Verify reload signal was sent for the modified file
+        mock_reload.assert_called_once()
+        # Check that the file path passed to _send_reload_signal ends with main.py
+        called_file_path = mock_reload.call_args[0][0]
+        assert called_file_path.name == "main.py"

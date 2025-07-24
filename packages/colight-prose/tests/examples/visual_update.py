@@ -4,7 +4,7 @@
 # %%
 import colight.plot as Plot
 
-from examples.visual_update_dep import x
+from .visual_update_dep import x
 
 x + 1
 

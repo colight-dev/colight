@@ -53,7 +53,7 @@ const embedConfigESM = {
 const liveConfig = {
   ...commonOptions,
   format: 'iife',
-  entryPoints: ['packages/colight-site/src/js/live.jsx'],
+  entryPoints: ['packages/colight-prose/src/js/live.jsx'],
   outfile: 'dist/live.js',
   plugins: [],
   define: {

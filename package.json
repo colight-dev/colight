@@ -62,7 +62,7 @@
     "docs:build": "yarn build && cp -r ./dist docs/src/colight_docs/overrides/js && uv run python -m mkdocs build",
     "test:js": "yarn build && yarn vitest run",
     "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "uv run python -m pytest packages --ignore=packages/colight/tests/visual",
+    "test:py": "uv run python -m pytest packages --ignore=packages/colight/tests/visual -x",
     "test:visual": "uv run python -m pytest packages/colight/tests/visual",
     "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
     "test:site": "uv run python -m pytest packages/colight-prose/tests",

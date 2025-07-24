@@ -142,21 +142,12 @@ def api_endpoint(): pass
 
 def test_import_spec_fallback():
     """Test that imports that can't be resolved locally still work."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        base = pathlib.Path(tmpdir)
-
-        # Create a file that imports something that doesn't exist locally
-        # but also isn't a known external module
-        test_file = base / "test.py"
-        test_file.write_text("""
-import some_missing_module
-import config
-""")
-
-        (base / "config.py").write_text("DEBUG = True")
-
-        graph = FileDependencyGraph(base)
-        imports = graph.analyze_file(test_file)
-
-        # Should only find config.py, missing module is ignored
-        assert imports == {"config.py"}
+    # Use fixture directory instead of temp directory
+    base = pathlib.Path(__file__).parent / "import-test-fixtures" / "fallback-test"
+    test_file = base / "test.py"
+    
+    graph = FileDependencyGraph(base)
+    imports = graph.analyze_file(test_file)
+    
+    # Should only find config.py, missing module is ignored
+    assert imports == {"config.py"}
