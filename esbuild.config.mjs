@@ -8,7 +8,7 @@ const watch = args.includes('--watch');
 const commonOptions = {
   bundle: true,
   plugins: [],
-  minify: false, //!watch,
+  minify: !watch,
   sourcemap: watch,
   loader: {
     '.css': 'text'

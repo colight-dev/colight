@@ -27,10 +27,6 @@ nav:
   - Home: index.md
   - Essential Reading: essential-reading.py
   - Scene3d: scene3d.py
-  - Guides:
-      - Getting Started: guides/getting-started.py
-      - Data Analysis Workflow: guides/data-analysis-workflow.py
-      - Responsive Dashboards: guides/responsive-dashboards.py
   - The Basics:
       - Layouts: system-guide/layouts.py
       - State: system-guide/state.py
@@ -87,7 +83,7 @@ plugins:
       ignore: ["llms.py", "data.py", "__init__.py"]
       file_options:
         "*.py":
-          hide_statements: true
+          pragma: "hide_statements"
 extra_css:
   - stylesheets/custom.css
   - stylesheets/bylight.css

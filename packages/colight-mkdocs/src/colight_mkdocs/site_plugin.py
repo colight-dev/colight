@@ -84,9 +84,7 @@ class SitePlugin(BasePlugin):
         ("format", Type(str, default="markdown")),
         ("include", ListOfItems(Type(str), default=["*.py"])),
         ("ignore", ListOfItems(Type(str), default=[])),
-        ("hide_statements", Type(bool, default=False)),
-        ("hide_visuals", Type(bool, default=False)),
-        ("hide_code", Type(bool, default=False)),
+        ("pragma", Type(str, default="")),
         (
             "colight_output_path",
             Type(str, default="./form-{form:03d}.colight"),
@@ -194,9 +192,7 @@ class SitePlugin(BasePlugin):
     def _get_file_options(self, file_path: pathlib.Path) -> dict:
         """Get file-specific options based on patterns."""
         options = {
-            "hide_statements": self.config["hide_statements"],
-            "hide_visuals": self.config["hide_visuals"],
-            "hide_code": self.config["hide_code"],
+            "pragma": self.config["pragma"],
             "format": self.config["format"],
         }
 
@@ -246,23 +242,21 @@ class SitePlugin(BasePlugin):
             inline_threshold=self.config["inline_threshold"],
             format=options.get("format", "markdown"),
             verbose=self.config["verbose"],
-            hide_statements=options.get("hide_statements", False),
-            hide_visuals=options.get("hide_visuals", False),
-            hide_code=options.get("hide_code", False),
+            pragma=options.get("pragma", ""),
             output_path_template=self.config["colight_output_path"],
             embed_path_template=self.config["colight_embed_path"],
         )
 
         # Track colight files for this file
-        for pf in result.forms:
-            if isinstance(pf.visual_data, pathlib.Path):
-                colight_file.colight_files.append(str(pf.visual_data))
-            elif pf.visual_data is not None:
+        for block in result.blocks:
+            if isinstance(block.visual_data, pathlib.Path):
+                colight_file.colight_files.append(str(block.visual_data))
+            elif block.visual_data is not None:
                 # Bytes were returned - we need to save them
                 colight_path = (
                     colight_dir / f"form-{len(colight_file.colight_files):03d}.colight"
                 )
-                colight_path.write_bytes(pf.visual_data)
+                colight_path.write_bytes(block.visual_data)
                 colight_file.colight_files.append(str(colight_path))
                 if self.config["verbose"]:
                     print(
