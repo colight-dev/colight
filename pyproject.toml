@@ -54,4 +54,4 @@ reportFunctionMemberAccess = false
 reportCallIssue = false
 
 [tool.ruff]
-lint.ignore = [ "E402", "F841"]
+lint.ignore = [ "E402", "F841", "E712"]

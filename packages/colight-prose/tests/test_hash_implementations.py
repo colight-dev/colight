@@ -1,7 +1,5 @@
 """Tests for block ID (cache key) generation."""
 
-import hashlib
-
 import libcst as cst
 
 from colight_prose.model import Block, BlockInterface, Element, TagSet
@@ -58,7 +56,9 @@ x = 2"""
     doc2 = parse_document(code2)
 
     # Block IDs should be different for different content
-    assert doc1.blocks[0].id != doc2.blocks[0].id, "Block IDs should differ for different content"
+    assert (
+        doc1.blocks[0].id != doc2.blocks[0].id
+    ), "Block IDs should differ for different content"
 
 
 def test_block_id_format():
@@ -74,7 +74,9 @@ y = 2"""
     for block in doc.blocks:
         # Block IDs should be 16-character hex strings (truncated SHA256)
         assert len(block.id) == 16, f"Block ID should be 16 chars, got {len(block.id)}"
-        assert all(c in '0123456789abcdef' for c in block.id), "Block ID should be valid hex"
+        assert all(
+            c in "0123456789abcdef" for c in block.id
+        ), "Block ID should be valid hex"
 
 
 def test_block_id_includes_dependencies():
@@ -102,7 +104,9 @@ result = x + 1"""
 
     # Since the dependencies are different (x=1 vs x=2),
     # the block IDs should be different even though the code is the same
-    assert block1_second.id != block2_second.id, "Block IDs should include dependency context"
+    assert (
+        block1_second.id != block2_second.id
+    ), "Block IDs should include dependency context"
 
 
 def test_block_id_stability_with_whitespace():
