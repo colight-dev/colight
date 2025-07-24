@@ -2,13 +2,13 @@ site_name: Colight
 site_url: https://colight.dev
 repo_url: https://github.com/colight-dev/colight
 repo_name: colight-dev/colight
-docs_dir: packages/colight-docs/src/colight_docs
+docs_dir: docs/src/colight_docs
 watch:
   - mkdocs.yml
-  - packages/colight-docs/src/colight_docs
+  - docs/src/colight_docs
 theme:
   name: material
-  custom_dir: packages/colight-docs/src/colight_docs/overrides
+  custom_dir: docs/src/colight_docs/overrides
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil-box

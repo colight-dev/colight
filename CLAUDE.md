@@ -4,12 +4,12 @@
 
 - Build frontend: `yarn build`
 - Watch mode: `yarn dev`
-- Run tests: `yarn test` (JS, Python, and colight-site)
+- Run tests: `yarn test` (JS, Python, and colight-prose)
 - Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
 - Run specific JS test file: `yarn vitest run packages/colight/tests/js/some-test.js`
 - Run Python tests: `yarn test:py` or `uv run pytest packages/colight/tests/`
-- Run colight-site tests: `yarn test:site` or `uv run pytest packages/colight-site/tests/`
+- Run colight-prose tests: `yarn test:site` or `uv run pytest packages/colight-prose/tests/`
 - Run single Python test: `uv run pytest packages/colight/tests/test_file.py::test_function`
 - **IMPORTANT**: Always use `uv run python` instead of `python` directly
 - Typecheck Python: `pyright` or `yarn pyright`
@@ -42,7 +42,7 @@ For detailed patterns, review existing code in the corresponding module.
 This project uses a monorepo structure with multiple packages:
 
 - `packages/colight/` - Main visualization library
-- `packages/colight-site/` - Static site generator for .py files
+- `packages/colight-prose/` - Static site generator for .py files
 - Root workspace manages shared dependencies and tooling
 
 When working on specific packages, navigate to the package directory or use the workspace commands from the root.
@@ -53,7 +53,7 @@ When working on specific packages, navigate to the package directory or use the 
 - If introducing a change which may increase complexity (eg. as a workaround for some difficulty), always ask the user first, they may have an idea for a simpler solution.
 - **Tests**: Never put test files at the root level. Always place tests in a `tests` directory within the appropriate package. For example:
   - `packages/colight/tests/` for colight package tests
-  - `packages/colight-site/tests/` for colight-site package tests
+  - `packages/colight-prose/tests/` for colight-prose package tests
 
 ## Testing Best Practices
 
@@ -86,6 +86,6 @@ When working on specific packages, navigate to the package directory or use the 
   ```javascript
   include: [
     "packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
-    "packages/colight-site/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
+    "packages/colight-prose/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
   ];
   ```

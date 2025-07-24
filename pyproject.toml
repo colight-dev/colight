@@ -6,9 +6,9 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 colight = { workspace = true }
-colight-site = { workspace = true }
+colight-prose = { workspace = true }
 colight-mkdocs = { workspace = true }
-colight-notebooks = { workspace = true }
+examples = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
@@ -42,7 +42,7 @@ dev = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests", "docs"]
+include = [ "packages/*/src", "packages/*/tests", "docs", "examples"]
 exclude = []
 typeCheckingMode = "standard"
 reportUnusedExpression = false

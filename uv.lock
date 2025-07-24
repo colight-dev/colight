@@ -11,10 +11,8 @@ resolution-markers = [
 [manifest]
 members = [
     "colight",
-    "colight-docs",
     "colight-mkdocs",
-    "colight-notebooks",
-    "colight-site",
+    "colight-prose",
 ]
 
 [manifest.dependency-groups]
@@ -334,27 +332,12 @@ dev = [
 ]
 
 [[package]]
-name = "colight-docs"
-version = "0.1.0"
-source = { editable = "packages/colight-docs" }
-dependencies = [
-    { name = "colight" },
-    { name = "colight-site" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "colight", editable = "packages/colight" },
-    { name = "colight-site", editable = "packages/colight-site" },
-]
-
-[[package]]
 name = "colight-mkdocs"
 version = "2025.4.1"
 source = { editable = "packages/colight-mkdocs" }
 dependencies = [
     { name = "colight" },
-    { name = "colight-site" },
+    { name = "colight-prose" },
     { name = "griffe" },
     { name = "mkdocs" },
 ]
@@ -367,7 +350,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "colight", editable = "packages/colight" },
-    { name = "colight-site", editable = "packages/colight-site" },
+    { name = "colight-prose", editable = "packages/colight-prose" },
     { name = "griffe", specifier = ">=0.36" },
     { name = "mkdocs", specifier = ">=1.5" },
 ]
@@ -376,20 +359,9 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
-name = "colight-notebooks"
-version = "0.1.0"
-source = { editable = "packages/colight-notebooks" }
-dependencies = [
-    { name = "colight" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "colight", editable = "packages/colight" }]
-
-[[package]]
-name = "colight-site"
+name = "colight-prose"
 version = "2025.4.1"
-source = { editable = "packages/colight-site" }
+source = { editable = "packages/colight-prose" }
 dependencies = [
     { name = "click" },
     { name = "colight" },

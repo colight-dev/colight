@@ -95,17 +95,17 @@ jobs:
           sed -i "s|VERSIONED_CDN_DIST_URL = None|VERSIONED_CDN_DIST_URL = \"${JSDELIVR_JS_URL}\"|" packages/colight/src/colight/env.py
 
           cd packages/colight && uv build --out-dir dist
-          cd ../colight-site && uv build --out-dir dist
+          cd ../colight-prose && uv build --out-dir dist
 
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
           ls -la packages/colight/dist/
-          ls -la packages/colight-site/dist/
+          ls -la packages/colight-prose/dist/
           echo "=== Publishing colight to PyPI ==="
           uv publish packages/colight/dist/* --token ${{ secrets.PYPI_TOKEN }}
-          echo "=== Publishing colight-site to PyPI ==="
-          uv publish packages/colight-site/dist/* --token ${{ secrets.PYPI_TOKEN }}
+          echo "=== Publishing colight-prose to PyPI ==="
+          uv publish packages/colight-prose/dist/* --token ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish to npm
         run: |
@@ -128,4 +128,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*,packages/colight/dist/*,packages/colight-site/dist/*"
+          artifacts: "dist/*,packages/colight/dist/*,packages/colight-prose/dist/*"
