@@ -28,10 +28,7 @@ def parse_formats_arg(formats: Union[str, Set[str], None]) -> Set[FormatType]:
         formats: Either a string of comma-separated formats, a set of formats, or None
 
     Returns:
-        Set of valid format strings
-
-    Raises:
-        ValueError: If any invalid formats are provided
+        Set of format strings (validation happens in BuildConfig)
     """
     if not formats:
         return {"markdown"}  # Default format
@@ -42,14 +39,6 @@ def parse_formats_arg(formats: Union[str, Set[str], None]) -> Set[FormatType]:
         if isinstance(formats, set)
         else {fmt.strip() for fmt in formats.split(",") if fmt.strip()}
     )
-
-    # Validate against literal type
-    invalid_formats = format_set - VALID_FORMATS
-    if invalid_formats:
-        raise ValueError(
-            f"Invalid formats: {', '.join(sorted(invalid_formats))}. "
-            f"Valid formats are: {', '.join(sorted(VALID_FORMATS))}"
-        )
 
     return format_set or {"markdown"}  # type: ignore[return-value]
 
@@ -66,6 +55,18 @@ class BuildConfig:
     colight_embed_path: Optional[str] = None
     inline_threshold: int = DEFAULT_INLINE_THRESHOLD
     in_subprocess: bool = False
+
+    def __post_init__(self):
+        """Validate formats after initialization."""
+        if self.formats:
+            # Convert to set of strings for comparison
+            format_strings = {str(fmt) for fmt in self.formats}
+            invalid_formats = format_strings - VALID_FORMATS
+            if invalid_formats:
+                raise ValueError(
+                    f"Invalid formats: {', '.join(sorted(invalid_formats))}. "
+                    f"Valid formats are: {', '.join(sorted(VALID_FORMATS))}"
+                )
 
     @property
     def format(self) -> FormatType:
