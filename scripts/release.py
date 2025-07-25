@@ -187,7 +187,7 @@ def main():
         alpha_name = sys.argv[2]
 
     new_version = get_next_version(alpha_name)
-    files_to_add = []
+    files_to_add = ["uv.lock"]
 
     # Print version prominently for easy copying
     print("\n" + "=" * 50)
