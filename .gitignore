@@ -20,3 +20,6 @@ dist
 docs/api/
 .colight_cache
 .ruff_cache
+.pytest_cache 
+.lsp 
+.llm_context
