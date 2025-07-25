@@ -55,3 +55,6 @@ reportCallIssue = false
 
 [tool.ruff]
 lint.ignore = [ "E402", "F841", "E712"]
+exclude = [
+    "packages/colight-prose/tests/import-test-fixtures/",
+]
