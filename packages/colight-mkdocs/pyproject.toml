@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "colight-mkdocs"
-version = "2025.7.3"
+version = "2025.7.4"
 description = "MkDocs plugins for Colight documentation"
 readme = "README.md"
 requires-python = ">=3.10"
