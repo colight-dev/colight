@@ -42,7 +42,7 @@ dev = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests", "docs", "examples"]
+include = [ "packages/*/src", "packages/*/tests"]
 exclude = [
     "packages/colight-prose/tests/examples/pep723_*.py",
     "packages/colight-prose/tests/import-test-fixtures/",

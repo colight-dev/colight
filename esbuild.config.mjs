@@ -4,7 +4,7 @@ import * as importMap from "esbuild-plugin-import-map";
 const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 
-const DIST_DIR = 'packages/colight/src/js-dist'
+const DIST_DIR = 'packages/colight/src/colight/js-dist'
 
 // Common options for all builds
 const commonOptions = {

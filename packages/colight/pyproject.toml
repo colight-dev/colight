@@ -30,6 +30,8 @@ reportFunctionMemberAccess = false
 [tool.ruff.lint]
 ignore = [ "E402", "F841",]
 
+[tool.hatch.build]
+ignore-vcs = true
+
 [tool.hatch.build.targets.wheel]
 packages = [ "src/colight",]
-artifacts = [ "src/js-dist/",]
