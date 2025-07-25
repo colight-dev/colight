@@ -37,7 +37,14 @@ CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 VERSIONED_CDN_DIST_URL = None
 UNVERSIONED_CDN_DIST_URL = "https://cdn.jsdelivr.net/npm/@colight/core/dist"
 DIST_URL = str(VERSIONED_CDN_DIST_URL or "/dist")
-DIST_LOCAL_PATH = COLIGHT_PATH.parent / "js-dist"  # local path to file
+
+# In PyPI installations, js-dist is copied into the colight package directory
+# In development, it's in the parent directory (src/js-dist)
+DIST_LOCAL_PATH = COLIGHT_PATH / "js-dist"
+if not DIST_LOCAL_PATH.exists():
+    # Try development path
+    DIST_LOCAL_PATH = COLIGHT_PATH.parent / "js-dist"
+    assert DIST_LOCAL_PATH.exists()
 
 # Local development paths
 WIDGET_PATH = DIST_LOCAL_PATH / "widget.mjs"

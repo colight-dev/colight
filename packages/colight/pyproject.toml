@@ -32,4 +32,4 @@ ignore = [ "E402", "F841",]
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/colight",]
-artifacts = [ "src/js/widget.mjs",]
+artifacts = [ "src/js-dist/",]
