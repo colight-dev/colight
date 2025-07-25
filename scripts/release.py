@@ -1,7 +1,8 @@
-from datetime import datetime
 import subprocess
-import toml
 import sys
+from datetime import datetime
+
+import toml
 
 
 def check_working_directory():

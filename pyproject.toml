@@ -2,13 +2,13 @@
 # This file provides shared tooling configuration but is not a buildable package
 
 [tool.uv.workspace]
-members = ["packages/*", "notebooks"]
+members = ["packages/*"]
 
 [tool.uv.sources]
 colight = { workspace = true }
-colight-site = { workspace = true }
+colight-prose = { workspace = true }
 colight-mkdocs = { workspace = true }
-notebooks = { workspace = true }
+examples = { workspace = true }
 
 # Shared development dependencies
 [dependency-groups]
@@ -42,12 +42,16 @@ dev = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests", "docs", "notebooks",]
-exclude = []
+include = [ "packages/*/src", "packages/*/tests", "docs", "examples"]
+exclude = [
+    "packages/colight-prose/tests/examples/pep723_*.py",
+    "packages/colight-prose/tests/import-test-fixtures/",
+    "packages/colight-prose/tests/integration/server-test.py"
+]
 typeCheckingMode = "standard"
 reportUnusedExpression = false
 reportFunctionMemberAccess = false
 reportCallIssue = false
 
-[tool.ruff.lint]
-ignore = [ "E402",]
+[tool.ruff]
+lint.ignore = [ "E402", "F841", "E712"]

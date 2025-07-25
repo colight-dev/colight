@@ -1,9 +1,9 @@
 import http.server
+import mimetypes
+import os
 import socketserver
 import threading
-import os
-import mimetypes
-from typing import Dict, Union, Any
+from typing import Any, Dict, Union
 
 
 class ColightRequestHandler(http.server.SimpleHTTPRequestHandler):

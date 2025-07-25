@@ -5,7 +5,7 @@ MkDocs plugins for Colight documentation.
 ## Features
 
 - **API Documentation Plugin**: Automatically generates API documentation from Python modules
-- **Site Plugin**: Processes `.py` and `.colight.py` files for MkDocs sites
+- **Site Plugin**: Processes `.py` files for MkDocs sites
 
 ## Installation
 
@@ -27,5 +27,4 @@ plugins:
       format: markdown
       include:
         - "*.py"
-        - "*.colight.py"
 ```

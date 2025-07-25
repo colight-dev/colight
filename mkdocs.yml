@@ -2,13 +2,13 @@ site_name: Colight
 site_url: https://colight.dev
 repo_url: https://github.com/colight-dev/colight
 repo_name: colight-dev/colight
-edit_uri: tree/docs/docs/
+docs_dir: docs/src/colight_docs
 watch:
   - mkdocs.yml
-  - docs
+  - docs/src/colight_docs
 theme:
   name: material
-  custom_dir: docs/overrides
+  custom_dir: docs/src/colight_docs/overrides
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil-box
@@ -27,10 +27,6 @@ nav:
   - Home: index.md
   - Essential Reading: essential-reading.py
   - Scene3d: scene3d.py
-  - Guides:
-      - Getting Started: guides/getting-started.py
-      - Data Analysis Workflow: guides/data-analysis-workflow.py
-      - Responsive Dashboards: guides/responsive-dashboards.py
   - The Basics:
       - Layouts: system-guide/layouts.py
       - State: system-guide/state.py
@@ -83,11 +79,11 @@ plugins:
   - colight.mkdocs.site_plugin:
       verbose: false
       format: markdown
-      include: ["*.py", "*.colight.py"]
+      include: ["*.py"]
       ignore: ["llms.py", "data.py", "__init__.py"]
       file_options:
         "*.py":
-          hide_statements: true
+          pragma: "hide_statements"
 extra_css:
   - stylesheets/custom.css
   - stylesheets/bylight.css

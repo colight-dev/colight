@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Ellipse, ellipse } from "../../../src/colight/js/plot/ellipse";
+import { Ellipse, ellipse } from "../../../src/js/plot/ellipse";
 import * as Plot from "@observablehq/plot";
 
 describe("Ellipse", () => {

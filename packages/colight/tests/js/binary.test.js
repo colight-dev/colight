@@ -3,7 +3,7 @@ import {
   inferDtype,
   evaluateNdarray,
   estimateJSONSize,
-} from "../../src/colight/js/binary";
+} from "../../src/js/binary";
 
 describe("binary.js", () => {
   describe("inferDtype", () => {

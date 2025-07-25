@@ -1,54 +1,38 @@
 [build-system]
-requires = [
-    "hatchling",
-]
+requires = [ "hatchling",]
 build-backend = "hatchling.build"
 
 [project]
 name = "colight-mkdocs"
-version = "2025.4.1"
+version = "2025.7.1"
 description = "MkDocs plugins for Colight documentation"
-authors = [
-    { name = "Matthew Huebert", email = "me@matt.is" },
-]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "mkdocs>=1.5",
-    "griffe>=0.36",
-    "colight",
-    "colight-site",
-]
+dependencies = [ "mkdocs>=1.5", "griffe>=0.36", "colight", "colight-prose",]
+[[project.authors]]
+name = "Matthew Huebert"
+email = "me@matt.is"
+
+[dependency-groups]
+dev = [ "pytest>=8.4.0",]
 
 [project.license]
 text = "MIT"
+
+[tool.pyright]
+venvPath = "../.."
+venv = ".venv"
+include = [ "src", "tests",]
+typeCheckingMode = "standard"
+reportUnusedExpression = false
+reportFunctionMemberAccess = false
 
 [project.entry-points."mkdocs.plugins"]
 "colight.mkdocs.api_plugin" = "colight_mkdocs.api_plugin:APIDocPlugin"
 "colight.mkdocs.site_plugin" = "colight_mkdocs.site_plugin:SitePlugin"
 
-[dependency-groups]
-dev = [
-    "pytest>=8.4.0",
-]
+[tool.ruff.lint]
+ignore = [ "E402",]
 
 [tool.hatch.build.targets.wheel]
-packages = [
-    "src/colight_mkdocs",
-]
-
-[tool.pyright]
-venvPath = "../.."
-venv = ".venv"
-include = [
-    "src",
-    "tests",
-]
-typeCheckingMode = "standard"
-reportUnusedExpression = false
-reportFunctionMemberAccess = false
-
-[tool.ruff.lint]
-ignore = [
-    "E402",
-]
+packages = [ "src/colight_mkdocs",]

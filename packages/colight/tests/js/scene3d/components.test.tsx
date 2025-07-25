@@ -2,11 +2,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
 import { render, act } from "@testing-library/react";
 import React from "react";
-import { SceneInner } from "../../../src/colight/js/scene3d/impl3d";
+import { SceneInner } from "../../../src/js/scene3d/impl3d";
 import type {
   ComponentConfig,
   PointCloudComponentConfig,
-} from "../../../src/colight/js/scene3d/components";
+} from "../../../src/js/scene3d/components";
 import { setupWebGPU, cleanupWebGPU } from "../webgpu-setup";
 import { withBlankState } from "../test-utils";
 

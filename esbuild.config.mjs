@@ -19,7 +19,7 @@ const commonOptions = {
 const widgetESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/widget.jsx'],
+  entryPoints: ['packages/colight/src/js/widget.jsx'],
   outfile: 'dist/widget.mjs',
   plugins: [],
 };
@@ -28,7 +28,7 @@ const widgetESM = {
 const anywidgetESM = {
   ...widgetESM,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/anywidget.jsx'],
+  entryPoints: ['packages/colight/src/js/anywidget.jsx'],
   outfile: 'dist/anywidget.mjs',
 };
 
@@ -36,7 +36,7 @@ const anywidgetESM = {
 const embedConfigJS = {
   ...commonOptions,
   format: 'iife',
-  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  entryPoints: ['packages/colight/src/js/embed.js'],
   outfile: 'dist/embed.js',
   plugins: [],
 };
@@ -45,16 +45,28 @@ const embedConfigJS = {
 const embedConfigESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['packages/colight/src/colight/js/embed.js'],
+  entryPoints: ['packages/colight/src/js/embed.js'],
   outfile: 'dist/embed.mjs',
 };
 
-const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM]
+// LiveServer build (IIFE format for embedding in HTML pages)
+const liveConfig = {
+  ...commonOptions,
+  format: 'iife',
+  entryPoints: ['packages/colight-prose/src/js/live.jsx'],
+  outfile: 'dist/live.js',
+  plugins: [],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production')
+  }
+};
+
+const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch
 if (USE_CDN_IMPORTS) {
-  importMap.load('packages/colight/src/colight/js/import-map.cdn.json');
+  importMap.load('packages/colight/src/js/import-map.cdn.json');
   configs.forEach(config => {
     config.plugins.push(importMap.plugin());
   });

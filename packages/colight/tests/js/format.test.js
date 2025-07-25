@@ -2,10 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import {
-  parseColightData,
-  loadColightFile,
-} from "../../src/colight/js/format.js";
+import { parseColightData, loadColightFile } from "../../src/js/format.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const testArtifactsDir = join(__dirname, "..", "test-artifacts");

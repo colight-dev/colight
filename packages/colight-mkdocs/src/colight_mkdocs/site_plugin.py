@@ -1,4 +1,4 @@
-"""MkDocs plugin for processing .py and .colight.py files in-memory.
+"""MkDocs plugin for processing .py files with Colight.
 
 This plugin processes Python files during the build without creating intermediate files,
 similar to how mkdocs-jupyter works.
@@ -9,14 +9,13 @@ import traceback
 from functools import cached_property
 from typing import Optional
 
+from colight_prose import api
+from colight_prose.constants import DEFAULT_INLINE_THRESHOLD
 from mkdocs.config import Config
+from mkdocs.config.config_options import DictOfItems, ListOfItems, Type
 from mkdocs.plugins import BasePlugin
-from mkdocs.config.config_options import Type, DictOfItems, ListOfItems
-from mkdocs.structure.files import Files, File
+from mkdocs.structure.files import File, Files
 from mkdocs.structure.pages import Page
-
-from colight_site import api
-from colight_site.constants import DEFAULT_INLINE_THRESHOLD
 
 
 class ColightFile(File):
@@ -83,11 +82,9 @@ class SitePlugin(BasePlugin):
     config_scheme = (
         ("verbose", Type(bool, default=False)),
         ("format", Type(str, default="markdown")),
-        ("include", ListOfItems(Type(str), default=["*.py", "*.colight.py"])),
+        ("include", ListOfItems(Type(str), default=["*.py"])),
         ("ignore", ListOfItems(Type(str), default=[])),
-        ("hide_statements", Type(bool, default=False)),
-        ("hide_visuals", Type(bool, default=False)),
-        ("hide_code", Type(bool, default=False)),
+        ("pragma", Type(str, default="")),
         (
             "colight_output_path",
             Type(str, default="./form-{form:03d}.colight"),
@@ -195,9 +192,7 @@ class SitePlugin(BasePlugin):
     def _get_file_options(self, file_path: pathlib.Path) -> dict:
         """Get file-specific options based on patterns."""
         options = {
-            "hide_statements": self.config["hide_statements"],
-            "hide_visuals": self.config["hide_visuals"],
-            "hide_code": self.config["hide_code"],
+            "pragma": self.config["pragma"],
             "format": self.config["format"],
         }
 
@@ -227,11 +222,8 @@ class SitePlugin(BasePlugin):
         rel_path = file_path.relative_to(docs_dir)
 
         # Create the output directory in the site based on the file's destination
-        # For .colight.py files, we want to match the MkDocs page structure
-        if rel_path.name.endswith(".colight.py"):
-            # e.g., sliders.colight.py -> sliders.colight
-            output_name = rel_path.name[:-3]  # Remove just .py, keep .colight
-        elif rel_path.name.endswith(".py"):
+        # Match the MkDocs page structure
+        if rel_path.name.endswith(".py"):
             output_name = rel_path.name[:-3]  # Remove .py
         else:
             output_name = rel_path.stem
@@ -244,29 +236,27 @@ class SitePlugin(BasePlugin):
             print(f"[colight]   Writing .colight files to: {colight_dir}")
 
         # Process the colight file using the public API
-        result = api.process_colight_file(
+        result = api.evaluate_python(
             file_path,
             output_dir=colight_dir,
             inline_threshold=self.config["inline_threshold"],
             format=options.get("format", "markdown"),
             verbose=self.config["verbose"],
-            hide_statements=options.get("hide_statements", False),
-            hide_visuals=options.get("hide_visuals", False),
-            hide_code=options.get("hide_code", False),
+            pragma=options.get("pragma", ""),
             output_path_template=self.config["colight_output_path"],
             embed_path_template=self.config["colight_embed_path"],
         )
 
         # Track colight files for this file
-        for pf in result.forms:
-            if isinstance(pf.visualization_data, pathlib.Path):
-                colight_file.colight_files.append(str(pf.visualization_data))
-            elif pf.visualization_data is not None:
+        for block in result.blocks:
+            if isinstance(block.visual_data, pathlib.Path):
+                colight_file.colight_files.append(str(block.visual_data))
+            elif block.visual_data is not None:
                 # Bytes were returned - we need to save them
                 colight_path = (
                     colight_dir / f"form-{len(colight_file.colight_files):03d}.colight"
                 )
-                colight_path.write_bytes(pf.visualization_data)
+                colight_path.write_bytes(block.visual_data)
                 colight_file.colight_files.append(str(colight_path))
                 if self.config["verbose"]:
                     print(
