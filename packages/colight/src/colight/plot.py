@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import colight.plot_defs as plot_defs
 from colight.components.bitmap import bitmap
+from colight.components.slider import Slider
 from colight.env import configure
-from colight.protocols import Collector
 from colight.layout import (
     Column,
     Grid,
@@ -24,7 +24,6 @@ from colight.layout import (
     onChange,
     ref,
 )
-from colight.components.slider import Slider
 from colight.plot_defs import (
     area,
     areaX,
@@ -163,6 +162,7 @@ from colight.plot_defs import (
     windowY,
 )
 from colight.plot_spec import MarkSpec, PlotSpec, new
+from colight.protocols import Collector
 
 # This module provides a composable way to create interactive plots using Observable Plot
 # and AnyWidget, built on the work of pyobsplot.
@@ -896,8 +896,7 @@ def Frames(
         return Hiccup([_Frames, {"state_key": key, "frames": frames}])
 
 
-initial_state = State
-state = State
+initial_state = initialState = state = State
 
 
 def renderChildEvents(options: dict[str, Any] = {}, **kwargs) -> JSRef:
