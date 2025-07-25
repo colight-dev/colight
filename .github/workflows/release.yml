@@ -50,6 +50,7 @@ jobs:
         run: |
           yarn build
           # Force Git to track the build files temporarily
+          cp -r packages/colight/src/js-dist dist/
           git add -f dist
       - name: Setup Node.js for npm publishing
         uses: actions/setup-node@v4
@@ -109,7 +110,6 @@ jobs:
 
       - name: Publish to npm
         run: |
-          cp -r packages/colight/src/js-dist dist/
           ls -la dist/
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
           cp packages/colight/src/widget.css dist/
