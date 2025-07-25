@@ -1,7 +1,7 @@
-import pathlib
 import importlib.util
 import os
-from typing import TypedDict, Literal, Any, Union, cast
+import pathlib
+from typing import Any, Literal, TypedDict, Union, cast
 
 
 class Config(TypedDict):
@@ -37,8 +37,8 @@ CONFIG: Config = {"display_as": "widget", "dev": False, "defaults": {}}
 VERSIONED_CDN_DIST_URL = None
 UNVERSIONED_CDN_DIST_URL = "https://cdn.jsdelivr.net/npm/@colight/core/dist"
 DIST_URL = str(VERSIONED_CDN_DIST_URL or "/dist")
-DIST_PATH = COLIGHT_PATH.parent.parent.parent.parent / "dist"  # local path to file
+DIST_LOCAL_PATH = COLIGHT_PATH.parent / "js-dist"  # local path to file
 
 # Local development paths
-WIDGET_PATH = DIST_PATH / "widget.mjs"
+WIDGET_PATH = DIST_LOCAL_PATH / "widget.mjs"
 ANYWIDGET_PATH = str(WIDGET_PATH).replace("widget.mjs", "anywidget.mjs")

@@ -6,7 +6,7 @@ meta.json
 site
 *.interactive
 basic_plot.*
-docs/overrides/stylesheets/tailwind.css
+**/overrides/stylesheets/tailwind.css
 *.env
 *.js.map
 **/notebooks/webgpu.html
@@ -23,3 +23,4 @@ docs/api/
 .pytest_cache 
 .lsp 
 .llm_context
+**/js-dist/**

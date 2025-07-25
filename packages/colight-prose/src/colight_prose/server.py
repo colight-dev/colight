@@ -12,6 +12,7 @@ import webbrowser
 from typing import Any, List, Optional, Set
 
 import websockets
+from colight.env import DIST_LOCAL_PATH
 from watchfiles import awatch
 from werkzeug.middleware.shared_data import SharedDataMiddleware
 from werkzeug.serving import make_server
@@ -240,25 +241,7 @@ class LiveServer:
         # Set up roots - only serve dist directory for JS/CSS
         roots = {}
 
-        # Find dist directory - check both current dir and project root
-        possible_dist_dirs = [
-            pathlib.Path("dist"),  # If run from root
-            pathlib.Path(__file__).parent.parent.parent.parent.parent
-            / "dist",  # If run from packages/colight-prose
-        ]
-
-        dist_dir = None
-        for path in possible_dist_dirs:
-            resolved = path.resolve()
-            if resolved.exists() and resolved.is_dir():
-                dist_dir = resolved
-                break
-
-        if dist_dir:
-            roots["/dist"] = str(dist_dir)
-            print(f"Serving assets from {dist_dir}")
-        else:
-            print("WARNING: Could not find dist directory for assets")
+        roots["/dist"] = str(DIST_LOCAL_PATH)
 
         # Base app that serves static files
         app = SharedDataMiddleware(

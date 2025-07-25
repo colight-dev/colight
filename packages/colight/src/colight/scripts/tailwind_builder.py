@@ -1,5 +1,5 @@
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
 
 log = logging.getLogger("mkdocs")
@@ -8,11 +8,11 @@ TAILWIND_INPUT = """
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-""" + Path("src/widget.css").read_text()
+""" + Path("packages/colight/src/widget.css").read_text()
 
 
 def build_tailwind():
-    output_path = "docs/overrides/stylesheets/tailwind.css"
+    output_path = "docs/src/colight_docs/overrides/stylesheets/tailwind.css"
 
     try:
         subprocess.run(
@@ -25,7 +25,7 @@ def build_tailwind():
                 output_path,
                 "--minify",
                 "-c",
-                "docs/overrides/tailwind.config.js",
+                "docs/src/colight_docs/overrides/tailwind.config.js",
             ],
             input=TAILWIND_INPUT.encode(),
             check=True,

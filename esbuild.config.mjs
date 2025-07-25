@@ -4,6 +4,8 @@ import * as importMap from "esbuild-plugin-import-map";
 const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 
+const DIST_DIR = 'packages/colight/src/js-dist'
+
 // Common options for all builds
 const commonOptions = {
   bundle: true,
@@ -20,7 +22,7 @@ const widgetESM = {
   ...commonOptions,
   format: 'esm',
   entryPoints: ['packages/colight/src/js/widget.jsx'],
-  outfile: 'dist/widget.mjs',
+  outfile: DIST_DIR+'/widget.mjs',
   plugins: [],
 };
 
@@ -29,7 +31,7 @@ const anywidgetESM = {
   ...widgetESM,
   format: 'esm',
   entryPoints: ['packages/colight/src/js/anywidget.jsx'],
-  outfile: 'dist/anywidget.mjs',
+  outfile: DIST_DIR+'/anywidget.mjs',
 };
 
 // Embed build (IIFE format for standalone use with script tags)
@@ -37,7 +39,7 @@ const embedConfigJS = {
   ...commonOptions,
   format: 'iife',
   entryPoints: ['packages/colight/src/js/embed.js'],
-  outfile: 'dist/embed.js',
+  outfile: DIST_DIR+'/embed.js',
   plugins: [],
 };
 
@@ -46,7 +48,7 @@ const embedConfigESM = {
   ...commonOptions,
   format: 'esm',
   entryPoints: ['packages/colight/src/js/embed.js'],
-  outfile: 'dist/embed.mjs',
+  outfile: DIST_DIR+'/embed.mjs',
 };
 
 // LiveServer build (IIFE format for embedding in HTML pages)
@@ -54,7 +56,7 @@ const liveConfig = {
   ...commonOptions,
   format: 'iife',
   entryPoints: ['packages/colight-prose/src/js/live.jsx'],
-  outfile: 'dist/live.js',
+  outfile: DIST_DIR+'/live.js',
   plugins: [],
   define: {
     'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production')

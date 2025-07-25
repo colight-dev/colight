@@ -93,7 +93,8 @@ extra_javascript:
   - js/scroll-fix.js
   - js/command-k.js
   - js/colight-loader.js
-hooks: []
+hooks:
+  - packages/colight/src/colight/scripts/tailwind_builder.py
 # Temporarily disabled hooks due to path issues
 # - packages/colight/src/colight/scripts/css_modifier.py
-# - packages/colight/src/colight/scripts/tailwind_builder.py
+
