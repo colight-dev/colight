@@ -145,9 +145,9 @@ def test_import_spec_fallback():
     # Use fixture directory instead of temp directory
     base = pathlib.Path(__file__).parent / "import-test-fixtures" / "fallback-test"
     test_file = base / "test.py"
-    
+
     graph = FileDependencyGraph(base)
     imports = graph.analyze_file(test_file)
-    
+
     # Should only find config.py, missing module is ignored
     assert imports == {"config.py"}

@@ -91,7 +91,9 @@ def test_watch_build_and_serve_defaults_to_html_format(tmp_path):
     with patch("colight_prose.static.watcher.LiveReloadServer"):
         with patch("colight_prose.static.watcher.watch") as mock_watch:
             with patch("colight_prose.static.watcher.threading.Thread"):
-                with patch("colight_prose.static.watcher.builder.build_file") as mock_build:
+                with patch(
+                    "colight_prose.static.watcher.builder.build_file"
+                ) as mock_build:
                     # Make watch raise KeyboardInterrupt to exit immediately
                     mock_watch.side_effect = KeyboardInterrupt()
 

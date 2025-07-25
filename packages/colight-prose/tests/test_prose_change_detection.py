@@ -49,24 +49,30 @@ x = 1
 # %% [markdown]
 # More prose here
 """
-        
+
         # Parse the changed content
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f2:
             f2.write(content2)
             f2.flush()
             doc2 = parse_colight_file(pathlib.Path(f2.name))
-            
+
         # Get block IDs from changed content
         block_ids2 = [block.id for block in doc2.blocks]
 
         # First block (prose) should have different ID due to content change
-        assert block_ids1[0] != block_ids2[0], "Prose change should result in different block ID"
+        assert (
+            block_ids1[0] != block_ids2[0]
+        ), "Prose change should result in different block ID"
 
         # Second block (code) should have same ID - no change
-        assert block_ids1[1] == block_ids2[1], "Unchanged code should have same block ID"
+        assert (
+            block_ids1[1] == block_ids2[1]
+        ), "Unchanged code should have same block ID"
 
         # Third block (prose) should have same ID - no change
-        assert block_ids1[2] == block_ids2[2], "Unchanged prose should have same block ID"
+        assert (
+            block_ids1[2] == block_ids2[2]
+        ), "Unchanged prose should have same block ID"
 
         # Clean up
         pathlib.Path(f.name).unlink()
@@ -110,10 +116,14 @@ def test_trailing_prose_change():
             block_ids2 = [block.id for block in doc2.blocks]
 
         # Code block should have same ID - no change
-        assert block_ids1[0] == block_ids2[0], "Unchanged code should have same block ID"
+        assert (
+            block_ids1[0] == block_ids2[0]
+        ), "Unchanged code should have same block ID"
 
         # Prose block should have different ID due to content change
-        assert block_ids1[1] != block_ids2[1], "Changed prose should have different block ID"
+        assert (
+            block_ids1[1] != block_ids2[1]
+        ), "Changed prose should have different block ID"
 
         # Clean up
         pathlib.Path(f.name).unlink()

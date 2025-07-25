@@ -33,7 +33,7 @@ z = y + 1"""
         f1.write(content1)
         f1.flush()
         doc1 = parse_colight_file(pathlib.Path(f1.name))
-        
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f2:
         f2.write(content2)
         f2.flush()
@@ -49,7 +49,9 @@ z = y + 1"""
     # The second and third blocks' IDs should also change
     # because their dependency context changed
     assert ids1[1] != ids2[1], "Second block ID should change when dependency changes"
-    assert ids1[2] != ids2[2], "Third block ID should change when transitive dependency changes"
+    assert (
+        ids1[2] != ids2[2]
+    ), "Third block ID should change when transitive dependency changes"
 
     # Clean up
     pathlib.Path(f1.name).unlink()
@@ -59,7 +61,7 @@ z = y + 1"""
 def test_cache_key_unchanged_for_independent_blocks():
     """Test that independent blocks can be cached when content doesn't change."""
     executor = IncrementalExecutor(verbose=True)
-    
+
     # Use same file to test cache behavior
     content1 = """# %%
 a = 1
@@ -83,31 +85,35 @@ c = a + 1  # Depends on a"""
         # First version
         f.write(content1)
         f.flush()
-        
+
         doc1 = parse_colight_file(pathlib.Path(f.name))
-        results1 = list(executor.execute_incremental_streaming(doc1, str(f.name), str(f.name)))
-        
+        results1 = list(
+            executor.execute_incremental_streaming(doc1, str(f.name), str(f.name))
+        )
+
         # All should be cache misses
         assert all(not r.cache_hit for _, r in results1)
-        
+
         # Second version - same file, changed content
         f.seek(0)
         f.truncate()
         f.write(content2)
         f.flush()
-        
+
         doc2 = parse_colight_file(pathlib.Path(f.name))
-        results2 = list(executor.execute_incremental_streaming(doc2, str(f.name), str(f.name)))
-        
+        results2 = list(
+            executor.execute_incremental_streaming(doc2, str(f.name), str(f.name))
+        )
+
         # Block 0 changed (a = 10 instead of a = 1)
         assert not results2[0][1].cache_hit
-        
+
         # Block 1 unchanged (b = 2) and independent - should hit cache
         assert results2[1][1].cache_hit, "Independent unchanged block should hit cache"
-        
+
         # Block 2 depends on changed block - cache miss
         assert not results2[2][1].cache_hit
-        
+
         # Clean up
         pathlib.Path(f.name).unlink()
 
@@ -139,11 +145,13 @@ a = 1"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f1:
         f1.write(content1)
         f1.flush()
-        
+
         # First execution
         doc1 = parse_colight_file(pathlib.Path(f1.name))
-        results1 = list(executor.execute_incremental_streaming(doc1, str(f1.name), str(f1.name)))
-        
+        results1 = list(
+            executor.execute_incremental_streaming(doc1, str(f1.name), str(f1.name))
+        )
+
         # All should be cache misses
         for block, result in results1:
             assert result.cache_hit == False
@@ -151,16 +159,18 @@ a = 1"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f2:
         f2.write(content2)
         f2.flush()
-        
+
         # Second execution with reordered blocks
         doc2 = parse_colight_file(pathlib.Path(f2.name))
-        results2 = list(executor.execute_incremental_streaming(doc2, str(f2.name), str(f2.name)))
-        
+        results2 = list(
+            executor.execute_incremental_streaming(doc2, str(f2.name), str(f2.name))
+        )
+
         # Since these are independent blocks with same content,
         # they should have same IDs and hit cache
         cache_hits = sum(1 for _, result in results2 if result.cache_hit)
         print(f"Cache hits after reordering: {cache_hits}/3")
-        
+
         # Due to different file paths, cache might not hit
         # But the important thing is that the blocks have consistent IDs
 

@@ -295,30 +295,28 @@ def test_import_resolution_with_different_watched_dir():
     # Use the real examples directory
     current_file = pathlib.Path(__file__)
     examples_dir = current_file.parent / "examples"
-    
+
     # Skip test if examples directory doesn't exist
     if not examples_dir.exists():
         pytest.skip("examples directory not found")
-    
+
     # Ensure the dependency files exist
     dep_file = examples_dir / "visual_update_dep.py"
     main_file = examples_dir / "visual_update.py"
-    
+
     if not dep_file.exists() or not main_file.exists():
         pytest.skip("Required test files not found in examples directory")
-    
+
     # Create dependency graph watching only the examples directory
     graph = FileDependencyGraph(examples_dir)
-    
+
     # Analyze the main file
     deps = graph.analyze_file(main_file)
-    
+
     # The main file should depend on visual_update_dep.py
     expected_dep = "visual_update_dep.py"
-    assert (
-        expected_dep in deps
-    ), f"Expected {expected_dep} in dependencies, got {deps}"
-    
+    assert expected_dep in deps, f"Expected {expected_dep} in dependencies, got {deps}"
+
     # Check that changes to dep file affect main file
     affected = graph.get_affected_files("visual_update_dep.py")
     assert (

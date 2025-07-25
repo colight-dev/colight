@@ -38,7 +38,7 @@ class IncrementalExecutor(BlockExecutor):
 
             # Check if block has always-eval pragma (never cache)
             should_skip_cache = "always-eval" in block.tags.flags
-            
+
             # Try to get from cache
             result = None if should_skip_cache else self.cache.get(cache_key)
 

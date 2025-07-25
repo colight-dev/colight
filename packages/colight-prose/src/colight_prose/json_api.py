@@ -45,9 +45,11 @@ class JsonDocumentGenerator:
 
         # Execute document incrementally if we have an executor
         if self.incremental_executor:
-            block_results = list(self.incremental_executor.execute_incremental_streaming(
-                document, changed_blocks, str(source_path), str(source_path)
-            ))
+            block_results = list(
+                self.incremental_executor.execute_incremental_streaming(
+                    document, changed_blocks, str(source_path), str(source_path)
+                )
+            )
             # Extract just the results in order
             results = [result for block, result in block_results]
         else:

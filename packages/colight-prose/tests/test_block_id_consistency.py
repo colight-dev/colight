@@ -48,11 +48,15 @@ z = x + y
 
         # Block IDs should be non-empty strings (cache keys)
         for block_id in result_ids:
-            assert isinstance(block_id, str), f"Block ID should be string, got {type(block_id)}"
+            assert isinstance(
+                block_id, str
+            ), f"Block ID should be string, got {type(block_id)}"
             assert len(block_id) > 0, "Block ID should not be empty"
 
         # The block IDs from parsing and execution should match
-        assert block_ids == result_ids, f"Block IDs don't match: {block_ids} vs {result_ids}"
+        assert (
+            block_ids == result_ids
+        ), f"Block IDs don't match: {block_ids} vs {result_ids}"
 
         # Clean up
         source_path.unlink()

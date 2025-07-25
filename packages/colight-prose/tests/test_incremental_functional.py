@@ -101,10 +101,10 @@ y = x * 2"""
     results = list(executor.execute_incremental_streaming(doc_edited))
 
     # With caching, only the changed block should execute
-    # Since the first x changed but doesn't affect y (second x overrides), 
+    # Since the first x changed but doesn't affect y (second x overrides),
     # y should still be 20 from cache
     assert executor.env["y"] == 20  # unchanged
-    
+
     # The cache should have served the y block from cache
     # We can verify by checking the results - should only contain the edited block
     assert len(results) == 3  # All blocks returned but some from cache
@@ -327,9 +327,9 @@ Plot.dot(data)"""
     doc_edited = parse_document(code_edited)
     results = list(executor.execute_incremental_streaming(doc_edited))
 
-    # With caching, when data changes, both data and visualization blocks 
+    # With caching, when data changes, both data and visualization blocks
     # should execute (viz depends on data)
     assert len(results) == 3  # All 3 blocks
-    
+
     # Check that the data was updated
     assert executor.env["data"] == [5, 4, 3, 2, 1]

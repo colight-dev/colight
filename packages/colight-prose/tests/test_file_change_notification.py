@@ -156,7 +156,7 @@ def helper():
         # Mock dependencies
         ws = AsyncMock()
         server.connections = {ws}
-        
+
         # Register a client watching main.py
         server.client_registry.register_client("test_client", ws)
         server.client_registry.watch_file("test_client", str(temp_project / "main.py"))
@@ -170,7 +170,9 @@ def helper():
 
         # Patch various methods
         with patch("colight_prose.server.awatch", mock_awatch):
-            with patch.object(server, "_send_reload_signal", new_callable=AsyncMock) as mock_reload:
+            with patch.object(
+                server, "_send_reload_signal", new_callable=AsyncMock
+            ) as mock_reload:
                 # Run watch loop
                 await server._watch_for_changes()
 

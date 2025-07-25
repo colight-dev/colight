@@ -30,9 +30,9 @@ z = y + 1
 
         # First execution - all cache misses
         doc = parse_colight_file(file_path)
-        results1 = list(executor.execute_incremental_streaming(
-            doc, str(file_path), str(file_path)
-        ))
+        results1 = list(
+            executor.execute_incremental_streaming(doc, str(file_path), str(file_path))
+        )
 
         # All should be cache misses
         for block, result in results1:
@@ -40,9 +40,9 @@ z = y + 1
             assert result.cache_hit == False
 
         # Second execution with no changes - all cache hits
-        results2 = list(executor.execute_incremental_streaming(
-            doc, str(file_path), str(file_path)
-        ))
+        results2 = list(
+            executor.execute_incremental_streaming(doc, str(file_path), str(file_path))
+        )
 
         # All should be cache hits
         for block, result in results2:
@@ -74,19 +74,19 @@ c = a + 1  # Depends on a
 
         # First execution
         doc = parse_colight_file(file_path)
-        results1 = list(executor.execute_incremental_streaming(
-            doc, str(file_path), str(file_path)
-        ))
+        results1 = list(
+            executor.execute_incremental_streaming(doc, str(file_path), str(file_path))
+        )
 
         # All should be cache misses initially
         for block, result in results1:
             assert result.cache_hit == False
 
         # Second execution - all should be cache hits
-        results2 = list(executor.execute_incremental_streaming(
-            doc, str(file_path), str(file_path)
-        ))
-        
+        results2 = list(
+            executor.execute_incremental_streaming(doc, str(file_path), str(file_path))
+        )
+
         for block, result in results2:
             assert result.cache_hit == True
 
