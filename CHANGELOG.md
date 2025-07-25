@@ -1,3 +1,7 @@
+### [2025.7.2] - Jul 24, 2025
+
+- merge branch 'live'
+
 ### [2025.7.1] - Jul 24, 2025
 
 - debug release
