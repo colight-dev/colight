@@ -165,10 +165,12 @@ export function evaluate(node, $state, experimental, buffers) {
           : source;
 
         const paramNames = (node.params || []).map((_, i) => `p${i}`);
+        const scopeNames = Object.keys(node.scope || {});
         node.__compiledFn = new Function(
           "$state",
           ...Object.keys($state.__evalEnv),
           ...paramNames,
+          ...scopeNames,
           source,
         );
       }
@@ -176,10 +178,14 @@ export function evaluate(node, $state, experimental, buffers) {
       const paramValues = (node.params || []).map((p) =>
         evaluate(p, $state, experimental, buffers),
       );
+      const scopeValues = Object.values(node.scope || {}).map((v) =>
+        evaluate(v, $state, experimental, buffers),
+      );
       return node.__compiledFn(
         $state,
         ...Object.values($state.__evalEnv),
         ...paramValues,
+        ...scopeValues,
       );
     case "datetime":
       return new Date(node.value);

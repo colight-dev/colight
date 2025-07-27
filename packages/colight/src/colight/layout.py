@@ -7,8 +7,8 @@ import colight.format as format
 import colight.screenshots as screenshots
 from colight.env import CONFIG
 from colight.html import html_page, html_snippet
-from colight.widget import Widget, WidgetState, to_json_with_state
 from colight.protocols import Collector
+from colight.widget import Widget, WidgetState, to_json_with_state
 
 
 def create_parent_dir(path: str) -> None:
@@ -329,11 +329,12 @@ def js_ref(path: str) -> "JSRef":
 class JSCode(LayoutItem):
     """Represents raw JavaScript code to be evaluated."""
 
-    def __init__(self, code: str, *params: Any, expression: bool):
+    def __init__(self, code: str, *params: Any, expression: bool, **scope_vars: Any):
         super().__init__()
         self.code = code
         self.params = params
         self.expression = expression
+        self.scope_vars = scope_vars
 
     def for_json(self) -> dict:
         return {
@@ -341,6 +342,7 @@ class JSCode(LayoutItem):
             "value": self.code,
             "params": self.params,
             "expression": self.expression,
+            "scope": self.scope_vars,
         }
 
 
@@ -360,7 +362,7 @@ def is_js_expr(obj: Any) -> bool:
     return isinstance(obj, (JSCall, JSRef, JSCode))
 
 
-def js(txt: str, *params: Any, expression=True) -> JSCode:
+def js(txt: str, *params: Any, expression=True, **kwargs: Any) -> JSCode:
     """Represents raw JavaScript code to be evaluated as a LayoutItem.
 
     The code will be evaluated in a scope that includes:
@@ -368,17 +370,19 @@ def js(txt: str, *params: Any, expression=True) -> JSCode:
     - html: render HTML using a JavaScript hiccup syntax
     - d3: D3.js library
     - colight.api: roughly, the api exposed via the colight.plot module
+    - Any additional variables passed as kwargs
 
     Args:
         txt (str): JavaScript code with optional %1, %2, etc. placeholders
         *params: Values to substitute for %1, %2, etc. placeholders
         expression (bool): Whether to evaluate as expression or statement
+        **kwargs: Additional variables to include in the JavaScript scope
     """
-    return JSCode(txt, *params, expression=expression)
+    return JSCode(txt, *params, expression=expression, **kwargs)
 
 
 class Hiccup(LayoutItem):
-    """Wraps a Hiccup-style list to be rendered as an interactive widget in the JavaScript runtime."""
+    """Use python lists and dicts to represent html, a la Clojure's hiccup."""
 
     def __init__(self, *hiccup_elements) -> None:
         LayoutItem.__init__(self)
@@ -606,11 +610,11 @@ def State(values: dict[str, Any], sync: Union[set[str], bool, None] = None) -> M
         State: An object that initializes the state variables when rendered.
 
     Examples:
-        ```python
-        Plot.State({"count": 0, "name": "foo"})  # Initialize without sync
-        Plot.State({"count": 0}, sync=True)  # Sync all variables
-        Plot.State({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
-        ```
+    ```
+    Plot.State({"count": 0, "name": "foo"})  # Initialize without sync
+    Plot.State({"count": 0}, sync=True)  # Sync all variables
+    Plot.State({"x": 0, "y": 1}, sync={"x"})  # Only sync "x"
+    ```
     """
 
     sync_set = set(values.keys()) if sync is True else (sync or set())

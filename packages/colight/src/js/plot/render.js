@@ -18,7 +18,7 @@ import { calculateScaleFactors, invertPoint } from "./style";
  *
  */
 
-export function childEvents({
+export function renderChildEvents({
   onDragStart,
   onDrag,
   onDragEnd,

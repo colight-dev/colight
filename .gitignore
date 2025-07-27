@@ -24,3 +24,4 @@ docs/api/
 .lsp 
 .llm_context
 **/js-dist/**
+**/api/*.md

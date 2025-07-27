@@ -1,12 +1,13 @@
-from colight.layout import JSExpr
-import colight.plot as Plot
-from typing import Any, Dict, Union, Optional, TypedDict
+from typing import Any, Dict, Optional, TypedDict, Union
 
 import numpy as np
 
+import colight.plot as Plot
+from colight.layout import JSExpr
+
 # Move Array type definition after imports
-ArrayLike = Union[list, np.ndarray, Plot.JSExpr]
-NumberLike = Union[int, float, np.number, Plot.JSExpr]
+ArrayLike = Union[list, np.ndarray, JSExpr]
+NumberLike = Union[int, float, np.number, JSExpr]
 
 
 class Decoration(TypedDict, total=False):

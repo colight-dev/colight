@@ -7,13 +7,14 @@ import * as mobxReact from "mobx-react-lite";
 import * as React from "react";
 const { useState, useEffect, useContext, useRef, useCallback, useMemo } = React;
 import * as ReactDOM from "react-dom/client";
-import * as render from "./plot/render";
+import { renderChildEvents } from "./plot/render";
 import { Grid, Row, Column } from "./layout";
 import { joinClasses, tw } from "./utils";
 import * as scene3d from "./scene3d/scene3d";
 import { Bitmap } from "./components/bitmap";
 import { inspect } from "./inspect";
 import { md, katex } from "./markdown";
+import * as htl from "htl";
 
 export const CONTAINER_PADDING = 10;
 
@@ -265,6 +266,7 @@ export const Frames = mobxReact.observer(function (props) {
 
   return node(frames[index]);
 });
+
 export class Bylight {
   constructor(source, patterns, props = {}) {
     this.patterns = patterns;
@@ -297,6 +299,7 @@ export function repeat(data) {
   return (_, i) => data[i % length];
 }
 export {
+  bylight,
   d3,
   inspect,
   MarkSpec,
@@ -307,12 +310,13 @@ export {
   Row,
   Column,
   Grid,
-  render,
+  renderChildEvents,
   scene3d,
   Bitmap,
   tw,
   md,
   katex,
+  htl,
 };
 
 function renderArray($state, value) {
@@ -415,9 +419,6 @@ export function Hiccup(tag, props, ...children) {
   }
 
   const evaluatedProps = $state.evaluate(props);
-  // console.log('Props ', ...Object.entries(props).flat(), )
-  // console.log('EProps', ...Object.entries(evaluatedProps).flat())
-  // console.log("---------")
 
   if (evaluatedProps.class) {
     evaluatedProps.className = evaluatedProps.class;

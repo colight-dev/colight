@@ -57,7 +57,9 @@ nav:
       - Rendering LaTeX: examples/katex.py
       - Render Pixel Data: examples/pixels.py
   - API Docs:
+      - Core: api/core.md
       - Plot: api/plot.md
+      - Plot Extras: api/plot-extras.md
       - Scene3D: api/scene3d.md
   - How Do I...: learn-more/how-do-i.py
 
@@ -72,8 +74,12 @@ plugins:
   - search
   - colight.mkdocs.api_plugin:
       modules:
+        - module: colight.core
+          output: api/core.md
         - module: colight.plot
           output: api/plot.md
+        - module: colight.plot_extras
+          output: api/plot-extras.md
         - module: colight.scene3d
           output: api/scene3d.md
   - colight.mkdocs.site_plugin:
@@ -89,12 +95,11 @@ extra_css:
   - stylesheets/bylight.css
 extra_javascript:
   - js/dist/embed.js
-  - js/bylight.js
+  - js/init.js
   - js/scroll-fix.js
   - js/command-k.js
-  - js/colight-loader.js
 hooks:
-  - packages/colight/src/colight/scripts/tailwind_builder.py
+  - packages/colight/src/colight/scripts/mkdocs_hooks.py
 # Temporarily disabled hooks due to path issues
 # - packages/colight/src/colight/scripts/css_modifier.py
 

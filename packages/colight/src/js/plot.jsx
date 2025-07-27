@@ -45,7 +45,7 @@ function mergePlotSpec(layers) {
   return layers.flat().reduce(
     (mergedSpec, layer) => {
       if (!layer) return mergedSpec;
-      if (layer instanceof MarkSpec) {
+      if (layer instanceof MarkSpec || typeof layer === "function") {
         mergedSpec.marks.push(layer);
         return mergedSpec;
       }
