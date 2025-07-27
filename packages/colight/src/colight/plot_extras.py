@@ -3,7 +3,7 @@ from typing import Any
 import colight.plot_defs as defs
 from colight.components.bitmap import bitmap
 from colight.layout import JSCode, JSRef, js
-from colight.plot_spec import MarkSpec, PlotSpec
+from colight.plot_spec import MarkSpec, PlotSpec, new
 
 
 def histogram(
@@ -80,8 +80,39 @@ def renderChildEvents(options: dict[str, Any] = {}, **kwargs) -> JSRef:
 
 
 def canvas_mark(user_canvas_fn):
-    return js(
-        """(_indexes, scales, _values, dim, _ctx) => {
+    """
+    Create a custom Plot mark that renders using HTML5 Canvas within an SVG context.
+
+    This function enables high-performance custom visualization by allowing direct
+    canvas drawing operations while maintaining compatibility with Observable Plot's
+    coordinate system and layout. The canvas is automatically scaled for high-DPI
+    displays and embedded as a foreignObject in the SVG.
+
+    Args:
+        user_canvas_fn (callable): A function that performs the canvas drawing operations.
+            Called with arguments:
+            - ctx: Canvas 2D rendering context (pre-scaled for device pixel ratio)
+            - scales: Observable Plot scale functions for converting data to pixel coordinates
+            - dim: Object with width/height properties in CSS pixels
+            - mark_context: Plot mark context extended with 'mark_canvas' property
+
+    Returns:
+        PlotSpec: A plot specification that can be included in plot compositions.
+
+    Example:
+        ```python
+        def draw_circles(ctx, scales, dim, mark_context):
+            ctx.fillStyle = 'red'
+            ctx.beginPath()
+            ctx.arc(dim.width/2, dim.height/2, 50, 0, 2*np.pi)
+            ctx.fill()
+
+        Plot.canvas_mark(draw_circles) + Plot.domain([0, 1])
+        ```
+    """
+    return new(
+        js(
+            """(_indexes, scales, _values, dim, mark_context) => {
     const devicePixelRatio = window.devicePixelRatio || 1;
 
     /* ---- build the canvas-in-SVG wrapper -------------------------------- */
@@ -104,11 +135,12 @@ def canvas_mark(user_canvas_fn):
     const ctx = canvas.getContext("2d");
     ctx.scale(devicePixelRatio, devicePixelRatio);
                    
-    user_canvas_fn(ctx, scales)
+    user_canvas_fn(ctx, scales, dim, {...mark_context, mark_canvas: canvas})
     
     return fo;
 }""",
-        user_canvas_fn=user_canvas_fn,
+            user_canvas_fn=user_canvas_fn,
+        )
     )
 
 
