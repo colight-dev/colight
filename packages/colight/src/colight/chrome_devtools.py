@@ -400,7 +400,7 @@ class ChromeContext:
         except Exception as e:
             raise RuntimeError(f"Failed to open Chrome page: {e}")
 
-        self.ws = connect(ws_url)
+        self.ws = connect(ws_url, max_size=100 * 1024 * 1024)  # 100MB max message size
         _active_count += 1
         # Enable required domains
         self._send_command("Page.enable")
