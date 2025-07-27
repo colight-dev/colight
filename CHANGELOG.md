@@ -1,3 +1,9 @@
+### [2025.7.6] - Jul 27, 2025
+
+- canvas_mark for high performance 2d canvas (in colight.plot.extras)
+- separate colight.core, colight.plot, colight.plot_extras
+- `js` accepts keyward args
+
 ### [2025.7.5] - Jul 25, 2025
 
 - merge branch 'live'
