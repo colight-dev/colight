@@ -1,3 +1,7 @@
+### [2025.7.8] - Jul 28, 2025
+
+- support typed arrays in plot layers
+
 ### [2025.7.7] - Jul 27, 2025
 
 - fix video export error by increasing max websocket payload size
