@@ -28,7 +28,7 @@ function deepMergeLayers(target, source) {
         result[key] = [...result[key], ...source[key]];
       } else if (
         source[key] &&
-        typeof source[key] === "object" &&
+        source[key].constructor === Object &&
         key in result
       ) {
         result[key] = deepMergeLayers(result[key], source[key]);
@@ -58,6 +58,8 @@ function mergePlotSpec(layers) {
 export class PlotSpec {
   constructor({ layers }) {
     this.spec = mergePlotSpec(layers);
+    console.log("layers", layers);
+    console.log("merged", this.spec);
   }
 
   render() {
