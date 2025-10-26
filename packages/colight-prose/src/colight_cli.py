@@ -27,9 +27,7 @@ def main():
     type=click.Path(path_type=pathlib.Path),
     help="Output file or directory",
 )
-@click.option(
-    "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
-)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.option(
     "--formats",
     "-f",
@@ -43,10 +41,9 @@ def main():
     help="Comma-separated pragma tags (e.g., 'hide-statements,hide-visuals')",
 )
 @click.option(
-    "--continue-on-error",
-    type=bool,
+    "--continue-on-error/--stop-on-error",
     default=True,
-    help="Continue building even if forms fail to execute (default: True)",
+    help="Continue building even if forms fail to execute (default: continue-on-error)",
 )
 @click.option(
     "--colight-output-path",
@@ -94,7 +91,7 @@ def build(
                 builder.build_file(
                     input_path, output_dir=output, formats=formats, **kwargs
                 )
-        except ValueError as e:
+        except (ValueError, RuntimeError) as e:
             click.echo(f"Error: {e}")
             return
 
@@ -109,7 +106,7 @@ def build(
             output = pathlib.Path("build")
         try:
             builder.build_directory(input_path, output, formats=formats, **kwargs)
-        except ValueError as e:
+        except (ValueError, RuntimeError) as e:
             click.echo(f"Error: {e}")
             return
         if kwargs.get("verbose"):
@@ -124,9 +121,7 @@ def build(
     type=click.Path(path_type=pathlib.Path),
     help="Output directory (default: .colight_cache with dev server, build without)",
 )
-@click.option(
-    "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
-)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.option(
     "--formats",
     "-f",
@@ -140,10 +135,9 @@ def build(
     help="Comma-separated pragma tags (e.g., 'hide-statements,hide-visuals')",
 )
 @click.option(
-    "--continue-on-error",
-    type=bool,
+    "--continue-on-error/--stop-on-error",
     default=True,
-    help="Continue building even if forms fail to execute (default: True)",
+    help="Continue building even if forms fail to execute (default: continue-on-error)",
 )
 @click.option(
     "--colight-output-path",
@@ -175,10 +169,9 @@ def build(
     help="File patterns to ignore. Can be specified multiple times.",
 )
 @click.option(
-    "--dev-server",
-    type=bool,
+    "--dev-server/--no-dev-server",
     default=True,
-    help="Run development server with live reload (default: True)",
+    help="Run development server with live reload (default: enabled)",
 )
 @click.option(
     "--host",
@@ -258,9 +251,7 @@ def watch(
 
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
-@click.option(
-    "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
-)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.option(
     "--pragma",
     type=str,

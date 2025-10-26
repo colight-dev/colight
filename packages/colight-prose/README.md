@@ -17,8 +17,11 @@ colight-prose build src/post.py --output build/post.md
 # Watch for changes
 colight-prose watch src/ --output build/
 
-# Initialize new project
-colight-prose init my-blog/
+# Watch without the dev server
+colight-prose watch src/ --output build/ --no-dev-server
+
+# Run the live editing server
+colight-prose live src/
 ```
 
 ## File Format

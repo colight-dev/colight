@@ -6,6 +6,7 @@ import pathlib
 import threading
 from typing import List, Optional
 
+import click
 from watchfiles import watch
 
 import colight_prose.static.builder as builder
@@ -58,11 +59,11 @@ def watch_and_build(
     if include is None:
         include = ["*.py"]
 
-    print(f"Watching {input_path} for changes...")
+    click.echo(f"Watching {input_path} for changes...")
     if config.verbose:
-        print(f"Include patterns: {include}")
+        click.echo(f"Include patterns: {include}")
         if ignore:
-            print(f"Ignore patterns: {ignore}")
+            click.echo(f"Ignore patterns: {ignore}")
 
     # Build initially
     if input_path.is_file():
@@ -115,10 +116,10 @@ def watch_and_build(
 
         if matching_changes:
             if config.verbose:
-                print(
+                click.echo(
                     f"Changes detected: {', '.join(str(f) for f in matching_changes)}"
                 )
-                print(
+                click.echo(
                     {
                         "is_file": input_path.is_file(),
                         "in matching changes": input_path in matching_changes,
@@ -137,7 +138,7 @@ def watch_and_build(
                                 input_path, output_dir=output_path, config=config
                             )
                         if config.verbose:
-                            print(f"Rebuilt {input_path}")
+                            click.echo(f"Rebuilt {input_path}")
                 else:
                     # Rebuild affected files
                     for changed_file in matching_changes:
@@ -147,7 +148,9 @@ def watch_and_build(
                                 input_path.absolute()
                             )
                         except Exception as e:
-                            print(f"DEBUG: Error checking relative paths: {e}")
+                            click.echo(
+                                f"DEBUG: Error checking relative paths: {e}", err=True
+                            )
 
                         if changed_file.is_relative_to(input_path.resolve()):
                             rel_path = changed_file.relative_to(input_path.resolve())
@@ -157,9 +160,9 @@ def watch_and_build(
                                 changed_file, output_file=output_file, config=config
                             )
                             if config.verbose:
-                                print(f"Rebuilt {changed_file}")
+                                click.echo(f"Rebuilt {changed_file}")
             except Exception as e:
-                print(f"Error during rebuild: {e}")
+                click.echo(f"Error during rebuild: {e}", err=True)
                 if config.verbose:
                     import traceback
 
@@ -230,8 +233,8 @@ def watch_build_and_serve(
     # Ensure output directory exists
     output_path.mkdir(parents=True, exist_ok=True)
 
-    print(f"Watching {input_path} for changes...")
-    print(f"Output directory: {output_path}")
+    click.echo(f"Watching {input_path} for changes...")
+    click.echo(f"Output directory: {output_path}")
 
     # Build initially
     if input_path.is_file():
@@ -310,7 +313,7 @@ def watch_build_and_serve(
 
             if matching_changes:
                 if config.verbose:
-                    print(
+                    click.echo(
                         f"Changes detected: {', '.join(str(f) for f in matching_changes)}"
                     )
                 try:
@@ -323,7 +326,7 @@ def watch_build_and_serve(
                                 input_path, output_file=output_file, config=config
                             )
                             if config.verbose:
-                                print(f"Rebuilt {input_path}")
+                                click.echo(f"Rebuilt {input_path}")
                     else:
                         # Rebuild affected files
                         for changed_file in matching_changes:
@@ -337,19 +340,19 @@ def watch_build_and_serve(
                                     changed_file, output_file=output_file, config=config
                                 )
                                 if config.verbose:
-                                    print(f"Rebuilt {changed_file}")
+                                    click.echo(f"Rebuilt {changed_file}")
 
                         # Index regeneration is handled by API endpoint
                         if config.verbose:
-                            print("Files rebuilt successfully")
+                            click.echo("Files rebuilt successfully")
 
                 except Exception as e:
-                    print(f"Error during rebuild: {e}")
+                    click.echo(f"Error during rebuild: {e}", err=True)
                     if config.verbose:
                         import traceback
 
                         traceback.print_exc()
 
     except KeyboardInterrupt:
-        print("\nStopping server...")
+        click.echo("\nStopping server...")
         server.stop()

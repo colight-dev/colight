@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Set, Union, get_args
 
+import click
+
 from colight_prose.constants import DEFAULT_INLINE_THRESHOLD
 from colight_prose.executor import DocumentExecutor
 from colight_prose.file_resolver import find_files
@@ -93,7 +95,7 @@ class BuildConfig:
         args = []
 
         if self.verbose:
-            args.extend(["--verbose", "true"])
+            args.append("--verbose")
 
         # Convert pragma to comma-separated list
         if self.pragma:
@@ -104,7 +106,7 @@ class BuildConfig:
             args.extend(["--formats", ",".join(sorted(self.formats))])
 
         if not self.continue_on_error:
-            args.extend(["--continue-on-error", "false"])
+            args.append("--stop-on-error")
 
         if self.colight_output_path:
             args.extend(["--colight-output-path", self.colight_output_path])
@@ -201,7 +203,7 @@ def build_file(
     # Skip PEP 723 handling if we're already in a subprocess
     if pep723_metadata and not config.in_subprocess:
         if config.verbose:
-            print("  Detected PEP 723 metadata - re-running with dependencies")
+            click.echo("  Detected PEP 723 metadata - re-running with dependencies")
 
         # Parse the dependencies from PEP 723 metadata
         dependencies = parse_dependencies(pep723_metadata)
@@ -244,10 +246,19 @@ def build_file(
         cmd.extend(config.to_cli_args())
 
         if config.verbose:
-            print(f"  Running: {' '.join(cmd)}")
+            click.echo(f"  Running: {' '.join(cmd)}")
 
         # Run the command and let output pass through in real-time
-        result = subprocess.run(cmd)
+        try:
+            subprocess.run(cmd, check=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Could not invoke 'uv'. Install uv (https://docs.astral.sh/uv/) or ensure it is on PATH."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"'uv' failed while installing PEP 723 dependencies (exit code {exc.returncode})."
+            ) from exc
 
         # Return instead of sys.exit to allow tests to continue
         # The subprocess has completed, so we just return to prevent further processing
@@ -256,19 +267,19 @@ def build_file(
     # Not a PEP 723 file or already in PEP 723 environment - continue with normal execution
     if config.verbose:
         if output_file:
-            print(f"Building {input_path} -> {output_file}")
+            click.echo(f"Building {input_path} -> {output_file}")
         else:
-            print(f"Building {input_path} -> {output_dir}/")
+            click.echo(f"Building {input_path} -> {output_dir}/")
     try:
         # Parse the file
         document = parse_colight_file(input_path)
         if config.verbose:
-            print(f"Found {len(document.blocks)} blocks")
+            click.echo(f"Found {len(document.blocks)} blocks")
             if document.tags.flags:
-                print(f"  File tags: {document.tags.flags}")
+                click.echo(f"  File tags: {document.tags.flags}")
     except Exception as e:
         if config.verbose:
-            print(f"Parse error: {e}")
+            click.echo(f"Parse error: {e}", err=True)
         # Create a minimal output file with error message
         if output_file:
             # Single file output
@@ -310,8 +321,8 @@ def build_file(
         colight_dir = output_dir / f"{input_path.stem}_colight"
         colight_basename = input_path.stem
 
-    if config.verbose:
-        print(f"  Writing .colight files to: {colight_dir}")
+        if config.verbose:
+            click.echo(f"  Writing .colight files to: {colight_dir}")
 
     # Prepare path context for templates
     path_context = {
@@ -326,7 +337,7 @@ def build_file(
     execution_errors = [r.error for r in results if r.error]
     if execution_errors and not config.continue_on_error:
         if config.verbose:
-            print("  Execution stopped due to errors")
+            click.echo("  Execution stopped due to errors")
 
     # For visualizations that should be inlined, update the results
     inline_visuals = []
@@ -394,7 +405,7 @@ def build_file(
             final_output_path.write_text(markdown_content)
 
         if config.verbose:
-            print(f"Generated {final_output_path}")
+            click.echo(f"Generated {final_output_path}")
 
 
 def build_directory(
@@ -419,7 +430,7 @@ def build_directory(
     config = BuildConfig.from_config_and_kwargs(config, **kwargs)
 
     if config.verbose:
-        print(f"Building directory {input_dir} -> {output_dir}")
+        click.echo(f"Building directory {input_dir} -> {output_dir}")
 
     # Default to .py files if no include patterns specified
     if include is None:
@@ -432,7 +443,7 @@ def build_directory(
     python_files = sorted(set(python_files))
 
     if config.verbose:
-        print(f"Found {len(python_files)} Python files")
+        click.echo(f"Found {len(python_files)} Python files")
 
     # Build each file
     for python_file in python_files:
@@ -449,7 +460,7 @@ def build_directory(
                 config=config,
             )
         except Exception as e:
-            print(f"Error building {python_file}: {e}")
+            click.echo(f"Error building {python_file}: {e}", err=True)
             if config.verbose:
                 import traceback
 
