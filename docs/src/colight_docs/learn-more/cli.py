@@ -1,14 +1,14 @@
 # %% [markdown]
 # # CLI Tools
 #
-# Colight ships a command-line interface as part of the `colight-prose` package.
+# Colight ships a command-line interface as part of the `colight-publish` package.
 # It powers the documentation build workflow by executing notebook-style `.py`
 # files (like the one you are reading) and exporting them to Markdown.
 #
 # %% [markdown]
 # ## Where the CLI is documented
 #
-# The canonical reference lives in `packages/colight-prose/README.md`. This page
+# The canonical reference lives in `packages/colight-publish/README.md`. This page
 # surfaces the highlights of that README and keeps it connected to the rest of
 # the docs site so you can find it through navigation.
 #
@@ -17,9 +17,9 @@
 #
 # | Command | When to use it | Notes |
 # | --- | --- | --- |
-# | `colight-prose build <SOURCE> --output <DEST>` | One-off conversion of `.py` docs into Markdown or HTML. | Useful in CI and for testing whether a single file compiles. |
-# | `colight-prose watch <SOURCE> --output <DEST>` | Incrementally rebuilds docs as you edit files. | Pass `--no-dev-server` to skip starting the live preview server. |
-# | `colight-prose live <SOURCE>` | Starts the live editing server backed by the watch pipeline. | Great for pairing Markdown edits with interactive previews. |
+# | `colight-publish build <SOURCE> --output <DEST>` | One-off conversion of `.py` docs into Markdown or HTML. | Useful in CI and for testing whether a single file compiles. |
+# | `colight-publish watch <SOURCE> --output <DEST>` | Incrementally rebuilds docs as you edit files. | Pass `--no-dev-server` to skip starting the live preview server. |
+# | `colight-publish live <SOURCE>` | Starts the live editing server backed by the watch pipeline. | Great for pairing Markdown edits with interactive previews. |
 #
 # SOURCE may be a single file or a directory tree. DEST can be a file or folder
 # depending on the command.

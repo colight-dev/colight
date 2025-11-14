@@ -9,8 +9,8 @@ import traceback
 from functools import cached_property
 from typing import Optional
 
-from colight_prose import api
-from colight_prose.constants import DEFAULT_INLINE_THRESHOLD
+from colight_publish import api
+from colight_publish.constants import DEFAULT_INLINE_THRESHOLD
 from mkdocs.config import Config
 from mkdocs.config.config_options import DictOfItems, ListOfItems, Type
 from mkdocs.plugins import BasePlugin

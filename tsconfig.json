@@ -13,7 +13,7 @@
   },
   "include": [
     "packages/colight/src/js",
-    "packages/colight-prose/src/colight_prose/live/js"
+    "packages/colight-publish/src/colight_publish/live/js"
   ],
   "exclude": ["node_modules"]
 }

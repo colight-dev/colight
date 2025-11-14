@@ -12,7 +12,7 @@ resolution-markers = [
 members = [
     "colight",
     "colight-mkdocs",
-    "colight-prose",
+    "colight-publish",
 ]
 
 [manifest.dependency-groups]
@@ -337,7 +337,7 @@ version = "2025.7.7"
 source = { editable = "packages/colight-mkdocs" }
 dependencies = [
     { name = "colight" },
-    { name = "colight-prose" },
+    { name = "colight-publish" },
     { name = "griffe" },
     { name = "mkdocs" },
 ]
@@ -350,7 +350,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "colight", editable = "packages/colight" },
-    { name = "colight-prose", editable = "packages/colight-prose" },
+    { name = "colight-publish", editable = "packages/colight-publish" },
     { name = "griffe", specifier = ">=0.36" },
     { name = "mkdocs", specifier = ">=1.5" },
 ]
@@ -359,9 +359,9 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
-name = "colight-prose"
+name = "colight-publish"
 version = "2025.7.7"
-source = { editable = "packages/colight-prose" }
+source = { editable = "packages/colight-publish" }
 dependencies = [
     { name = "click" },
     { name = "colight" },

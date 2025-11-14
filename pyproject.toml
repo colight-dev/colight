@@ -6,7 +6,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 colight = { workspace = true }
-colight-prose = { workspace = true }
+colight-publish = { workspace = true }
 colight-mkdocs = { workspace = true }
 examples = { workspace = true }
 
@@ -44,9 +44,9 @@ venvPath = "."
 venv = ".venv"
 include = [ "packages/*/src", "packages/*/tests"]
 exclude = [
-    "packages/colight-prose/tests/examples/pep723_*.py",
-    "packages/colight-prose/tests/import-test-fixtures/",
-    "packages/colight-prose/tests/integration/server-test.py"
+    "packages/colight-publish/tests/examples/pep723_*.py",
+    "packages/colight-publish/tests/import-test-fixtures/",
+    "packages/colight-publish/tests/integration/server-test.py"
 ]
 typeCheckingMode = "standard"
 reportUnusedExpression = false
