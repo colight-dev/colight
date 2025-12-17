@@ -239,8 +239,8 @@ def Ellipsoid(
     centers: ArrayLike,
     half_sizes: Optional[ArrayLike] = None,
     half_size: Optional[Union[NumberLike, ArrayLike]] = None,  # Single value or [x,y,z]
-    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [x,y,z,w]
-    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
+    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
+    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
     alphas: Optional[ArrayLike] = None,
@@ -255,8 +255,8 @@ def Ellipsoid(
         centers: Nx3 array of ellipsoid centers or flattened array
         half_sizes: Nx3 array of half_sizes (x,y,z) or flattened array (optional)
         half_size: Default half_size (sphere) or [x,y,z] half_sizes (ellipsoid) if half_sizes not provided
-        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
-        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
+        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
+        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
         alphas: Array of alpha values per ellipsoid (optional)
@@ -299,8 +299,8 @@ def Cuboid(
     centers: ArrayLike,
     half_sizes: Optional[ArrayLike] = None,
     half_size: Optional[Union[ArrayLike, NumberLike]] = None,
-    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [x,y,z,w]
-    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
+    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
+    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
@@ -313,8 +313,8 @@ def Cuboid(
         centers: Nx3 array of cuboid centers or flattened array
         half_sizes: Nx3 array of half sizes (width,height,depth) or flattened array (optional)
         half_size: Default half size [w,h,d] for all cuboids if half_sizes not provided
-        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
-        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
+        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
+        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all cuboids if colors not provided
         alphas: Array of alpha values per cuboid (optional)
@@ -391,11 +391,76 @@ def LineBeams(
     return SceneComponent("LineBeams", data, **kwargs)
 
 
+def BoundingBox(
+    centers: ArrayLike,
+    half_sizes: Optional[ArrayLike] = None,
+    half_size: Optional[Union[ArrayLike, NumberLike]] = None,
+    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
+    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
+    colors: Optional[ArrayLike] = None,
+    color: Optional[ArrayLike] = None,  # Default RGB color for all boxes
+    sizes: Optional[ArrayLike] = None,  # Per-box edge thickness
+    size: Optional[NumberLike] = None,  # Default edge thickness
+    alphas: Optional[ArrayLike] = None,  # Per-box alpha values
+    alpha: Optional[NumberLike] = None,  # Default alpha for all boxes
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a wireframe bounding box element.
+
+    Args:
+        centers: Nx3 array of box centers or flattened array
+        half_sizes: Nx3 array of half sizes (width,height,depth) or flattened array (optional)
+        half_size: Default half size [w,h,d] or single value for all boxes if half_sizes not provided
+        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
+        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
+        colors: Nx3 array of RGB colors or flattened array (optional)
+        color: Default RGB color [r,g,b] for all boxes if colors not provided
+        sizes: Array of edge thickness per box (optional)
+        size: Default edge thickness for all boxes if sizes not provided
+        alphas: Array of alpha values per box (optional)
+        alpha: Default alpha value for all boxes if alphas not provided
+        **kwargs: Additional arguments like decorations, onHover, onClick
+
+    Returns:
+        A BoundingBox scene component that renders wireframe boxes (12 edges each).
+    """
+    centers = flatten_array(centers, dtype=np.float32)
+    data: Dict[str, Any] = {"centers": centers}
+
+    if half_sizes is not None:
+        data["half_sizes"] = flatten_array(half_sizes, dtype=np.float32)
+    elif half_size is not None:
+        data["half_size"] = half_size
+
+    if quaternions is not None:
+        data["quaternions"] = flatten_array(quaternions, dtype=np.float32)
+    elif quaternion is not None:
+        data["quaternion"] = quaternion
+
+    if colors is not None:
+        data["colors"] = flatten_array(colors, dtype=np.float32)
+    elif color is not None:
+        data["color"] = color
+
+    if sizes is not None:
+        data["sizes"] = flatten_array(sizes, dtype=np.float32)
+    elif size is not None:
+        data["size"] = size
+
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
+
+    return SceneComponent("BoundingBox", data, **kwargs)
+
+
 __all__ = [
     "Scene",
     "PointCloud",
     "Ellipsoid",
     "Cuboid",
     "LineBeams",
+    "BoundingBox",
     "deco",
 ]

@@ -21,6 +21,7 @@ import {
   CuboidComponentConfig,
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
+  BoundingBoxComponentConfig,
 } from "./components";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
@@ -162,6 +163,37 @@ export function LineBeams(
   return {
     ...coerceFloat32Fields(props, ["points", "colors"]),
     type: "LineBeams",
+  };
+}
+
+/**
+ * Creates a bounding box (wireframe) component configuration.
+ * @param props - Bounding box configuration properties
+ * @returns {BoundingBoxComponentConfig} Configuration for rendering wireframe boxes in 3D space
+ */
+export function BoundingBox(
+  props: BoundingBoxComponentConfig,
+): BoundingBoxComponentConfig {
+  const half_size =
+    typeof props.half_size === "number"
+      ? ([props.half_size, props.half_size, props.half_size] as [
+          number,
+          number,
+          number,
+        ])
+      : props.half_size;
+
+  return {
+    ...coerceFloat32Fields(props, [
+      "centers",
+      "half_sizes",
+      "quaternions",
+      "colors",
+      "sizes",
+      "alphas",
+    ]),
+    half_size,
+    type: "BoundingBox",
   };
 }
 

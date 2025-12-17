@@ -1,6 +1,7 @@
 # %% Common imports and configuration
 import numpy as np
 from colight.scene3d import (
+    BoundingBox,
     Ellipsoid,
     Cuboid,
     LineBeams,
@@ -28,7 +29,6 @@ scene_points = PointCloud(
             scale=1.5,
         ),
         deco([0], scale=4),
-        deco(None, scale=[1.2, 0.8, 1.0]),
     ],
 ) + (
     {
@@ -51,8 +51,9 @@ scene_ellipsoids = (
         colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
         half_size=[0.4, 0.4, 0.4],
         alpha=0.7,
+        # Quaternions in [w, x, y, z] format
         quaternions=np.array(
-            [[1, 0, 0, 0], [0, 0.707, 0, 0.707], [0.5, 0, 0.5, 0.707]]
+            [[1, 0, 0, 0], [0.707, 0, 0.707, 0], [0.707, 0.5, 0, 0.5]]
         ),
         onHover=js(
             "(i) => $state.update({hover_ellipsoid: typeof i === 'number' ? [i] : []})"
@@ -93,8 +94,9 @@ scene_ellipsoids = (
         color=[0, 1, 0],
         half_sizes=[0.4, 0.4, 0.4],
         alpha=0.8,
+        # Quaternions in [w, x, y, z] format
         quaternions=np.array(
-            [[0.866, 0, 0.5, 0], [0.707, 0.707, 0, 0], [0.5, 0.5, 0.5, 0.5]]
+            [[0.966, 0, 0.259, 0], [0.707, 0.707, 0, 0], [0.5, 0.5, 0.5, 0.5]]
         ),
         onHover=js(
             "(i) => $state.update({hover_axes: typeof i === 'number' ? [i] : []})"
@@ -133,6 +135,7 @@ scene_cuboids = Cuboid(
     colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
     alphas=np.array([0.5, 0.7, 0.9]),
     half_size=0.4,
+    # Quaternions in [w, x, y, z] format: identity, 90° Y, 45° XYZ
     quaternions=np.array([[1, 0, 0, 0], [0.707, 0, 0.707, 0], [0.5, 0.5, 0.5, 0.5]]),
     onHover=js(
         "(i) => $state.update({hover_cuboid: typeof i === 'number' ? [i] : []})"
@@ -167,33 +170,31 @@ scene_beams = LineBeams(
             -2,
             -2,
             0,
-            0,  # start x,y,z, dummy
+            0,  # start x,y,z, line_index
             -1,
             -2,
             1,
-            0,  # end x,y,z, dummy
+            0,  # end x,y,z, line_index
             -1,
             -2,
             0,
-            0,  # start of second beam
+            1,  # start of second beam (line_index=1)
             -2,
             -2,
             1,
-            0,  # end of second beam
+            1,  # end of second beam
         ],
         dtype=np.float32,
     ).reshape(-1),
-    colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+    colors=np.array([[1, 0, 0], [0, 1, 0]]),  # per-segment colors
     size=0.06,
     alpha=0.7,
-    quaternions=np.array([[1, 0, 0, 0], [0.707, 0, 0.707, 0]]),
     onHover=js("(i) => $state.update({hover_beam: typeof i === 'number' ? [i] : []})"),
     decorations=[
         deco(
             js("$state.hover_beam"),
             color=[1, 1, 0],
         ),
-        deco(None, scale=[1.2, 0.8, 1.0]),
     ],
 ) + (
     {
@@ -215,6 +216,7 @@ mixed_scene = (
         centers=np.array([[2, -2, 0.5]]),
         colors=np.array([[1, 0, 0]]),
         half_sizes=[0.5, 0.5, 0.5],
+        # 90° rotation around Y axis in wxyz format
         quaternions=np.array([[0.707, 0, 0.707, 0]]),
         onHover=js(
             "(i) => $state.update({hover_mixed_ellipsoid: typeof i === 'number' ? [i] : []})"
@@ -224,14 +226,12 @@ mixed_scene = (
                 js("$state.hover_mixed_ellipsoid"),
                 color=[1, 1, 0],
             ),
-            deco(None, scale=[1.5, 0.7, 1.0]),
         ],
     )
     + PointCloud(
         centers=np.array([[2, -2, 0], [2, -2, 1]]),
         colors=np.array([[0, 1, 0], [0, 0, 1]]),
         size=0.2,
-        quaternions=np.array([[1, 0, 0, 0], [0.707, 0.707, 0, 0]]),
         onHover=js(
             "(i) => $state.update({hover_mixed_point: typeof i === 'number' ? [i] : []})"
         ),
@@ -240,7 +240,6 @@ mixed_scene = (
                 js("$state.hover_mixed_point"),
                 color=[1, 1, 0],
             ),
-            deco(None, scale=[0.8, 1.2, 1.0]),
         ],
     )
     + (
@@ -279,10 +278,18 @@ colors[:, 2] = (centers[:, 2] - centers[:, 2].min()) / (
     centers[:, 2].max() - centers[:, 2].min()
 )
 
+# Generate per-cuboid rotations based on position (wxyz format)
+n_cuboids = len(centers)
+angles = np.linspace(0, np.pi / 2, n_cuboids)  # 0 to 90 degrees
+quaternions = np.zeros((n_cuboids, 4))
+quaternions[:, 0] = np.cos(angles / 2)  # w
+quaternions[:, 3] = np.sin(angles / 2)  # z (rotate around Z axis)
+
 scene_grid_cuboids = (
     Cuboid(
         centers=centers[: len(centers) // 2],
         colors=colors[: len(colors) // 2],
+        quaternions=quaternions[: len(quaternions) // 2],
         half_sizes=[0.15],
         alpha=0.85,
         onHover=js(
@@ -299,6 +306,7 @@ scene_grid_cuboids = (
     + Cuboid(
         centers=centers[len(centers) // 2 :],
         colors=colors[len(colors) // 2 :],
+        quaternions=quaternions[len(quaternions) // 2 :],
         half_sizes=[0.15],
         alpha=0.85,
         onHover=js(
@@ -323,8 +331,44 @@ scene_grid_cuboids = (
     )
 )
 
+# %% 7) Bounding Box Picking
+print("Test 7: Bounding Box Picking.\nHover over wireframe bounding boxes.")
+
+# Create bounding boxes with various rotations
+bbox_centers = np.array([[-4, -2, 0], [-4, -2, 1.5], [-2.5, -2, 0.75]])
+bbox_half_sizes = np.array([[0.5, 0.3, 0.4], [0.4, 0.4, 0.4], [0.6, 0.2, 0.5]])
+bbox_colors = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+# Quaternions in wxyz format: identity, 45° around Z, 30° around Y
+bbox_quaternions = np.array([[1, 0, 0, 0], [0.924, 0, 0, 0.383], [0.966, 0, 0.259, 0]])
+
+scene_bboxes = BoundingBox(
+    centers=bbox_centers,
+    half_sizes=bbox_half_sizes,
+    quaternions=bbox_quaternions,
+    colors=bbox_colors,
+    size=0.02,  # edge thickness
+    alpha=1.0,
+    onHover=js("(i) => $state.update({hover_bbox: typeof i === 'number' ? [i] : []})"),
+    decorations=[
+        deco(
+            js("$state.hover_bbox"),
+            color=[1, 1, 0],
+            scale=1.1,
+        ),
+    ],
+) + (
+    {
+        "defaultCamera": {
+            **DEFAULT_CAMERA,
+            "position": [-6, -4, 2],
+            "target": [-3.25, -2, 0.75],
+        }
+    }
+)
+
 (
     scene_points & scene_beams
     | scene_cuboids & scene_ellipsoids
     | mixed_scene & scene_grid_cuboids
+    | scene_bboxes
 )

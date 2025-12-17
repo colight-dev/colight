@@ -314,6 +314,7 @@ export interface GeometryResources {
   EllipsoidAxes: GeometryResource | null;
   Cuboid: GeometryResource | null;
   LineBeams: GeometryResource | null;
+  BoundingBox: GeometryResource | null;
 }
 
 export interface BufferInfo {

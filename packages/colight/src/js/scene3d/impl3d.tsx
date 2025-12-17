@@ -30,11 +30,12 @@ import {
 
 import isEqual from "lodash-es/isEqual";
 
-import { ellipsoidAxesSpec } from "./components/ring";
 import {
   ComponentConfig,
+  boundingBoxSpec,
   cuboidSpec,
   ellipsoidSpec,
+  ellipsoidAxesSpec,
   lineBeamsSpec,
   pointCloudSpec,
   buildPickingData,
@@ -111,6 +112,7 @@ const primitiveRegistry: Record<ComponentConfig["type"], PrimitiveSpec<any>> = {
   EllipsoidAxes: ellipsoidAxesSpec,
   Cuboid: cuboidSpec,
   LineBeams: lineBeamsSpec,
+  BoundingBox: boundingBoxSpec,
 };
 
 function ensurePickingData(
@@ -584,6 +586,7 @@ export function SceneInner({
           EllipsoidAxes: null,
           Cuboid: null,
           LineBeams: null,
+          BoundingBox: null,
         },
       };
 
