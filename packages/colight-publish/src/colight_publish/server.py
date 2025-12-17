@@ -9,6 +9,7 @@ import pathlib
 import sys
 import threading
 import webbrowser
+from time import perf_counter
 from typing import Any, List, Optional, Set
 
 import websockets
@@ -23,6 +24,7 @@ from .file_graph import FileDependencyGraph
 from .file_resolver import FileResolver, find_files
 from .incremental_executor import IncrementalExecutor
 from .json_api import JsonDocumentGenerator, build_file_tree_json
+from .logging import LiveDashboard, format_duration_ms, rich_console
 from .model import TagSet
 from .parser import parse_file
 from .pragma import parse_pragma_arg
@@ -68,6 +70,7 @@ class ApiMiddleware:
         include: List[str],
         ignore: Optional[List[str]] = None,
         verbose: bool = False,
+        console=None,
     ):
         self.app = app
         self.input_path = input_path.resolve()  # Always use absolute path
@@ -78,12 +81,19 @@ class ApiMiddleware:
         self.incremental_executor = IncrementalExecutor(verbose=verbose)
         self.incremental_executor.project_root = str(self.input_path)
         self.verbose = verbose
+        self.console = console
         if self.verbose:
             logging.basicConfig(level=logging.INFO)
 
     def _get_files(self) -> List[str]:
         """Get list of all matching Python files."""
         return self.file_resolver.get_all_files()
+
+    def _log(self, message, style="cyan"):
+        if self.console:
+            self.console.print(f"[{style}]{message}[/]")
+        elif self.verbose:
+            logger.info(message)
 
     def __call__(self, environ, start_response):
         """Handle API requests."""
@@ -99,7 +109,7 @@ class ApiMiddleware:
             return response(environ, start_response)
 
         # Handle /api/index endpoint
-        if path == "/api/index":
+        if path == "/api/index.json":
             files = find_files(
                 self.input_path, self.include, merge_ignore_patterns(self.ignore)
             )
@@ -117,6 +127,7 @@ class ApiMiddleware:
             # Find source file
             source_file = self.file_resolver.find_source_file(file_path + ".html")
             if source_file:
+                start = perf_counter()
                 try:
                     generator = JsonDocumentGenerator(
                         verbose=self.verbose,
@@ -128,6 +139,12 @@ class ApiMiddleware:
 
                     response = Response(
                         json.dumps(doc, indent=2), mimetype="application/json"
+                    )
+                    duration = (perf_counter() - start) * 1000
+                    self._log(
+                        f"[green]Built[/] {file_path} "
+                        f"({format_duration_ms(duration)})",
+                        style="green",
                     )
                     return response(environ, start_response)
                 except Exception as e:
@@ -198,11 +215,15 @@ class LiveServer:
         self.http_port = http_port
         self.ws_port = ws_port
         self.open_url = open_url
-
         self.connections: Set[Any] = set()  # WebSocket connections
         self.client_registry = (
             ClientRegistry()
         )  # Track client file watches (absolute paths)
+        self.console = rich_console()
+        self.dashboard = LiveDashboard(self.client_registry)
+        if self.dashboard:
+            self.dashboard.start()
+            self._refresh_dashboard_watchers()
         self.dependency_graph = FileDependencyGraph(
             self.input_path
         )  # Track file dependencies (absolute paths)
@@ -220,6 +241,10 @@ class LiveServer:
         self._changed_files_buffer = set()
         self._notification_task = None
         self._notification_delay = 0.1  # 100ms throttle
+        self._log(
+            f"LiveServer ready at http://{self.host}:{self.http_port}",
+            style="bold green",
+        )
 
     def _get_spa_html(self):
         """Get the SPA HTML template."""
@@ -268,10 +293,13 @@ class LiveServer:
         try:
             app = self._create_app()
             self._http_server = make_server(self.host, self.http_port, app)
-            print(f"HTTP server thread started on {self.host}:{self.http_port}")
+            self._log(
+                f"HTTP server thread started on {self.host}:{self.http_port}",
+                style="magenta",
+            )
             self._http_server.serve_forever()
         except Exception as e:
-            print(f"ERROR in HTTP server thread: {e}")
+            self._log(f"ERROR in HTTP server thread: {e}", style="red")
             import traceback
 
             traceback.print_exc()
@@ -286,7 +314,7 @@ class LiveServer:
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")
-                    print("Received message", data)
+                    self._log(f"Received message {data}", style="cyan")
 
                     # Handle watch-file message
                     if message_type == "watch-file":
@@ -303,9 +331,11 @@ class LiveServer:
                             self.client_registry.watch_file(client_id, str(abs_path))
                             self.client_registry.log_status()
                             if self.verbose:
-                                print(
-                                    f"DEBUG: Client {client_id} watching path: '{abs_path}'"
+                                self._log(
+                                    f"Client {client_id} watching path: '{abs_path}'",
+                                    style="magenta",
                                 )
+                            self._refresh_dashboard_watchers()
                             # Unmark file from eviction if it was marked
                             if (
                                 self._api_middleware
@@ -323,6 +353,7 @@ class LiveServer:
                             abs_path = (self.input_path / rel_path).resolve()
                             self.client_registry.unwatch_file(client_id, str(abs_path))
                             self.client_registry.log_status()
+                            self._refresh_dashboard_watchers()
                             # Mark file for potential eviction if no one is watching it
                             if not self.client_registry.get_watchers(str(abs_path)):
                                 if (
@@ -433,7 +464,7 @@ class LiveServer:
                         modules_to_remove.append(module_name)
 
             for module_name in modules_to_remove:
-                print(f"  Removing {module_name} from sys.modules")
+                self._log(f"Removing {module_name} from sys.modules", style="yellow")
                 del sys.modules[module_name]
 
         # Then, fully execute watched files with visual tracking
@@ -473,6 +504,7 @@ class LiveServer:
         try:
             # Verify the file exists and matches patterns
             if self._api_middleware:
+                self._log(f"Run {run} -> {file_path_str}", style="blue")
                 if (
                     not source_file.exists()
                     or not self._api_middleware.file_resolver.matches_patterns(
@@ -666,7 +698,10 @@ class LiveServer:
                 )
 
                 if self.verbose:
-                    print(f"Sent file-changed notification for {rel_path}")
+                    self._log(
+                        f"Sent file-changed notification for {rel_path}",
+                        style="green",
+                    )
 
     async def _periodic_cache_eviction(self):
         """Periodically evict cache entries for unwatched files."""
@@ -686,37 +721,46 @@ class LiveServer:
                         stats = (
                             self._api_middleware.incremental_executor.get_cache_stats()
                         )
-                        print(
+                        self._log(
                             f"Cache stats: {stats['total_entries']} entries, "
-                            f"hit rate: {stats['hit_rate']:.2%}"
+                            f"hit rate: {stats['hit_rate']:.2%}",
+                            style="yellow",
                         )
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 if self.verbose:
-                    print(f"Error in cache eviction: {e}")
+                    self._log(f"Error in cache eviction: {e}", style="red")
 
     async def _watch_for_changes(self):
         """Watch for file changes."""
         paths_to_watch = [str(self.input_path)]
 
         # Initial dependency graph build
-        print("Building initial dependency graph...")
+        start_graph = perf_counter()
+        self._log("Building initial dependency graph...", style="yellow")
         self.dependency_graph.analyze_directory(self.input_path)
         if self.verbose:
-            print(f"\nDependency graph watching: {self.dependency_graph.watched_path}")
-            print("\nDependency graph imports:")
+            self._log(
+                f"Dependency graph watching: {self.dependency_graph.watched_path}",
+                style="yellow",
+            )
+            self._log("Dependency graph imports:", style="yellow")
             for file, imports in sorted(self.dependency_graph.imports.items()):
                 if imports:
-                    print(f"  {file} -> {imports}")
-            print("\nDependency graph imported_by:")
+                    self._log(f"  {file} -> {imports}", style="yellow")
+            self._log("Dependency graph imported_by:", style="yellow")
             for file, imported_by in sorted(self.dependency_graph.imported_by.items()):
                 if imported_by:
-                    print(f"  {file} <- {imported_by}")
+                    self._log(f"  {file} <- {imported_by}", style="yellow")
 
         graph_stats = self.dependency_graph.get_graph_stats()
-        print(
-            f"Dependency graph: {graph_stats['total_files']} files, {graph_stats['total_imports']} imports"
+        duration_graph = (perf_counter() - start_graph) * 1000
+        self._log(
+            f"Dependency graph: {graph_stats['total_files']} files, "
+            f"{graph_stats['total_imports']} imports "
+            f"({format_duration_ms(duration_graph)})",
+            style="green",
         )
 
         async for changes in awatch(*paths_to_watch, stop_event=self._stop_event):
@@ -750,7 +794,7 @@ class LiveServer:
 
             # If the directory structure changed, notify all clients
             if directory_changed:
-                print("Directory structure changed, notifying clients.")
+                self._log("Directory structure changed, notifying clients.")
                 await self._ws_broadcast_all({"type": "directory-changed"})
 
             # Determine which files need re-execution based on modifications
@@ -770,28 +814,36 @@ class LiveServer:
 
             # Find all files affected by the modifications
             if self.verbose and modified_files:
-                print(f"\nProcessing {len(modified_files)} modified file(s)...")
+                self._log(
+                    f"Processing {len(modified_files)} modified file(s)...",
+                    style="blue",
+                )
             for file_path in modified_files:
                 try:
                     relative_path = str(file_path.relative_to(self.input_path))
                 except ValueError:
                     if self.verbose:
-                        print(f"  Skipping {file_path} - not relative to input path")
+                        self._log(
+                            f"  Skipping {file_path} - not relative to input path",
+                            style="yellow",
+                        )
                     continue
 
                 if self.verbose:
-                    print(f"  Modified: {relative_path}")
+                    self._log(f"  Modified: {relative_path}", style="blue")
 
                 affected = self.dependency_graph.get_affected_files(relative_path)
                 if self.verbose:
-                    print(f"    Affected files: {affected}")
+                    self._log(f"    Affected files: {affected}", style="blue")
 
                 for affected_file in affected:
                     affected_path = (self.input_path / affected_file).resolve()
                     if affected_path.exists():
                         files_to_execute.add(affected_path)
                         if self.verbose:
-                            print(f"    Will execute: {affected_file}")
+                            self._log(
+                                f"    Will execute: {affected_file}", style="blue"
+                            )
 
             # Process all affected files
             if files_to_execute:
@@ -837,9 +889,9 @@ class LiveServer:
             self._websocket_handler, self.host, self.ws_port
         )
 
-        print(f"LiveServer running at http://{self.host}:{self.http_port}")
-        print(f"WebSocket server at ws://{self.host}:{self.ws_port}")
-        print("Building files on-demand...")
+        self._log(f"LiveServer running at http://{self.host}:{self.http_port}")
+        self._log(f"WebSocket server at ws://{self.host}:{self.ws_port}")
+        self._log("Building files on-demand...")
 
         # Open browser if requested
         if self.open_url:
@@ -871,3 +923,17 @@ class LiveServer:
         self._stop_event.set()
         if self._http_server:
             self._http_server.shutdown()
+        if self.dashboard:
+            self.dashboard.stop()
+
+    def _log(self, message: str, style: str = "cyan"):
+        if self.dashboard and self.dashboard.log(message, style):
+            return
+        if self.console:
+            self.console.print(f"[{style}]{message}[/]")
+        elif self.verbose:
+            logger.info(message)
+
+    def _refresh_dashboard_watchers(self):
+        if self.dashboard:
+            self.dashboard.refresh_watchers()

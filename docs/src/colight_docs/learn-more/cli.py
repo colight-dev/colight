@@ -1,9 +1,10 @@
 # %% [markdown]
 # # CLI Tools
 #
-# Colight ships a command-line interface as part of the `colight-publish` package.
-# It powers the documentation build workflow by executing notebook-style `.py`
-# files (like the one you are reading) and exporting them to Markdown.
+# Colight ships a command-line interface as part of the `colight-publish` package,
+# exposed to end users as `colight publish`. It powers the documentation build
+# workflow by executing notebook-style `.py` files (like the one you are reading)
+# and exporting them to Markdown, HTML, or the full interactive site.
 #
 # %% [markdown]
 # ## Where the CLI is documented
@@ -13,26 +14,34 @@
 # the docs site so you can find it through navigation.
 #
 # %% [markdown]
-# ## Core commands
+# ## Core command
 #
-# | Command | When to use it | Notes |
-# | --- | --- | --- |
-# | `colight-publish build <SOURCE> --output <DEST>` | One-off conversion of `.py` docs into Markdown or HTML. | Useful in CI and for testing whether a single file compiles. |
-# | `colight-publish watch <SOURCE> --output <DEST>` | Incrementally rebuilds docs as you edit files. | Pass `--no-dev-server` to skip starting the live preview server. |
-# | `colight-publish live <SOURCE>` | Starts the live editing server backed by the watch pipeline. | Great for pairing Markdown edits with interactive previews. |
+# Everything now flows through a single entry point:
+#
+# ```bash
+# colight publish <SOURCE> --format (md|html|site) [--watch] [--output DEST]
+# ```
+#
+# | Format | Watch? | What you get | Default output |
+# | --- | --- | --- | --- |
+# | `md` | optional | Markdown files only | `build/` |
+# | `html` | optional | Standalone HTML + `.colight` assets | `build/` (or `.colight_cache/` when watching with the dev server) |
+# | `site` | optional | The interactive explorer UI | `site-build/` (static) |
 #
 # SOURCE may be a single file or a directory tree. DEST can be a file or folder
-# depending on the command.
+# depending on the command. For `site --watch` the CLI runs the LiveServer
+# directly and ignores `--output`.
 #
 # %% [markdown]
 # ## Common options
 #
-# - `--output PATH` (or `-o PATH`): Choose where built markdown/HTML files are
-#   written.
-# - `--no-dev-server`: Use with `watch` when you only need file rebuilds.
-# - `--format markdown|html`: Override the default export format set in
-#   `mkdocs.yml`.
-# - `--quiet / --verbose`: Control progress output when running in CI.
+# - `--output PATH` (or `-o PATH`): Choose where artifacts land (ignored for `site --watch`).
+# - `--watch`: Regenerate on change. Starts the appropriate dev server for `html`
+#   and `site`; Markdown mode simply rewrites files.
+# - `--include/--ignore`: Glob filters for picking files out of a docs tree.
+# - `--verbose`: Print extra progress information.
+# - `--colight-output-path`, `--colight-embed-path`, `--inline-threshold`: Tuning
+#   knobs for HTML and Markdown output.
 #
 # Options supplied on the CLI sit between file-level defaults and the form-level
 # pragmas described below, so you can override a default without touching the

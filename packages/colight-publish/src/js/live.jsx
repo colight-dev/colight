@@ -307,7 +307,7 @@ const LiveServerApp = () => {
   const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
 
   // Get WebSocket connection status
-  const { connected } = useWebSocket();
+  const { connected, isStatic } = useWebSocket();
 
   // Handle file-changed messages for navigation
   useMessageHandler({
@@ -356,6 +356,7 @@ const LiveServerApp = () => {
         currentPath={navState.path}
         isDirectory={navState.type === "directory"}
         connected={connected}
+        isStaticMode={isStatic}
         onNavigate={navigateTo}
         isLoading={false}
         pragmaOverrides={pragmaOverrides}

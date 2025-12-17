@@ -5,9 +5,11 @@ import {
   useRef,
   useState,
   useCallback,
+  useMemo,
 } from "react";
 import { WebsocketBuilder, ExponentialBackoff, ArrayQueue } from "websocket-ts";
 import createLogger from "../logger.js";
+import { isStaticMode } from "../config.js";
 
 const logger = createLogger("websocket-context");
 
@@ -68,6 +70,9 @@ export const WebSocketProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    if (isStaticMode) {
+      return undefined;
+    }
     const wsPort = parseInt(window.location.port) + 1;
 
     // Build WebSocket with exponential backoff and message buffering
@@ -105,17 +110,22 @@ export const WebSocketProvider = ({ children }) => {
   }, [processMessage]);
 
   const sendMessage = useCallback((message) => {
+    if (isStaticMode) return;
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify(message));
     }
   }, []);
 
-  const value = {
-    connected,
-    sendMessage,
-    registerHandler,
-    ws: wsRef.current,
-  };
+  const value = useMemo(
+    () => ({
+      connected: isStaticMode ? false : connected,
+      sendMessage,
+      registerHandler,
+      ws: isStaticMode ? null : wsRef.current,
+      isStatic: isStaticMode,
+    }),
+    [connected, registerHandler, sendMessage],
+  );
 
   return (
     <WebSocketContext.Provider value={value}>

@@ -19,6 +19,9 @@ dev = [ "jax>=0.4.33; python_version<'3.13'", "jaxlib>=0.4.33; python_version<'3
 [project.license]
 text = "MIT"
 
+[project.scripts]
+colight = "colight.cli:main"
+
 [tool.pyright]
 venvPath = "../.."
 venv = ".venv"

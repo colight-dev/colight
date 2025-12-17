@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useWebSocket,
   useMessageHandler,
@@ -8,6 +8,7 @@ import { getClientId } from "./client-id.js";
 import bylight from "./bylight.ts";
 import { tw } from "../../../colight/src/js/utils.ts";
 import createLogger from "./logger.js";
+import { apiFetch, encodePathSegments } from "./config.js";
 
 const logger = createLogger("DocumentViewer");
 
@@ -45,12 +46,14 @@ function createBlockReplacementMap(prevIds, nextIds, prevResults) {
 
 export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
   const docRef = useRef();
-  const { connected, sendMessage } = useWebSocket();
+  const { connected, sendMessage, isStatic } = useWebSocket();
   const watchedFileRef = useRef(null);
   const clientIdRef = useRef(getClientId());
 
   // Block management state - resets when file changes
   const [blockResults, setBlockResults] = useStateWithDeps({}, [file]);
+  const [staticLoading, setStaticLoading] = useState(false);
+  const [staticError, setStaticError] = useState(null);
 
   // Refs for tracking state across renders
   const latestRunRef = useRef(0);
@@ -67,6 +70,7 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
   useMessageHandler({
     types: ["run-start", "block-result", "run-end", "file-changed"],
     handler: (message) => {
+      if (isStatic) return;
       logger.debug("Received message:", message.type);
 
       switch (message.type) {
@@ -220,7 +224,8 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
 
   // Handle file watching
   useEffect(() => {
-    if (connected && file) {
+    if (isStatic || !file) return;
+    if (connected) {
       const clientId = clientIdRef.current;
 
       // Track what we're watching
@@ -252,7 +257,7 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
         }
       };
     }
-  }, [connected, file, sendMessage]);
+  }, [connected, file, sendMessage, isStatic]);
 
   // Run syntax highlighting after render
   useEffect(() => {
@@ -261,15 +266,84 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
     }
   }, [blockResults]);
 
+  useEffect(() => {
+    if (!isStatic || !file) {
+      setStaticLoading(false);
+      setStaticError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const targetPath = file.replace(/^\//, "");
+    if (!targetPath) {
+      setBlockResults({});
+      return undefined;
+    }
+
+    const encodedPath = encodePathSegments(targetPath);
+    setStaticLoading(true);
+    setStaticError(null);
+
+    (async () => {
+      try {
+        const response = await apiFetch(`document/${encodedPath}.json`);
+        if (!response.ok) {
+          throw new Error(`Failed to load ${file} (${response.status})`);
+        }
+        const doc = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        const newResults = {};
+        (doc.blocks || []).forEach((block, idx) => {
+          const blockId = block.id || `block-${idx}`;
+          newResults[blockId] = {
+            elements: block.elements || [],
+            error: block.error,
+            stdout: block.stdout,
+            showsVisual: block.showsVisual,
+            pending: false,
+            pendingReplacement: false,
+            ordinal: idx,
+          };
+        });
+
+        setBlockResults(newResults);
+      } catch (error) {
+        if (!cancelled) {
+          logger.error("Failed to load static document:", error);
+          setStaticError(error.message || String(error));
+          setBlockResults({});
+        }
+      } finally {
+        if (!cancelled) {
+          setStaticLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, isStatic, setBlockResults]);
+
   // Show loading state if no blocks yet
   if (!blockResults || Object.keys(blockResults).length === 0) {
     return (
       <div className={tw("max-w-4xl mx-auto px-4 py-8")}>
-        <div className={tw("text-center text-gray-500")}>Loading {file}...</div>
+        <div className={tw("text-center text-gray-500")}>
+          {staticLoading ? "Loading static content..." : `Loading ${file}...`}
+        </div>
         <div className={tw("text-center text-gray-400 text-sm mt-4")}>
           If this takes too long, check that the server is running and the file
           exists.
         </div>
+        {staticError && (
+          <div className={tw("text-center text-red-500 mt-4")}>
+            {staticError}
+          </div>
+        )}
       </div>
     );
   }

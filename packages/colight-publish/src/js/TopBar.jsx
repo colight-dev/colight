@@ -19,6 +19,7 @@ const TopBar = ({
   currentPath,
   isDirectory,
   connected,
+  isStaticMode = false,
   onNavigate,
   isLoading,
   pragmaOverrides,
@@ -175,16 +176,23 @@ const TopBar = ({
       {/* Connection Status */}
       <div
         className={tw(
-          `h-2 w-2 rounded-full`,
-          isLoading
-            ? `bg-yellow-400`
-            : connected
-              ? `bg-green-400`
-              : `bg-red-400`,
-          `ml-2.5`,
+          `h-2 w-2 rounded-full ml-2.5`,
+          isStaticMode
+            ? `bg-blue-400`
+            : isLoading
+              ? `bg-yellow-400`
+              : connected
+                ? `bg-green-400`
+                : `bg-red-400`,
         )}
         title={
-          isLoading ? "Loading..." : connected ? "Connected" : "Disconnected"
+          isStaticMode
+            ? "Static preview"
+            : isLoading
+              ? "Loading..."
+              : connected
+                ? "Connected"
+                : "Disconnected"
         }
       />
     </div>

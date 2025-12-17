@@ -26,6 +26,7 @@ class JsonDocumentGenerator:
     incremental_executor: Optional[IncrementalExecutor] = (
         None  # For incremental execution
     )
+    inline_threshold: int = VISUAL_INLINE_THRESHOLD
 
     def generate_json(
         self, source_path: pathlib.Path, changed_blocks: Optional[set] = None
@@ -216,7 +217,7 @@ class JsonDocumentGenerator:
                     # Include metadata
                     elem["visual_meta"] = {"size": visual_size, "format": "colight"}
 
-                    if visual_size <= VISUAL_INLINE_THRESHOLD:
+                    if visual_size <= self.inline_threshold:
                         # Inline small visuals as before
                         elem["visual"] = base64.b64encode(result.colight_bytes).decode(
                             "ascii"

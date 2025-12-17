@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from colight_publish.server import ApiMiddleware
 from colight_publish.static.server_watch import HtmlFallbackMiddleware, LiveReloadServer
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
@@ -172,3 +173,53 @@ def test_server_stop_sets_event(temp_site):
     assert not server._stop_event.is_set()
     server.stop()
     assert server._stop_event.is_set()
+
+
+def test_api_middleware_serves_index_json(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "doc.py").write_text("print('hi')", encoding="utf-8")
+
+    middleware = ApiMiddleware(
+        lambda environ, start_response: Response("Not Found", status=404)(
+            environ, start_response
+        ),
+        docs,
+        include=["*.py"],
+    )
+    client = Client(middleware, Response)
+
+    response = client.get("/api/index.json")
+    assert response.status_code == 200
+    data = json.loads(response.get_data(as_text=True))
+    assert data["name"] == docs.name
+
+
+def test_api_middleware_document_allows_json_suffix(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    doc_path = docs / "doc.py"
+    doc_path.write_text("print('hi')", encoding="utf-8")
+
+    middleware = ApiMiddleware(
+        lambda environ, start_response: Response("Not Found", status=404)(
+            environ, start_response
+        ),
+        docs,
+        include=["*.py"],
+    )
+    middleware.file_resolver.find_source_file = lambda requested_path: doc_path  # type: ignore[method-assign]
+
+    with (
+        patch("colight_publish.server.JsonDocumentGenerator") as MockGenerator,
+        patch.object(
+            MockGenerator.return_value,
+            "generate_json",
+            return_value=json.dumps({"file": "doc.py"}),
+        ),
+    ):
+        client = Client(middleware, Response)
+        response = client.get("/api/document/doc.py.json")
+        assert response.status_code == 200
+        payload = json.loads(response.get_data(as_text=True))
+        assert payload["file"] == "doc.py"

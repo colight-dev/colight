@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import createLogger from "../logger.js";
+import { apiFetch } from "../config.js";
 
 const logger = createLogger("directory-tree");
 
@@ -14,7 +15,7 @@ export function useDirectoryTree(navState) {
     if (!directoryTree) setIsLoadingTree(true);
 
     try {
-      const response = await fetch("/api/index");
+      const response = await apiFetch("index.json");
       if (!response.ok) {
         throw new Error("Failed to load directory tree");
       }

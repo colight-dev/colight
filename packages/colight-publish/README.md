@@ -1,4 +1,4 @@
-# Colight Site
+# Colight Publish
 
 Static site generator for Colight visualizations.
 
@@ -10,19 +10,46 @@ Converts `.py` files into markdown/HTML documents where:
 
 ## Usage
 
+The CLI is available as `colight publish` (recommended) or `colight-publish`:
+
 ```bash
-# Build a single file
-colight-publish build src/post.py --output build/post.md
-
-# Watch for changes
-colight-publish watch src/ --output build/
-
-# Watch without the dev server
-colight-publish watch src/ --output build/ --no-dev-server
-
-# Run the live editing server
-colight-publish live src/
+colight publish <SOURCE> --format (md|html|site) [--watch] [--output DEST]
 ```
+
+### Formats
+
+| Format | Description                         | Default output |
+| ------ | ----------------------------------- | -------------- |
+| `md`   | Markdown files only                 | `build/`       |
+| `html` | Standalone HTML + `.colight` assets | `build/`       |
+| `site` | Full interactive explorer UI        | `site-build/`  |
+
+### Examples
+
+```bash
+# Build markdown from a single file
+colight publish src/post.py --format md --output build/
+
+# Build a static site from a directory
+colight publish docs/ --format site
+
+# Watch with live reload (HTML)
+colight publish docs/ --format html --watch
+
+# Interactive explorer with hot reload
+colight publish docs/ --format site --watch
+```
+
+### Options
+
+- `--output PATH` / `-o PATH`: Output directory (ignored for `site --watch`)
+- `--watch`: Regenerate on file changes; starts dev server for `html` and `site`
+- `--include PATTERN`: File patterns to include (default: `*.py`, `*.md`)
+- `--ignore PATTERN`: File patterns to ignore
+- `--verbose`: Print extra progress information
+- `--pragma TAGS`: Comma-separated pragma overrides
+- `--host` / `--port`: Dev server binding (default: `127.0.0.1:5500`)
+- `--no-open`: Don't open browser when starting dev server
 
 ## File Format
 
