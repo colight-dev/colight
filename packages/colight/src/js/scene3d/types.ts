@@ -212,7 +212,27 @@ export interface ElementConstants {
   scale?: number;
 }
 
+/**
+ * Event data passed to scene-level picking callbacks.
+ */
+export interface PickEvent {
+  /** The primitive type (e.g., 'PointCloud', 'Ellipsoid', 'Cuboid') */
+  type: string;
+  /** User-provided component identifier, if specified */
+  id?: string;
+  /** Index of the picked element within the component */
+  index: number;
+  /** World-space position of the picked element center */
+  position: [number, number, number];
+}
+
 export interface BaseComponentConfig {
+  /**
+   * Optional identifier for this component.
+   * Used to identify the component in scene-level picking callbacks.
+   */
+  id?: string;
+
   constants?: ElementConstants;
   /**
    * Per-instance RGB color values as a Float32Array of RGB triplets.

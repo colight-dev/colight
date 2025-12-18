@@ -4,6 +4,9 @@
  * This module provides a declarative interface for 3D visualization, handling camera controls,
  * picking, and efficient rendering of various 3D primitives.
  *
+ * Supports two composition styles:
+ * 1. JSX children: <Scene><PointCloud ... /><Ellipsoid ... /></Scene>
+ * 2. Components array: <Scene components={[...]} /> (used by Python interop)
  */
 
 import React, {
@@ -22,12 +25,23 @@ import {
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
   BoundingBoxComponentConfig,
+  PickEvent,
 } from "./components";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
 import { $StateContext } from "../context";
+
+// =============================================================================
+// Primitive Components (JSX API)
+// =============================================================================
+
+/**
+ * Symbol used to identify scene3d primitive components.
+ * Components with this symbol are collected by Scene for rendering.
+ */
+const SCENE3D_TYPE = Symbol.for("scene3d.type");
 
 /**
  * Helper function to coerce specified fields to Float32Array if they exist and are arrays
@@ -43,6 +57,100 @@ function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
     }
   }
   return result;
+}
+
+/**
+ * Processes props into a component config, handling type coercion and defaults.
+ */
+function processConfig(
+  typeName: string,
+  props: Record<string, any>,
+): ComponentConfig {
+  switch (typeName) {
+    case "PointCloud":
+      return {
+        ...coerceFloat32Fields(props, ["centers", "colors", "sizes"]),
+        type: "PointCloud",
+      } as PointCloudComponentConfig;
+
+    case "Ellipsoid": {
+      const half_size =
+        typeof props.half_size === "number"
+          ? ([props.half_size, props.half_size, props.half_size] as [
+              number,
+              number,
+              number,
+            ])
+          : props.half_size;
+      const fillMode = props.fill_mode || "Solid";
+      return {
+        ...coerceFloat32Fields(props, [
+          "centers",
+          "half_sizes",
+          "quaternions",
+          "colors",
+          "alphas",
+        ]),
+        half_size,
+        type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
+      } as EllipsoidComponentConfig;
+    }
+
+    case "Cuboid": {
+      const half_size =
+        typeof props.half_size === "number"
+          ? ([props.half_size, props.half_size, props.half_size] as [
+              number,
+              number,
+              number,
+            ])
+          : props.half_size;
+      return {
+        ...coerceFloat32Fields(props, [
+          "centers",
+          "half_sizes",
+          "quaternions",
+          "colors",
+          "alphas",
+        ]),
+        half_size,
+        type: "Cuboid",
+      } as CuboidComponentConfig;
+    }
+
+    case "LineBeams":
+      return {
+        ...coerceFloat32Fields(props, ["points", "colors"]),
+        type: "LineBeams",
+      } as LineBeamsComponentConfig;
+
+    case "BoundingBox": {
+      const half_size =
+        typeof props.half_size === "number"
+          ? ([props.half_size, props.half_size, props.half_size] as [
+              number,
+              number,
+              number,
+            ])
+          : props.half_size;
+      return {
+        ...coerceFloat32Fields(props, [
+          "centers",
+          "half_sizes",
+          "quaternions",
+          "colors",
+          "sizes",
+          "alphas",
+        ]),
+        half_size,
+        type: "BoundingBox",
+      } as BoundingBoxComponentConfig;
+    }
+
+    default:
+      // For unknown types, pass through with type field
+      return { ...props, type: typeName } as ComponentConfig;
+  }
 }
 
 /**
@@ -78,132 +186,77 @@ export function deco(
   return { indexes: indexArray, ...options };
 }
 
-/**
- * Creates a point cloud component configuration.
- * @param props - Point cloud configuration properties
- * @returns {PointCloudComponentConfig} Configuration for rendering points in 3D space
- */
-export function PointCloud(
-  props: PointCloudComponentConfig,
-): PointCloudComponentConfig {
-  return {
-    ...coerceFloat32Fields(props, ["centers", "colors", "sizes"]),
-    type: "PointCloud",
-  };
+// =============================================================================
+// Props types for JSX usage (omit 'type' which is added automatically)
+// =============================================================================
+
+export type PointCloudProps = Omit<PointCloudComponentConfig, "type">;
+export type EllipsoidProps = Omit<EllipsoidComponentConfig, "type">;
+export type CuboidProps = Omit<CuboidComponentConfig, "type">;
+export type LineBeamsProps = Omit<LineBeamsComponentConfig, "type">;
+export type BoundingBoxProps = Omit<BoundingBoxComponentConfig, "type">;
+
+export type { PickEvent };
+
+// =============================================================================
+// Primitive Components
+//
+// Each primitive can be used in two ways:
+// 1. As a function: `PointCloud({centers, color})` returns a config object
+// 2. As a JSX component: `<PointCloud centers={...} />` (collected by Scene)
+// =============================================================================
+
+/** PointCloud - renders points as camera-facing billboards. */
+export function PointCloud(props: PointCloudProps): PointCloudComponentConfig {
+  return processConfig("PointCloud", props) as PointCloudComponentConfig;
 }
+(PointCloud as any)[SCENE3D_TYPE] = "PointCloud";
 
-/**
- * Creates an ellipsoid component configuration.
- * @param props - Ellipsoid configuration properties
- * @returns {EllipsoidComponentConfig} Configuration for rendering ellipsoids in 3D space
- */
-export function Ellipsoid(
-  props: Omit<EllipsoidComponentConfig, "type">,
-): EllipsoidComponentConfig {
-  const half_size =
-    typeof props.half_size === "number"
-      ? ([props.half_size, props.half_size, props.half_size] as [
-          number,
-          number,
-          number,
-        ])
-      : props.half_size;
-
-  const fillMode = props.fill_mode || "Solid";
-
-  return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
-    half_size,
-    type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
-  };
+/** Ellipsoid - renders spheres or ellipsoids. */
+export function Ellipsoid(props: EllipsoidProps): EllipsoidComponentConfig {
+  return processConfig("Ellipsoid", props) as EllipsoidComponentConfig;
 }
+(Ellipsoid as any)[SCENE3D_TYPE] = "Ellipsoid";
 
-/**
- * Creates a cuboid component configuration.
- * @param props - Cuboid configuration properties
- * @returns {CuboidComponentConfig} Configuration for rendering cuboids in 3D space
- */
-export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
-  const half_size =
-    typeof props.half_size === "number"
-      ? ([props.half_size, props.half_size, props.half_size] as [
-          number,
-          number,
-          number,
-        ])
-      : props.half_size;
-
-  return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
-    half_size,
-    type: "Cuboid",
-  };
+/** Cuboid - renders axis-aligned or rotated boxes. */
+export function Cuboid(props: CuboidProps): CuboidComponentConfig {
+  return processConfig("Cuboid", props) as CuboidComponentConfig;
 }
+(Cuboid as any)[SCENE3D_TYPE] = "Cuboid";
 
-/**
- * Creates a line beams component configuration.
- * @param props - Line beams configuration properties
- * @returns {LineBeamsComponentConfig} Configuration for rendering line beams in 3D space
- */
-export function LineBeams(
-  props: LineBeamsComponentConfig,
-): LineBeamsComponentConfig {
-  return {
-    ...coerceFloat32Fields(props, ["points", "colors"]),
-    type: "LineBeams",
-  };
+/** LineBeams - renders connected line segments as 3D beams. */
+export function LineBeams(props: LineBeamsProps): LineBeamsComponentConfig {
+  return processConfig("LineBeams", props) as LineBeamsComponentConfig;
 }
+(LineBeams as any)[SCENE3D_TYPE] = "LineBeams";
 
-/**
- * Creates a bounding box (wireframe) component configuration.
- * @param props - Bounding box configuration properties
- * @returns {BoundingBoxComponentConfig} Configuration for rendering wireframe boxes in 3D space
- */
+/** BoundingBox - renders wireframe boxes. */
 export function BoundingBox(
-  props: BoundingBoxComponentConfig,
+  props: BoundingBoxProps,
 ): BoundingBoxComponentConfig {
-  const half_size =
-    typeof props.half_size === "number"
-      ? ([props.half_size, props.half_size, props.half_size] as [
-          number,
-          number,
-          number,
-        ])
-      : props.half_size;
-
-  return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "sizes",
-      "alphas",
-    ]),
-    half_size,
-    type: "BoundingBox",
-  };
+  return processConfig("BoundingBox", props) as BoundingBoxComponentConfig;
 }
+(BoundingBox as any)[SCENE3D_TYPE] = "BoundingBox";
+
+/**
+ * Set of valid primitive type names.
+ * Used by SceneWithLayers to identify component configs.
+ */
+const PRIMITIVE_TYPES = new Set([
+  "PointCloud",
+  "Ellipsoid",
+  "EllipsoidAxes",
+  "Cuboid",
+  "LineBeams",
+  "BoundingBox",
+]);
+
+// =============================================================================
+// Scene Components
+// =============================================================================
 
 /**
  * Computes canvas dimensions based on container width and desired aspect ratio.
- * @param containerWidth - Width of the container element
- * @param width - Optional explicit width override
- * @param height - Optional explicit height override
- * @param aspectRatio - Desired aspect ratio (width/height), defaults to 1
- * @returns Canvas dimensions and style configuration
  */
 export function computeCanvasDimensions(
   containerWidth: number,
@@ -231,8 +284,10 @@ export function computeCanvasDimensions(
  * @description Props for the Scene component
  */
 interface SceneProps {
-  /** Array of 3D components to render */
-  components: ComponentConfig[];
+  /** Primitive components as JSX children */
+  children?: React.ReactNode;
+  /** Array of 3D component configs (alternative to children, used by Python interop) */
+  components?: ComponentConfig[];
   /** Optional explicit width */
   width?: number;
   /** Optional explicit height */
@@ -245,6 +300,10 @@ interface SceneProps {
   defaultCamera?: CameraParams;
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
+  /** Scene-level hover callback. Called with PickEvent when hovering, null when not. */
+  onHover?: (event: PickEvent | null) => void;
+  /** Scene-level click callback. Called with PickEvent when an element is clicked. */
+  onClick?: (event: PickEvent) => void;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   className?: string;
@@ -306,56 +365,88 @@ function DevMenu({
 }
 
 /**
- * A React component for rendering 3D scenes.
+ * Collects component configs from React children.
+ * Recursively processes children to handle fragments and arrays.
+ */
+function collectComponentsFromChildren(
+  children: React.ReactNode,
+): ComponentConfig[] {
+  const configs: ComponentConfig[] = [];
+
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return;
+
+    const typeName = (child.type as any)?.[SCENE3D_TYPE];
+    if (typeName) {
+      configs.push(processConfig(typeName, child.props as Record<string, any>));
+    }
+  });
+
+  return configs;
+}
+
+/**
+ * Python interop entry point - converts layers array to Scene with children.
  *
- * This component provides a high-level interface for 3D visualization, handling:
- * - WebGPU initialization and management
- * - Camera controls (orbit, pan, zoom)
- * - Mouse interaction and picking
- * - Efficient rendering of multiple primitive types
- *
- * @component
- * @example
- * ```tsx
- * <Scene
- *   components={[
- *     PointCloud({ centers: points, color: [1,0,0] }),
- *     Ellipsoid({ centers: centers, half_size: 0.1 })
- *   ]}
- *   width={800}
- *   height={600}
- *   onCameraChange={handleCameraChange}
- *   controls={['fps']}  // Show FPS counter
- * />
- * ```
+ * This is called when Python composition like `PointCloud(...) + Ellipsoid(...) + {camera}`
+ * is serialized and evaluated on the JS side.
  */
 export function SceneWithLayers({ layers }: { layers: any[] }) {
-  const components: any[] = [];
-  const props: any = {};
+  const components: ComponentConfig[] = [];
+  const sceneProps: Record<string, any> = {};
 
   for (const layer of layers) {
     if (!layer) continue;
 
+    // Handle nested SceneWithLayers (from Python Scene + Scene)
     if (Array.isArray(layer) && layer[0] === SceneWithLayers) {
-      components.push(...layer[1].layers);
-    } else if (layer.type) {
+      const nestedLayers = layer[1].layers;
+      for (const nestedLayer of nestedLayers) {
+        if (nestedLayer?.type && PRIMITIVE_TYPES.has(nestedLayer.type)) {
+          components.push(nestedLayer);
+        } else if (nestedLayer?.constructor === Object) {
+          Object.assign(sceneProps, nestedLayer);
+        }
+      }
+    } else if (layer.type && PRIMITIVE_TYPES.has(layer.type)) {
       components.push(layer);
     } else if (layer.constructor === Object) {
-      Object.assign(props, layer);
+      Object.assign(sceneProps, layer);
     }
   }
 
-  return <Scene components={components} {...props} />;
+  return <Scene components={components} {...sceneProps} />;
 }
 
+/**
+ * A React component for rendering 3D scenes.
+ *
+ * Supports two composition styles:
+ *
+ * **JSX Children (preferred for TSX):**
+ * ```tsx
+ * <Scene defaultCamera={{...}}>
+ *   <PointCloud centers={points} color={[1,0,0]} />
+ *   <Ellipsoid centers={centers} half_size={0.1} />
+ * </Scene>
+ * ```
+ *
+ * **Components Array (used by Python interop):**
+ * ```tsx
+ * <Scene components={[...configs]} />
+ * ```
+ */
 export function Scene({
-  components,
+  children,
+  components: componentsProp,
   width,
   height,
   aspectRatio = 1,
   camera,
   defaultCamera,
   onCameraChange,
+  onHover,
+  onClick,
   className,
   style,
   controls = [],
@@ -367,10 +458,19 @@ export function Scene({
     ...camera,
   });
   const $state: any = useContext($StateContext);
-  const onReady = useMemo(() => $state.beginUpdate("scene3d/ready"), []);
+  const onReady = useMemo(
+    () => $state?.beginUpdate?.("scene3d/ready"),
+    [$state],
+  );
+
+  // Collect components from children or use components prop
+  const components = useMemo(() => {
+    if (componentsProp) return componentsProp;
+    return collectComponentsFromChildren(children);
+  }, [children, componentsProp]);
 
   const cameraChangeCallback = useCallback(
-    (camera) => {
+    (camera: CameraParams) => {
       internalCameraRef.current = camera;
       onCameraChange?.(camera);
     },
@@ -445,6 +545,8 @@ export function Scene({
             onCameraChange={cameraChangeCallback}
             onFrameRendered={updateDisplay}
             onReady={onReady}
+            onHover={onHover}
+            onClick={onClick}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

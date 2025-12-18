@@ -53,6 +53,7 @@ import {
   DynamicBuffers,
   RenderObjectCache,
   ComponentOffset,
+  PickEvent,
 } from "./types";
 
 /**
@@ -91,6 +92,12 @@ export interface SceneInnerProps {
 
   /** Callback to fire when scene is initially ready */
   onReady: () => void;
+
+  /** Scene-level hover callback. Called with PickEvent when hovering, null when not. */
+  onHover?: (event: PickEvent | null) => void;
+
+  /** Scene-level click callback. Called with PickEvent when an element is clicked. */
+  onClick?: (event: PickEvent) => void;
 }
 
 function initGeometryResources(
@@ -410,6 +417,8 @@ export function SceneInner({
   onCameraChange,
   onFrameRendered,
   onReady,
+  onHover: onSceneHover,
+  onClick: onSceneClick,
 }: SceneInnerProps) {
   const $state = useContext($StateContext);
 
@@ -1178,6 +1187,60 @@ export function SceneInner({
     }
   }
 
+  /**
+   * Finds the component and element info for a given global picking index.
+   * Returns null if no component is found.
+   */
+  function findPickedElement(globalIdx: number): {
+    componentIdx: number;
+    elementIdx: number;
+    spec: PrimitiveSpec<any>;
+  } | null {
+    if (!gpuRef.current) return null;
+
+    for (const ro of gpuRef.current.renderObjects) {
+      if (!ro?.componentOffsets) continue;
+
+      for (const offset of ro.componentOffsets) {
+        if (
+          globalIdx >= offset.pickingStart &&
+          globalIdx < offset.pickingStart + offset.elementCount
+        ) {
+          return {
+            componentIdx: offset.componentIdx,
+            elementIdx: globalIdx - offset.pickingStart,
+            spec: ro.spec,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Builds a PickEvent for the given component and element.
+   */
+  function buildPickEvent(
+    componentIdx: number,
+    elementIdx: number,
+    spec: PrimitiveSpec<any>,
+  ): PickEvent {
+    const component = components[componentIdx];
+    const centers = spec.getCenters(component);
+    const baseIdx = elementIdx * 3;
+
+    return {
+      type: spec.type,
+      id: component.id,
+      index: elementIdx,
+      position: [
+        centers[baseIdx],
+        centers[baseIdx + 1],
+        centers[baseIdx + 2],
+      ] as [number, number, number],
+    };
+  }
+
   function handleHoverID(pickedID: number) {
     if (!gpuRef.current) return;
 
@@ -1188,36 +1251,22 @@ export function SceneInner({
       if (lastHoverState.current) {
         const prevComponent = components[lastHoverState.current.componentIdx];
         prevComponent?.onHover?.(null);
+        onSceneHover?.(null);
         lastHoverState.current = null;
       }
       return;
     }
 
-    // Find which component this instance belongs to by searching through all render objects
-    let newHoverState = null;
-    for (const ro of gpuRef.current.renderObjects) {
-      for (const offset of ro.componentOffsets) {
-        if (
-          globalIdx >= offset.pickingStart &&
-          globalIdx < offset.pickingStart + offset.elementCount
-        ) {
-          newHoverState = {
-            componentIdx: offset.componentIdx,
-            elementIdx: globalIdx - offset.pickingStart,
-          };
-          break;
-        }
-      }
-      if (newHoverState) break; // Found the matching component
-    }
+    // Find which component this instance belongs to
+    const found = findPickedElement(globalIdx);
 
     // If hover state hasn't changed, do nothing
     if (
-      (!lastHoverState.current && !newHoverState) ||
+      (!lastHoverState.current && !found) ||
       (lastHoverState.current &&
-        newHoverState &&
-        lastHoverState.current.componentIdx === newHoverState.componentIdx &&
-        lastHoverState.current.elementIdx === newHoverState.elementIdx)
+        found &&
+        lastHoverState.current.componentIdx === found.componentIdx &&
+        lastHoverState.current.elementIdx === found.elementIdx)
     ) {
       return;
     }
@@ -1229,15 +1278,21 @@ export function SceneInner({
     }
 
     // Set new hover if it exists
-    if (newHoverState) {
-      const { componentIdx, elementIdx } = newHoverState;
+    if (found) {
+      const { componentIdx, elementIdx, spec } = found;
       if (componentIdx >= 0 && componentIdx < components.length) {
+        const event = buildPickEvent(componentIdx, elementIdx, spec);
+        onSceneHover?.(event);
         components[componentIdx].onHover?.(elementIdx);
       }
+    } else {
+      onSceneHover?.(null);
     }
 
     // Update last hover state
-    lastHoverState.current = newHoverState;
+    lastHoverState.current = found
+      ? { componentIdx: found.componentIdx, elementIdx: found.elementIdx }
+      : null;
   }
 
   function handleClickID(pickedID: number) {
@@ -1247,25 +1302,15 @@ export function SceneInner({
     const globalIdx = unpackID(pickedID);
     if (globalIdx === null) return;
 
-    // Find which component this instance belongs to by searching through all render objects
-    for (const ro of gpuRef.current.renderObjects) {
-      // Skip if no component offsets
-      if (!ro?.componentOffsets) continue;
+    // Find which component this instance belongs to
+    const found = findPickedElement(globalIdx);
+    if (!found) return;
 
-      // Check each component in this render object
-      for (const offset of ro.componentOffsets) {
-        if (
-          globalIdx >= offset.pickingStart &&
-          globalIdx < offset.pickingStart + offset.elementCount
-        ) {
-          const componentIdx = offset.componentIdx;
-          const elementIdx = globalIdx - offset.pickingStart;
-          if (componentIdx >= 0 && componentIdx < components.length) {
-            components[componentIdx].onClick?.(elementIdx);
-          }
-          return; // Found and handled the click
-        }
-      }
+    const { componentIdx, elementIdx, spec } = found;
+    if (componentIdx >= 0 && componentIdx < components.length) {
+      const event = buildPickEvent(componentIdx, elementIdx, spec);
+      onSceneClick?.(event);
+      components[componentIdx].onClick?.(elementIdx);
     }
   }
 

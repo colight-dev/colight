@@ -9,7 +9,10 @@ import {
   GeometryResource,
   GeometryData,
   ElementConstants,
+  PickEvent,
 } from "./types";
+
+export type { PickEvent };
 
 import { acopy } from "../utils";
 
