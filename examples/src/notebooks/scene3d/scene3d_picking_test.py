@@ -36,7 +36,8 @@ scene_points = PointCloud(
             **DEFAULT_CAMERA,
             "position": [-4, 2, 2],
             "target": [-2, 0.5, 0.5],
-        }
+        },
+        "hoverOutline": True,
     }
 )
 
@@ -120,7 +121,8 @@ scene_ellipsoids = (
                     0.5,
                     0.5,
                 ],  # Adjusted target to center between ellipsoids and axes
-            }
+            },
+            "hoverOutline": True,
         }
     )
 )
@@ -156,7 +158,8 @@ scene_cuboids = Cuboid(
             **DEFAULT_CAMERA,
             "position": [4, 2, 2],
             "target": [2, 0, 0.5],
-        }
+        },
+        "hoverOutline": True,
     }
 )
 scene_cuboids
@@ -202,7 +205,8 @@ scene_beams = LineBeams(
             **DEFAULT_CAMERA,
             "position": [-4, -4, 2],
             "target": [-1.5, -2, 0.5],
-        }
+        },
+        "hoverOutline": True,
     }
 )
 
@@ -248,7 +252,8 @@ mixed_scene = (
                 **DEFAULT_CAMERA,
                 "position": [4, -4, 2],
                 "target": [2, -2, 0.5],
-            }
+            },
+            "hoverOutline": True,
         }
     )
 )
@@ -326,7 +331,8 @@ scene_grid_cuboids = (
                 **DEFAULT_CAMERA,
                 "position": [6, -4, 2],
                 "target": [4.75, -1.25, 0.5],
-            }
+            },
+            "hoverOutline": True,
         }
     )
 )
@@ -362,7 +368,8 @@ scene_bboxes = BoundingBox(
             **DEFAULT_CAMERA,
             "position": [-6, -4, 2],
             "target": [-3.25, -2, 0.75],
-        }
+        },
+        "hoverOutline": True,
     }
 )
 

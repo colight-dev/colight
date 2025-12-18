@@ -42,7 +42,7 @@ import {
   buildRenderData,
 } from "./components";
 import { unpackID } from "./picking";
-import { LIGHTING } from "./shaders";
+import { LIGHTING, outlineVertCode, outlineFragCode } from "./shaders";
 import {
   BufferInfo,
   GeometryResources,
@@ -98,6 +98,15 @@ export interface SceneInnerProps {
 
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
   onClick?: (event: PickEvent) => void;
+
+  /** Enable outline on hover. Default: false */
+  hoverOutline?: boolean;
+
+  /** Outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
+  outlineColor?: [number, number, number];
+
+  /** Outline width in pixels. Default: 2 */
+  outlineWidth?: number;
 }
 
 function initGeometryResources(
@@ -419,6 +428,9 @@ export function SceneInner({
   onReady,
   onHover: onSceneHover,
   onClick: onSceneClick,
+  hoverOutline = false,
+  outlineColor = [1, 1, 1],
+  outlineWidth = 2,
 }: SceneInnerProps) {
   const $state = useContext($StateContext);
 
@@ -433,6 +445,15 @@ export function SceneInner({
     pickTexture: GPUTexture | null;
     pickDepthTexture: GPUTexture | null;
     readbackBuffer: GPUBuffer;
+
+    // Outline rendering resources
+    outlineTexture: GPUTexture | null;
+    outlineDepthTexture: GPUTexture | null;
+    outlinePipeline: GPURenderPipeline | null;
+    outlineBindGroupLayout: GPUBindGroupLayout | null;
+    outlineBindGroup: GPUBindGroup | null;
+    outlineParamsBuffer: GPUBuffer | null;
+    outlineSampler: GPUSampler | null;
 
     renderObjects: RenderObject[];
     pipelineCache: Map<string, PipelineCacheEntry>;
@@ -586,6 +607,14 @@ export function SceneInner({
         pickTexture: null,
         pickDepthTexture: null,
         readbackBuffer,
+        // Outline resources (initialized lazily when needed)
+        outlineTexture: null,
+        outlineDepthTexture: null,
+        outlinePipeline: null,
+        outlineBindGroupLayout: null,
+        outlineBindGroup: null,
+        outlineParamsBuffer: null,
+        outlineSampler: null,
         renderObjects: [],
         pipelineCache: new Map(),
         dynamicBuffers: null,
@@ -653,6 +682,162 @@ export function SceneInner({
     });
     gpuRef.current.pickTexture = colorTex;
     gpuRef.current.pickDepthTexture = depthTex;
+  }, []);
+
+  const createOrUpdateOutlineTextures = useCallback(() => {
+    if (!gpuRef.current || !canvasRef.current) return;
+    const { device, outlineTexture, outlineDepthTexture } = gpuRef.current;
+
+    const canvas = canvasRef.current;
+    const displayWidth = canvas.width;
+    const displayHeight = canvas.height;
+
+    if (outlineTexture) outlineTexture.destroy();
+    if (outlineDepthTexture) outlineDepthTexture.destroy();
+
+    // Silhouette mask texture - use same format as canvas for pipeline compatibility
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    const silhouetteTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format,
+      usage:
+        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      label: "Outline silhouette texture",
+    });
+
+    // Depth texture for silhouette pass (object's own depth, not scene depth)
+    const silhouetteDepthTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format: "depth24plus",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      label: "Outline depth texture",
+    });
+
+    gpuRef.current.outlineTexture = silhouetteTex;
+    gpuRef.current.outlineDepthTexture = silhouetteDepthTex;
+
+    // Create sampler if not exists
+    if (!gpuRef.current.outlineSampler) {
+      gpuRef.current.outlineSampler = device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+      });
+    }
+
+    // Create or recreate bind group layout for outline post-process
+    if (!gpuRef.current.outlineBindGroupLayout) {
+      gpuRef.current.outlineBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+          {
+            binding: 0,
+            visibility: GPUShaderStage.FRAGMENT,
+            sampler: { type: "filtering" },
+          },
+          {
+            binding: 1,
+            visibility: GPUShaderStage.FRAGMENT,
+            texture: { sampleType: "float" },
+          },
+          {
+            binding: 2,
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: "uniform" },
+          },
+        ],
+        label: "Outline bind group layout",
+      });
+    }
+
+    // Create params buffer if not exists (32 bytes: vec3 color + f32 width + vec2 texelSize + vec2 pad)
+    if (!gpuRef.current.outlineParamsBuffer) {
+      gpuRef.current.outlineParamsBuffer = device.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: "Outline params buffer",
+      });
+    }
+
+    // Recreate bind group with new texture
+    gpuRef.current.outlineBindGroup = device.createBindGroup({
+      layout: gpuRef.current.outlineBindGroupLayout,
+      entries: [
+        { binding: 0, resource: gpuRef.current.outlineSampler },
+        { binding: 1, resource: silhouetteTex.createView() },
+        {
+          binding: 2,
+          resource: { buffer: gpuRef.current.outlineParamsBuffer },
+        },
+      ],
+      label: "Outline bind group",
+    });
+
+    // Create outline post-process pipeline if not exists
+    if (!gpuRef.current.outlinePipeline) {
+      const bindGroupLayout = gpuRef.current.outlineBindGroupLayout;
+      if (!bindGroupLayout) {
+        console.error("Outline bind group layout is null!");
+        return;
+      }
+
+      const format = navigator.gpu.getPreferredCanvasFormat();
+
+      // Create shader modules
+      const vertModule = device.createShaderModule({
+        code: outlineVertCode,
+        label: "Outline vertex shader",
+      });
+      const fragModule = device.createShaderModule({
+        code: outlineFragCode,
+        label: "Outline fragment shader",
+      });
+
+      // Use async pipeline creation to catch errors properly
+      device
+        .createRenderPipelineAsync({
+          layout: device.createPipelineLayout({
+            bindGroupLayouts: [bindGroupLayout],
+          }),
+          vertex: {
+            module: vertModule,
+            entryPoint: "vs_main",
+          },
+          fragment: {
+            module: fragModule,
+            entryPoint: "fs_outline",
+            targets: [
+              {
+                format,
+                blend: {
+                  color: {
+                    srcFactor: "src-alpha",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                  alpha: {
+                    srcFactor: "one",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                },
+              },
+            ],
+          },
+          primitive: {
+            topology: "triangle-list",
+          },
+          label: "Outline post-process pipeline",
+        })
+        .then((pipeline) => {
+          if (gpuRef.current) {
+            gpuRef.current.outlinePipeline = pipeline;
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to create outline pipeline:", err);
+        });
+    }
   }, []);
 
   type ComponentType = ComponentConfig["type"];
@@ -947,6 +1132,167 @@ export function SceneInner({
    * C) Render pass (single call, no loop)
    ******************************************************/
 
+  /**
+   * Renders the silhouette of a single hovered element to the outline texture.
+   */
+  function renderSilhouettePass(
+    hoveredState: { componentIdx: number; elementIdx: number },
+    components: ComponentConfig[],
+  ): void {
+    if (!gpuRef.current) return;
+
+    const {
+      device,
+      outlineTexture,
+      outlineDepthTexture,
+      uniformBindGroup,
+      renderObjects,
+    } = gpuRef.current;
+
+    if (!outlineTexture || !outlineDepthTexture) return;
+
+    const { componentIdx, elementIdx } = hoveredState;
+    const component = components[componentIdx];
+    if (!component) return;
+
+    // Find the render object for this component type
+    const ro = renderObjects.find((r) =>
+      r.componentOffsets.some((o) => o.componentIdx === componentIdx),
+    );
+    if (!ro) return;
+
+    // Find the component offset
+    const compOffset = ro.componentOffsets.find(
+      (o) => o.componentIdx === componentIdx,
+    );
+    if (!compOffset) return;
+
+    // Calculate the instance index within the render object's buffer
+    // Must account for transparency sorting - render data is in sorted order
+    const baseOffset = compOffset.elementStart;
+    const originalIndex = baseOffset + elementIdx;
+
+    // If sorted, convert original index to sorted position
+    const sortedIndex = ro.sortedPositions
+      ? ro.sortedPositions[originalIndex]
+      : originalIndex;
+
+    const instancesPerElement = ro.spec.instancesPerElement;
+
+    // Create a small buffer with just this one element's instance data
+    const floatsPerInstance = ro.spec.floatsPerInstance;
+    const instanceDataSize =
+      floatsPerInstance * instancesPerElement * Float32Array.BYTES_PER_ELEMENT;
+    const tempBuffer = device.createBuffer({
+      size: align16(instanceDataSize),
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      label: "Silhouette temp instance buffer",
+    });
+
+    // Copy the instance data for this element (using sorted index for correct position)
+    const startOffset = sortedIndex * instancesPerElement * floatsPerInstance;
+    const instanceData = ro.renderData.subarray(
+      startOffset,
+      startOffset + floatsPerInstance * instancesPerElement,
+    );
+    device.queue.writeBuffer(tempBuffer, 0, instanceData);
+
+    // Get or create silhouette pipeline
+    // For silhouette, we can reuse the regular render pipeline but with a simple white fragment shader
+    // However, the fragment output needs to match - let's use the picking pipeline's vertex shader
+    // since it has the same transforms but simpler attributes
+
+    const cmd = device.createCommandEncoder({ label: "Silhouette encoder" });
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: outlineTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: outlineDepthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+
+    // Use the regular render pipeline - the fragment shader will still output lit color,
+    // but we only care about coverage for the silhouette
+    pass.setPipeline(ro.pipeline);
+    pass.setBindGroup(0, uniformBindGroup);
+    pass.setVertexBuffer(0, ro.geometryBuffer);
+    pass.setVertexBuffer(1, tempBuffer, 0);
+    pass.setIndexBuffer(ro.indexBuffer, "uint16");
+    pass.drawIndexed(ro.indexCount, instancesPerElement);
+
+    pass.end();
+    device.queue.submit([cmd.finish()]);
+
+    // Clean up temp buffer
+    tempBuffer.destroy();
+  }
+
+  /**
+   * Renders the outline post-process pass, compositing the outline over the canvas.
+   */
+  function renderOutlinePostProcess(
+    outlineColorVal: [number, number, number],
+    outlineWidthVal: number,
+  ): void {
+    if (!gpuRef.current) return;
+
+    const {
+      device,
+      context,
+      outlinePipeline,
+      outlineBindGroup,
+      outlineParamsBuffer,
+    } = gpuRef.current;
+
+    if (!outlinePipeline || !outlineBindGroup || !outlineParamsBuffer) return;
+
+    // Update outline params
+    const dpr = window.devicePixelRatio || 1;
+    const texelSizeX = 1.0 / (containerWidth * dpr);
+    const texelSizeY = 1.0 / (containerHeight * dpr);
+
+    const paramsData = new Float32Array([
+      outlineColorVal[0],
+      outlineColorVal[1],
+      outlineColorVal[2],
+      outlineWidthVal,
+      texelSizeX,
+      texelSizeY,
+      0, // padding
+      0, // padding
+    ]);
+    device.queue.writeBuffer(outlineParamsBuffer, 0, paramsData);
+
+    const cmd = device.createCommandEncoder({ label: "Outline post-process" });
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: context.getCurrentTexture().createView(),
+          loadOp: "load", // Keep existing content
+          storeOp: "store",
+        },
+      ],
+    });
+
+    pass.setPipeline(outlinePipeline);
+    pass.setBindGroup(0, outlineBindGroup);
+    pass.draw(3); // Full-screen triangle
+
+    pass.end();
+    device.queue.submit([cmd.finish()]);
+  }
+
   const pendingAnimationFrameRef = useRef<number | null>(null);
 
   const renderFrame = useCallback(
@@ -1039,23 +1385,45 @@ export function SceneInner({
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
       try {
-        await renderPass({
+        // Submit all render passes before waiting
+        const renderPromise = renderPass({
           device,
           context,
           depthTexture,
           renderObjects,
           uniformBindGroup,
         });
+
+        // Render hover outline if enabled and something is hovered
+        // Must happen BEFORE awaiting to use the same swap chain texture
+        if (hoverOutline && lastHoverState.current && components) {
+          renderSilhouettePass(lastHoverState.current, components);
+          renderOutlinePostProcess(outlineColor, outlineWidth);
+        }
+
+        // Now wait for all GPU work to complete
+        await renderPromise;
         onRenderComplete();
       } catch (err) {
-        console.error("[Debug] Error during renderPass:", err.message);
+        console.error(
+          "[Debug] Error during renderPass:",
+          (err as Error).message,
+        );
         onRenderComplete();
       }
 
       onFrameRendered?.(performance.now());
       onReady();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [
+      containerWidth,
+      containerHeight,
+      onFrameRendered,
+      components,
+      hoverOutline,
+      outlineColor,
+      outlineWidth,
+    ],
   );
 
   function requestRender(label: string) {
@@ -1252,7 +1620,12 @@ export function SceneInner({
         const prevComponent = components[lastHoverState.current.componentIdx];
         prevComponent?.onHover?.(null);
         onSceneHover?.(null);
+        const hadHover = lastHoverState.current !== null;
         lastHoverState.current = null;
+        // Re-render to clear outline
+        if (hoverOutline && hadHover) {
+          requestRender("hover-clear");
+        }
       }
       return;
     }
@@ -1293,6 +1666,11 @@ export function SceneInner({
     lastHoverState.current = found
       ? { componentIdx: found.componentIdx, elementIdx: found.elementIdx }
       : null;
+
+    // Re-render to update outline
+    if (hoverOutline) {
+      requestRender("hover-change");
+    }
   }
 
   function handleClickID(pickedID: number) {
@@ -1476,6 +1854,9 @@ export function SceneInner({
     if (isReady) {
       createOrUpdateDepthTexture();
       createOrUpdatePickTextures();
+      if (hoverOutline) {
+        createOrUpdateOutlineTextures();
+      }
     }
   }, [
     isReady,
@@ -1483,6 +1864,8 @@ export function SceneInner({
     containerHeight,
     createOrUpdateDepthTexture,
     createOrUpdatePickTextures,
+    createOrUpdateOutlineTextures,
+    hoverOutline,
   ]);
 
   // Update canvas size effect
@@ -1502,6 +1885,9 @@ export function SceneInner({
       // Update textures after canvas size change
       createOrUpdateDepthTexture();
       createOrUpdatePickTextures();
+      if (hoverOutline) {
+        createOrUpdateOutlineTextures();
+      }
       requestRender("canvas");
     }
   }, [
@@ -1509,6 +1895,8 @@ export function SceneInner({
     containerHeight,
     createOrUpdateDepthTexture,
     createOrUpdatePickTextures,
+    createOrUpdateOutlineTextures,
+    hoverOutline,
     renderFrame,
   ]);
 

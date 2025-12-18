@@ -304,6 +304,12 @@ interface SceneProps {
   onHover?: (event: PickEvent | null) => void;
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
   onClick?: (event: PickEvent) => void;
+  /** Enable outline on hover. Default: false */
+  hoverOutline?: boolean;
+  /** Outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
+  outlineColor?: [number, number, number];
+  /** Outline width in pixels. Default: 2 */
+  outlineWidth?: number;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   className?: string;
@@ -394,7 +400,6 @@ function collectComponentsFromChildren(
 export function SceneWithLayers({ layers }: { layers: any[] }) {
   const components: ComponentConfig[] = [];
   const sceneProps: Record<string, any> = {};
-
   for (const layer of layers) {
     if (!layer) continue;
 
@@ -447,6 +452,9 @@ export function Scene({
   onCameraChange,
   onHover,
   onClick,
+  hoverOutline,
+  outlineColor,
+  outlineWidth,
   className,
   style,
   controls = [],
@@ -547,6 +555,9 @@ export function Scene({
             onReady={onReady}
             onHover={onHover}
             onClick={onClick}
+            hoverOutline={hoverOutline}
+            outlineColor={outlineColor}
+            outlineWidth={outlineWidth}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

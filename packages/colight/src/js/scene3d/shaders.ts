@@ -556,3 +556,76 @@ export const CUBOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
   ],
   "instance",
 );
+
+// =============================================================================
+// Hover Outline Shaders
+// =============================================================================
+
+/**
+ * Post-process vertex shader for outline rendering.
+ * Uses the full-screen triangle trick (no vertex buffer needed).
+ */
+export const outlineVertCode = /*wgsl*/ `
+struct VSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VSOut {
+  // Full-screen triangle: 3 vertices that cover the entire screen
+  var pos = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>(3.0, -1.0),
+    vec2<f32>(-1.0, 3.0)
+  );
+  var out: VSOut;
+  out.position = vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+  out.uv = (pos[vertexIndex] + 1.0) * 0.5;
+  out.uv.y = 1.0 - out.uv.y; // Flip Y for texture coordinates
+  return out;
+}`;
+
+/**
+ * Post-process fragment shader for outline edge detection.
+ * Samples the silhouette texture and draws an outline at edges.
+ */
+export const outlineFragCode = /*wgsl*/ `
+@group(0) @binding(0) var outlineSampler: sampler;
+@group(0) @binding(1) var outlineTexture: texture_2d<f32>;
+
+struct OutlineParams {
+  outlineColor: vec3<f32>,
+  outlineWidth: f32,
+  texelSize: vec2<f32>,
+  _pad: vec2<f32>,
+};
+@group(0) @binding(2) var<uniform> params: OutlineParams;
+
+@fragment
+fn fs_outline(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let center = textureSample(outlineTexture, outlineSampler, uv).a;
+
+  // Sample neighbors for edge detection (4-connected)
+  var edge = 0.0;
+  let step = params.texelSize * params.outlineWidth;
+
+  // Sample 4 neighbors
+  let left = textureSample(outlineTexture, outlineSampler, uv + vec2<f32>(-step.x, 0.0)).a;
+  let right = textureSample(outlineTexture, outlineSampler, uv + vec2<f32>(step.x, 0.0)).a;
+  let up = textureSample(outlineTexture, outlineSampler, uv + vec2<f32>(0.0, -step.y)).a;
+  let down = textureSample(outlineTexture, outlineSampler, uv + vec2<f32>(0.0, step.y)).a;
+
+  edge = max(edge, abs(center - left));
+  edge = max(edge, abs(center - right));
+  edge = max(edge, abs(center - up));
+  edge = max(edge, abs(center - down));
+
+  // Draw outline where there's an edge and we're outside the object
+  if (edge > 0.1 && center < 0.5) {
+    return vec4<f32>(params.outlineColor, 1.0);
+  }
+
+  // Return fully transparent to not affect existing content (blend will handle this)
+  return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+}`;
