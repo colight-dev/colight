@@ -11,6 +11,46 @@ import * as fs from "fs";
 
 let config = vscode.workspace.getConfiguration("colight");
 
+const defaultCellMarkers = ["# +", "# %%"];
+const defaultBottomMarkers = ["# -", "# %-"];
+
+function normalizeMarkers(markers: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(markers)) {
+    return fallback.slice();
+  }
+  return markers.filter(
+    (marker): marker is string =>
+      typeof marker === "string" && marker.trim().length > 0
+  );
+}
+
+function getEnabledCellMarkers(): string[] {
+  const currentConfig = vscode.workspace.getConfiguration("colight");
+  return normalizeMarkers(
+    currentConfig.get("enabledCellMarkers"),
+    defaultCellMarkers
+  );
+}
+
+function lineStartsWithMarker(line: string, markers: readonly string[]): boolean {
+  const trimmed = line.trimStart();
+  return markers.some((marker) => trimmed.startsWith(marker));
+}
+
+function lineIsMarker(line: string, markers: readonly string[]): boolean {
+  const trimmed = line.trim();
+  return markers.some((marker) => trimmed === marker);
+}
+
+function isTopMarkerLine(line: string, markers?: readonly string[]): boolean {
+  const activeMarkers = markers ?? getEnabledCellMarkers();
+  return lineStartsWithMarker(line, activeMarkers);
+}
+
+function isBottomMarkerLine(line: string): boolean {
+  return lineIsMarker(line, defaultBottomMarkers);
+}
+
 const logger = {
   time: (label: string) => {
     if (config.get("debugMode", false)) {
@@ -42,20 +82,11 @@ interface Cell {
 }
 
 function checkForExplicitMarkers(document: vscode.TextDocument): boolean {
-  const enabledCellMarkers: string[] = config.get("enabledCellMarkers", [
-    "# +",
-    "# %+",
-    "# %%",
-  ]);
-
+  const markers = getEnabledCellMarkers();
   // Check only the first 100 lines for performance
   const linesToCheck = Math.min(document.lineCount, 100);
   for (let i = 0; i < linesToCheck; i++) {
-    if (
-      enabledCellMarkers.some((marker) =>
-        document.lineAt(i).text.startsWith(marker)
-      )
-    ) {
+    if (lineStartsWithMarker(document.lineAt(i).text, markers)) {
       return true;
     }
   }
@@ -84,9 +115,6 @@ export function getCellAtPosition(
     : getImplicitCell(document, position);
 }
 
-const topMarkerRegex = /^\s*(# \+|# %\+|# %%)\s*/;
-const bottomMarkerRegex = /^\s*(# -|# %-)\s*$/;
-
 function getExplicitCell(
   document: vscode.TextDocument,
   position: vscode.Position
@@ -94,16 +122,17 @@ function getExplicitCell(
   let startLine = position.line;
   let endLine = position.line;
   let metadata: Record<string, string> = {};
+  const markers = getEnabledCellMarkers();
 
   const currentLine = document.lineAt(position.line).text;
-  if (topMarkerRegex.test(currentLine)) {
+  if (isTopMarkerLine(currentLine, markers)) {
     metadata = parseMetadata(currentLine);
     startLine++;
   } else {
     // Find the start of the cell
     while (startLine > 0) {
       const line = document.lineAt(startLine - 1).text;
-      if (topMarkerRegex.test(line)) {
+      if (isTopMarkerLine(line, markers)) {
         metadata = parseMetadata(line);
         break;
       }
@@ -114,7 +143,7 @@ function getExplicitCell(
   // Find the end of the cell
   while (endLine < document.lineCount - 1) {
     const line = document.lineAt(endLine + 1).text;
-    if (topMarkerRegex.test(line) || bottomMarkerRegex.test(line)) {
+    if (isTopMarkerLine(line, markers) || isBottomMarkerLine(line)) {
       break;
     }
     endLine++;
@@ -325,7 +354,8 @@ function boundaryBetween(
   const isGoingUp = fromNode.from > toNode.from;
   const targetNode = isGoingUp ? toNode : toNode;
   const targetText = code.slice(targetNode.from, targetNode.to);
-  if (targetText.trim().startsWith("# %%")) {
+  const markers = getEnabledCellMarkers();
+  if (lineStartsWithMarker(targetText, markers)) {
     return true;
   }
 
@@ -708,10 +738,11 @@ function moveToNextExplicitCell(
 ): void {
   const document = editor.document;
   let nextLine = currentCell.endLine + 1;
+  const markers = getEnabledCellMarkers();
 
   while (nextLine < document.lineCount) {
     const line = document.lineAt(nextLine).text;
-    if (topMarkerRegex.test(line)) {
+    if (isTopMarkerLine(line, markers)) {
       const newPosition = new vscode.Position(nextLine, 0);
       editor.selection = new vscode.Selection(newPosition, newPosition);
       editor.revealRange(
@@ -832,8 +863,17 @@ async function evaluateCellsAboveAndCurrent(
   const originalSelection = editor.selection;
   // jupyter.runtoline runs up to the previous line,
   // so we must set our selection to the next line.
-  const runUntilPosition = new vscode.Position(currentCell.endLine + 1, 0);
-  editor.selection = new vscode.Selection(runUntilPosition, runUntilPosition);
+  const runUntilLine = Math.min(
+    currentCell.endLine + 1,
+    document.lineCount
+  );
+  const safeRunUntilPosition = document.validatePosition(
+    new vscode.Position(runUntilLine, 0)
+  );
+  editor.selection = new vscode.Selection(
+    safeRunUntilPosition,
+    safeRunUntilPosition
+  );
   await vscode.commands.executeCommand("jupyter.runtoline");
   editor.selection = originalSelection;
 }
@@ -1208,6 +1248,9 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration("colight")) {
           config = vscode.workspace.getConfiguration("colight");
+          for (const state of documentStates.values()) {
+            state.hasExplicitCells = null;
+          }
           decorations.dispose();
           decorations.initTypes();
         }

@@ -2,6 +2,21 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as extension from '../extension';
 
+async function updateColightConfig<T>(key: string, value: T): Promise<void> {
+    const config = vscode.workspace.getConfiguration('colight');
+    const change = new Promise<void>((resolve) => {
+        const disposable = vscode.workspace.onDidChangeConfiguration((event) => {
+            if (event.affectsConfiguration(`colight.${key}`)) {
+                disposable.dispose();
+                resolve();
+            }
+        });
+    });
+    await config.update(key, value, vscode.ConfigurationTarget.Global);
+    await change;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 suite('Extension Test Suite', () => {
     vscode.window.showInformationMessage('Start all tests.');
 
@@ -217,5 +232,87 @@ suite('Extension Test Suite', () => {
         assert.strictEqual(selected, "for x in range(10):\n            print(x)");
     });
 
-});
+    test('custom explicit markers are honored', async () => {
+        const config = vscode.workspace.getConfiguration('colight');
+        const originalMarkers = config.get('enabledCellMarkers');
+        try {
+            await vscode.extensions.getExtension('colight.vscode')?.activate();
+            await updateColightConfig('enabledCellMarkers', ['# >>>']);
 
+            const document = await vscode.workspace.openTextDocument({
+                content: '# >>>\nprint("Hello")\n\n# >>>\nprint("World")',
+                language: 'python'
+            });
+
+            const cell1 = extension.getCellAtPosition(
+                document,
+                new vscode.Position(1, 0),
+                'explicit'
+            );
+            assert.strictEqual(cell1?.text, 'print("Hello")\n');
+
+            const cell2 = extension.getCellAtPosition(
+                document,
+                new vscode.Position(4, 0),
+                'explicit'
+            );
+            assert.strictEqual(cell2?.text, 'print("World")');
+        } finally {
+            await updateColightConfig('enabledCellMarkers', originalMarkers);
+        }
+    });
+
+    test('implicit parsing respects custom markers after edits', async () => {
+        const config = vscode.workspace.getConfiguration('colight');
+        const originalMarkers = config.get('enabledCellMarkers');
+        try {
+            await vscode.extensions.getExtension('colight.vscode')?.activate();
+            await updateColightConfig('enabledCellMarkers', ['# >>>']);
+
+            const document = await vscode.workspace.openTextDocument({
+                content: 'x = 1\n# >>>\ny = 2',
+                language: 'python'
+            });
+
+            const cell = extension.getCellAtPosition(
+                document,
+                new vscode.Position(2, 0),
+                'implicit'
+            );
+            assert.strictEqual(cell?.text, 'y = 2');
+        } finally {
+            await updateColightConfig('enabledCellMarkers', originalMarkers);
+        }
+    });
+
+    test('implicit parsing updates after edits', async () => {
+        const document = await vscode.workspace.openTextDocument({
+            content: 'def func1():\n    print("Hello")\ndef func2():\n    print("World")',
+            language: 'python'
+        });
+        const editor = await vscode.window.showTextDocument(document);
+
+        const mergedCell = extension.getCellAtPosition(
+            document,
+            new vscode.Position(2, 0)
+        );
+        assert.strictEqual(
+            mergedCell?.text,
+            'def func1():\n    print("Hello")\ndef func2():\n    print("World")'
+        );
+
+        await editor.edit((editBuilder) => {
+            editBuilder.insert(new vscode.Position(2, 0), '\n');
+        });
+
+        const splitCell = extension.getCellAtPosition(
+            document,
+            new vscode.Position(3, 0)
+        );
+        assert.strictEqual(
+            splitCell?.text,
+            'def func2():\n    print("World")'
+        );
+    });
+
+});
