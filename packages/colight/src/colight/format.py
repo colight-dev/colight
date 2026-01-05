@@ -279,6 +279,52 @@ def parse_file(
     return initial_data, initial_buffers, updates
 
 
+def parse_file_with_updates(
+    file_path: Union[str, Path],
+) -> tuple[
+    Optional[Dict[str, Any]], List[bytes], List[Dict[str, Any]]
+]:
+    """
+    Parse a .colight file and return update entries with buffers.
+
+    Args:
+        file_path: Path to the .colight file
+
+    Returns:
+        Tuple of (initial_json_data, initial_buffers, update_entries)
+        update_entries is a list of {"data": <updates>, "buffers": <bytes[]>}
+    """
+    file_path = Path(file_path)
+    file_size = file_path.stat().st_size
+
+    initial_data = None
+    initial_buffers: List[bytes] = []
+    update_entries: List[Dict[str, Any]] = []
+
+    with open(file_path, "rb") as f:
+        offset = 0
+        first_entry = True
+
+        while offset < file_size:
+            try:
+                json_data, buffers, entry_size = parse_entry(f, offset)
+
+                if first_entry and "updates" not in json_data:
+                    initial_data = json_data
+                    initial_buffers = buffers
+                elif "updates" in json_data:
+                    update_entries.append(
+                        {"data": json_data["updates"], "buffers": buffers}
+                    )
+
+                first_entry = False
+                offset += entry_size
+            except Exception:
+                break
+
+    return initial_data, initial_buffers, update_entries
+
+
 def append_updates(
     file_path: Union[str, Path],
     update_items: List[Any],

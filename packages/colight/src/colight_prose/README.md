@@ -28,7 +28,7 @@ y = np.sin(frequency * x)
 Run the server:
 
 ```bash
-colight-prose live your_file.py
+colight live your_file.py
 ```
 
 ## Key features

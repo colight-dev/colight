@@ -246,13 +246,13 @@ print("test")
     with_idx = cmd.index("--with")
     assert cmd[with_idx + 1] == "tomli"
 
-    # Check that colight-prose build is in the command
+    # Check that colight-prose publish is in the command
     assert "--" in cmd
     dash_idx = cmd.index("--")
-    # After the --, should be python -m colight_cli build
+    # After the --, should be python -m colight_cli publish
     assert "-m" in cmd[dash_idx:]
     assert "colight_cli" in cmd[dash_idx:]
-    assert "build" in cmd[dash_idx:]
+    assert "publish" in cmd[dash_idx:]
 
     # Check that --in-subprocess flag is present
     assert "--in-subprocess" in cmd

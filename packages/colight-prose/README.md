@@ -1,6 +1,6 @@
-# Colight Site
+# Colight CLI
 
-Static site generator for Colight visualizations.
+Static site generator and live server for Colight visualizations.
 
 Converts `.py` files into markdown/HTML documents where:
 
@@ -8,18 +8,33 @@ Converts `.py` files into markdown/HTML documents where:
 - Code blocks are executed to generate Colight visualizations
 - Output is embedded as interactive `.colight` files
 
+## Install
+
+```bash
+# Install CLI + library
+pip install colight
+
+# Or install as a tool
+uv tool install colight
+```
+
 ## Usage
 
 ```bash
-# Build a single file
-colight-prose build src/post.py --output build/post.md
+# Publish a single file
+colight publish src/post.py --output build/post.md
 
-# Watch for changes
-colight-prose watch src/ --output build/
+# Watch + live-reload server
+colight publish src/ --serve
 
-# Initialize new project
-colight-prose init my-blog/
+# Live incremental execution for a file or directory
+colight live src/post.py
+
+# Render a .colight file to an image or video
+colight render output.colight --out output.png
+colight render output.colight updates.colight --out output.mp4
 ```
+
 
 ## File Format
 

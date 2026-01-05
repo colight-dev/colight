@@ -1,5 +1,6 @@
 """Performance tests for block dependency graph."""
 
+import statistics
 import time
 
 from colight_prose.block_graph import BlockGraph
@@ -33,11 +34,13 @@ def test_edge_building_performance():
                     }
                 )
 
-        graph = BlockGraph()
-        start_time = time.time()
-        graph.add_blocks(blocks)
-        elapsed = time.time() - start_time
-        times.append(elapsed)
+        samples = []
+        for _ in range(5):
+            graph = BlockGraph()
+            start_time = time.perf_counter()
+            graph.add_blocks(blocks)
+            samples.append(time.perf_counter() - start_time)
+        times.append(statistics.median(samples))
 
     # Check that time doesn't grow quadratically
     # If O(n²), doubling n should ~4x the time
@@ -56,9 +59,10 @@ def test_edge_building_performance():
     # Currently this will fail because the implementation is O(n²)
     # After fix, all ratios should be close to 2.0
     avg_ratio = sum(ratios) / len(ratios)
-    assert (
-        avg_ratio < 3.0
-    ), f"Average time ratio {avg_ratio:.2f} suggests O(n²) complexity"
+    assert avg_ratio < 3.0, (
+        f"Average time ratio {avg_ratio:.2f} suggests O(n²) complexity "
+        "(median of 5 runs per size)"
+    )
 
 
 def test_many_providers_performance():

@@ -2,11 +2,14 @@
 # This file provides shared tooling configuration but is not a buildable package
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = [
+    "packages/colight",
+    "packages/colight-mkdocs",
+    "examples",
+]
 
 [tool.uv.sources]
 colight = { workspace = true }
-colight-prose = { workspace = true }
 colight-mkdocs = { workspace = true }
 examples = { workspace = true }
 

@@ -207,27 +207,27 @@ def build_file(
         dependencies = parse_dependencies(pep723_metadata)
 
         # Build the uv run command
-        # Get the colight-prose package root (3 levels up from builder.py)
-        colight_prose_root = pathlib.Path(__file__).parent.parent.parent
+        # Get the colight package root (4 levels up from builder.py)
+        colight_prose_root = pathlib.Path(__file__).parent.parent.parent.parent
         cmd = [
             "uv",
             "run",
             "--with-editable",
-            str(colight_prose_root),  # colight-prose package root
+            str(colight_prose_root),  # colight package root
         ]
 
         # Add each PEP 723 dependency
         for dep in dependencies:
             cmd.extend(["--with", dep])
 
-        # Add the script flag and colight-prose command
+        # Add the script flag and colight publish command
         cmd.extend(
             [
                 "--",
                 "python",
                 "-m",
                 "colight_cli",
-                "build",
+                "publish",
                 str(input_path),
             ]
         )
