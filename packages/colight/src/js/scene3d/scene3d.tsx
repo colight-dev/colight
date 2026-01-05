@@ -22,6 +22,7 @@ import {
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
 } from "./components";
+import { NOOP_READY_STATE, ReadyState } from "./types";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
@@ -215,6 +216,8 @@ interface SceneProps {
   onCameraChange?: (camera: CameraParams) => void;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
+  /** Optional ready state manager for render lifecycle tracking */
+  readyState?: ReadyState;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -298,6 +301,7 @@ function DevMenu({
  * ```
  */
 export function SceneWithLayers({ layers }: { layers: any[] }) {
+  const readyState = useContext($StateContext) ?? NOOP_READY_STATE;
   const components: any[] = [];
   const props: any = {};
 
@@ -313,7 +317,16 @@ export function SceneWithLayers({ layers }: { layers: any[] }) {
     }
   }
 
-  return <Scene components={components} {...props} />;
+  const { readyState: propsReadyState, ...restProps } = props;
+  const resolvedReadyState = propsReadyState ?? readyState;
+
+  return (
+    <Scene
+      components={components}
+      {...restProps}
+      readyState={resolvedReadyState}
+    />
+  );
 }
 
 export function Scene({
@@ -327,6 +340,7 @@ export function Scene({
   className,
   style,
   controls = [],
+  readyState = NOOP_READY_STATE,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -334,8 +348,10 @@ export function Scene({
     ...defaultCamera,
     ...camera,
   });
-  const $state: any = useContext($StateContext);
-  const onReady = useMemo(() => $state.beginUpdate("scene3d/ready"), []);
+  const onReady = useMemo(
+    () => readyState.beginUpdate("scene3d/ready"),
+    [readyState],
+  );
 
   const cameraChangeCallback = useCallback(
     (camera) => {
@@ -397,7 +413,7 @@ export function Scene({
   return (
     <div
       ref={containerRef as React.RefObject<HTMLDivElement | null>}
-      className={`${className || ""} ${tw("font-base relative w-full")}`}
+      className={`${className || ""} ${tw("text-base relative w-full")}`}
       style={{ ...style }}
       onContextMenu={handleContextMenu}
     >
@@ -413,6 +429,7 @@ export function Scene({
             onCameraChange={cameraChangeCallback}
             onFrameRendered={updateDisplay}
             onReady={onReady}
+            readyState={readyState}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

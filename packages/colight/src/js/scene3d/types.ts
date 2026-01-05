@@ -1,3 +1,11 @@
+export interface ReadyState {
+  beginUpdate: (label: string) => () => void;
+}
+
+export const NOOP_READY_STATE: ReadyState = {
+  beginUpdate: () => () => {},
+};
+
 export interface PipelineCacheEntry {
   pipeline: GPURenderPipeline;
   device: GPUDevice;

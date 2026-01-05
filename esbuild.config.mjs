@@ -5,6 +5,7 @@ const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 
 const DIST_DIR = 'packages/colight/src/colight/js-dist'
+const NPM_DIST_DIR = 'packages/colight-scene3d/dist'
 
 // Common options for all builds
 const commonOptions = {
@@ -63,7 +64,23 @@ const liveConfig = {
   }
 };
 
-const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig]
+const scene3dESM = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['packages/colight/src/js/scene3d/index.ts'],
+  outfile: NPM_DIST_DIR + '/scene3d.mjs',
+  external: ['react'],
+  plugins: [],
+};
+
+const configs = [
+  widgetESM,
+  anywidgetESM,
+  embedConfigJS,
+  embedConfigESM,
+  liveConfig,
+  scene3dESM,
+]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch

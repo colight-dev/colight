@@ -8,10 +8,8 @@ import React, {
   useMemo,
   useRef,
   useState,
-  useContext,
 } from "react";
 import { throttle, deepEqualModuloTypedArrays } from "../utils";
-import { $StateContext } from "../context";
 import { useCanvasSnapshot } from "../canvasSnapshot";
 import {
   CameraParams,
@@ -52,6 +50,8 @@ import {
   DynamicBuffers,
   RenderObjectCache,
   ComponentOffset,
+  NOOP_READY_STATE,
+  ReadyState,
 } from "./types";
 
 /**
@@ -90,6 +90,9 @@ export interface SceneInnerProps {
 
   /** Callback to fire when scene is initially ready */
   onReady: () => void;
+
+  /** Optional ready state manager for render lifecycle tracking */
+  readyState?: ReadyState;
 }
 
 function initGeometryResources(
@@ -408,9 +411,8 @@ export function SceneInner({
   onCameraChange,
   onFrameRendered,
   onReady,
+  readyState = NOOP_READY_STATE,
 }: SceneInnerProps) {
-  const $state = useContext($StateContext);
-
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
     device: GPUDevice;
@@ -951,7 +953,7 @@ export function SceneInner({
 
       camState = camState || activeCameraRef.current!;
 
-      const onRenderComplete = $state.beginUpdate("impl3d/renderFrame");
+      const onRenderComplete = readyState.beginUpdate("impl3d/renderFrame");
 
       components = components || gpuRef.current.renderedComponents;
       const componentsChanged =
@@ -1043,7 +1045,7 @@ export function SceneInner({
       onFrameRendered?.(performance.now());
       onReady();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [readyState, containerWidth, containerHeight, onFrameRendered, components],
   );
 
   function requestRender(label: string) {

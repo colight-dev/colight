@@ -1,0 +1,179 @@
+{
+  "name": "vscode",
+  "displayName": "Colight",
+  "publisher": "colight",
+  "description": "Rapid Python eval without markup.",
+  "version": "0.1.24",
+  "engines": {
+    "vscode": "^1.89.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "extension.evaluateCell",
+        "title": "Colight: Evaluate Cell"
+      },
+      {
+        "command": "extension.evaluateCellAndMoveNext",
+        "title": "Colight: Evaluate Cell and Move to Next"
+      },
+      {
+        "command": "extension.evaluateCellAndAbove",
+        "title": "Colight: Evaluate Cell and Above"
+      },
+      {
+        "command": "extension.evaluateImplicitCell",
+        "title": "Colight: Evaluate Implicit Cell"
+      },
+      {
+        "command": "extension.generateNotebook",
+        "title": "Colight: Generate Jupyter Notebook (.ipynb)"
+      },
+      {
+        "command": "extension.expandSelection",
+        "title": "Colight: Expand Selection"
+      },
+      {
+        "command": "extension.shrinkSelection",
+        "title": "Colight: Shrink Selection"
+      },
+      {
+        "command": "extension.evaluateAllCells",
+        "title": "Colight: Evaluate All Cells"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Colight",
+        "properties": {
+          "colight.debugMode": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable debug logging"
+          },
+          "colight.enabledCellMarkers": {
+            "type": "array",
+            "default": [
+              "# +",
+              "# %%"
+            ],
+            "description": "Enabled cell markers for Colight extension"
+          },
+          "colight.useExplicitCellsIfPresent": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true, use explicit cell markers when present. If false, always use implicit cell detection."
+          },
+          "colight.renderComments": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true, renders comments as Markdown"
+          }
+        }
+      },
+      {
+        "title": "Decorations",
+        "properties": {
+          "colight.currentCell.borderWidth": {
+            "type": "string",
+            "default": "4px"
+          },
+          "colight.currentCell.show": {
+            "type": "boolean",
+            "description": "Decorate the current cell with a border above/below",
+            "default": false
+          }
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "extension.evaluateCell",
+        "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      },
+      {
+        "command": "extension.evaluateCellAndMoveNext",
+        "key": "shift+enter",
+        "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      },
+      {
+        "command": "extension.evaluateImplicitCell",
+        "key": "shift+ctrl+enter",
+        "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      },
+      {
+        "command": "extension.expandSelection",
+        "key": "cmd+1",
+        "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      },
+      {
+        "command": "extension.shrinkSelection",
+        "key": "cmd+2",
+        "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      }
+    ],
+    "colors": [
+      {
+        "id": "colight.accentColor",
+        "description": "Accent color for Colight cells",
+        "defaults": {
+          "dark": "#6464FF33",
+          "light": "#6464FF33",
+          "highContrast": "#6464FF33"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "yarn run package",
+    "compile": "yarn run check-types && yarn run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "yarn run check-types && yarn run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test",
+    "bump": "node scripts/bump.js",
+    "commit-tag": "node scripts/tag.js",
+    "cut": "yarn bump && yarn commit-tag && git push --follow-tags",
+    "release": "vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.7",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.11.0",
+    "@vscode/test-cli": "^0.0.9",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.21.5",
+    "eslint": "^8.57.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@lezer/python": "^1.1.14",
+    "@types/vscode": "1.89.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/colight-dev/colight.git"
+  },
+  "bugs": {
+    "url": "https://github.com/colight-dev/colight/issues"
+  },
+  "homepage": "https://github.com/colight-dev/colight#readme"
+}
