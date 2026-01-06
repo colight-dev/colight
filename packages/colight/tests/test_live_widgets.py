@@ -37,7 +37,7 @@ def test_live_widget_manager_error_handling():
         return None
 
     manager = LiveWidgetManager(send_message)
-    widget = manager.get_widget("widget-1", "/tmp/example.py")
+    manager.get_widget("widget-1", "/tmp/example.py")
 
     # Test unknown widget
     success, error = manager.handle_command("unknown-id", "handle_updates", {})
