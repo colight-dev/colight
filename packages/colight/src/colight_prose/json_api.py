@@ -316,6 +316,8 @@ def build_file_tree_json(
             rel_path = pathlib.Path(file_path.name)
 
         # Build nested structure
+        if not rel_path.parts:
+            rel_path = pathlib.Path(file_path.name)
         parts = rel_path.parts
         current_dict = tree_dict
 

@@ -70,8 +70,7 @@
     "test": "npm-run-all test:py test:js",
     "pyright": "uv run pyright",
     "watch-examples": "uv run python -m colight_cli publish packages/colight-prose/tests/examples --serve",
-    "cli": "uv run python -m colight_cli ",
-    "live": "yarn cli live .",
+    "colight": "uv run python -m colight_cli --",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },
   "files": [

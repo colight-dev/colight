@@ -1,12 +1,16 @@
 """CLI interface for Colight."""
 
 import asyncio
+import base64
 import pathlib
 import subprocess
+import tempfile
+import webbrowser
 from typing import Optional
 
 import click
 
+import colight.env as env
 import colight_prose.static.builder as builder
 from colight_prose.constants import DEFAULT_INLINE_THRESHOLD
 from colight_prose.server import LiveServer
@@ -32,6 +36,37 @@ def _ensure_html_format(formats: str) -> str:
 
 
 UPDATE_OPS = {"reset", "append", "concat", "setAt"}
+
+
+def _load_embed_js() -> str:
+    embed_path = env.DIST_LOCAL_PATH / "embed.js"
+    try:
+        return embed_path.read_text(encoding="utf-8")
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"embed.js not found at {embed_path}") from e
+
+
+def _build_inline_view_html(
+    colight_base64: str, embed_js: str, title: str
+) -> str:
+    safe_embed_js = embed_js.replace("</script>", "<\\/script>")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+</head>
+<body>
+  <script type="application/x-colight">
+{colight_base64}
+  </script>
+  <script>
+{safe_embed_js}
+  </script>
+</body>
+</html>
+"""
 
 
 def _is_update_payload(payload, known_keys: set[str]) -> bool:
@@ -599,6 +634,64 @@ def publish(
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
 @click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=pathlib.Path),
+    help="Output HTML file (default: temp file)",
+)
+@click.option(
+    "--no-open",
+    is_flag=True,
+    help="Don't open browser after creating the HTML file",
+)
+def view(
+    input_path: pathlib.Path,
+    output: Optional[pathlib.Path],
+    no_open: bool,
+):
+    """Open a .colight file in a browser using inline HTML."""
+    try:
+        colight_bytes = input_path.read_bytes()
+    except OSError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    try:
+        embed_js = _load_embed_js()
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    colight_base64 = base64.b64encode(colight_bytes).decode("ascii")
+    title = f"Colight: {input_path.name}"
+    html = _build_inline_view_html(colight_base64, embed_js, title)
+
+    if output:
+        output_path = pathlib.Path(output)
+        try:
+            output_path.write_text(html, encoding="utf-8")
+        except OSError as e:
+            click.echo(f"Error: {e}")
+            return
+    else:
+        tmp_file = tempfile.NamedTemporaryFile(
+            prefix="colight-view-",
+            suffix=".html",
+            delete=False,
+        )
+        tmp_file.write(html.encode("utf-8"))
+        tmp_file.close()
+        output_path = pathlib.Path(tmp_file.name)
+
+    url = output_path.as_uri()
+    click.echo(f"View: {url}")
+    if not no_open:
+        webbrowser.open(url)
+
+
+@main.command()
+@click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option(
     "--verbose", "-v", type=bool, default=False, help="Verbose output (default: False)"
 )
 @click.option(
@@ -652,6 +745,8 @@ def live(
     click.echo(f"Starting LiveServer for {input_path}")
     click.echo(f"Server: http://{host}:{port}")
 
+    open_path = input_path.name if input_path.is_file() else None
+
     server = LiveServer(
         input_path,
         verbose=verbose,
@@ -662,6 +757,7 @@ def live(
         http_port=port,
         ws_port=port + 1,  # WebSocket port is HTTP port + 1
         open_url=not no_open,
+        open_path=open_path,
     )
 
     try:

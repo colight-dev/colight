@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import {
   useWebSocket,
   useMessageHandler,
@@ -48,6 +48,10 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
   const { connected, sendMessage } = useWebSocket();
   const watchedFileRef = useRef(null);
   const clientIdRef = useRef(getClientId());
+  const liveContext = useMemo(
+    () => ({ file, clientId: clientIdRef.current }),
+    [file],
+  );
 
   // Block management state - resets when file changes
   const [blockResults, setBlockResults] = useStateWithDeps({}, [file]);
@@ -304,6 +308,7 @@ export const DocumentViewer = ({ file, pragmaOverrides, navigateTo }) => {
             key={blockId}
             block={block}
             pragmaOverrides={pragmaOverrides}
+            liveContext={liveContext}
           />
         );
       })}

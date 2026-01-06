@@ -1,6 +1,7 @@
 """LiveServer: On-demand development server for colight-prose."""
 
 import asyncio
+import base64
 import fnmatch
 import itertools
 import json
@@ -23,6 +24,7 @@ from .file_graph import FileDependencyGraph
 from .file_resolver import FileResolver, find_files
 from .incremental_executor import IncrementalExecutor
 from .json_api import JsonDocumentGenerator, build_file_tree_json
+from .live_widgets import LiveWidgetManager
 from .model import TagSet
 from .parser import parse_file
 from .pragma import parse_pragma_arg
@@ -184,6 +186,7 @@ class LiveServer:
         http_port: int = 5500,
         ws_port: int = 5501,
         open_url: bool = True,
+        open_path: Optional[str] = None,
         verbose: bool = False,
         pragma: Optional[str | set] = set(),
     ):
@@ -198,6 +201,7 @@ class LiveServer:
         self.http_port = http_port
         self.ws_port = ws_port
         self.open_url = open_url
+        self.open_path = open_path
 
         self.connections: Set[Any] = set()  # WebSocket connections
         self.client_registry = (
@@ -215,6 +219,7 @@ class LiveServer:
             None  # Reference to API middleware
         )
         self._eviction_task: Optional[asyncio.Task] = None  # Periodic eviction task
+        self.widget_manager = LiveWidgetManager(self._ws_send_widget_message)
 
         # File change notification state
         self._changed_files_buffer = set()
@@ -256,12 +261,62 @@ class LiveServer:
         self._api_middleware = ApiMiddleware(
             app, self.input_path, self.include, self.ignore, self.verbose
         )
+        self._api_middleware.incremental_executor.widget_manager = self.widget_manager
         app = self._api_middleware
 
         # Add SPA middleware (serves the React app)
         app = SpaMiddleware(app, self._get_spa_html())
 
         return app
+
+    def _resolve_client_path(self, rel_path: str) -> pathlib.Path:
+        """Resolve a client-provided path to an absolute source file path.
+
+        When input_path is a file, the client can refer to it by:
+        - Empty string, full name, or stem (e.g., "", "example.py", "example")
+        - Any path whose basename matches
+
+        When input_path is a directory, paths are resolved relative to it.
+
+        Security: Resolved paths are restricted to the input_path directory
+        (or its parent for single-file mode). Symlinks are not followed.
+        """
+        rel_path = (rel_path or "").lstrip("/")
+
+        # Single file mode: match various ways client might refer to the file
+        if self.input_path.is_file():
+            # Direct match: "", "example.py", or "example"
+            if rel_path in ("", self.input_path.name, self.input_path.stem):
+                return self.input_path
+            # Match by basename: "subdir/example.py" -> example.py
+            rel_name = pathlib.Path(rel_path).name
+            if rel_name in (self.input_path.name, self.input_path.stem):
+                return self.input_path
+
+            # Other paths resolve relative to parent directory
+            base_dir = self.input_path.parent
+            resolved = (base_dir / rel_path).resolve()
+
+            # Security: ensure resolved path is within base directory
+            try:
+                resolved.relative_to(base_dir)
+            except ValueError:
+                # Path escapes base directory - return original to fail later
+                return resolved
+
+            return resolved
+
+        # Directory mode: resolve relative to input_path
+        resolved = (self.input_path / rel_path).resolve()
+
+        # Security: ensure resolved path is within input_path directory
+        try:
+            resolved.relative_to(self.input_path)
+        except ValueError:
+            # Path escapes input_path - return it to fail later
+            return resolved
+
+        return resolved
 
     def _run_http_server(self):
         """Run the HTTP server in a separate thread."""
@@ -286,14 +341,13 @@ class LiveServer:
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")
-                    print("Received message", data)
 
                     # Handle watch-file message
                     if message_type == "watch-file":
                         client_id = data.get("clientId")
                         rel_path = data.get("path")
                         if client_id and rel_path:
-                            abs_path = (self.input_path / rel_path).resolve()
+                            abs_path = self._resolve_client_path(rel_path)
                             # Register client if not already registered
                             if client_id not in self.client_registry.clients:
                                 self.client_registry.register_client(
@@ -320,7 +374,7 @@ class LiveServer:
                         client_id = data.get("clientId")
                         rel_path = data.get("path")
                         if client_id and rel_path:
-                            abs_path = (self.input_path / rel_path).resolve()
+                            abs_path = self._resolve_client_path(rel_path)
                             self.client_registry.unwatch_file(client_id, str(abs_path))
                             self.client_registry.log_status()
                             # Mark file for potential eviction if no one is watching it
@@ -340,7 +394,7 @@ class LiveServer:
                         client_run = data.get("clientRun", 0)
                         if self._api_middleware:
                             # Convert relative path to absolute Python file path
-                            abs_path = (self.input_path / rel_path).resolve()
+                            abs_path = self._resolve_client_path(rel_path)
                             if (
                                 abs_path.exists()
                                 and self._api_middleware.file_resolver.matches_patterns(
@@ -348,6 +402,30 @@ class LiveServer:
                                 )
                             ):
                                 await self._send_reload_signal(abs_path, client_run)
+                    elif message_type == "widget-command":
+                        widget_id = data.get("widgetId")
+                        command = data.get("command")
+                        params = data.get("params") or {}
+                        buffers = []
+                        for buffer_b64 in data.get("buffers") or []:
+                            try:
+                                buffers.append(base64.b64decode(buffer_b64))
+                            except Exception as exc:
+                                if self.verbose:
+                                    print(f"Failed to decode widget buffer: {exc}")
+                        if widget_id and command:
+                            success, error = self.widget_manager.handle_command(
+                                widget_id, command, params, buffers
+                            )
+                            if not success:
+                                # Send error response back to client
+                                error_msg = {
+                                    "type": "widget-error",
+                                    "widgetId": widget_id,
+                                    "command": command,
+                                    "error": error or "Command failed",
+                                }
+                                await websocket.send(json.dumps(error_msg))
                 except json.JSONDecodeError:
                     pass  # Ignore invalid messages
         except websockets.exceptions.ConnectionClosed:
@@ -360,7 +438,12 @@ class LiveServer:
     async def _ws_broadcast_to_file_watchers(self, message: dict, file_path: str):
         """Broadcast a message only to clients watching a specific file."""
         # file_path is relative; convert to absolute for registry lookup
-        abs_path = (self.input_path / file_path).resolve()
+        path_obj = pathlib.Path(file_path)
+        abs_path = (
+            path_obj.resolve()
+            if path_obj.is_absolute()
+            else self._resolve_client_path(file_path)
+        )
         watching_clients = self.client_registry.get_watchers(str(abs_path))
 
         if not watching_clients:
@@ -397,6 +480,25 @@ class LiveServer:
             *(ws.send(message_str) for ws in self.connections),
             return_exceptions=True,
         )
+
+    async def _ws_send_widget_message(self, file_path: str, message: dict):
+        """Send widget updates to clients watching a specific file."""
+        watching_clients = self.client_registry.get_watchers(file_path)
+        if not watching_clients:
+            return
+
+        message_str = json.dumps(message)
+        websockets_to_send = []
+        for client_id in watching_clients:
+            ws = self.client_registry.clients.get(client_id)
+            if ws and ws in self.connections:
+                websockets_to_send.append(ws)
+
+        if websockets_to_send:
+            await asyncio.gather(
+                *(ws.send(message_str) for ws in websockets_to_send),
+                return_exceptions=True,
+            )
 
     async def _process_multiple_files(self, files_to_execute: Set[pathlib.Path]):
         """Process multiple files that need execution."""
@@ -844,6 +946,13 @@ class LiveServer:
         # Open browser if requested
         if self.open_url:
             url = f"http://{self.host}:{self.http_port}"
+            if self.open_path:
+                open_path = (
+                    self.open_path
+                    if self.open_path.startswith("/")
+                    else f"/{self.open_path}"
+                )
+                url = f"{url}{open_path}"
             threading.Timer(1, lambda: webbrowser.open(url)).start()
 
         # Start periodic cache eviction task

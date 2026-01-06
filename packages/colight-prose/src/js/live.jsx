@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import ReactDOM from "react-dom/client";
 import {
   createBrowserRouter,
@@ -18,6 +18,10 @@ import TopBar from "./TopBar.jsx";
 import bylight from "./bylight.ts";
 import { getClientId } from "./client-id.js";
 import createLogger from "./logger.js";
+import {
+  encodeBufferToBase64,
+  decodeBase64ToUint8Array,
+} from "../../../colight/src/js/base64.js";
 
 // Custom hooks
 import { useNavigation } from "./hooks/useNavigation.js";
@@ -41,8 +45,16 @@ window.setColightLogLevel("info");
 
 // ========== Content Components (unchanged) ==========
 
-const ColightVisual = ({ data, dataRef }) => {
+const findSingleFilePath = (node) => {
+  if (!node) return null;
+  if (node.type === "file") return node.path || node.name;
+  if (!node.children || node.children.length !== 1) return null;
+  return findSingleFilePath(node.children[0]);
+};
+
+const ColightVisual = ({ data, dataRef, liveContext }) => {
   const containerRef = useRef(null);
+  const { sendMessage } = useWebSocket();
   const [[currentKey, currentData, pendingData], setColightData] = useState([
     0,
     null,
@@ -52,6 +64,34 @@ const ColightVisual = ({ data, dataRef }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
   const [minHeight, setMinHeight] = useState(0);
+  const widgetId = currentData?.id;
+
+  const experimental = useMemo(() => {
+    if (!liveContext?.clientId || !liveContext?.file || !widgetId) {
+      return null;
+    }
+
+    return {
+      invoke: (command, params, options = {}) => {
+        const buffers = options.buffers || [];
+        const message = {
+          type: "widget-command",
+          command,
+          widgetId,
+          clientId: liveContext.clientId,
+          file: liveContext.file,
+          params,
+        };
+
+        if (buffers.length) {
+          message.buffers = buffers.map(encodeBufferToBase64);
+        }
+
+        sendMessage(message);
+        return Promise.resolve();
+      },
+    };
+  }, [liveContext, sendMessage, widgetId]);
 
   // Load external visual when needed
   useEffect(() => {
@@ -111,7 +151,11 @@ const ColightVisual = ({ data, dataRef }) => {
       {currentData && (
         <DraggableViewer
           key={currentKey}
-          data={{ ...currentData, onMount: () => setMinHeight(0) }}
+          data={{
+            ...currentData,
+            onMount: () => setMinHeight(0),
+            experimental,
+          }}
         />
       )}
 
@@ -200,7 +244,7 @@ const groupBlockElements = (elements) => {
   return groupedElements;
 };
 
-const BlockRenderer = ({ block, pragmaOverrides }) => {
+const BlockRenderer = ({ block, pragmaOverrides, liveContext }) => {
   // If block is pending but has content, show content with pending indicator
   const isPending = block.pending;
   const isPendingReplacement = block.pendingReplacement;
@@ -266,6 +310,7 @@ const BlockRenderer = ({ block, pragmaOverrides }) => {
               key={`visual-${idx}`}
               data={item.visual}
               dataRef={item.visual_ref}
+              liveContext={liveContext}
             />
           ) : null;
         } else {
@@ -322,6 +367,33 @@ const LiveServerApp = () => {
       }
     },
     priority: 10,
+  });
+
+  useEffect(() => {
+    if (
+      navState.type !== "directory" ||
+      navState.directory !== "/" ||
+      !directoryTree
+    ) {
+      return;
+    }
+
+    const singleFilePath = findSingleFilePath(directoryTree);
+    if (singleFilePath) {
+      navigateTo(singleFilePath);
+    }
+  }, [navState.type, navState.directory, directoryTree, navigateTo]);
+
+  useMessageHandler({
+    types: ["update_state"],
+    handler: (message) => {
+      if (!message.widgetId || !message.updates) return;
+      const instance = window.colight?.instances?.[message.widgetId];
+      if (!instance) return;
+      const buffers = (message.buffers || []).map(decodeBase64ToUint8Array);
+      instance.updateWithBuffers(message.updates, buffers);
+    },
+    priority: 9,
   });
 
   // Handle global keyboard shortcuts

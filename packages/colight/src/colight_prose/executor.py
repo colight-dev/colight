@@ -26,12 +26,13 @@ class ExecutionResult:
 class BlockExecutor:
     """Execute blocks in a persistent namespace."""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, widget_manager: Any = None):
         self.env: Dict[str, Any] = {
             "__name__": "__main__",
             "__builtins__": __builtins__,
         }
         self.verbose = verbose
+        self.widget_manager = widget_manager
         self._setup_environment()
 
     def _get_package_from_filename(self, filename: str) -> Optional[str]:
@@ -142,8 +143,16 @@ except ImportError:
                     if result.value is not None:
                         try:
                             visual = inspect(result.value)
-                            if visual is not None:
-                                result.colight_bytes = visual.to_bytes()
+                            if visual is not None and hasattr(visual, "to_bytes"):
+                                if self.widget_manager and hasattr(visual, "get_id"):
+                                    widget_id = visual.get_id()
+                                    widget = self.widget_manager.get_widget(
+                                        widget_id, filename
+                                    )
+                                    widget.callback_registry.clear()
+                                    result.colight_bytes = visual.to_bytes(widget=widget)
+                                else:
+                                    result.colight_bytes = visual.to_bytes()
                         except Exception as e:
                             if self.verbose:
                                 print(

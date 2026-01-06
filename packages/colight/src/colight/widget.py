@@ -81,6 +81,7 @@ class CollectedState:
         self.animateBy = []
         self.buffers = buffers or []
         self.widget = widget
+        self.callback_counter = 0  # For deterministic callback IDs
 
     def state_entry(self, state_key, value, sync=False):
         if sync:
@@ -131,12 +132,42 @@ def serialize_for_json(data: Any, collected_state: Optional[CollectedState]) -> 
 
 @register_serializer()
 def serialize_callable(data: Any, collected_state: Optional[CollectedState]) -> Any:
-    """Serializer for callable objects."""
+    """Serializer for callable objects.
+
+    Generates deterministic callback IDs based on:
+    1. Order encountered during serialization (callback_counter)
+    2. Hash of the callable's code (for stability across re-executions)
+
+    This ensures:
+    - Multiple clients get the same callback IDs
+    - IDs are stable as long as the code doesn't change
+    - The visual's interface is predictable and inspectable
+    """
     if not callable(data):
         return SKIP
     assert collected_state is not None
     if collected_state and collected_state.widget:
-        id = str(uuid.uuid4())
+        # Generate deterministic ID: order + content hash
+        order = collected_state.callback_counter
+        collected_state.callback_counter += 1
+
+        # Hash the callable's code for stability
+        try:
+            if hasattr(data, "__code__"):
+                # For functions/lambdas: hash the bytecode and constants
+                # Include consts to differentiate lambdas with different literals
+                code_hash = hash((data.__code__.co_code, data.__code__.co_consts))
+            else:
+                # For other callables: use type and name
+                code_hash = hash((type(data).__name__, str(data)))
+        except Exception:
+            # Fallback if hashing fails
+            code_hash = 0
+
+        # Combine order and hash for deterministic ID
+        # Format: cb-{order}-{hash_hex}
+        id = f"cb-{order}-{abs(code_hash):x}"
+
         collected_state.widget.callback_registry[id] = data
         return {"__type__": "callback", "id": id}
     warnings.warn(
@@ -213,7 +244,7 @@ def to_json(
         # Store binary data in buffers and return reference
         buffer_index = len(collected_state.buffers)
         collected_state.buffers.append(data)
-        return {"__type__": "buffer", "index": buffer_index}
+        return {"__buffer_index__": buffer_index}
 
     # Handle datetime objects early since isinstance check is fast
     if isinstance(data, (datetime.date, datetime.datetime)):
@@ -296,6 +327,9 @@ def to_json_with_state(
     id = layout_item.get_id() if hasattr(layout_item, "get_id") else None
     ast = to_json(layout_item, collected_state=collected_state)
 
+    # Serialize Python listeners to register callbacks
+    py_listeners_json = to_json(collected_state.listeners["py"], collected_state=collected_state)
+
     json = to_json(
         {
             "ast": ast,
@@ -303,6 +337,7 @@ def to_json_with_state(
             "state": collected_state.stateJSON,
             "syncedKeys": collected_state.syncedKeys,
             "listeners": collected_state.listeners["js"],
+            "py_listeners": py_listeners_json,  # Include serialized Python listeners
             "imports": collected_state.imports,
             "animateBy": resolve_animate_by(collected_state),
             **CONFIG,
@@ -390,13 +425,12 @@ class WidgetState:
 class Widget(anywidget.AnyWidget):
     _esm = ANYWIDGET_PATH
     # CSS is now embedded in the JS bundle
-    callback_registry: Dict[str, Callable] = {}
-    data = traitlets.Any().tag(sync=True, to_json=to_json_with_state)
+    data = traitlets.Any().tag(sync=True, to_json=lambda value, widget: to_json_with_state(value, widget=widget))
 
     def __init__(self, ast: Any):
+        self.callback_registry: Dict[str, Callable] = {}
         self.state = WidgetState(self)
-        super().__init__()
-        self.data = ast
+        super().__init__(data=ast)  # Pass data during init to avoid serializing None
 
     def set_ast(self, ast: Any):
         self.data = ast

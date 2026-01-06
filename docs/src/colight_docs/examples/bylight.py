@@ -7,6 +7,7 @@
 
 # %%
 import colight.plot as Plot
+from colight import extras
 
 rhyme = """Roses are blue,
 Violets are red,
@@ -15,10 +16,10 @@ Colors are misled!"""
 
 # %% [markdown]
 
-# Use the `Plot.bylight` function to highlight specific words in our text:
+# Use the `extras.bylight` function to highlight specific words in our text:
 
 # %%
-Plot.bylight(rhyme, ["blue", "red", "Colors", "misled!"])
+extras.bylight(rhyme, ["blue", "red", "Colors", "misled!"])
 
 # %% [markdown]
 # ## Animated Highlighting
@@ -30,7 +31,7 @@ Plot.bylight(rhyme, ["blue", "red", "Colors", "misled!"])
 
 Plot.Frames(
     [
-        Plot.js("`frame: ${$state.frame}`") & Plot.bylight(rhyme, pattern)
+        Plot.js("`frame: ${$state.frame}`") & extras.bylight(rhyme, pattern)
         for pattern in rhyme.split()
     ],
     fps=2,
