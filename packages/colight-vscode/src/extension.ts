@@ -5,7 +5,6 @@ import {
   TreeFragment,
   Input,
   Tree,
-  TreeCursor,
 } from "@lezer/common";
 import * as fs from "fs";
 
