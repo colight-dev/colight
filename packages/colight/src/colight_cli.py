@@ -11,10 +11,10 @@ from typing import Optional
 import click
 
 import colight.env as env
-import colight_prose.static.builder as builder
-from colight_prose.constants import DEFAULT_INLINE_THRESHOLD
-from colight_prose.server import LiveServer
-from colight_prose.static import watcher
+import colight.publish.static.builder as builder
+from colight.publish.constants import DEFAULT_INLINE_THRESHOLD
+from colight.server.server import LiveServer
+from colight.publish.static import watcher
 from colight.format import parse_file_with_updates
 from colight.screenshots import StudioContext
 

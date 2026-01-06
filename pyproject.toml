@@ -47,9 +47,9 @@ venvPath = "."
 venv = ".venv"
 include = [ "packages/*/src", "packages/*/tests"]
 exclude = [
-    "packages/colight-prose/tests/examples/pep723_*.py",
-    "packages/colight-prose/tests/import-test-fixtures/",
-    "packages/colight-prose/tests/integration/server-test.py"
+    "packages/colight/tests/examples/pep723_*.py",
+    "packages/colight/tests/import-test-fixtures/",
+    "packages/colight/tests/integration/server-test.py"
 ]
 typeCheckingMode = "standard"
 reportUnusedExpression = false

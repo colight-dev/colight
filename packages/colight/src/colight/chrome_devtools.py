@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Union
 
 # Import ColightHTTPServer
-from colight.server import ColightHTTPServer
+from colight.http_server import ColightHTTPServer
 
 DEBUG_WINDOW = False
 

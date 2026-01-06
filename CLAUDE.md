@@ -4,7 +4,7 @@
 
 - Build frontend: `yarn build`
 - Watch mode: `yarn dev`
-- Run tests: `yarn test` (JS, Python, and colight-prose)
+- Run tests: `yarn test` (JS and Python)
 - Run JS tests only (watch mode): `yarn test:js`
 - Run single JS test: `yarn vitest <test-file-pattern>`
 - Run specific JS test file: `yarn vitest run packages/colight/tests/js/some-test.js`
@@ -38,21 +38,19 @@ For detailed patterns, review existing code in the corresponding module.
 
 ## Monorepo Structure
 
-This project uses a monorepo structure with multiple packages:
+This project uses a monorepo structure with the main package:
 
-- `packages/colight/` - Main visualization library
-- `packages/colight-prose/` - Static site generator for .py files
+- `packages/colight/` - Main visualization library with runtime, publish, and server modules
 - Root workspace manages shared dependencies and tooling
 
-When working on specific packages, navigate to the package directory or use the workspace commands from the root.
+When working on the package, navigate to the package directory or use the workspace commands from the root.
 
 ## Development Guidelines
 
 - Use yarn, not npm
 - If introducing a change which may increase complexity (eg. as a workaround for some difficulty), always ask the user first, they may have an idea for a simpler solution.
-- **Tests**: Never put test files at the root level. Always place tests in a `tests` directory within the appropriate package. For example:
-  - `packages/colight/tests/` for colight package tests
-  - `packages/colight-prose/tests/` for colight-prose package tests
+- **Tests**: Never put test files at the root level. Always place tests in the `tests` directory:
+  - `packages/colight/tests/` for all colight tests
 
 ## Testing Best Practices
 
@@ -81,10 +79,9 @@ When working on specific packages, navigate to the package directory or use the 
       </MemoryRouter>,
     );
     ```
-- **Vitest Configuration**: In the monorepo, `vitest.config.mjs` must include both package test paths:
+- **Vitest Configuration**: The `vitest.config.mjs` includes all colight tests:
   ```javascript
   include: [
     "packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
-    "packages/colight-prose/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
   ];
   ```

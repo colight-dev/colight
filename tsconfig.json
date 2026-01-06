@@ -12,8 +12,7 @@
     "types": ["@webgpu/types"]
   },
   "include": [
-    "packages/colight/src/js",
-    "packages/colight-prose/src/colight_prose/live/js"
+    "packages/colight/src/js"
   ],
   "exclude": ["node_modules"]
 }

@@ -46,4 +46,4 @@ ignore = [ "E402", "F841",]
 ignore-vcs = true
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/colight", "src/colight_prose", "src/colight_cli.py",]
+packages = [ "src/colight", "src/colight_cli.py",]
