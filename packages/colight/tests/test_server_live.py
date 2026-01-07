@@ -6,7 +6,7 @@ import pytest
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
-from colight.server.server_watch import HtmlFallbackMiddleware, LiveReloadServer
+from colight.live_server.server_watch import HtmlFallbackMiddleware, LiveReloadServer
 
 
 @pytest.fixture
@@ -92,7 +92,7 @@ async def test_live_reload_server_sends_reload_signal(temp_site):
             while not kwargs["stop_event"].is_set():
                 await asyncio.sleep(0.1)
 
-    with patch("colight.server.server_watch.awatch", mock_awatch):
+    with patch("colight.live_server.server_watch.awatch", mock_awatch):
         with patch.object(
             server, "_send_reload_signal", new_callable=AsyncMock
         ) as mock_send:

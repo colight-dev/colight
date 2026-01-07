@@ -11,7 +11,7 @@ from colight.widget import (
     to_json,
     CollectedState,
 )
-from colight.binary_serialization import (
+from colight_wire_protocol import (
     deserialize_buffer_entry,
     replace_buffers,
     serialize_binary_data,

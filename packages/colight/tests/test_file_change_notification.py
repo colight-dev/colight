@@ -6,7 +6,7 @@ import pathlib
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from colight.server.server import LiveServer
+from colight.live_server.server import LiveServer
 
 
 class TestFileChangeNotification:
@@ -169,7 +169,7 @@ def helper():
             server._stop_event.set()
 
         # Patch various methods
-        with patch("colight.server.server.awatch", mock_awatch):
+        with patch("colight.live_server.server.awatch", mock_awatch):
             with patch.object(
                 server, "_send_reload_signal", new_callable=AsyncMock
             ) as mock_reload:

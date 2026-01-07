@@ -154,11 +154,11 @@ class ColightHTTPServer:
                 request, client_address, server, server_instance=self
             )
 
-        # socketserver.TCPServer.allow_reuse_address = True # Useful for quick restarts
-        self.httpd = socketserver.TCPServer(
-            (self.host, self.requested_port), handler_class
-        )
-        self.httpd.allow_reuse_address = True  # Set before server_bind
+        # Create a subclass with allow_reuse_address set before binding
+        class ReusableTCPServer(socketserver.TCPServer):
+            allow_reuse_address = True
+
+        self.httpd = ReusableTCPServer((self.host, self.requested_port), handler_class)
 
         self.actual_port = self.httpd.server_address[
             1

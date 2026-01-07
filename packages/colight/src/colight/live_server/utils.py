@@ -1,4 +1,4 @@
-"""Shared utilities for colight.server package."""
+"""Shared utilities for colight.live_server package."""
 
 from typing import List, Optional
 

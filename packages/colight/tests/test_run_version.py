@@ -6,7 +6,7 @@ import pathlib
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from colight.server.server import LiveServer
+from colight.live_server.server import LiveServer
 
 
 @pytest.mark.asyncio

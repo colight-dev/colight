@@ -1,4 +1,4 @@
-"""Constants for colight.server package."""
+"""Constants for colight.live_server package."""
 
 # Default ignore patterns for file discovery
 DEFAULT_IGNORE_PATTERNS = [

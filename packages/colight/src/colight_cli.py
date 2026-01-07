@@ -13,7 +13,7 @@ import click
 import colight.env as env
 import colight.publish.static.builder as builder
 from colight.publish.constants import DEFAULT_INLINE_THRESHOLD
-from colight.server.server import LiveServer
+from colight.live_server.server import LiveServer
 from colight.publish.static import watcher
 from colight.format import parse_file_with_updates
 from colight.screenshots import StudioContext

@@ -9,7 +9,7 @@ from typing import List, Optional
 from watchfiles import watch
 
 import colight.publish.static.builder as builder
-from colight.server.server_watch import LiveReloadServer
+from colight.live_server.server_watch import LiveReloadServer
 
 from .builder import BuildConfig
 

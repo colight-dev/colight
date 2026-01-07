@@ -8,7 +8,7 @@ import pytest
 
 def test_watch_unwatch_protocol():
     """Test the watch/unwatch protocol with a mock WebSocket."""
-    from colight.server.client_registry import ClientRegistry
+    from colight.live_server.client_registry import ClientRegistry
 
     # Create registry
     registry = ClientRegistry()
@@ -76,7 +76,7 @@ async def test_message_format_validation():
 
 def test_telemetry_phase1():
     """Test that registry collects telemetry without changing execution."""
-    from colight.server.client_registry import ClientRegistry
+    from colight.live_server.client_registry import ClientRegistry
 
     registry = ClientRegistry()
 

@@ -3,7 +3,7 @@ import base64
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from colight.binary_serialization import replace_buffers
+from colight_wire_protocol import replace_buffers
 from colight.widget import SubscriptableNamespace, WidgetState
 
 logger = logging.getLogger(__name__)

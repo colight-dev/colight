@@ -1,5 +1,5 @@
-from colight.server.live_widgets import LiveWidgetManager
-from colight.server.server import LiveServer
+from colight.live_server.live_widgets import LiveWidgetManager
+from colight.live_server.server import LiveServer
 
 
 def test_live_widget_manager_updates_and_callbacks():

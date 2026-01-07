@@ -7,12 +7,12 @@ from typing import List, Literal, Optional, Set, Union, get_args
 
 from colight.publish.constants import DEFAULT_INLINE_THRESHOLD
 from colight.runtime.executor import DocumentExecutor
-from colight.server.file_resolver import find_files
+from colight.live_server.file_resolver import find_files
 from colight.runtime.model import TagSet
 from colight.runtime.parser import parse_colight_file
 from colight.runtime.pep723 import detect_pep723_metadata, parse_dependencies
 from colight.runtime.pragma import parse_pragma_arg
-from colight.server.utils import merge_ignore_patterns
+from colight.live_server.utils import merge_ignore_patterns
 
 from .generator import HTMLGenerator, MarkdownGenerator, write_colight_files
 
