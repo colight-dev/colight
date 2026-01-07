@@ -73,6 +73,32 @@ const scene3dESM = {
   plugins: [],
 };
 
+const wireProtocolESM = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['packages/colight-wire-protocol/src/js/index.ts'],
+  outfile: 'packages/colight-wire-protocol/dist/index.mjs',
+  plugins: [],
+};
+
+const scene3dLiveDemo = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['examples/scene3d_live/web/app.jsx'],
+  outfile: 'examples/scene3d_live/web/dist/app.js',
+  external: ['react', 'react-dom/client', './scene3d.mjs'],
+  plugins: [],
+};
+
+const scene3dLiveDemoR3F = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['examples/scene3d_live/web/app-r3f.jsx'],
+  outfile: 'examples/scene3d_live/web/dist/app-r3f.js',
+  external: ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'three', '@react-three/fiber', '@react-three/drei', 'scheduler'],
+  plugins: [],
+};
+
 const configs = [
   widgetESM,
   anywidgetESM,
@@ -80,6 +106,9 @@ const configs = [
   embedConfigESM,
   liveConfig,
   scene3dESM,
+  wireProtocolESM,
+  scene3dLiveDemo,
+  scene3dLiveDemoR3F,
 ]
 
 // Apply CDN imports if enabled
