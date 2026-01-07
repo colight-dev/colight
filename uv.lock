@@ -13,6 +13,7 @@ members = [
     "colight",
     "colight-examples",
     "colight-mkdocs",
+    "colight-wire-protocol",
 ]
 
 [manifest.dependency-groups]
@@ -293,6 +294,7 @@ source = { editable = "packages/colight" }
 dependencies = [
     { name = "anywidget" },
     { name = "click" },
+    { name = "colight-wire-protocol" },
     { name = "libcst" },
     { name = "markdown" },
     { name = "traitlets" },
@@ -319,6 +321,7 @@ dev = [
 requires-dist = [
     { name = "anywidget", specifier = ">=0.9.10" },
     { name = "click", specifier = ">=8.1" },
+    { name = "colight-wire-protocol", editable = "packages/colight-wire-protocol" },
     { name = "libcst", specifier = ">=1.4" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "traitlets", specifier = ">=5.14.3" },
@@ -376,6 +379,17 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.0" }]
+
+[[package]]
+name = "colight-wire-protocol"
+version = "0.1.0"
+source = { editable = "packages/colight-wire-protocol" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.22,<2.0.0" }]
 
 [[package]]
 name = "colorama"

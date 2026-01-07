@@ -5,12 +5,14 @@
 members = [
     "packages/colight",
     "packages/colight-mkdocs",
+    "packages/colight-wire-protocol",
     "examples",
 ]
 
 [tool.uv.sources]
 colight = { workspace = true }
 colight-mkdocs = { workspace = true }
+colight-wire-protocol = { workspace = true }
 examples = { workspace = true }
 
 # Shared development dependencies

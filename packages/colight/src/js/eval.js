@@ -1,6 +1,6 @@
 import * as api from "./api";
 import * as Plot from "@observablehq/plot";
-import { evaluateNdarray, inferDtype } from "./binary";
+import { evaluateNdarray } from "./binary";
 import { serializeEvent } from "./utils";
 import * as globals from "./globals";
 
@@ -223,74 +223,4 @@ export function evaluate(node, $state, experimental, buffers) {
   }
 }
 
-export function collectBuffers(data) {
-  const buffers = [];
-
-  function traverse(value) {
-    // Handle ArrayBuffer and TypedArray instances
-    if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-      const index = buffers.length;
-      buffers.push(value);
-
-      // Add metadata about the array type
-      const metadata = {
-        __buffer_index__: index,
-        __type__: "ndarray",
-        dtype: inferDtype(value),
-      };
-
-      // Add shape if available
-      if (value instanceof ArrayBuffer) {
-        metadata.shape = [value.byteLength];
-      } else {
-        metadata.shape = [value.length];
-      }
-
-      return metadata;
-    }
-
-    // Handle arrays recursively
-    if (Array.isArray(value)) {
-      return value.map(traverse);
-    }
-
-    // Handle objects recursively
-    if (value && typeof value === "object") {
-      const result = {};
-      for (const [key, val] of Object.entries(value)) {
-        result[key] = traverse(val);
-      }
-      return result;
-    }
-
-    // Return primitives as-is
-    return value;
-  }
-
-  return [traverse(data), buffers];
-}
-
-export function replaceBuffers(data, buffers) {
-  function traverse(value) {
-    if (value && typeof value === "object") {
-      if (
-        value.__type__ === "ndarray" &&
-        value.__buffer_index__ !== undefined
-      ) {
-        value.data = buffers[value.__buffer_index__];
-        delete value.__buffer_index__;
-        return value;
-      }
-      if (Array.isArray(value)) {
-        return value.map(traverse);
-      }
-      const result = {};
-      for (const [key, val] of Object.entries(value)) {
-        result[key] = traverse(val);
-      }
-      return result;
-    }
-    return value;
-  }
-  return traverse(data);
-}
+export { collectBuffers, replaceBuffers } from "../../../colight-wire-protocol/src/js/buffers";

@@ -1,0 +1,19 @@
+{
+  "name": "@colight/wire-protocol",
+  "version": "0.1.0",
+  "description": "Binary wire protocol utilities for arrays.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
