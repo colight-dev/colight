@@ -13,7 +13,7 @@
   },
   "include": [
     "packages/colight/src/js",
-    "packages/colight-wire-protocol/src/js"
+    "packages/colight-serde/src/js"
   ],
   "exclude": ["node_modules"]
 }

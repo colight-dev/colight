@@ -15,10 +15,13 @@ export class OutputPanel {
   private panel: vscode.WebviewPanel | null = null;
   private mode: PanelMode = "snapshot";
   private widgets: WidgetEntry[] = [];
+  private widgetIdsByEvalId: Map<string, string> = new Map();
   private extensionUri: vscode.Uri;
   private evalServer: EvalServer;
 
   private widgetMessageDisposable: vscode.Disposable | null = null;
+  private connectionDisposable: vscode.Disposable | null = null;
+  private isConnected: boolean = false;
 
   private constructor(extensionUri: vscode.Uri) {
     this.extensionUri = extensionUri;
@@ -64,6 +67,8 @@ export class OutputPanel {
       this.panel = null;
       this.widgetMessageDisposable?.dispose();
       this.widgetMessageDisposable = null;
+      this.connectionDisposable?.dispose();
+      this.connectionDisposable = null;
     });
 
     // Forward widget messages from server to webview
@@ -72,6 +77,14 @@ export class OutputPanel {
       console.log("[Colight OutputPanel] Forwarding widget message to webview:", msg);
       this._sendToWebview(msg);
     });
+
+    this.isConnected = this.evalServer.connected;
+    this.connectionDisposable = this.evalServer.onConnectionStateChange(
+      (connected) => {
+        this.isConnected = connected;
+        this._sendConnectionState();
+      }
+    );
   }
 
   addWidget(evalId: string, visualBase64: string): void {
@@ -82,6 +95,7 @@ export class OutputPanel {
     };
 
     if (this.mode === "snapshot") {
+      this._disposeAllWidgets();
       // Replace all widgets with just this one
       this.widgets = [entry];
     } else {
@@ -98,6 +112,11 @@ export class OutputPanel {
   }
 
   removeWidget(evalId: string): void {
+    const widgetId = this.widgetIdsByEvalId.get(evalId);
+    if (widgetId) {
+      this.evalServer.disposeWidget(widgetId);
+      this.widgetIdsByEvalId.delete(evalId);
+    }
     this.widgets = this.widgets.filter((w) => w.evalId !== evalId);
     this._sendToWebview({
       type: "remove-widget",
@@ -106,6 +125,7 @@ export class OutputPanel {
   }
 
   clear(): void {
+    this._disposeAllWidgets();
     this.widgets = [];
     this._sendToWebview({ type: "clear" });
   }
@@ -139,6 +159,23 @@ export class OutputPanel {
     }
   }
 
+  private _sendConnectionState(): void {
+    if (!this.panel) {
+      return;
+    }
+    this._sendToWebview({
+      type: "connection-state",
+      connected: this.isConnected,
+    });
+  }
+
+  private _disposeAllWidgets(): void {
+    for (const widgetId of this.widgetIdsByEvalId.values()) {
+      this.evalServer.disposeWidget(widgetId);
+    }
+    this.widgetIdsByEvalId.clear();
+  }
+
   private _handleWebviewMessage(msg: { type: string; [key: string]: unknown }): void {
     switch (msg.type) {
       case "widget-command":
@@ -152,11 +189,29 @@ export class OutputPanel {
         );
         break;
 
+      case "register-widget": {
+        const evalId = msg.evalId as string | undefined;
+        const widgetId = msg.widgetId as string | undefined;
+        if (!evalId || !widgetId) {
+          break;
+        }
+        const entryExists = this.widgets.some((w) => w.evalId === evalId);
+        if (!entryExists) {
+          this.evalServer.disposeWidget(widgetId);
+          break;
+        }
+        this.widgetIdsByEvalId.set(evalId, widgetId);
+        break;
+      }
+
       case "set-mode":
         this.mode = msg.mode as PanelMode;
         break;
 
       case "remove-widget":
+        if (msg.widgetId && typeof msg.widgetId === "string") {
+          this.widgetIdsByEvalId.set(msg.evalId as string, msg.widgetId);
+        }
         this.removeWidget(msg.evalId as string);
         break;
 
@@ -167,6 +222,7 @@ export class OutputPanel {
       case "ready":
         // Webview is ready, send current state
         this._sendToWebview({ type: "set-mode", mode: this.mode });
+        this._sendConnectionState();
         for (const widget of this.widgets) {
           this._sendToWebview({
             type: "add-widget",
@@ -213,7 +269,18 @@ export class OutputPanel {
       <button data-mode="log">Log</button>
       <button data-mode="document" disabled title="Coming soon">Document</button>
     </div>
-    <button id="clear-btn" title="Clear all">Clear</button>
+    <div class="panel-actions">
+      <div
+        id="connection-status"
+        class="connection-status"
+        data-state="disconnected"
+        title="Eval server disconnected"
+      >
+        <span class="status-dot"></span>
+        <span class="status-label">Disconnected</span>
+      </div>
+      <button id="clear-btn" title="Clear all">Clear</button>
+    </div>
   </div>
   <div id="output-container"></div>
 

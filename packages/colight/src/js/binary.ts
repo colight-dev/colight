@@ -1,1 +1,1 @@
-export * from "../../../colight-wire-protocol/src/js/binary";
+export * from "../../../colight-serde/src/js/binary";

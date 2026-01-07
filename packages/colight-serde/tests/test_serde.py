@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from colight_wire_protocol import (
+from colight_serde import (
     BufferCollector,
     pack_message,
     serialize,

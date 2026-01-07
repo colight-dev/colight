@@ -11,9 +11,9 @@ export default defineConfig({
         __dirname,
         "../../packages/colight/src/js/scene3d"
       ),
-      "@colight/wire-protocol": path.resolve(
+      "@colight/serde": path.resolve(
         __dirname,
-        "../../packages/colight-wire-protocol/src/js"
+        "../../packages/colight-serde/src/js"
       ),
     },
   },

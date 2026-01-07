@@ -42,6 +42,9 @@ export class EvalServer {
 
   private _state: ServerState = "stopped";
   private statusBarItem: vscode.StatusBarItem | null = null;
+  private _connected: boolean = false;
+  private connectionEmitter = new vscode.EventEmitter<boolean>();
+  readonly onConnectionStateChange = this.connectionEmitter.event;
 
   private constructor() {
     this._createStatusBarItem();
@@ -85,9 +88,21 @@ export class EvalServer {
     return this._state;
   }
 
+  get connected(): boolean {
+    return this._connected;
+  }
+
   private _setState(state: ServerState): void {
     this._state = state;
     this._updateStatusBar();
+  }
+
+  private _setConnected(connected: boolean): void {
+    if (this._connected === connected) {
+      return;
+    }
+    this._connected = connected;
+    this.connectionEmitter.fire(connected);
   }
 
   static getInstance(): EvalServer {
@@ -262,12 +277,14 @@ export class EvalServer {
 
       this.ws.on("open", () => {
         clearTimeout(timeout);
+        this._setConnected(true);
         console.log("WebSocket connected to eval server");
         resolve();
       });
 
       this.ws.on("error", (err) => {
         clearTimeout(timeout);
+        this._setConnected(false);
         reject(err);
       });
 
@@ -278,6 +295,7 @@ export class EvalServer {
       this.ws.on("close", () => {
         console.log("WebSocket disconnected from eval server");
         this.ws = null;
+        this._setConnected(false);
       });
     });
   }
@@ -377,6 +395,22 @@ export class EvalServer {
     this.ws.send(JSON.stringify(msg));
   }
 
+  disposeWidget(widgetId: string): void {
+    log(`disposeWidget: widgetId=${widgetId}, wsState=${this.ws?.readyState}`);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      log(`Cannot dispose widget: not connected`);
+      return;
+    }
+
+    const msg = {
+      type: "widget-dispose",
+      widgetId,
+    };
+
+    log(`Sending widget-dispose to server: ${JSON.stringify(msg)}`);
+    this.ws.send(JSON.stringify(msg));
+  }
+
   async stop(): Promise<void> {
     if (this.ws) {
       this.ws.close();
@@ -388,6 +422,7 @@ export class EvalServer {
       this.process = null;
     }
 
+    this._setConnected(false);
     this._setState("stopped");
   }
 

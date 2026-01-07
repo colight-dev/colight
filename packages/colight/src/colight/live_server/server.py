@@ -448,6 +448,15 @@ class LiveServer:
                                 }
                                 await websocket.send(json.dumps(error_msg))
 
+                    elif message_type == "widget-dispose":
+                        widget_id = data.get("widgetId")
+                        if widget_id:
+                            removed = self.widget_manager.remove_widget(widget_id)
+                            print(
+                                f"[LiveServer] widget-dispose: widgetId={widget_id}, removed={removed}",
+                                flush=True,
+                            )
+
                     # Handle eval-code message (eval mode only)
                     elif message_type == "eval-code" and self.eval_mode:
                         await self._handle_eval_code(websocket, data)

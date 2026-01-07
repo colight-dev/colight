@@ -33,6 +33,39 @@ body {
   gap: 4px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editor-background);
+}
+
+.connection-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--vscode-charts-red, #f48771);
+}
+
+.connection-status[data-state="connected"] .status-dot {
+  background: var(--vscode-charts-green, #89d185);
+}
+
+.connection-status[data-state="connected"] .status-label {
+  color: var(--vscode-foreground);
+}
+
 .mode-toggle button,
 #clear-btn {
   padding: 4px 12px;

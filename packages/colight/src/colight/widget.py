@@ -9,7 +9,7 @@ import warnings
 
 from colight.env import CONFIG, ANYWIDGET_PATH
 from colight.protocols import Collector
-from colight_wire_protocol import serialize_binary_data, replace_buffers
+from colight_serde import serialize_binary_data, replace_buffers
 from colight.state_operations import entry_id, normalize_updates, apply_updates
 
 

@@ -16,6 +16,8 @@
   const container = document.getElementById("output-container");
   const modeButtons = document.querySelectorAll(".mode-toggle button");
   const clearBtn = document.getElementById("clear-btn");
+  const connectionStatus = document.getElementById("connection-status");
+  const connectionLabel = connectionStatus?.querySelector(".status-label");
 
   // Create experimental interface for a widget to enable bidirectional communication
   function createExperimental(widgetId) {
@@ -77,7 +79,8 @@
     closeBtn.innerHTML = "&times;";
     closeBtn.title = "Remove";
     closeBtn.addEventListener("click", () => {
-      vscode.postMessage({ type: "remove-widget", evalId });
+      const widgetId = widgets.get(evalId)?.widgetId;
+      vscode.postMessage({ type: "remove-widget", evalId, widgetId });
     });
 
     const widgetContainer = document.createElement("div");
@@ -158,6 +161,9 @@
     if (mode === "snapshot") {
       clearWidgets();
     }
+    if (widgets.has(evalId)) {
+      removeWidget(evalId);
+    }
 
     // Remove empty state if present
     const emptyState = container.querySelector(".empty-state");
@@ -178,27 +184,45 @@
     // Render the widget
     const result = await renderWidget(visualBase64, widgetContainer);
 
+    if (result?.dispose) {
+      entry.__colightDispose = result.dispose;
+    }
+    if (result?.widgetId) {
+      entry.dataset.widgetId = result.widgetId;
+    }
+
     widgets.set(evalId, {
       container: entry,
       dispose: result?.dispose,
       widgetId: result?.widgetId,
     });
+
+    if (result?.widgetId) {
+      vscode.postMessage({
+        type: "register-widget",
+        evalId,
+        widgetId: result.widgetId,
+      });
+    }
   }
 
   // Remove widget
   function removeWidget(evalId) {
-    const widget = widgets.get(evalId);
-    if (widget) {
-      if (widget.dispose) {
+    const entries = container.querySelectorAll(
+      `[data-eval-id="${evalId}"]`,
+    );
+    entries.forEach((entry) => {
+      const dispose = entry.__colightDispose;
+      if (typeof dispose === "function") {
         try {
-          widget.dispose();
+          dispose();
         } catch (e) {
           console.error("Error disposing widget:", e);
         }
       }
-      widget.container.remove();
-      widgets.delete(evalId);
-    }
+      entry.remove();
+    });
+    widgets.delete(evalId);
 
     // Show empty state if no widgets
     if (widgets.size === 0) {
@@ -208,16 +232,18 @@
 
   // Clear all widgets
   function clearWidgets() {
-    for (const [evalId, widget] of widgets) {
-      if (widget.dispose) {
+    const entries = container.querySelectorAll(".widget-entry");
+    entries.forEach((entry) => {
+      const dispose = entry.__colightDispose;
+      if (typeof dispose === "function") {
         try {
-          widget.dispose();
+          dispose();
         } catch (e) {
           console.error("Error disposing widget:", e);
         }
       }
-      widget.container.remove();
-    }
+      entry.remove();
+    });
     widgets.clear();
     showEmptyState();
   }
@@ -233,6 +259,17 @@
       <p>Press <kbd>Cmd+Shift+Enter</kbd> to evaluate a cell to this panel</p>
     `;
     container.appendChild(empty);
+  }
+
+  function setConnectionState(connected) {
+    if (!connectionStatus) return;
+    connectionStatus.dataset.state = connected ? "connected" : "disconnected";
+    connectionStatus.title = connected
+      ? "Eval server connected"
+      : "Eval server disconnected";
+    if (connectionLabel) {
+      connectionLabel.textContent = connected ? "Connected" : "Disconnected";
+    }
   }
 
   // Set mode
@@ -311,6 +348,10 @@
         showStdout(msg.evalId, msg.stdout);
         break;
 
+      case "connection-state":
+        setConnectionState(!!msg.connected);
+        break;
+
       case "update_state":
         // Forward state updates from Python to the widget instance
         console.log("[Colight] Received update_state:", msg);
@@ -346,6 +387,7 @@
   });
 
   // Initialize
+  setConnectionState(false);
   showEmptyState();
 
   // Tell extension we're ready

@@ -1,7 +1,7 @@
 # Wire Protocol Draft
 
 This document defines the draft JSON+binary wire format used by
-`colight-wire-protocol`.
+`colight-serde`.
 
 ## Overview
 

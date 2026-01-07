@@ -1,17 +1,17 @@
-# colight-wire-protocol
+# colight-serde
 
 Wire protocol utilities for sending NumPy arrays and binary buffers over JSON +
 binary channels. Deserialization on the JavaScript side is zero-copy; Python
 serialization may materialize contiguous bytes.
 
-See `packages/colight-wire-protocol/WIRE_PROTOCOL.md` for the draft spec.
+See `packages/colight-serde/WIRE_PROTOCOL.md` for the draft spec.
 
 ## Quick Usage
 
 Python:
 
 ```python
-from colight_wire_protocol import pack_message, unpack_message
+from colight_serde import pack_message, unpack_message
 import numpy as np
 
 payload = {"points": np.random.rand(4, 3).astype(np.float32)}
@@ -24,7 +24,7 @@ restored = unpack_message(envelope, buffers)
 JavaScript:
 
 ```ts
-import { packMessage, unpackMessage } from "@colight/wire-protocol";
+import { packMessage, unpackMessage } from "@colight/serde";
 
 const [envelope, buffers] = packMessage({
   points: new Float32Array([0, 1, 2, 3, 4, 5]),

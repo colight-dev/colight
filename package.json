@@ -6,7 +6,7 @@
     "type": "git",
     "url": "git+ssh://git@github.com/colight-dev/colight.git"
   },
-  "author": "Matthew Huebert <me@matt.is>",
+  "author": "Matthew Huebert <mhuebert@gmail.com>",
   "license": "Apache-2.0",
   "devDependencies": {
     "@playwright/test": "^1.57.0",

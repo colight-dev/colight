@@ -11,7 +11,7 @@ import { createRoot } from "react-dom/client";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Box } from "@react-three/drei";
 import * as THREE from "three";
-import { packMessage, unpackMessage } from "../../../packages/colight-wire-protocol/dist/index.mjs";
+import { packMessage, unpackMessage } from "../../../packages/colight-serde/dist/index.mjs";
 
 const WS_URL = `ws://${window.location.hostname}:8001`;
 

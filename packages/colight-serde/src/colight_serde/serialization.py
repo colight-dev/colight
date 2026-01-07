@@ -191,7 +191,7 @@ def serialize(
     data: Any,
     collector: Optional[List[Buffer] | BufferCollector] = None,
 ) -> Any:
-    """Serialize arrays and binary blobs into wire-protocol JSON structures."""
+    """Serialize arrays and binary blobs into binary JSON structures."""
     if isinstance(data, np.generic):
         return data.item()
 
@@ -230,7 +230,7 @@ def deserialize(
     data: Any,
     buffers: List[Buffer] | BufferCollector,
 ) -> Any:
-    """Deserialize wire-protocol JSON structures using provided buffers."""
+    """Deserialize binary JSON structures using provided buffers."""
     return replace_buffers(data, buffers)
 
 

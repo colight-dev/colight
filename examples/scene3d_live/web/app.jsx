@@ -9,7 +9,7 @@ import {
   sub,
   add,
 } from "@colight/scene3d";
-import { packMessage, unpackMessage } from "@colight/wire-protocol";
+import { packMessage, unpackMessage } from "@colight/serde";
 
 const WS_URL = `ws://${window.location.hostname}:8001`;
 

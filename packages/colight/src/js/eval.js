@@ -223,4 +223,4 @@ export function evaluate(node, $state, experimental, buffers) {
   }
 }
 
-export { collectBuffers, replaceBuffers } from "../../../colight-wire-protocol/src/js/buffers";
+export { collectBuffers, replaceBuffers } from "../../../colight-serde/src/js/buffers";

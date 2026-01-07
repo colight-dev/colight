@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 import websockets
 
-from colight_wire_protocol import pack_message, unpack_message
+from colight_serde import pack_message, unpack_message
 
 
 class Event(SimpleNamespace):

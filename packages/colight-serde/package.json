@@ -1,7 +1,7 @@
 {
-  "name": "@colight/wire-protocol",
+  "name": "@colight/serde",
   "version": "0.1.0",
-  "description": "Binary wire protocol utilities for arrays.",
+  "description": "Binary utilities for arrays.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.mjs",

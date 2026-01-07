@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "colight-wire-protocol"
+name = "colight-serde"
 version = "0.1.0"
-description = "Binary wire protocol for efficient array transfer."
+description = "Binary format for efficient array transfer."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
 
 [[project.authors]]
 name = "Matthew Huebert"
-email = "me@matt.is"
+email = "mhuebert@gmail.com"
 
 [project.license]
 text = "Apache-2.0"
@@ -23,4 +23,4 @@ text = "Apache-2.0"
 ignore-vcs = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/colight_wire_protocol"]
+packages = ["src/colight_serde"]
