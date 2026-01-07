@@ -259,16 +259,74 @@ export interface BaseComponentConfig {
   onHover?: (index: number | null) => void;
 
   /**
+   * Callback fired when the mouse hovers with detailed pick info.
+   * Receives null when hover ends.
+   */
+  onHoverDetail?: (info: PickInfo | null) => void;
+
+  /**
    * Callback fired when an instance is clicked.
    * The index parameter is the clicked instance index.
    */
   onClick?: (index: number) => void;
 
   /**
+   * Callback fired when an instance is clicked with detailed pick info.
+   */
+  onClickDetail?: (info: PickInfo) => void;
+
+  /**
    * Optional array of decorations to apply to specific instances.
    * Decorations can override colors, alpha, and scale for individual instances.
    */
   decorations?: Decoration[];
+}
+
+export type PickEventType = "hover" | "click" | "dragstart" | "drag" | "dragend";
+
+export interface PickRay {
+  origin: [number, number, number];
+  direction: [number, number, number];
+}
+
+export interface PickHit {
+  position: [number, number, number];
+  normal?: [number, number, number];
+  t?: number;
+  distance?: number;
+}
+
+export interface PickFace {
+  index: number;
+  name: string;
+}
+
+export interface PickSegment {
+  index: number;
+  t: number;
+  lineIndex?: number;
+}
+
+export interface PickCamera {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  fov: number;
+  near: number;
+  far: number;
+}
+
+export interface PickInfo {
+  event: PickEventType;
+  component: { index: number; type: string };
+  instanceIndex: number;
+  screen: { x: number; y: number; dpr: number; rectWidth: number; rectHeight: number };
+  ray: PickRay;
+  camera: PickCamera;
+  hit?: PickHit;
+  face?: PickFace;
+  segment?: PickSegment;
+  local?: { position: [number, number, number] };
 }
 
 export interface VertexBufferLayout {
@@ -302,6 +360,7 @@ export interface PipelineConfig {
     depthCompare: GPUCompareFunction;
   };
   colorWriteMask?: number; // Use number instead of GPUColorWrite
+  targets?: GPUColorTargetState[];
 }
 
 export interface GeometryData {

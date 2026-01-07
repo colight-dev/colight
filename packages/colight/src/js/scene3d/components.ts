@@ -267,6 +267,25 @@ export function createRenderPipeline(
     stripIndexFormat: config.primitive?.stripIndexFormat,
   };
 
+  const targets = config.targets || [
+    {
+      format,
+      writeMask: config.colorWriteMask ?? GPUColorWrite.ALL,
+      ...(config.blend && {
+        blend: {
+          color: config.blend.color || {
+            srcFactor: "src-alpha",
+            dstFactor: "one-minus-src-alpha",
+          },
+          alpha: config.blend.alpha || {
+            srcFactor: "one",
+            dstFactor: "one-minus-src-alpha",
+          },
+        },
+      }),
+    },
+  ];
+
   return device.createRenderPipeline({
     layout: pipelineLayout,
     vertex: {
@@ -277,24 +296,7 @@ export function createRenderPipeline(
     fragment: {
       module: device.createShaderModule({ code: config.fragmentShader }),
       entryPoint: config.fragmentEntryPoint,
-      targets: [
-        {
-          format,
-          writeMask: config.colorWriteMask ?? GPUColorWrite.ALL,
-          ...(config.blend && {
-            blend: {
-              color: config.blend.color || {
-                srcFactor: "src-alpha",
-                dstFactor: "one-minus-src-alpha",
-              },
-              alpha: config.blend.alpha || {
-                srcFactor: "one",
-                dstFactor: "one-minus-src-alpha",
-              },
-            },
-          }),
-        },
-      ],
+      targets,
     },
     primitive: primitiveConfig,
     depthStencil: config.depthStencil || {
@@ -558,8 +560,13 @@ export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
               POINT_CLOUD_GEOMETRY_LAYOUT,
               POINT_CLOUD_PICKING_INSTANCE_LAYOUT,
             ],
+            targets: [
+              { format: "r32uint" },
+              { format: "rgba32float" },
+              { format: "rgba8unorm" },
+            ],
           },
-          "rgba8unorm",
+          "r32uint",
         ),
       cache,
     );
@@ -746,8 +753,13 @@ export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
               MESH_GEOMETRY_LAYOUT,
               ELLIPSOID_PICKING_INSTANCE_LAYOUT,
             ],
+            targets: [
+              { format: "r32uint" },
+              { format: "rgba32float" },
+              { format: "rgba8unorm" },
+            ],
           },
-          "rgba8unorm",
+          "r32uint",
         );
       },
       cache,
@@ -895,8 +907,13 @@ export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
               CUBOID_PICKING_INSTANCE_LAYOUT,
             ],
             primitive: this.renderConfig,
+            targets: [
+              { format: "r32uint" },
+              { format: "rgba32float" },
+              { format: "rgba8unorm" },
+            ],
           },
-          "rgba8unorm",
+          "r32uint",
         );
       },
       cache,
@@ -942,6 +959,14 @@ function prepareLineSegments(elem: LineBeamsComponentConfig): number[] {
   }
   lineBeamsSegmentMap.set(elem, { segmentMap: segmentIndices });
   return segmentIndices;
+}
+
+export function getLineBeamsSegmentPointIndex(
+  elem: LineBeamsComponentConfig,
+  segmentIndex: number,
+): number | undefined {
+  const segmentMap = prepareLineSegments(elem);
+  return segmentMap[segmentIndex];
 }
 
 function countSegments(elem: LineBeamsComponentConfig): number {
@@ -1087,8 +1112,13 @@ export const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
               LINE_BEAM_PICKING_INSTANCE_LAYOUT,
             ],
             primitive: this.renderConfig,
+            targets: [
+              { format: "r32uint" },
+              { format: "rgba32float" },
+              { format: "rgba8unorm" },
+            ],
           },
-          "rgba8unorm",
+          "r32uint",
         );
       },
       cache,

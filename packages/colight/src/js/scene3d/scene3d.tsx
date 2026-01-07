@@ -214,6 +214,8 @@ interface SceneProps {
   defaultCamera?: CameraParams;
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
+  /** Callback fired with canvas element when mounted/unmounted */
+  onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   /** Optional ready state manager for render lifecycle tracking */
@@ -337,6 +339,7 @@ export function Scene({
   camera,
   defaultCamera,
   onCameraChange,
+  onCanvasRef,
   className,
   style,
   controls = [],
@@ -427,6 +430,7 @@ export function Scene({
             camera={camera}
             defaultCamera={defaultCamera}
             onCameraChange={cameraChangeCallback}
+            onCanvasRef={onCanvasRef}
             onFrameRendered={updateDisplay}
             onReady={onReady}
             readyState={readyState}

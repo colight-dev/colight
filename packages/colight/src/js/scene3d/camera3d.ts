@@ -463,7 +463,7 @@ export function getProjectionMatrix(
   camera: CameraState,
   aspect: number,
 ): Float32Array {
-  return glMatrix.mat4.perspective(
+  return glMatrix.mat4.perspectiveZO(
     glMatrix.mat4.create(),
     degreesToRadians(camera.fov), // Convert FOV to radians
     aspect,
@@ -517,3 +517,4 @@ export function hasCameraMoved(
   const dz = current[2] - last[2];
   return dx * dx + dy * dy + dz * dz > threshold;
 }
+

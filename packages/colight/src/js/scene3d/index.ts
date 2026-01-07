@@ -8,9 +8,9 @@ export {
   deco,
   computeCanvasDimensions,
 } from "./scene3d";
-export { SceneInner } from "./impl3d";
+export { SceneInner, screenRay } from "./impl3d";
 export { DEFAULT_CAMERA } from "./camera3d";
-export type { CameraParams } from "./camera3d";
+export type { CameraParams, CameraState } from "./camera3d";
 export type {
   ComponentConfig,
   PointCloudComponentConfig,
@@ -19,4 +19,4 @@ export type {
   LineBeamsComponentConfig,
 } from "./components";
 export { NOOP_READY_STATE } from "./types";
-export type { Decoration, ReadyState } from "./types";
+export type { Decoration, PickInfo, ReadyState } from "./types";

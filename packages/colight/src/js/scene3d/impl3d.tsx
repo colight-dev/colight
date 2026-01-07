@@ -24,6 +24,8 @@ import {
   zoom,
   DraggingState,
   hasCameraMoved,
+  getProjectionMatrix,
+  getViewMatrix,
 } from "./camera3d";
 
 import isEqual from "lodash-es/isEqual";
@@ -33,6 +35,7 @@ import {
   ComponentConfig,
   cuboidSpec,
   ellipsoidSpec,
+  getLineBeamsSegmentPointIndex,
   lineBeamsSpec,
   pointCloudSpec,
   buildPickingData,
@@ -52,7 +55,9 @@ import {
   ComponentOffset,
   NOOP_READY_STATE,
   ReadyState,
+  PickInfo,
 } from "./types";
+import { normalize as normalizeQuat, rotateVector } from "./quaternion";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -84,6 +89,9 @@ export interface SceneInnerProps {
 
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
+
+  /** Callback fired with canvas element when mounted/unmounted */
+  onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
 
   /** Callback fired after each frame render with the render time in milliseconds */
   onFrameRendered?: (renderTime: number) => void;
@@ -401,6 +409,39 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
   throw new Error(`Failed to get GPU adapter after ${maxAttempts} attempts`);
 };
 
+export function screenRay(
+  screenX: number,
+  screenY: number,
+  rect: { width: number; height: number },
+  camera: CameraState,
+): { origin: [number, number, number]; direction: [number, number, number] } | null {
+  const ndcX = (screenX / rect.width) * 2 - 1;
+  const ndcY = 1 - (screenY / rect.height) * 2;
+  const view = getViewMatrix(camera);
+  const proj = getProjectionMatrix(camera, rect.width / rect.height);
+  const viewProj = glMatrix.mat4.multiply(
+    glMatrix.mat4.create(),
+    proj,
+    view,
+  );
+  const inv = glMatrix.mat4.invert(glMatrix.mat4.create(), viewProj);
+  if (!inv) return null;
+
+  const near = glMatrix.vec4.fromValues(ndcX, ndcY, 0, 1);
+  const far = glMatrix.vec4.fromValues(ndcX, ndcY, 1, 1);
+  glMatrix.vec4.transformMat4(near, near, inv);
+  glMatrix.vec4.transformMat4(far, far, inv);
+
+  const origin: [number, number, number] = [near[0] / near[3], near[1] / near[3], near[2] / near[3]];
+  const farPoint: [number, number, number] = [far[0] / far[3], far[1] / far[3], far[2] / far[3]];
+  const dx = farPoint[0] - origin[0];
+  const dy = farPoint[1] - origin[1];
+  const dz = farPoint[2] - origin[2];
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const direction: [number, number, number] = [dx / len, dy / len, dz / len];
+  return { origin, direction };
+}
+
 export function SceneInner({
   components,
   containerWidth,
@@ -409,6 +450,7 @@ export function SceneInner({
   camera: controlledCamera,
   defaultCamera,
   onCameraChange,
+  onCanvasRef,
   onFrameRendered,
   onReady,
   readyState = NOOP_READY_STATE,
@@ -422,8 +464,12 @@ export function SceneInner({
     bindGroupLayout: GPUBindGroupLayout;
     depthTexture: GPUTexture | null;
     pickTexture: GPUTexture | null;
+    pickPositionTexture: GPUTexture | null;
+    pickNormalTexture: GPUTexture | null;
     pickDepthTexture: GPUTexture | null;
     readbackBuffer: GPUBuffer;
+    positionReadbackBuffer: GPUBuffer;
+    normalReadbackBuffer: GPUBuffer;
 
     renderObjects: RenderObject[];
     pipelineCache: Map<string, PipelineCacheEntry>;
@@ -496,6 +542,12 @@ export function SceneInner({
     renderToTexture,
   );
 
+  // Expose canvas ref to parent via callback
+  useEffect(() => {
+    onCanvasRef?.(canvasRef.current);
+    return () => onCanvasRef?.(null);
+  }, [onCanvasRef]);
+
   const [isReady, setIsReady] = useState(false);
 
   const pickingLockRef = useRef(false);
@@ -567,6 +619,18 @@ export function SceneInner({
         label: "Picking readback buffer",
       });
 
+      const positionReadbackBuffer = device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        label: "Position readback buffer",
+      });
+
+      const normalReadbackBuffer = device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        label: "Normal readback buffer",
+      });
+
       gpuRef.current = {
         device,
         context,
@@ -575,8 +639,12 @@ export function SceneInner({
         bindGroupLayout,
         depthTexture: null,
         pickTexture: null,
+        pickPositionTexture: null,
+        pickNormalTexture: null,
         pickDepthTexture: null,
         readbackBuffer,
+        positionReadbackBuffer,
+        normalReadbackBuffer,
         renderObjects: [],
         pipelineCache: new Map(),
         dynamicBuffers: null,
@@ -621,7 +689,7 @@ export function SceneInner({
 
   const createOrUpdatePickTextures = useCallback(() => {
     if (!gpuRef.current || !canvasRef.current) return;
-    const { device, pickTexture, pickDepthTexture } = gpuRef.current;
+    const { device, pickTexture, pickPositionTexture, pickNormalTexture, pickDepthTexture } = gpuRef.current;
 
     // Get the actual canvas size
     const canvas = canvasRef.current;
@@ -629,19 +697,40 @@ export function SceneInner({
     const displayHeight = canvas.height;
 
     if (pickTexture) pickTexture.destroy();
+    if (pickPositionTexture) pickPositionTexture.destroy();
+    if (pickNormalTexture) pickNormalTexture.destroy();
     if (pickDepthTexture) pickDepthTexture.destroy();
 
+    // Element ID texture (R32Uint for element index)
     const colorTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format: "r32uint",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+
+    // World position texture (RGBA32Float for XYZ position + padding)
+    const positionTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format: "rgba32float",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+
+    // World normal texture (RGBA8Unorm for XYZ normal packed to 0..1)
+    const normalTex = device.createTexture({
       size: [displayWidth, displayHeight],
       format: "rgba8unorm",
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
     });
+
     const depthTex = device.createTexture({
       size: [displayWidth, displayHeight],
       format: "depth24plus",
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
+
     gpuRef.current.pickTexture = colorTex;
+    gpuRef.current.pickPositionTexture = positionTex;
+    gpuRef.current.pickNormalTexture = normalTex;
     gpuRef.current.pickDepthTexture = depthTex;
   }, []);
 
@@ -1065,6 +1154,7 @@ export function SceneInner({
     mode: "hover" | "click",
   ) {
     if (!gpuRef.current || !canvasRef.current || pickingLockRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
     const pickingId = Date.now();
     const currentPickingId = pickingId;
     pickingLockRef.current = true;
@@ -1073,12 +1163,16 @@ export function SceneInner({
       const {
         device,
         pickTexture,
+        pickPositionTexture,
+        pickNormalTexture,
         pickDepthTexture,
         readbackBuffer,
+        positionReadbackBuffer,
+        normalReadbackBuffer,
         uniformBindGroup,
         renderObjects,
       } = gpuRef.current;
-      if (!pickTexture || !pickDepthTexture || !readbackBuffer) return;
+      if (!pickTexture || !pickPositionTexture || !pickNormalTexture || !pickDepthTexture || !readbackBuffer) return;
 
       // Ensure picking data is ready for all objects
       for (let i = 0; i < renderObjects.length; i++) {
@@ -1102,7 +1196,9 @@ export function SceneInner({
         pickX >= displayWidth ||
         pickY >= displayHeight
       ) {
-        if (mode === "hover") handleHoverID(0);
+        if (mode === "hover") {
+          handleHoverID(0, screenX, screenY, rect);
+        }
         return;
       }
 
@@ -1111,7 +1207,19 @@ export function SceneInner({
         colorAttachments: [
           {
             view: pickTexture.createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            loadOp: "clear",
+            storeOp: "store",
+          },
+          {
+            view: pickPositionTexture.createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            loadOp: "clear",
+            storeOp: "store",
+          },
+          {
+            view: pickNormalTexture.createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
             loadOp: "clear",
             storeOp: "store",
           },
@@ -1152,32 +1260,68 @@ export function SceneInner({
         { buffer: readbackBuffer, bytesPerRow: 256, rowsPerImage: 1 },
         [1, 1, 1],
       );
+      cmd.copyTextureToBuffer(
+        { texture: pickPositionTexture, origin: { x: pickX, y: pickY } },
+        { buffer: positionReadbackBuffer, bytesPerRow: 256, rowsPerImage: 1 },
+        [1, 1, 1],
+      );
+      cmd.copyTextureToBuffer(
+        { texture: pickNormalTexture, origin: { x: pickX, y: pickY } },
+        { buffer: normalReadbackBuffer, bytesPerRow: 256, rowsPerImage: 1 },
+        [1, 1, 1],
+      );
       device.queue.submit([cmd.finish()]);
 
       if (currentPickingId !== pickingId) return;
-      await readbackBuffer.mapAsync(GPUMapMode.READ);
+      await Promise.all([
+        readbackBuffer.mapAsync(GPUMapMode.READ),
+        positionReadbackBuffer.mapAsync(GPUMapMode.READ),
+        normalReadbackBuffer.mapAsync(GPUMapMode.READ),
+      ]);
+
       if (currentPickingId !== pickingId) {
         readbackBuffer.unmap();
+        positionReadbackBuffer.unmap();
+        normalReadbackBuffer.unmap();
         return;
       }
-      const arr = new Uint8Array(readbackBuffer.getMappedRange());
-      const r = arr[0],
-        g = arr[1],
-        b = arr[2];
+
+      const idArr = new Uint32Array(readbackBuffer.getMappedRange());
+      const pickedID = idArr[0];
       readbackBuffer.unmap();
-      const pickedID = (b << 16) | (g << 8) | r;
+
+      const posArr = new Float32Array(positionReadbackBuffer.getMappedRange());
+      const position: [number, number, number] = [posArr[0], posArr[1], posArr[2]];
+      positionReadbackBuffer.unmap();
+
+      const normArr = new Uint8Array(normalReadbackBuffer.getMappedRange());
+      // Decode normal from [0..255] to [-1..1]
+      // val = (byte / 255) * 2 - 1
+      const normal: [number, number, number] = [
+        (normArr[0] / 255.0) * 2.0 - 1.0,
+        (normArr[1] / 255.0) * 2.0 - 1.0,
+        (normArr[2] / 255.0) * 2.0 - 1.0,
+      ];
+      normalReadbackBuffer.unmap();
 
       if (mode === "hover") {
-        handleHoverID(pickedID);
+        handleHoverID(pickedID, screenX, screenY, rect, position, normal);
       } else {
-        handleClickID(pickedID);
+        handleClickID(pickedID, screenX, screenY, rect, position, normal);
       }
     } finally {
       pickingLockRef.current = false;
     }
   }
 
-  function handleHoverID(pickedID: number) {
+  function handleHoverID(
+    pickedID: number,
+    screenX: number,
+    screenY: number,
+    rect: DOMRect,
+    position?: [number, number, number],
+    normal?: [number, number, number],
+  ) {
     if (!gpuRef.current) return;
 
     // Get combined instance index
@@ -1210,28 +1354,48 @@ export function SceneInner({
       if (newHoverState) break; // Found the matching component
     }
 
-    // If hover state hasn't changed, do nothing
-    if (
-      (!lastHoverState.current && !newHoverState) ||
-      (lastHoverState.current &&
-        newHoverState &&
-        lastHoverState.current.componentIdx === newHoverState.componentIdx &&
-        lastHoverState.current.elementIdx === newHoverState.elementIdx)
-    ) {
+    const sameElement =
+      lastHoverState.current &&
+      newHoverState &&
+      lastHoverState.current.componentIdx === newHoverState.componentIdx &&
+      lastHoverState.current.elementIdx === newHoverState.elementIdx;
+
+    // If no element and no change, do nothing
+    if (!lastHoverState.current && !newHoverState) {
       return;
     }
 
-    // Clear previous hover if it exists
-    if (lastHoverState.current) {
+    // Clear previous hover if element changed
+    if (lastHoverState.current && !sameElement) {
       const prevComponent = components[lastHoverState.current.componentIdx];
       prevComponent?.onHover?.(null);
+      prevComponent?.onHoverDetail?.(null);
     }
 
-    // Set new hover if it exists
+    // Set/update hover if we have a new state
     if (newHoverState) {
       const { componentIdx, elementIdx } = newHoverState;
       if (componentIdx >= 0 && componentIdx < components.length) {
-        components[componentIdx].onHover?.(elementIdx);
+        // Only call onHover when element changes (not just position)
+        if (!sameElement) {
+          components[componentIdx].onHover?.(elementIdx);
+        }
+        // Always call onHoverDetail with fresh position/normal data
+        if (components[componentIdx].onHoverDetail) {
+          const info = buildPickInfo(
+            "hover",
+            componentIdx,
+            elementIdx,
+            screenX,
+            screenY,
+            rect,
+            position,
+            normal,
+          );
+          if (info) {
+            components[componentIdx].onHoverDetail?.(info);
+          }
+        }
       }
     }
 
@@ -1239,7 +1403,14 @@ export function SceneInner({
     lastHoverState.current = newHoverState;
   }
 
-  function handleClickID(pickedID: number) {
+  function handleClickID(
+    pickedID: number,
+    screenX: number,
+    screenY: number,
+    rect: DOMRect,
+    position?: [number, number, number],
+    normal?: [number, number, number],
+  ) {
     if (!gpuRef.current) return;
 
     // Get combined instance index
@@ -1261,11 +1432,190 @@ export function SceneInner({
           const elementIdx = globalIdx - offset.pickingStart;
           if (componentIdx >= 0 && componentIdx < components.length) {
             components[componentIdx].onClick?.(elementIdx);
+            if (components[componentIdx].onClickDetail) {
+              const info = buildPickInfo(
+                "click",
+                componentIdx,
+                elementIdx,
+                screenX,
+                screenY,
+                rect,
+                position,
+                normal,
+              );
+              if (info) {
+                components[componentIdx].onClickDetail?.(info);
+              }
+            }
           }
           return; // Found and handled the click
         }
       }
     }
+  }
+
+  const faceNames = ["+x", "-x", "+y", "-y", "+z", "-z"];
+
+  function readVec3(arrayLike, index) {
+    const base = index * 3;
+    return [arrayLike[base + 0], arrayLike[base + 1], arrayLike[base + 2]];
+  }
+
+  function readQuat(arrayLike, index) {
+    const base = index * 4;
+    return [
+      arrayLike[base + 0],
+      arrayLike[base + 1],
+      arrayLike[base + 2],
+      arrayLike[base + 3],
+    ];
+  }
+
+  function getQuaternion(component, index, fallback) {
+    if (component.quaternions) {
+      return readQuat(component.quaternions, index);
+    }
+    if (component.quaternion) {
+      return component.quaternion;
+    }
+    return fallback;
+  }
+
+  function normalizeVec3(vec) {
+    const len = Math.hypot(vec[0], vec[1], vec[2]);
+    if (!len) return [0, 0, 0];
+    return [vec[0] / len, vec[1] / len, vec[2] / len];
+  }
+
+  function subVec3(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  }
+
+  function addVec3(a, b) {
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  }
+
+  function scaleVec3(v, s) {
+    return [v[0] * s, v[1] * s, v[2] * s];
+  }
+
+  function dotVec3(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+
+  function buildPickInfo(
+    mode: PickEventType,
+    componentIndex: number,
+    elementIndex: number,
+    screenX: number,
+    screenY: number,
+    rect: DOMRect,
+    position?: [number, number, number],
+    normal?: [number, number, number],
+  ): PickInfo | null {
+    const camera = activeCameraRef.current;
+    const component = components[componentIndex];
+    if (!camera || !component) return null;
+
+    const ray = screenRay(screenX, screenY, rect, camera);
+    if (!ray) return null;
+
+    const info: PickInfo = {
+      event: mode,
+      component: { index: componentIndex, type: component.type },
+      instanceIndex: elementIndex,
+      screen: {
+        x: screenX,
+        y: screenY,
+        dpr: window.devicePixelRatio || 1,
+        rectWidth: rect.width,
+        rectHeight: rect.height,
+      },
+      ray,
+      camera: createCameraParams(camera),
+    };
+
+    if (position) {
+      info.hit = { position, normal, t: 0 };
+
+      // Calculate local position if applicable
+      if (
+        (component.type === "Cuboid" ||
+          component.type === "Ellipsoid" ||
+          component.type === "EllipsoidAxes") &&
+        component.centers
+      ) {
+        const center = readVec3(component.centers, elementIndex);
+        const quat = getQuaternion(component, elementIndex, [0, 0, 0, 1]);
+        const q = normalizeQuat(quat);
+        const qInv = [-q[0], -q[1], -q[2], q[3]];
+        const localPos = rotateVector(subVec3(position, center), qInv);
+        info.local = { position: localPos };
+
+        if (component.type === "Cuboid" && normal) {
+          const localNormal = rotateVector(normal, qInv);
+          let hitAxis = 0;
+          let hitSign = 1;
+
+          for (let i = 0; i < 3; i++) {
+            if (Math.abs(localNormal[i]) > 0.5) {
+              hitAxis = i;
+              hitSign = localNormal[i] > 0 ? 1 : -1;
+            }
+          }
+
+          const faceIndex = hitAxis * 2 + (hitSign > 0 ? 0 : 1);
+          info.face = {
+            index: faceIndex,
+            name: faceNames[faceIndex] || "unknown",
+          };
+        }
+      }
+
+      if (component.type === "LineBeams") {
+        const segmentPointIndex = getLineBeamsSegmentPointIndex(
+          component,
+          elementIndex,
+        );
+        if (segmentPointIndex !== undefined) {
+          const start = [
+            component.points[segmentPointIndex * 4 + 0],
+            component.points[segmentPointIndex * 4 + 1],
+            component.points[segmentPointIndex * 4 + 2],
+          ];
+          const end = [
+            component.points[(segmentPointIndex + 1) * 4 + 0],
+            component.points[(segmentPointIndex + 1) * 4 + 1],
+            component.points[(segmentPointIndex + 1) * 4 + 2],
+          ];
+          const lineIndex = Math.floor(
+            component.points[segmentPointIndex * 4 + 3],
+          );
+
+          // Calculate t along the segment
+          const v = subVec3(end, start);
+          const w = subVec3(position, start);
+          const u = dotVec3(w, v) / dotVec3(v, v);
+
+          info.segment = {
+            index: elementIndex,
+            t: u,
+            lineIndex,
+          };
+        }
+      }
+
+      return info;
+    }
+
+    // Fallback for cases where GPU position is not available (should not happen with MRT)
+    if (component.type === "PointCloud") {
+      const center = readVec3(component.centers, elementIndex);
+      info.hit = { position: center };
+      return info;
+    }
+
+    return info;
   }
 
   /******************************************************

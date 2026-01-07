@@ -112,23 +112,27 @@ export const ringShaders = /*wgsl*/ `
     return out;
   }
 
-  @vertex
-  fn vs_pick(
-    @location(0) center: vec3<f32>,  // Centerline attribute (first 3 floats)
-    @location(1) offset: vec3<f32>,  // Tube offset attribute (next 3 floats)
-    @location(2) inNormal: vec3<f32>, // Precomputed normal (last 3 floats)
-    @location(3) position: vec3<f32>,  // Instance center
-    @location(4) size: vec3<f32>,      // Instance non-uniform scaling for ellipsoid
-    @location(5) quaternion: vec4<f32>,// Instance rotation
-    @location(6) pickID: f32           // Picking ID
-  ) -> VSOut {
-    let worldPos = computeRingPosition(center, offset, position, size, quaternion);
+    @vertex
+    fn vs_pick(
+      @location(0) center: vec3<f32>,  // Centerline attribute (first 3 floats)
+      @location(1) offset: vec3<f32>,  // Tube offset attribute (next 3 floats)
+      @location(2) inNormal: vec3<f32>, // Precomputed normal (last 3 floats)
+      @location(3) position: vec3<f32>,  // Instance center
+      @location(4) size: vec3<f32>,      // Instance non-uniform scaling for ellipsoid
+      @location(5) quaternion: vec4<f32>,// Instance rotation
+      @location(6) pickID: f32           // Picking ID
+    ) -> VSOut {
+      let worldPos = computeRingPosition(center, offset, position, size, quaternion);
+      let worldNormal = quat_rotate(quaternion, normalize(offset));
 
-    var out: VSOut;
-    out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-    out.pickID = pickID;
-    return out;
-  }`;
+      var out: VSOut;
+      out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
+      out.pickID = pickID;
+      out.worldPos = worldPos;
+      out.normal = worldNormal;
+      return out;
+    }
+  `;
 
 export const ringFragCode = /*wgsl*/ `
   ${cameraStruct}
@@ -283,8 +287,13 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
             fragmentEntryPoint: "fs_pick",
             bufferLayouts: [RING_GEOMETRY_LAYOUT, RING_PICKING_INSTANCE_LAYOUT],
             primitive: this.renderConfig,
+            targets: [
+              { format: "r32uint" },
+              { format: "rgba32float" },
+              { format: "rgba8unorm" },
+            ],
           },
-          "rgba8unorm",
+          "r32uint",
         );
       },
       cache,

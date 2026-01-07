@@ -81,7 +81,9 @@ struct VSOut {
 export const pickingVSOut = /*wgsl*/ `
 struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>,
+  @location(2) normal: vec3<f32>
 };`;
 
 export const billboardVertCode = /*wgsl*/ `
@@ -139,6 +141,8 @@ fn vs_main(
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
+  out.normal = normal;
   return out;
 }`;
 
@@ -213,9 +217,15 @@ fn vs_main(
   // Apply translation
   let worldPos = position + rotatedPos;
 
+  // Transform normal - first normalize by size, then rotate by quaternion
+  let invScaledNorm = normalize(normal / size);
+  let rotatedNorm = quat_rotate(quaternion, invScaledNorm);
+
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
+  out.normal = rotatedNorm;
   return out;
 }`;
 
@@ -295,9 +305,15 @@ fn vs_main(
   // Apply translation
   let worldPos = position + rotatedPos;
 
+  // Transform normal - first normalize by size, then rotate by quaternion
+  let invScaledNorm = normalize(normal / size);
+  let rotatedNorm = quat_rotate(quaternion, invScaledNorm);
+
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
+  out.normal = rotatedNorm;
   return out;
 }`;
 
@@ -418,20 +434,38 @@ fn vs_main(
     + yDir * localY
     + zDir * localZ;
 
+  // Transform normal to world space
+  let worldNorm = normalize(
+    xDir * normal.x +
+    yDir * normal.y +
+    zDir * normal.z
+  );
+
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
+  out.normal = worldNorm;
   return out;
 }`;
 
 export const pickingFragCode = /*wgsl*/ `
+${pickingVSOut}
+
+struct PickOut {
+  @location(0) pickID: u32,
+  @location(1) worldPos: vec4<f32>,
+  @location(2) normal: vec4<f32>,
+}
+
 @fragment
-fn fs_pick(@location(0) pickID: f32)-> @location(0) vec4<f32> {
-  let iID = u32(pickID);
-  let r = f32(iID & 255u)/255.0;
-  let g = f32((iID>>8)&255u)/255.0;
-  let b = f32((iID>>16)&255u)/255.0;
-  return vec4<f32>(r,g,b,1.0);
+fn fs_pick(in: VSOut) -> PickOut {
+  var out: PickOut;
+  out.pickID = u32(in.pickID);
+  out.worldPos = vec4<f32>(in.worldPos, 1.0);
+  // Encode normal [-1, 1] -> [0, 1]
+  out.normal = vec4<f32>(in.normal * 0.5 + 0.5, 1.0);
+  return out;
 }`;
 
 // Helper function to create vertex buffer layouts
