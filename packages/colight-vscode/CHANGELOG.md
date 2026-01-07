@@ -12,6 +12,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
+## [0.1.26] - 2026-01-07
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## [0.1.24] - 2024-11-29
 
 ### Added
@@ -200,3 +208,4 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Basic error handling and user feedback
 - Configuration options for cell markers
 - Initial test suite
+

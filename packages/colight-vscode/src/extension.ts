@@ -8,6 +8,8 @@ import {
   TreeCursor,
 } from "@lezer/common";
 import * as fs from "fs";
+import { EvalServer } from "./evalServer";
+import { OutputPanel } from "./outputPanel";
 
 let config = vscode.workspace.getConfiguration("colight");
 
@@ -1346,6 +1348,144 @@ export function activate(context: vscode.ExtensionContext) {
         }
       )
     );
+
+    // --- Colight Output Panel Commands ---
+
+    disposables.push(
+      vscode.commands.registerCommand(
+        "extension.evaluateCellToPanel",
+        async () => {
+          const editor = vscode.window.activeTextEditor;
+          if (!editor || !isStandardEditor(editor)) {
+            return;
+          }
+
+          // Get the cell or selection to evaluate
+          let code: string;
+          if (!editor.selection.isEmpty) {
+            code = editor.document.getText(editor.selection);
+          } else {
+            const cell = getCellAtPosition(
+              editor.document,
+              editor.selection.active
+            );
+            if (!cell) {
+              vscode.window.showWarningMessage("No cell found at cursor");
+              return;
+            }
+            code = cell.text;
+          }
+
+          // Get or create output panel
+          const panel = OutputPanel.getInstance(context.extensionUri);
+          panel.show();
+
+          // Evaluate the code
+          try {
+            console.log("[Colight] Evaluating code:", code.slice(0, 100) + "...");
+            const server = EvalServer.getInstance();
+            const result = await server.eval(code, editor.document.fileName);
+            console.log("[Colight] Got result:", {
+              evalId: result.evalId,
+              hasVisual: !!result.visual,
+              hasError: !!result.error,
+              stdout: result.stdout?.slice(0, 100),
+            });
+
+            if (result.stdout) {
+              panel.showStdout(result.evalId, result.stdout);
+            }
+
+            if (result.error) {
+              panel.showError(result.evalId, result.error);
+            } else if (result.visual) {
+              panel.addWidget(result.evalId, result.visual);
+            } else {
+              // No visual and no error - show a message
+              vscode.window.showInformationMessage(
+                "Code evaluated but produced no visual output"
+              );
+            }
+          } catch (err) {
+            console.error("[Colight] Evaluation error:", err);
+            const errorMessage =
+              err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(
+              `Evaluation failed: ${errorMessage}`
+            );
+          }
+        }
+      )
+    );
+
+    disposables.push(
+      vscode.commands.registerCommand("extension.showOutputPanel", () => {
+        const panel = OutputPanel.getInstance(context.extensionUri);
+        panel.show();
+      })
+    );
+
+    disposables.push(
+      vscode.commands.registerCommand("extension.clearOutputPanel", () => {
+        const panel = OutputPanel.getInstance(context.extensionUri);
+        panel.clear();
+      })
+    );
+
+    disposables.push(
+      vscode.commands.registerCommand("extension.evalServerMenu", async () => {
+        const server = EvalServer.getInstance();
+        const state = server.state;
+
+        const items: vscode.QuickPickItem[] = [];
+
+        if (state === "running") {
+          items.push(
+            { label: "$(debug-stop) Stop Server", description: "Stop the Colight eval server" },
+            { label: "$(debug-restart) Restart Server", description: "Restart the Colight eval server" }
+          );
+        } else if (state === "stopped") {
+          items.push(
+            { label: "$(play) Start Server", description: "Start the Colight eval server" }
+          );
+        } else {
+          // starting
+          items.push(
+            { label: "$(loading~spin) Starting...", description: "Server is starting up" }
+          );
+        }
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: `Colight Eval Server (${state})`,
+        });
+
+        if (!selected) {
+          return;
+        }
+
+        if (selected.label.includes("Stop")) {
+          await server.stop();
+          vscode.window.showInformationMessage("Colight eval server stopped");
+        } else if (selected.label.includes("Restart")) {
+          await server.restart();
+          vscode.window.showInformationMessage("Colight eval server restarted");
+        } else if (selected.label.includes("Start")) {
+          try {
+            await server.start();
+            vscode.window.showInformationMessage("Colight eval server started");
+          } catch (err) {
+            // Error already shown by EvalServer
+          }
+        }
+      })
+    );
+
+    // Stop eval server on deactivation
+    context.subscriptions.push({
+      dispose: () => {
+        EvalServer.getInstance().dispose();
+      },
+    });
 
     disposables.push(
       vscode.workspace.onDidCloseTextDocument((document) => {

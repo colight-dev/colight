@@ -52,9 +52,18 @@ class LiveWidgetManager:
         if widget is None:
             widget = LiveWidget(widget_id, file_path, self._send_message)
             self._widgets[widget_id] = widget
+            print(f"[LiveWidgetManager] Created widget: {widget_id}", flush=True)
         else:
             widget.update_file(file_path)
         return widget
+
+    def remove_widget(self, widget_id: str) -> bool:
+        """Remove a widget from the manager. Returns True if widget existed."""
+        if widget_id in self._widgets:
+            del self._widgets[widget_id]
+            print(f"[LiveWidgetManager] Removed widget: {widget_id}", flush=True)
+            return True
+        return False
 
     def handle_command(
         self,
@@ -68,9 +77,12 @@ class LiveWidgetManager:
         Returns:
             (success, error_message): success=True if handled, error_message if failed
         """
+        print(f"[LiveWidgetManager] handle_command: widget_id={widget_id}, command={command}", flush=True)
+        print(f"[LiveWidgetManager] known widgets: {list(self._widgets.keys())}", flush=True)
         widget = self._widgets.get(widget_id)
         if widget is None:
             error = f"Unknown widget id: {widget_id}"
+            print(f"[LiveWidgetManager] {error}", flush=True)
             logger.warning(error)
             return (False, error)
 

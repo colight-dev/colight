@@ -3,7 +3,7 @@
   "displayName": "Colight",
   "publisher": "colight",
   "description": "Rapid Python eval without markup.",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "engines": {
     "vscode": "^1.89.0"
   },
@@ -51,6 +51,22 @@
       {
         "command": "extension.evaluateToLastCell",
         "title": "Colight: Evaluate to Last Cell"
+      },
+      {
+        "command": "extension.evaluateCellToPanel",
+        "title": "Colight: Evaluate Cell to Output Panel"
+      },
+      {
+        "command": "extension.showOutputPanel",
+        "title": "Colight: Show Output Panel"
+      },
+      {
+        "command": "extension.clearOutputPanel",
+        "title": "Colight: Clear Output Panel"
+      },
+      {
+        "command": "extension.evalServerMenu",
+        "title": "Colight: Eval Server Menu"
       }
     ],
     "configuration": [
@@ -122,6 +138,12 @@
         "command": "extension.shrinkSelection",
         "key": "cmd+2",
         "when": "editorTextFocus && editorLangId == 'python' && !notebookCellListFocused && !inlineChatFocused && !notebookCellExecuting && !jupyter.executing && !jupyter.hasNativeCells && !jupyter.inInteractiveWindow && activeEditor !== 'workbench.editor.interactive'"
+      },
+      {
+        "command": "extension.evaluateCellToPanel",
+        "key": "cmd+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus && editorLangId == 'python'"
       }
     ],
     "colors": [
@@ -157,11 +179,12 @@
   "devDependencies": {
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
+    "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.11.0",
     "@vscode/test-cli": "^0.0.9",
     "@vscode/test-electron": "^2.4.0",
-    "@vscode/vsce": "^3.2.1",
+    "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.21.5",
     "eslint": "^8.57.0",
     "npm-run-all": "^4.1.5",
@@ -170,7 +193,8 @@
   "license": "MIT",
   "dependencies": {
     "@lezer/python": "^1.1.14",
-    "@types/vscode": "1.89.0"
+    "@types/vscode": "1.89.0",
+    "ws": "^8.18.0"
   },
   "repository": {
     "type": "git",

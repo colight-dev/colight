@@ -189,6 +189,7 @@ class LiveServer:
         open_path: Optional[str] = None,
         verbose: bool = False,
         pragma: Optional[str | set] = set(),
+        eval_mode: bool = False,
     ):
         self.input_path = input_path.resolve()  # Always use absolute path
         self.verbose = verbose
@@ -202,6 +203,7 @@ class LiveServer:
         self.ws_port = ws_port
         self.open_url = open_url
         self.open_path = open_path
+        self.eval_mode = eval_mode
 
         self.connections: Set[Any] = set()  # WebSocket connections
         self.client_registry = (
@@ -225,6 +227,15 @@ class LiveServer:
         self._changed_files_buffer = set()
         self._notification_task = None
         self._notification_delay = 0.1  # 100ms throttle
+
+        # Eval mode: persistent executor for code snippets
+        self._eval_executor: Optional["BlockExecutor"] = None
+        if self.eval_mode:
+            from colight.runtime.executor import BlockExecutor
+
+            self._eval_executor = BlockExecutor(
+                verbose=self.verbose, widget_manager=self.widget_manager
+            )
 
     def _get_spa_html(self):
         """Get the SPA HTML template."""
@@ -334,6 +345,7 @@ class LiveServer:
     async def _websocket_handler(self, websocket):
         """Handle WebSocket connections."""
         self.connections.add(websocket)
+        print(f"[LiveServer] WebSocket connected, total connections: {len(self.connections)}", flush=True)
         client_id = None
         try:
             # Listen for messages from the client
@@ -341,6 +353,7 @@ class LiveServer:
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")
+                    print(f"[LiveServer] Received message type: {message_type}", flush=True)
 
                     # Handle watch-file message
                     if message_type == "watch-file":
@@ -413,9 +426,17 @@ class LiveServer:
                             except Exception as exc:
                                 if self.verbose:
                                     print(f"Failed to decode widget buffer: {exc}")
+                        print(
+                            f"[LiveServer] widget-command: widgetId={widget_id}, command={command}, params={params}",
+                            flush=True,
+                        )
                         if widget_id and command:
                             success, error = self.widget_manager.handle_command(
                                 widget_id, command, params, buffers
+                            )
+                            print(
+                                f"[LiveServer] widget-command result: success={success}, error={error}",
+                                flush=True,
                             )
                             if not success:
                                 # Send error response back to client
@@ -426,6 +447,11 @@ class LiveServer:
                                     "error": error or "Command failed",
                                 }
                                 await websocket.send(json.dumps(error_msg))
+
+                    # Handle eval-code message (eval mode only)
+                    elif message_type == "eval-code" and self.eval_mode:
+                        await self._handle_eval_code(websocket, data)
+
                 except json.JSONDecodeError:
                     pass  # Ignore invalid messages
         except websockets.exceptions.ConnectionClosed:
@@ -434,6 +460,126 @@ class LiveServer:
             self.connections.remove(websocket)
             if client_id:
                 self.client_registry.unregister_client(client_id)
+
+    async def _handle_eval_code(self, websocket, data: dict):
+        """Handle eval-code message: execute code and return result.
+
+        Message format:
+            {"type": "eval-code", "code": "...", "evalId": "uuid", "filePath": "optional/path.py"}
+
+        Response format:
+            {"type": "eval-result", "evalId": "uuid", "visual": "base64...", "stdout": "...", "error": null}
+        """
+        import contextlib
+        import io
+
+        from colight.inspect import inspect
+
+        code = data.get("code", "")
+        eval_id = data.get("evalId", "")
+        file_path = data.get("filePath", "<eval>")
+
+        if not self._eval_executor:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "eval-result",
+                        "evalId": eval_id,
+                        "error": "Eval mode not enabled",
+                    }
+                )
+            )
+            return
+
+        # Capture stdout
+        stdout_capture = io.StringIO()
+        result_value = None
+        error = None
+        colight_bytes = None
+
+        try:
+            code = code.strip()
+            if not code:
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "eval-result",
+                            "evalId": eval_id,
+                            "visual": None,
+                            "stdout": "",
+                            "error": None,
+                        }
+                    )
+                )
+                return
+
+            # Set __file__ for imports to work properly
+            self._eval_executor.env["__file__"] = file_path
+
+            with contextlib.redirect_stdout(stdout_capture):
+                # Use AST to properly separate statements from trailing expression
+                import ast
+
+                tree = ast.parse(code, file_path, "exec")
+
+                # Check if the last statement is an expression
+                final_expr = None
+                exec_statements = tree.body
+
+                if tree.body and isinstance(tree.body[-1], ast.Expr):
+                    # Last statement is an expression - separate it
+                    final_expr = tree.body[-1].value
+                    exec_statements = tree.body[:-1]
+
+                # Execute all statements (except final expression)
+                if exec_statements:
+                    exec_tree = ast.Module(body=exec_statements, type_ignores=[])
+                    exec_code = compile(exec_tree, file_path, "exec")
+                    exec(exec_code, self._eval_executor.env)
+
+                # Evaluate the final expression
+                if final_expr:
+                    eval_tree = ast.Expression(body=final_expr)
+                    eval_code = compile(eval_tree, file_path, "eval")
+                    result_value = eval(eval_code, self._eval_executor.env)
+
+                    # Try to create visualization
+                    if result_value is not None:
+                        try:
+                            visual = inspect(result_value)
+                            if visual is not None and hasattr(visual, "to_bytes"):
+                                # Get or create widget for bidirectional comms
+                                if hasattr(visual, "get_id"):
+                                    widget_id = visual.get_id()
+                                    widget = self.widget_manager.get_widget(
+                                        widget_id, file_path
+                                    )
+                                    widget.callback_registry.clear()
+                                    colight_bytes = visual.to_bytes(widget=widget)
+                                else:
+                                    colight_bytes = visual.to_bytes()
+                        except Exception as viz_err:
+                            if self.verbose:
+                                print(f"Visualization error: {viz_err}")
+
+        except Exception:
+            import traceback
+
+            error = traceback.format_exc()
+
+        # Encode visual if present
+        visual_b64 = None
+        if colight_bytes:
+            visual_b64 = base64.b64encode(colight_bytes).decode("ascii")
+
+        response = {
+            "type": "eval-result",
+            "evalId": eval_id,
+            "visual": visual_b64,
+            "stdout": stdout_capture.getvalue(),
+            "error": error,
+        }
+        await websocket.send(json.dumps(response))
 
     async def _ws_broadcast_to_file_watchers(self, message: dict, file_path: str):
         """Broadcast a message only to clients watching a specific file."""
@@ -939,12 +1085,17 @@ class LiveServer:
             self._websocket_handler, self.host, self.ws_port
         )
 
-        print(f"LiveServer running at http://{self.host}:{self.http_port}")
-        print(f"WebSocket server at ws://{self.host}:{self.ws_port}")
-        print("Building files on-demand...")
+        if self.eval_mode:
+            print(f"Colight eval server running")
+            print(f"  HTTP: http://{self.host}:{self.http_port}")
+            print(f"  WebSocket: ws://{self.host}:{self.ws_port}")
+        else:
+            print(f"LiveServer running at http://{self.host}:{self.http_port}")
+            print(f"WebSocket server at ws://{self.host}:{self.ws_port}")
+            print("Building files on-demand...")
 
-        # Open browser if requested
-        if self.open_url:
+        # Open browser if requested (not in eval mode)
+        if self.open_url and not self.eval_mode:
             url = f"http://{self.host}:{self.http_port}"
             if self.open_path:
                 open_path = (
@@ -955,12 +1106,17 @@ class LiveServer:
                 url = f"{url}{open_path}"
             threading.Timer(1, lambda: webbrowser.open(url)).start()
 
-        # Start periodic cache eviction task
-        self._eviction_task = asyncio.create_task(self._periodic_cache_eviction())
+        # Start periodic cache eviction task (not needed in eval mode)
+        if not self.eval_mode:
+            self._eviction_task = asyncio.create_task(self._periodic_cache_eviction())
 
         try:
-            # Watch for changes
-            await self._watch_for_changes()
+            if self.eval_mode:
+                # In eval mode, just wait for stop signal
+                await self._stop_event.wait()
+            else:
+                # Watch for changes
+                await self._watch_for_changes()
         finally:
             # Cleanup
             if self._eviction_task and not self._eviction_task.done():

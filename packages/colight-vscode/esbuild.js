@@ -1,7 +1,32 @@
 const esbuild = require("esbuild");
+const fs = require("fs");
+const path = require("path");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+
+// Copy widget.mjs from colight package to media folder
+function copyWidgetAssets() {
+	const srcDir = path.join(__dirname, '..', 'colight', 'src', 'colight', 'js-dist');
+	const destDir = path.join(__dirname, 'media');
+
+	// Ensure media directory exists
+	if (!fs.existsSync(destDir)) {
+		fs.mkdirSync(destDir, { recursive: true });
+	}
+
+	// Copy widget.mjs
+	const widgetSrc = path.join(srcDir, 'widget.mjs');
+	const widgetDest = path.join(destDir, 'widget.mjs');
+
+	if (fs.existsSync(widgetSrc)) {
+		fs.copyFileSync(widgetSrc, widgetDest);
+		console.log('Copied widget.mjs to media/');
+	} else {
+		console.warn('Warning: widget.mjs not found at', widgetSrc);
+		console.warn('Run "yarn build" in packages/colight first');
+	}
+}
 
 /**
  * @type {import('esbuild').Plugin}
@@ -24,6 +49,9 @@ const esbuildProblemMatcherPlugin = {
 };
 
 async function main() {
+	// Copy widget assets before building
+	copyWidgetAssets();
+
 	const ctx = await esbuild.context({
 		entryPoints: [
 			'src/extension.ts'

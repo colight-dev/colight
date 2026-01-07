@@ -767,5 +767,56 @@ def live(
         server.stop()
 
 
+@main.command("eval")
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind server to (default: 127.0.0.1)",
+)
+@click.option(
+    "--port",
+    default=5510,
+    type=int,
+    help="HTTP port (WebSocket will be port+1, default: 5510)",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Enable verbose output",
+)
+def eval_server(
+    host: str,
+    port: int,
+    verbose: bool,
+):
+    """Start eval server for VSCode integration.
+
+    The eval server accepts code snippets via WebSocket and returns
+    execution results with visualizations. Designed for integration
+    with the Colight VSCode extension.
+    """
+    print(f"[colight eval] Starting eval server on {host}:{port}", flush=True)
+    input_path = pathlib.Path.cwd()
+
+    server = LiveServer(
+        input_path,
+        verbose=verbose,
+        include=["*.py"],
+        ignore=None,
+        host=host,
+        http_port=port,
+        ws_port=port + 1,
+        open_url=False,
+        eval_mode=True,
+    )
+
+    try:
+        asyncio.run(server.serve())
+    except KeyboardInterrupt:
+        click.echo("\nStopping eval server...")
+        server.stop()
+
+
 if __name__ == "__main__":
     main()
