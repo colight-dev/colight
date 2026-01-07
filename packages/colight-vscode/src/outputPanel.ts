@@ -35,9 +35,9 @@ export class OutputPanel {
     return OutputPanel.instance;
   }
 
-  show(): void {
+  show(preserveFocus: boolean = false): void {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Beside);
+      this.panel.reveal(vscode.ViewColumn.Beside, preserveFocus);
       return;
     }
 
@@ -73,8 +73,6 @@ export class OutputPanel {
 
     // Forward widget messages from server to webview
     this.widgetMessageDisposable = this.evalServer.onWidgetMessage((msg) => {
-      // Forward the message as-is, the webview knows how to handle it
-      console.log("[Colight OutputPanel] Forwarding widget message to webview:", msg);
       this._sendToWebview(msg);
     });
 
@@ -114,6 +112,7 @@ export class OutputPanel {
   removeWidget(evalId: string): void {
     const widgetId = this.widgetIdsByEvalId.get(evalId);
     if (widgetId) {
+      this.evalServer.unsubscribeWidget(widgetId);
       this.evalServer.disposeWidget(widgetId);
       this.widgetIdsByEvalId.delete(evalId);
     }
@@ -171,6 +170,7 @@ export class OutputPanel {
 
   private _disposeAllWidgets(): void {
     for (const widgetId of this.widgetIdsByEvalId.values()) {
+      this.evalServer.unsubscribeWidget(widgetId);
       this.evalServer.disposeWidget(widgetId);
     }
     this.widgetIdsByEvalId.clear();
@@ -180,7 +180,6 @@ export class OutputPanel {
     switch (msg.type) {
       case "widget-command":
         // Forward widget command to server
-        console.log("[Colight OutputPanel] Forwarding widget-command:", msg);
         this.evalServer.sendWidgetCommand(
           msg.widgetId as string,
           msg.command as string,
@@ -201,6 +200,8 @@ export class OutputPanel {
           break;
         }
         this.widgetIdsByEvalId.set(evalId, widgetId);
+        // Subscribe to widget updates
+        this.evalServer.subscribeWidget(widgetId);
         break;
       }
 
@@ -238,17 +239,9 @@ export class OutputPanel {
   private _getHtmlContent(): string {
     const webview = this.panel!.webview;
 
-    // Get URIs for resources
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "media", "output.css")
-    );
-
+    // Get URI for the React bundle (includes everything)
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "media", "output.js")
-    );
-
-    const widgetUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "media", "widget.mjs")
+      vscode.Uri.joinPath(this.extensionUri, "media", "output-panel.js")
     );
 
     const nonce = this._getNonce();
@@ -259,34 +252,10 @@ export class OutputPanel {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'unsafe-eval' ${webview.cspSource}; img-src ${webview.cspSource} data: blob:; font-src ${webview.cspSource};">
-  <link rel="stylesheet" href="${styleUri}">
   <title>Colight Output</title>
 </head>
 <body>
-  <div id="panel-header">
-    <div class="mode-toggle">
-      <button data-mode="snapshot" class="active">Snapshot</button>
-      <button data-mode="log">Log</button>
-      <button data-mode="document" disabled title="Coming soon">Document</button>
-    </div>
-    <div class="panel-actions">
-      <div
-        id="connection-status"
-        class="connection-status"
-        data-state="disconnected"
-        title="Eval server disconnected"
-      >
-        <span class="status-dot"></span>
-        <span class="status-label">Disconnected</span>
-      </div>
-      <button id="clear-btn" title="Clear all">Clear</button>
-    </div>
-  </div>
-  <div id="output-container"></div>
-
-  <script nonce="${nonce}">
-    window.widgetModuleUri = "${widgetUri}";
-  </script>
+  <div id="root"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

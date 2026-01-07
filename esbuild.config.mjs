@@ -73,12 +73,24 @@ const scene3dESM = {
   plugins: [],
 };
 
-const wireProtocolESM = {
+const serdeESM = {
   ...commonOptions,
   format: 'esm',
-  entryPoints: ['packages/colight-wire-protocol/src/js/index.ts'],
-  outfile: 'packages/colight-wire-protocol/dist/index.mjs',
+  entryPoints: ['packages/colight-serde/src/js/index.ts'],
+  outfile: 'packages/colight-serde/dist/index.mjs',
   plugins: [],
+};
+
+// VSCode Output Panel (IIFE for webview)
+const vscodePanelConfig = {
+  ...commonOptions,
+  format: 'iife',
+  entryPoints: ['packages/colight/src/js/vscode-panel/index.jsx'],
+  outfile: 'packages/colight-vscode/media/output-panel.js',
+  plugins: [],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production')
+  }
 };
 
 const configs = [
@@ -88,7 +100,8 @@ const configs = [
   embedConfigESM,
   liveConfig,
   scene3dESM,
-  wireProtocolESM,
+  serdeESM,
+  vscodePanelConfig,
 ]
 
 // Apply CDN imports if enabled

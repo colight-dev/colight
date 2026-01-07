@@ -10,7 +10,7 @@ import pathlib
 import sys
 import threading
 import webbrowser
-from typing import Any, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import websockets
 from colight.env import DIST_LOCAL_PATH
@@ -206,6 +206,7 @@ class LiveServer:
         self.eval_mode = eval_mode
 
         self.connections: Set[Any] = set()  # WebSocket connections
+        self.widget_subscriptions: Dict[str, Set[Any]] = {}  # widgetId -> Set[websocket]
         self.client_registry = (
             ClientRegistry()
         )  # Track client file watches (absolute paths)
@@ -345,7 +346,7 @@ class LiveServer:
     async def _websocket_handler(self, websocket):
         """Handle WebSocket connections."""
         self.connections.add(websocket)
-        print(f"[LiveServer] WebSocket connected, total connections: {len(self.connections)}", flush=True)
+        logger.debug(f"WebSocket connected, total connections: {len(self.connections)}")
         client_id = None
         try:
             # Listen for messages from the client
@@ -353,7 +354,7 @@ class LiveServer:
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")
-                    print(f"[LiveServer] Received message type: {message_type}", flush=True)
+                    logger.debug(f"Received message type: {message_type}")
 
                     # Handle watch-file message
                     if message_type == "watch-file":
@@ -424,19 +425,11 @@ class LiveServer:
                             try:
                                 buffers.append(base64.b64decode(buffer_b64))
                             except Exception as exc:
-                                if self.verbose:
-                                    print(f"Failed to decode widget buffer: {exc}")
-                        print(
-                            f"[LiveServer] widget-command: widgetId={widget_id}, command={command}, params={params}",
-                            flush=True,
-                        )
+                                logger.debug(f"Failed to decode widget buffer: {exc}")
                         if widget_id and command:
+                            logger.info(f"[ws] widget-command for {widget_id}, known widgets: {list(self.widget_manager._widgets.keys())}")
                             success, error = self.widget_manager.handle_command(
                                 widget_id, command, params, buffers
-                            )
-                            print(
-                                f"[LiveServer] widget-command result: success={success}, error={error}",
-                                flush=True,
                             )
                             if not success:
                                 # Send error response back to client
@@ -451,11 +444,27 @@ class LiveServer:
                     elif message_type == "widget-dispose":
                         widget_id = data.get("widgetId")
                         if widget_id:
+                            logger.info(f"[ws] widget-dispose for {widget_id}")
                             removed = self.widget_manager.remove_widget(widget_id)
-                            print(
-                                f"[LiveServer] widget-dispose: widgetId={widget_id}, removed={removed}",
-                                flush=True,
-                            )
+                            # Also clean up subscriptions
+                            if widget_id in self.widget_subscriptions:
+                                self.widget_subscriptions[widget_id].discard(websocket)
+                                if not self.widget_subscriptions[widget_id]:
+                                    del self.widget_subscriptions[widget_id]
+
+                    elif message_type == "subscribe-widget":
+                        widget_id = data.get("widgetId")
+                        if widget_id:
+                            if widget_id not in self.widget_subscriptions:
+                                self.widget_subscriptions[widget_id] = set()
+                            self.widget_subscriptions[widget_id].add(websocket)
+
+                    elif message_type == "unsubscribe-widget":
+                        widget_id = data.get("widgetId")
+                        if widget_id and widget_id in self.widget_subscriptions:
+                            self.widget_subscriptions[widget_id].discard(websocket)
+                            if not self.widget_subscriptions[widget_id]:
+                                del self.widget_subscriptions[widget_id]
 
                     # Handle eval-code message (eval mode only)
                     elif message_type == "eval-code" and self.eval_mode:
@@ -467,6 +476,11 @@ class LiveServer:
             pass
         finally:
             self.connections.remove(websocket)
+            # Clean up any widget subscriptions for this websocket
+            for widget_id in list(self.widget_subscriptions.keys()):
+                self.widget_subscriptions[widget_id].discard(websocket)
+                if not self.widget_subscriptions[widget_id]:
+                    del self.widget_subscriptions[widget_id]
             if client_id:
                 self.client_registry.unregister_client(client_id)
 
@@ -560,11 +574,13 @@ class LiveServer:
                                 # Get or create widget for bidirectional comms
                                 if hasattr(visual, "get_id"):
                                     widget_id = visual.get_id()
+                                    logger.info(f"[eval] Registering widget: {widget_id}")
                                     widget = self.widget_manager.get_widget(
                                         widget_id, file_path
                                     )
                                     widget.callback_registry.clear()
                                     colight_bytes = visual.to_bytes(widget=widget)
+                                    logger.info(f"[eval] Widget manager has widgets: {list(self.widget_manager._widgets.keys())}")
                                 else:
                                     colight_bytes = visual.to_bytes()
                         except Exception as viz_err:
@@ -637,23 +653,38 @@ class LiveServer:
         )
 
     async def _ws_send_widget_message(self, file_path: str, message: dict):
-        """Send widget updates to clients watching a specific file."""
-        watching_clients = self.client_registry.get_watchers(file_path)
-        if not watching_clients:
-            return
+        """Send widget updates to subscribed clients."""
+        widget_id = message.get("widgetId")
 
-        message_str = json.dumps(message)
-        websockets_to_send = []
-        for client_id in watching_clients:
-            ws = self.client_registry.clients.get(client_id)
-            if ws and ws in self.connections:
-                websockets_to_send.append(ws)
+        # First, try subscription-based routing (works for all modes)
+        if widget_id and widget_id in self.widget_subscriptions:
+            subscribers = self.widget_subscriptions[widget_id]
+            if subscribers:
+                message_str = json.dumps(message)
+                await asyncio.gather(
+                    *(ws.send(message_str) for ws in subscribers if ws in self.connections),
+                    return_exceptions=True,
+                )
+                return
 
-        if websockets_to_send:
-            await asyncio.gather(
-                *(ws.send(message_str) for ws in websockets_to_send),
-                return_exceptions=True,
-            )
+        # Fallback: file-based routing for non-eval mode
+        if not self.eval_mode:
+            watching_clients = self.client_registry.get_watchers(file_path)
+            if not watching_clients:
+                return
+
+            message_str = json.dumps(message)
+            websockets_to_send = []
+            for client_id in watching_clients:
+                ws = self.client_registry.clients.get(client_id)
+                if ws and ws in self.connections:
+                    websockets_to_send.append(ws)
+
+            if websockets_to_send:
+                await asyncio.gather(
+                    *(ws.send(message_str) for ws in websockets_to_send),
+                    return_exceptions=True,
+                )
 
     async def _process_multiple_files(self, files_to_execute: Set[pathlib.Path]):
         """Process multiple files that need execution."""

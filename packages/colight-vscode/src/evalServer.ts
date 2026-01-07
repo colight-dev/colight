@@ -278,6 +278,7 @@ export class EvalServer {
       this.ws.on("open", () => {
         clearTimeout(timeout);
         this._setConnected(true);
+        log("WebSocket connected to eval server");
         console.log("WebSocket connected to eval server");
         resolve();
       });
@@ -285,6 +286,7 @@ export class EvalServer {
       this.ws.on("error", (err) => {
         clearTimeout(timeout);
         this._setConnected(false);
+        log(`WebSocket error: ${err.message}`);
         reject(err);
       });
 
@@ -292,7 +294,8 @@ export class EvalServer {
         this._handleMessage(data.toString());
       });
 
-      this.ws.on("close", () => {
+      this.ws.on("close", (code, reason) => {
+        log(`WebSocket disconnected: code=${code}, reason=${reason?.toString() || 'none'}`);
         console.log("WebSocket disconnected from eval server");
         this.ws = null;
         this._setConnected(false);
@@ -303,7 +306,6 @@ export class EvalServer {
   private _handleMessage(data: string): void {
     try {
       const msg = JSON.parse(data);
-      log(`Received message from server: type=${msg.type}, widgetId=${msg.widgetId || 'none'}`);
 
       if (msg.type === "eval-result") {
         const handler = this.pendingEvals.get(msg.evalId);
@@ -318,7 +320,6 @@ export class EvalServer {
         }
       } else if (msg.widgetId) {
         // Widget message - forward to handlers
-        log(`Forwarding widget message to ${this.widgetMessageHandlers.size} handlers`);
         for (const handler of this.widgetMessageHandlers) {
           handler(msg);
         }
@@ -374,9 +375,7 @@ export class EvalServer {
     params: Record<string, unknown>,
     buffers?: string[]
   ): void {
-    log(`sendWidgetCommand: widgetId=${widgetId}, command=${command}, wsState=${this.ws?.readyState}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      log(`Cannot send widget command: not connected`);
       return;
     }
 
@@ -391,27 +390,33 @@ export class EvalServer {
       msg.buffers = buffers;
     }
 
-    log(`Sending widget-command to server: ${JSON.stringify(msg)}`);
     this.ws.send(JSON.stringify(msg));
   }
 
   disposeWidget(widgetId: string): void {
-    log(`disposeWidget: widgetId=${widgetId}, wsState=${this.ws?.readyState}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      log(`Cannot dispose widget: not connected`);
       return;
     }
+    this.ws.send(JSON.stringify({ type: "widget-dispose", widgetId }));
+  }
 
-    const msg = {
-      type: "widget-dispose",
-      widgetId,
-    };
+  subscribeWidget(widgetId: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.ws.send(JSON.stringify({ type: "subscribe-widget", widgetId }));
+  }
 
-    log(`Sending widget-dispose to server: ${JSON.stringify(msg)}`);
-    this.ws.send(JSON.stringify(msg));
+  unsubscribeWidget(widgetId: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.ws.send(JSON.stringify({ type: "unsubscribe-widget", widgetId }));
   }
 
   async stop(): Promise<void> {
+    log("Stopping eval server...");
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -422,8 +427,27 @@ export class EvalServer {
       this.process = null;
     }
 
+    // Also kill any external server process on our ports
+    // This handles the case where we connected to an existing server
+    try {
+      const { exec } = await import("child_process");
+      await new Promise<void>((resolve) => {
+        exec(`lsof -ti:${this.port},${this.wsPort} | xargs kill -9 2>/dev/null`, (err) => {
+          if (!err) {
+            log("Killed external server process");
+          }
+          resolve();
+        });
+      });
+      // Wait a moment for the process to fully terminate
+      await new Promise((r) => setTimeout(r, 500));
+    } catch {
+      // Ignore errors - process may not exist
+    }
+
     this._setConnected(false);
     this._setState("stopped");
+    log("Eval server stopped");
   }
 
   async restart(): Promise<void> {

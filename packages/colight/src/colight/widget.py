@@ -371,10 +371,8 @@ class WidgetState:
             self.update([name, "reset", value])
 
     def notify_listeners(self, updates: List[List[Any]]) -> None:
-        print(f"[WidgetState] notify_listeners: updates={updates}, listeners={list(self._listeners.keys())}", flush=True)
         for name, operation, value in updates:
             for listener in self._listeners.get(name, []):
-                print(f"[WidgetState] Calling listener for {name}", flush=True)
                 # Skip if this listener is already being processed
                 if listener in self._processing_listeners:
                     continue

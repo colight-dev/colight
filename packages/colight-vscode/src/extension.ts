@@ -1378,7 +1378,7 @@ export function activate(context: vscode.ExtensionContext) {
 
           // Get or create output panel
           const panel = OutputPanel.getInstance(context.extensionUri);
-          panel.show();
+          panel.show(true); // preserveFocus = true to keep editor focused
 
           // Evaluate the code
           try {
