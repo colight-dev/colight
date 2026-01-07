@@ -3,7 +3,7 @@
   "displayName": "Colight",
   "publisher": "colight",
   "description": "Rapid Python eval without markup.",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "engines": {
     "vscode": "^1.89.0"
   },
@@ -47,6 +47,10 @@
       {
         "command": "extension.evaluateAllCells",
         "title": "Colight: Evaluate All Cells"
+      },
+      {
+        "command": "extension.evaluateToLastCell",
+        "title": "Colight: Evaluate to Last Cell"
       }
     ],
     "configuration": [

@@ -844,8 +844,9 @@ async function evaluateAllCells(editor: vscode.TextEditor): Promise<void> {
   }
 }
 
-async function evaluateCellsAboveAndCurrent(
-  editor: vscode.TextEditor
+async function evaluateCellsUpTo(
+  editor: vscode.TextEditor,
+  targetCell: Cell
 ): Promise<void> {
   // TODO
   // figure out how to run cells in the active kernel without showing the result
@@ -853,20 +854,10 @@ async function evaluateCellsAboveAndCurrent(
   // cell in the scrollbar area.
 
   const document = editor.document;
-  const currentPosition = editor.selection.active;
-
-  const currentCell = getCellAtPosition(document, currentPosition);
-  if (!currentCell) {
-    return; // Exit if no current cell is found
-  }
-
   const originalSelection = editor.selection;
   // jupyter.runtoline runs up to the previous line,
   // so we must set our selection to the next line.
-  const runUntilLine = Math.min(
-    currentCell.endLine + 1,
-    document.lineCount
-  );
+  const runUntilLine = Math.min(targetCell.endLine + 1, document.lineCount);
   const safeRunUntilPosition = document.validatePosition(
     new vscode.Position(runUntilLine, 0)
   );
@@ -876,6 +867,27 @@ async function evaluateCellsAboveAndCurrent(
   );
   await vscode.commands.executeCommand("jupyter.runtoline");
   editor.selection = originalSelection;
+}
+
+async function evaluateCellsAboveAndCurrent(
+  editor: vscode.TextEditor
+): Promise<void> {
+  const currentCell = getCellAtPosition(
+    editor.document,
+    editor.selection.active
+  );
+  if (!currentCell) {
+    return;
+  }
+  await evaluateCellsUpTo(editor, currentCell);
+}
+
+async function evaluateToLastCell(editor: vscode.TextEditor): Promise<void> {
+  const cells = parseCells(editor.document);
+  if (cells.length === 0) {
+    return;
+  }
+  await evaluateCellsUpTo(editor, cells[cells.length - 1]);
 }
 
 function isStandardEditor(editor: vscode.TextEditor | undefined): boolean {
@@ -1318,6 +1330,18 @@ export function activate(context: vscode.ExtensionContext) {
           const editor = vscode.window.activeTextEditor;
           if (editor && isStandardEditor(editor)) {
             await evaluateAllCells(editor);
+          }
+        }
+      )
+    );
+
+    disposables.push(
+      vscode.commands.registerCommand(
+        "extension.evaluateToLastCell",
+        async () => {
+          const editor = vscode.window.activeTextEditor;
+          if (editor && isStandardEditor(editor)) {
+            await evaluateToLastCell(editor);
           }
         }
       )
