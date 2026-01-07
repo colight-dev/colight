@@ -58,6 +58,9 @@ import {
   PickInfo,
 } from "./types";
 import { normalize as normalizeQuat, rotateVector } from "./quaternion";
+import { screenRay } from "./project";
+import { Vec3, sub as subVec3, dot as dotVec3, readVec3 } from "./vec3";
+import { PointerContext, CursorHint, CursorType, createPointerContext } from "./pointer";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -101,6 +104,15 @@ export interface SceneInnerProps {
 
   /** Optional ready state manager for render lifecycle tracking */
   readyState?: ReadyState;
+
+  /** Ref to receive pointer context updates (screen position, ray, pick info) */
+  pointerRef?: React.MutableRefObject<PointerContext | null>;
+
+  /** Cursor management mode: "auto" sets cursor based on hover state, "manual" lets you control it */
+  cursor?: "auto" | "manual";
+
+  /** Callback fired when cursor hint changes (when cursor="auto" or for custom handling) */
+  onCursorHint?: (hint: CursorHint) => void;
 }
 
 function initGeometryResources(
@@ -409,38 +421,8 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
   throw new Error(`Failed to get GPU adapter after ${maxAttempts} attempts`);
 };
 
-export function screenRay(
-  screenX: number,
-  screenY: number,
-  rect: { width: number; height: number },
-  camera: CameraState,
-): { origin: [number, number, number]; direction: [number, number, number] } | null {
-  const ndcX = (screenX / rect.width) * 2 - 1;
-  const ndcY = 1 - (screenY / rect.height) * 2;
-  const view = getViewMatrix(camera);
-  const proj = getProjectionMatrix(camera, rect.width / rect.height);
-  const viewProj = glMatrix.mat4.multiply(
-    glMatrix.mat4.create(),
-    proj,
-    view,
-  );
-  const inv = glMatrix.mat4.invert(glMatrix.mat4.create(), viewProj);
-  if (!inv) return null;
-
-  const near = glMatrix.vec4.fromValues(ndcX, ndcY, 0, 1);
-  const far = glMatrix.vec4.fromValues(ndcX, ndcY, 1, 1);
-  glMatrix.vec4.transformMat4(near, near, inv);
-  glMatrix.vec4.transformMat4(far, far, inv);
-
-  const origin: [number, number, number] = [near[0] / near[3], near[1] / near[3], near[2] / near[3]];
-  const farPoint: [number, number, number] = [far[0] / far[3], far[1] / far[3], far[2] / far[3]];
-  const dx = farPoint[0] - origin[0];
-  const dy = farPoint[1] - origin[1];
-  const dz = farPoint[2] - origin[2];
-  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  const direction: [number, number, number] = [dx / len, dy / len, dz / len];
-  return { origin, direction };
-}
+// Re-export for backwards compatibility
+export { screenRay } from "./project";
 
 export function SceneInner({
   components,
@@ -454,6 +436,9 @@ export function SceneInner({
   onFrameRendered,
   onReady,
   readyState = NOOP_READY_STATE,
+  pointerRef,
+  cursor: cursorMode = "manual",
+  onCursorHint,
 }: SceneInnerProps) {
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
@@ -556,6 +541,17 @@ export function SceneInner({
     componentIdx: number;
     elementIdx: number;
   } | null>(null);
+
+  // Pointer context for external access
+  const pointerContextRef = useRef<PointerContext>(
+    createPointerContext(
+      { width: containerWidth, height: containerHeight },
+      activeCameraRef.current,
+    ),
+  );
+
+  // Track last cursor hint to avoid redundant updates
+  const lastCursorHintRef = useRef<CursorHint | null>(null);
 
   const renderObjectCache = useRef<RenderObjectCache>({});
 
@@ -1314,6 +1310,60 @@ export function SceneInner({
     }
   }
 
+  // Helper to update cursor hint based on pick state
+  function updateCursorHint(pickInfo: PickInfo | null) {
+    if (cursorMode !== "auto" && !onCursorHint) return;
+
+    let hint: CursorHint;
+    const isCameraDragging = !!draggingState.current;
+
+    if (isCameraDragging) {
+      hint = { cursor: "move", reason: "camera" };
+    } else if (!pickInfo) {
+      hint = { cursor: "default", reason: null };
+    } else {
+      // Check if the hovered component is draggable or clickable
+      const component = components[pickInfo.component.index];
+      const hasDrag = component && "drag" in component && component.drag;
+      const hasClick = component && "onClick" in component && component.onClick;
+
+      if (hasDrag) {
+        hint = {
+          cursor: "grab",
+          reason: "draggable",
+          component: pickInfo.component,
+        };
+      } else if (hasClick) {
+        hint = {
+          cursor: "pointer",
+          reason: "clickable",
+          component: pickInfo.component,
+        };
+      } else {
+        hint = { cursor: "default", reason: null };
+      }
+    }
+
+    // Only update if changed
+    const prev = lastCursorHintRef.current;
+    if (
+      !prev ||
+      prev.cursor !== hint.cursor ||
+      prev.reason !== hint.reason ||
+      prev.component?.index !== hint.component?.index
+    ) {
+      lastCursorHintRef.current = hint;
+
+      // Apply cursor if auto mode
+      if (cursorMode === "auto" && canvasRef.current) {
+        canvasRef.current.style.cursor = hint.cursor;
+      }
+
+      // Fire callback if provided
+      onCursorHint?.(hint);
+    }
+  }
+
   function handleHoverID(
     pickedID: number,
     screenX: number,
@@ -1333,6 +1383,20 @@ export function SceneInner({
         prevComponent?.onHover?.(null);
         lastHoverState.current = null;
       }
+
+      // Update pointer context with no pick
+      const camera = activeCameraRef.current;
+      pointerContextRef.current = {
+        screen: { x: screenX, y: screenY },
+        ray: camera ? screenRay(screenX, screenY, rect, camera) : null,
+        pick: null,
+        rect: { width: rect.width, height: rect.height },
+        camera,
+      };
+      if (pointerRef) {
+        pointerRef.current = pointerContextRef.current;
+      }
+      updateCursorHint(null);
       return;
     }
 
@@ -1373,6 +1437,7 @@ export function SceneInner({
     }
 
     // Set/update hover if we have a new state
+    let pickInfo: PickInfo | null = null;
     if (newHoverState) {
       const { componentIdx, elementIdx } = newHoverState;
       if (componentIdx >= 0 && componentIdx < components.length) {
@@ -1380,24 +1445,41 @@ export function SceneInner({
         if (!sameElement) {
           components[componentIdx].onHover?.(elementIdx);
         }
+        // Build pick info for onHoverDetail and pointer context
+        pickInfo = buildPickInfo(
+          "hover",
+          componentIdx,
+          elementIdx,
+          screenX,
+          screenY,
+          rect,
+          position,
+          normal,
+        );
         // Always call onHoverDetail with fresh position/normal data
-        if (components[componentIdx].onHoverDetail) {
-          const info = buildPickInfo(
-            "hover",
-            componentIdx,
-            elementIdx,
-            screenX,
-            screenY,
-            rect,
-            position,
-            normal,
-          );
-          if (info) {
-            components[componentIdx].onHoverDetail?.(info);
-          }
+        if (components[componentIdx].onHoverDetail && pickInfo) {
+          components[componentIdx].onHoverDetail?.(pickInfo);
         }
       }
     }
+
+    // Update pointer context
+    const camera = activeCameraRef.current;
+    pointerContextRef.current = {
+      screen: { x: screenX, y: screenY },
+      ray: camera ? screenRay(screenX, screenY, rect, camera) : null,
+      pick: pickInfo,
+      rect: { width: rect.width, height: rect.height },
+      camera,
+    };
+
+    // Update external pointer ref if provided
+    if (pointerRef) {
+      pointerRef.current = pointerContextRef.current;
+    }
+
+    // Update cursor hint
+    updateCursorHint(pickInfo);
 
     // Update last hover state
     lastHoverState.current = newHoverState;
@@ -1456,12 +1538,7 @@ export function SceneInner({
 
   const faceNames = ["+x", "-x", "+y", "-y", "+z", "-z"];
 
-  function readVec3(arrayLike, index) {
-    const base = index * 3;
-    return [arrayLike[base + 0], arrayLike[base + 1], arrayLike[base + 2]];
-  }
-
-  function readQuat(arrayLike, index) {
+  function readQuat(arrayLike: ArrayLike<number>, index: number): [number, number, number, number] {
     const base = index * 4;
     return [
       arrayLike[base + 0],
@@ -1471,36 +1548,18 @@ export function SceneInner({
     ];
   }
 
-  function getQuaternion(component, index, fallback) {
-    if (component.quaternions) {
+  function getQuaternion(
+    component: ComponentConfig,
+    index: number,
+    fallback: [number, number, number, number],
+  ): [number, number, number, number] {
+    if ("quaternions" in component && component.quaternions) {
       return readQuat(component.quaternions, index);
     }
-    if (component.quaternion) {
-      return component.quaternion;
+    if ("quaternion" in component && component.quaternion) {
+      return component.quaternion as [number, number, number, number];
     }
     return fallback;
-  }
-
-  function normalizeVec3(vec) {
-    const len = Math.hypot(vec[0], vec[1], vec[2]);
-    if (!len) return [0, 0, 0];
-    return [vec[0] / len, vec[1] / len, vec[2] / len];
-  }
-
-  function subVec3(a, b) {
-    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  }
-
-  function addVec3(a, b) {
-    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-  }
-
-  function scaleVec3(v, s) {
-    return [v[0] * s, v[1] * s, v[2] * s];
-  }
-
-  function dotVec3(a, b) {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   }
 
   function buildPickInfo(

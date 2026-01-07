@@ -24,6 +24,7 @@ import {
 } from "./components";
 import { NOOP_READY_STATE, ReadyState } from "./types";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
+import { PointerContext, CursorHint } from "./pointer";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
@@ -220,6 +221,12 @@ interface SceneProps {
   controls?: string[];
   /** Optional ready state manager for render lifecycle tracking */
   readyState?: ReadyState;
+  /** Ref to receive pointer context updates (screen position, ray, pick info) */
+  pointerRef?: React.MutableRefObject<PointerContext | null>;
+  /** Cursor management mode: "auto" sets cursor based on hover state, "manual" lets you control it */
+  cursor?: "auto" | "manual";
+  /** Callback fired when cursor hint changes */
+  onCursorHint?: (hint: CursorHint) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -344,6 +351,9 @@ export function Scene({
   style,
   controls = [],
   readyState = NOOP_READY_STATE,
+  pointerRef,
+  cursor,
+  onCursorHint,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -434,6 +444,9 @@ export function Scene({
             onFrameRendered={updateDisplay}
             onReady={onReady}
             readyState={readyState}
+            pointerRef={pointerRef}
+            cursor={cursor}
+            onCursorHint={onCursorHint}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

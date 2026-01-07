@@ -6,25 +6,18 @@
 
 import { normalize as normalizeQuat, rotateVector } from "./quaternion";
 import { ComponentConfig } from "./components";
-import { CameraParams, CameraState, createCameraParams } from "./camera3d";
-import { screenRay as computeScreenRay } from "./impl3d";
+import { CameraState, createCameraParams } from "./camera3d";
+import { screenRay } from "./project";
 import { getLineBeamsSegmentPointIndex } from "./components";
 import { PickInfo } from "./types";
+import { Vec3, sub, dot, readVec3 } from "./vec3";
 
 export type PickEventType = "hover" | "click";
 
 export const FACE_NAMES = ["+x", "-x", "+y", "-y", "+z", "-z"] as const;
 export type FaceName = (typeof FACE_NAMES)[number];
 
-// ========== Vector utilities ==========
-
-export function readVec3(
-  arrayLike: ArrayLike<number>,
-  index: number,
-): [number, number, number] {
-  const base = index * 3;
-  return [arrayLike[base + 0], arrayLike[base + 1], arrayLike[base + 2]];
-}
+// ========== Quaternion utilities ==========
 
 export function readQuat(
   arrayLike: ArrayLike<number>,
@@ -38,22 +31,6 @@ export function readQuat(
     arrayLike[base + 3],
   ];
 }
-
-export function subVec3(
-  a: [number, number, number],
-  b: [number, number, number],
-): [number, number, number] {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-export function dotVec3(
-  a: [number, number, number],
-  b: [number, number, number],
-): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-// ========== Quaternion utilities ==========
 
 export function getQuaternion(
   component: ComponentConfig,
@@ -76,9 +53,7 @@ export function getQuaternion(
  * The GPU encodes normals as: encoded = normal * 0.5 + 0.5
  * We decode as: normal = (byte / 255) * 2 - 1
  */
-export function decodeNormalFromBytes(
-  bytes: Uint8Array,
-): [number, number, number] {
+export function decodeNormalFromBytes(bytes: Uint8Array): Vec3 {
   return [
     (bytes[0] / 255.0) * 2.0 - 1.0,
     (bytes[1] / 255.0) * 2.0 - 1.0,
@@ -90,9 +65,7 @@ export function decodeNormalFromBytes(
  * Encodes a normal vector [-1, 1] to bytes [0-255] for GPU output.
  * This is the inverse of decodeNormalFromBytes.
  */
-export function encodeNormalToBytes(
-  normal: [number, number, number],
-): [number, number, number] {
+export function encodeNormalToBytes(normal: Vec3): Vec3 {
   return [
     Math.round((normal[0] * 0.5 + 0.5) * 255),
     Math.round((normal[1] * 0.5 + 0.5) * 255),
@@ -115,7 +88,7 @@ export function encodeNormalToBytes(
  * - 5: -z (back)
  */
 export function detectCuboidFace(
-  localNormal: [number, number, number],
+  localNormal: Vec3,
 ): { index: number; name: FaceName } {
   let hitAxis = 0;
   let hitSign = 1;
@@ -139,9 +112,9 @@ export function detectCuboidFace(
  * Transforms a world-space normal to local space of a cuboid.
  */
 export function worldNormalToLocal(
-  worldNormal: [number, number, number],
+  worldNormal: Vec3,
   quaternion: [number, number, number, number],
-): [number, number, number] {
+): Vec3 {
   const q = normalizeQuat(quaternion);
   const qInv: [number, number, number, number] = [-q[0], -q[1], -q[2], q[3]];
   return rotateVector(worldNormal, qInv);
@@ -151,13 +124,13 @@ export function worldNormalToLocal(
  * Transforms a world-space position to local space of a component.
  */
 export function worldPositionToLocal(
-  worldPosition: [number, number, number],
-  center: [number, number, number],
+  worldPosition: Vec3,
+  center: Vec3,
   quaternion: [number, number, number, number],
-): [number, number, number] {
+): Vec3 {
   const q = normalizeQuat(quaternion);
   const qInv: [number, number, number, number] = [-q[0], -q[1], -q[2], q[3]];
-  return rotateVector(subVec3(worldPosition, center), qInv);
+  return rotateVector(sub(worldPosition, center), qInv);
 }
 
 // ========== Build pick info ==========
@@ -171,8 +144,8 @@ export interface BuildPickInfoParams {
   rect: { width: number; height: number };
   camera: CameraState;
   component: ComponentConfig;
-  position?: [number, number, number];
-  normal?: [number, number, number];
+  position?: Vec3;
+  normal?: Vec3;
 }
 
 /**
@@ -193,7 +166,7 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
     normal,
   } = params;
 
-  const ray = computeScreenRay(screenX, screenY, rect, camera);
+  const ray = screenRay(screenX, screenY, rect, camera);
   if (!ray) return null;
 
   const info: PickInfo = {
@@ -237,12 +210,12 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
         elementIndex,
       );
       if (segmentPointIndex !== undefined) {
-        const start: [number, number, number] = [
+        const start: Vec3 = [
           component.points[segmentPointIndex * 4 + 0],
           component.points[segmentPointIndex * 4 + 1],
           component.points[segmentPointIndex * 4 + 2],
         ];
-        const end: [number, number, number] = [
+        const end: Vec3 = [
           component.points[(segmentPointIndex + 1) * 4 + 0],
           component.points[(segmentPointIndex + 1) * 4 + 1],
           component.points[(segmentPointIndex + 1) * 4 + 2],
@@ -252,9 +225,9 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
         );
 
         // Calculate t along the segment
-        const v = subVec3(end, start);
-        const w = subVec3(position, start);
-        const u = dotVec3(w, v) / dotVec3(v, v);
+        const v = sub(end, start);
+        const w = sub(position, start);
+        const u = dot(w, v) / dot(v, v);
 
         info.segment = {
           index: elementIndex,

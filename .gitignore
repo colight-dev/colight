@@ -25,3 +25,4 @@ docs/api/
 .llm_context
 **/js-dist/**
 **/api/*.md
+planning

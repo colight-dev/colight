@@ -1,29 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Scene, DEFAULT_CAMERA, screenRay } from "./scene3d.mjs";
-import { packMessage, unpackMessage } from "./wire_protocol.js";
+import {
+  Scene,
+  DEFAULT_CAMERA,
+  screenRay,
+  intersectPlane,
+  planeFromHit,
+  sub,
+  add,
+} from "@colight/scene3d";
+import { packMessage, unpackMessage } from "@colight/wire-protocol";
 
 const WS_URL = `ws://${window.location.hostname}:8001`;
-
-function intersectPlane(ray, planePoint, planeNormal) {
-  if (!ray) return null;
-  const denom =
-    ray.direction[0] * planeNormal[0] +
-    ray.direction[1] * planeNormal[1] +
-    ray.direction[2] * planeNormal[2];
-  if (Math.abs(denom) < 1e-6) return null;
-  const t =
-    ((planePoint[0] - ray.origin[0]) * planeNormal[0] +
-      (planePoint[1] - ray.origin[1]) * planeNormal[1] +
-      (planePoint[2] - ray.origin[2]) * planeNormal[2]) /
-    denom;
-  if (t < 0) return null;
-  return [
-    ray.origin[0] + ray.direction[0] * t,
-    ray.origin[1] + ray.direction[1] * t,
-    ray.origin[2] + ray.direction[2] * t,
-  ];
-}
 
 function useWireScene(url) {
   const [scene, setScene] = useState(null);
@@ -88,80 +76,29 @@ function useWireScene(url) {
 
 function App() {
   const { scene, connected, sendEvent } = useWireScene(WS_URL);
-  const [localScene, setLocalScene] = useState(scene);
   const [camera, setCamera] = useState(DEFAULT_CAMERA);
-  const cameraRef = useRef(camera);
-  const hoverRef = useRef(null);
+  const pointerRef = useRef(null);
   const dragRef = useRef(null);
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  const sceneRef = useRef(localScene);
+  const sceneRef = useRef(scene);
   const sendRef = useRef(sendEvent);
   const rafRef = useRef(null);
   const pendingPayloadRef = useRef(null);
 
   useEffect(() => {
-    cameraRef.current = camera;
-  }, [camera]);
-
-  useEffect(() => {
-    setLocalScene(scene);
+    sceneRef.current = scene;
   }, [scene]);
-
-  useEffect(() => {
-    sceneRef.current = localScene;
-  }, [localScene]);
 
   useEffect(() => {
     sendRef.current = sendEvent;
   }, [sendEvent]);
 
-  const renderedScene = useMemo(() => {
-    if (!localScene) return null;
-    const components = localScene.components.map((component, idx) => {
-      const existingHover = component.onHover;
-      const existingHoverDetail = component.onHoverDetail;
-      return {
-        ...component,
-        onHover: (elementIdx) => {
-          if (typeof elementIdx === "number") {
-            hoverRef.current = {
-              componentIndex: idx,
-              elementIndex: elementIdx,
-            };
-          } else {
-            hoverRef.current = null;
-          }
-          if (typeof existingHover === "function") {
-            existingHover(elementIdx);
-          }
-        },
-        onHoverDetail: (info) => {
-          if (info) {
-            hoverRef.current = {
-              componentIndex: idx,
-              elementIndex: info.instanceIndex,
-              face: info.face,
-              hit: info.hit,
-              ray: info.ray,
-              camera: info.camera,
-              screen: info.screen,
-            };
-          }
-          if (typeof existingHoverDetail === "function") {
-            existingHoverDetail(info);
-          }
-        },
-      };
-    });
-    return { ...localScene, components };
-  }, [localScene]);
-
   useEffect(() => {
-    if (renderedScene?.defaultCamera) {
-      setCamera(renderedScene.defaultCamera);
+    if (scene?.defaultCamera) {
+      setCamera(scene.defaultCamera);
     }
-  }, [renderedScene?.defaultCamera]);
+  }, [scene?.defaultCamera]);
 
   const scheduleSend = (eventName, payload) => {
     pendingPayloadRef.current = { eventName, payload };
@@ -176,31 +113,13 @@ function App() {
     });
   };
 
-  const updateCenter = (componentIndex, elementIndex, position) => {
-    setLocalScene((prev) => {
-      if (!prev) return prev;
-      const components = [...prev.components];
-      const component = components[componentIndex];
-      if (!component?.centers) return prev;
-      const centers = component.centers;
-      const nextCenters =
-        centers instanceof Float32Array
-          ? centers.slice()
-          : Float32Array.from(centers);
-      const base = elementIndex * 3;
-      nextCenters[base] = position[0];
-      nextCenters[base + 1] = position[1];
-      nextCenters[base + 2] = position[2];
-      components[componentIndex] = { ...component, centers: nextCenters };
-      return { ...prev, components };
-    });
-  };
-
   const startDrag = (event) => {
-    if (!containerRef.current || !sceneRef.current) return;
-    const hover = hoverRef.current;
-    if (!hover) return;
-    const component = sceneRef.current.components[hover.componentIndex];
+    // Use pointer context from Scene
+    const pointer = pointerRef.current;
+    if (!pointer?.pick?.hit) return;
+
+    const { pick, rect, camera } = pointer;
+    const component = sceneRef.current?.components[pick.component.index];
     const dragToken = component?.drag?.__event__;
     if (!dragToken || !component?.centers) return;
 
@@ -209,39 +128,25 @@ function App() {
 
     // Get the current center
     const centers = component.centers;
-    const base = hover.elementIndex * 3;
+    const base = pick.instanceIndex * 3;
     const originalCenter = [
       centers[base + 0],
       centers[base + 1],
       centers[base + 2],
     ];
 
-    // The hit point on the surface from the GPU
-    if (!hover.hit?.position) {
-      console.error("No hit position from picking system!");
+    // Create drag plane from hit data using utility
+    const plane = planeFromHit(pick.hit);
+    if (!plane) {
+      console.error("Could not create drag plane from hit!");
       return;
     }
-    const hitPoint = [hover.hit.position[0], hover.hit.position[1], hover.hit.position[2]];
 
-    // Use the normal from the hit point - must exist!
-    if (!hover.hit?.normal) {
-      console.error("No hit normal from picking system!");
-      return;
-    }
-    const planeNormal = [hover.hit.normal[0], hover.hit.normal[1], hover.hit.normal[2]];
-
-    // The drag plane passes through the hit point (on the surface).
-    // We'll track the offset from intersection to the object's center.
-    const dragPlanePoint = hitPoint;
-
-    // Compute a fresh ray from the ACTUAL click position
-    // Use the CANVAS rect (not container), same as GPU picking uses
-    const rect = canvasRef.current?.getBoundingClientRect() ?? containerRef.current.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const clickY = event.clientY - rect.top;
-    const pickingRay = screenRay(clickX, clickY, rect, cameraRef.current);
-
-    const initialCursorOnPlane = intersectPlane(pickingRay, dragPlanePoint, planeNormal);
+    // Get initial cursor position on plane
+    const clickX = event.clientX - containerRef.current.getBoundingClientRect().left;
+    const clickY = event.clientY - containerRef.current.getBoundingClientRect().top;
+    const ray = screenRay(clickX, clickY, rect, camera);
+    const initialCursorOnPlane = intersectPlane(ray, plane);
 
     if (!initialCursorOnPlane) {
       console.error("Could not intersect ray with drag plane!");
@@ -249,13 +154,14 @@ function App() {
     }
 
     dragRef.current = {
-      componentIndex: hover.componentIndex,
-      elementIndex: hover.elementIndex,
+      componentIndex: pick.component.index,
+      elementIndex: pick.instanceIndex,
       originalCenter,
       initialCursorOnPlane,
-      dragPlanePoint,
-      planeNormal,
+      plane,
       eventName: dragToken,
+      rect,
+      camera,
     };
 
     window.addEventListener("pointermove", handleDragMove);
@@ -263,52 +169,28 @@ function App() {
   };
 
   const handleDragMove = (event) => {
-    if (!dragRef.current || !containerRef.current) return;
-    // Use the CANVAS rect, same as GPU picking
-    const rect = canvasRef.current?.getBoundingClientRect() ?? containerRef.current.getBoundingClientRect();
-    const currentScreenX = event.clientX - rect.left;
-    const currentScreenY = event.clientY - rect.top;
+    const drag = dragRef.current;
+    if (!drag || !containerRef.current) return;
 
-    // Cast ray from current mouse position using the proper library function
-    const currentRay = screenRay(
-      currentScreenX,
-      currentScreenY,
-      rect,
-      cameraRef.current,
-    );
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const currentScreenX = event.clientX - containerRect.left;
+    const currentScreenY = event.clientY - containerRect.top;
 
+    // Cast ray from current mouse position
+    const currentRay = screenRay(currentScreenX, currentScreenY, drag.rect, drag.camera);
     if (!currentRay) return;
 
     // Find where the cursor ray intersects the drag plane
-    const cursorOnPlane = intersectPlane(
-      currentRay,
-      dragRef.current.dragPlanePoint,
-      dragRef.current.planeNormal,
-    );
+    const cursorOnPlane = intersectPlane(currentRay, drag.plane);
+    if (!cursorOnPlane) return;
 
-    if (!cursorOnPlane) {
-      return;
-    }
+    // Compute new center: original + (current - initial)
+    const delta = sub(cursorOnPlane, drag.initialCursorOnPlane);
+    const newCenter = add(drag.originalCenter, delta);
 
-    // Compute delta from initial CPU intersection to current CPU intersection
-    // Both use the same ray computation, so the delta is consistent
-    const deltaX = cursorOnPlane[0] - dragRef.current.initialCursorOnPlane[0];
-    const deltaY = cursorOnPlane[1] - dragRef.current.initialCursorOnPlane[1];
-    const deltaZ = cursorOnPlane[2] - dragRef.current.initialCursorOnPlane[2];
-
-    const newCenter = [
-      dragRef.current.originalCenter[0] + deltaX,
-      dragRef.current.originalCenter[1] + deltaY,
-      dragRef.current.originalCenter[2] + deltaZ,
-    ];
-
-    updateCenter(
-      dragRef.current.componentIndex,
-      dragRef.current.elementIndex,
-      newCenter,
-    );
-    scheduleSend(dragRef.current.eventName, {
-      index: dragRef.current.elementIndex,
+    // updateCenter(drag.componentIndex, drag.elementIndex, newCenter);
+    scheduleSend(drag.eventName, {
+      index: drag.elementIndex,
       position: newCenter,
     });
   };
@@ -318,7 +200,7 @@ function App() {
     window.removeEventListener("pointermove", handleDragMove);
   };
 
-  if (!renderedScene) {
+  if (!scene) {
     return (
       <div
         style={{
@@ -342,11 +224,13 @@ function App() {
       onPointerDownCapture={startDrag}
     >
       <Scene
-        components={renderedScene.components}
-        defaultCamera={renderedScene.defaultCamera || DEFAULT_CAMERA}
-        controls={renderedScene.controls}
+        components={scene.components}
+        defaultCamera={scene.defaultCamera || DEFAULT_CAMERA}
+        controls={scene.controls}
         onCameraChange={setCamera}
         onCanvasRef={(canvas) => { canvasRef.current = canvas; }}
+        pointerRef={pointerRef}
+        cursor="auto"
       />
       <div
         style={{
