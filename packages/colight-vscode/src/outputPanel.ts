@@ -191,16 +191,20 @@ export class OutputPanel {
       case "register-widget": {
         const evalId = msg.evalId as string | undefined;
         const widgetId = msg.widgetId as string | undefined;
+        console.log(`[OutputPanel] register-widget: evalId=${evalId}, widgetId=${widgetId}`);
         if (!evalId || !widgetId) {
           break;
         }
         const entryExists = this.widgets.some((w) => w.evalId === evalId);
+        console.log(`[OutputPanel] entryExists=${entryExists}, widgets=${this.widgets.map(w => w.evalId).join(",")}`);
         if (!entryExists) {
+          console.log(`[OutputPanel] Entry not found, disposing widget`);
           this.evalServer.disposeWidget(widgetId);
           break;
         }
         this.widgetIdsByEvalId.set(evalId, widgetId);
         // Subscribe to widget updates
+        console.log(`[OutputPanel] Subscribing to widget ${widgetId}`);
         this.evalServer.subscribeWidget(widgetId);
         break;
       }

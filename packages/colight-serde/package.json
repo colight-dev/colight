@@ -1,19 +1,42 @@
 {
   "name": "@colight/serde",
   "version": "0.1.0",
-  "description": "Binary utilities for arrays.",
+  "description": "Wire protocol for sending NumPy arrays and binary data alongside JSON.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
   "exports": {
-    ".": "./dist/index.mjs"
+    ".": {
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
+    }
   },
   "files": [
-    "dist",
+    "dist/index.mjs",
     "README.md",
     "LICENSE"
   ],
+  "keywords": [
+    "numpy",
+    "arraybuffer",
+    "binary",
+    "serialization",
+    "websocket",
+    "python",
+    "typed-array",
+    "ndarray",
+    "wire-protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mhuebert/colight.git",
+    "directory": "packages/colight-serde"
+  },
+  "homepage": "https://github.com/mhuebert/colight/tree/main/packages/colight-serde#readme",
+  "author": "Matthew Huebert <mhuebert@gmail.com>",
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "sideEffects": false
 }

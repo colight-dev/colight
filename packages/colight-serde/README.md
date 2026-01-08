@@ -1,34 +1,88 @@
-# colight-serde
+# @colight/serde
 
-Wire protocol utilities for sending NumPy arrays and binary buffers over JSON +
-binary channels. Deserialization on the JavaScript side is zero-copy; Python
-serialization may materialize contiguous bytes.
+A wire protocol for sending NumPy arrays and binary data alongside JSON.
 
-See `packages/colight-serde/WIRE_PROTOCOL.md` for the draft spec.
+## What it does
 
-## Quick Usage
+When you need to send structured data containing arrays from Python to JavaScript (or vice versa), you typically have two choices:
 
-Python:
+1. Serialize arrays as JSON (slow, bloated - each float becomes a string)
+2. Use a binary format for everything (loses JSON's flexibility for metadata)
+
+`@colight/serde` takes a hybrid approach: JSON for structure and metadata, binary buffers sent out-of-band for array data. The JSON contains references to buffer indices, and the receiver reassembles them.
+
+```
+Python: {"points": np.array([[1,2,3], [4,5,6]], dtype=float32)}
+           ↓
+Wire:   JSON: {"points": {"__type__": "ndarray", "__buffer_index__": 0,
+                          "dtype": "float32", "shape": [2,3], ...}}
+        + Binary: <24 bytes of raw float32 data>
+           ↓
+JS:     {"points": [[1,2,3], [4,5,6]]}
+```
+
+## Key properties
+
+- **Zero-copy on JS side**: Binary buffers map directly to TypedArrays
+- **Transparent**: Arrays serialize/deserialize automatically in nested structures
+- **Transport-agnostic**: Works over WebSocket, HTTP multipart, or any channel that can carry JSON + binary blobs
+- **Bi-directional**: Both Python and JS can pack/unpack messages
+
+## Usage
+
+### Python → JavaScript
 
 ```python
-from colight_serde import pack_message, unpack_message
+from colight_serde import pack_message
 import numpy as np
 
-payload = {"points": np.random.rand(4, 3).astype(np.float32)}
-envelope, buffers = pack_message(payload)
-
-# Send envelope JSON, then `buffers` as binary frames.
-restored = unpack_message(envelope, buffers)
+data = {
+    "vertices": np.random.rand(1000, 3).astype(np.float32),
+    "indices": np.array([0, 1, 2, 2, 3, 0], dtype=np.uint32),
+    "name": "mesh",
+}
+envelope, buffers = pack_message(data)
+# Send envelope as JSON text, then each buffer as binary
 ```
 
-JavaScript:
+```javascript
+import { unpackMessage } from "@colight/serde";
 
-```ts
-import { packMessage, unpackMessage } from "@colight/serde";
+// Receive envelope and buffers from transport
+const data = unpackMessage(envelope, buffers);
+// data.vertices: nested array of numbers
+// data.indices: Uint32Array
+// data.name: "mesh"
+```
+
+### JavaScript → Python
+
+```javascript
+import { packMessage } from "@colight/serde";
 
 const [envelope, buffers] = packMessage({
-  points: new Float32Array([0, 1, 2, 3, 4, 5]),
+    samples: new Float32Array([0.1, 0.2, 0.3, 0.4]),
 });
-
-const restored = unpackMessage(envelope, buffers);
 ```
+
+```python
+from colight_serde import unpack_message
+
+data = unpack_message(envelope, buffers)
+# data["samples"] is a numpy array
+```
+
+## Wire format
+
+See [WIRE_PROTOCOL.md](./WIRE_PROTOCOL.md) for the specification.
+
+## Install
+
+```bash
+npm install @colight/serde   # JavaScript
+pip install colight-serde    # Python
+```
+
+## License
+
+Apache-2.0
