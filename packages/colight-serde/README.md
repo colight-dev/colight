@@ -27,6 +27,7 @@ JS:     {"points": [[1,2,3], [4,5,6]]}
 - **Transparent**: Arrays serialize/deserialize automatically in nested structures
 - **Transport-agnostic**: Works over WebSocket, HTTP multipart, or any channel that can carry JSON + binary blobs
 - **Bi-directional**: Both Python and JS can pack/unpack messages
+- **Type-safe**: Auto-generate TypeScript interfaces from Python dataclasses
 
 ## Usage
 
@@ -50,9 +51,35 @@ import { unpackMessage } from "@colight/serde";
 
 // Receive envelope and buffers from transport
 const data = unpackMessage(envelope, buffers);
-// data.vertices: nested array of numbers
-// data.indices: Uint32Array
+// data.vertices: NdArrayView (zero-copy Float32Array wrapper)
+// data.indices: NdArrayView (zero-copy Uint32Array wrapper)
 // data.name: "mesh"
+```
+
+### TypeScript Generation
+
+Generate TypeScript interfaces from Python dataclasses:
+
+```python
+from dataclasses import dataclass
+from numpy.typing import NDArray
+import numpy as np
+from colight_serde import generate_typescript, Shape
+from typing import Annotated
+
+@dataclass
+class Mesh:
+    vertices: NDArray[np.float32]
+    indices: NDArray[np.uint32]
+    name: str
+
+# Generate TypeScript
+print(generate_typescript(Mesh))
+# interface Mesh {
+#   vertices: NdArrayView<Float32Array>;
+#   indices: NdArrayView<Uint32Array>;
+#   name: string;
+# }
 ```
 
 ### JavaScript → Python

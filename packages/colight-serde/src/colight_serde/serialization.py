@@ -7,16 +7,26 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
+from .handlers import find_handler_for_value
+
 Buffer = bytes | bytearray | memoryview
 
 
 class BufferCollector:
-    """Collect buffers for out-of-band binary transfer."""
+    """Collect buffers for out-of-band binary transfer.
+
+    Implements BufferCollectorProtocol for use with handlers.
+    """
 
     def __init__(self, buffers: Optional[Sequence[Buffer]] = None) -> None:
         self._buffers: List[Buffer] = list(buffers) if buffers else []
 
+    def append(self, data: Buffer) -> None:
+        """Add a buffer (protocol method)."""
+        self._buffers.append(data)
+
     def add(self, data: Buffer) -> int:
+        """Add a buffer and return its index."""
         self._buffers.append(data)
         return len(self._buffers) - 1
 
@@ -25,6 +35,9 @@ class BufferCollector:
 
     def get_buffers(self) -> List[Buffer]:
         return self._buffers
+
+    def __len__(self) -> int:
+        return len(self._buffers)
 
     @property
     def buffers(self) -> List[Buffer]:
@@ -39,6 +52,31 @@ def _normalize_buffers(
     if isinstance(buffers, BufferCollector):
         return buffers.buffers
     return buffers
+
+
+class _ListWrapper:
+    """Wrapper that makes a list implement BufferCollectorProtocol."""
+
+    def __init__(self, lst: List[Buffer]) -> None:
+        self._list = lst
+
+    def append(self, data: Buffer) -> None:
+        self._list.append(data)
+
+    def __len__(self) -> int:
+        return len(self._list)
+
+
+def _ensure_collector(
+    collector: Optional[List[Buffer] | BufferCollector],
+) -> Optional[BufferCollector | _ListWrapper]:
+    """Convert list to protocol-compatible wrapper if needed."""
+    if collector is None:
+        return None
+    if isinstance(collector, BufferCollector):
+        return collector
+    # Wrap list so appends go to the original list
+    return _ListWrapper(collector)
 
 
 def serialize_binary_data(
@@ -161,68 +199,23 @@ def replace_buffers(
     return data
 
 
-def _is_array_like(value: Any) -> bool:
-    if isinstance(value, np.ndarray):
-        return True
-    return type(value).__name__ in ("DeviceArray", "Array", "ArrayImpl")
-
-
-def _to_contiguous_array(value: Any) -> tuple[np.ndarray, str]:
-    array = np.asarray(value)
-    if array.flags["F_CONTIGUOUS"] and not array.flags["C_CONTIGUOUS"]:
-        return np.asfortranarray(array), "F"
-    return np.ascontiguousarray(array), "C"
-
-
-def _append_buffer(
-    collector: Optional[List[Buffer] | BufferCollector],
-    buffer: Buffer,
-) -> Optional[int]:
-    if collector is None:
-        return None
-    normalized = _normalize_buffers(collector)
-    if normalized is None:
-        return None
-    normalized.append(buffer)
-    return len(normalized) - 1
-
-
 def serialize(
     data: Any,
     collector: Optional[List[Buffer] | BufferCollector] = None,
 ) -> Any:
-    """Serialize arrays and binary blobs into binary JSON structures."""
-    if isinstance(data, np.generic):
-        return data.item()
+    """Serialize arrays and binary blobs into binary JSON structures.
 
-    if _is_array_like(data):
-        array = np.asarray(data)
-        if array.ndim == 0:
-            return array.item()
-        contiguous, order = _to_contiguous_array(array)
-        bytes_data = contiguous.tobytes(order=order)
-        entry = {
-            "__type__": "ndarray",
-            "data": bytes_data,
-            "dtype": str(contiguous.dtype),
-            "shape": contiguous.shape,
-            "order": order,
-            "strides": list(contiguous.strides),
-        }
-        return serialize_binary_data(collector, entry)
+    Uses the unified handler registry from handlers.py to ensure
+    serialization stays in sync with TypeScript type generation.
+    """
+    # Ensure we have a proper collector (or None)
+    coll = _ensure_collector(collector)
 
-    if isinstance(data, (bytes, bytearray, memoryview)):
-        index = _append_buffer(collector, data)
-        if index is None:
-            return data
-        return {"__buffer_index__": index}
+    handler = find_handler_for_value(data)
+    if handler:
+        return handler.serialize(data, coll, recurse=serialize)
 
-    if isinstance(data, dict):
-        return {k: serialize(v, collector) for k, v in data.items()}
-
-    if isinstance(data, (list, tuple)):
-        return [serialize(x, collector) for x in data]
-
+    # Fallback: return as-is (primitives handled by PrimitiveHandler)
     return data
 
 

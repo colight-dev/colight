@@ -9,7 +9,7 @@ import warnings
 
 from colight.env import CONFIG, ANYWIDGET_PATH
 from colight.protocols import Collector
-from colight_serde import serialize_binary_data, replace_buffers
+from colight_serde import serialize_binary_data, replace_buffers, to_numpy
 from colight.state_operations import entry_id, normalize_updates, apply_updates
 
 
@@ -178,33 +178,23 @@ def serialize_callable(data: Any, collected_state: Optional[CollectedState]) -> 
 
 @register_serializer()
 def serialize_numpy_array(data: Any, collected_state: Optional[CollectedState]) -> Any:
-    """Serializer for numpy and jax arrays."""
-    if not (
-        isinstance(data, np.ndarray)
-        or type(data).__name__
-        in (
-            "DeviceArray",
-            "Array",
-            "ArrayImpl",
-        )
-    ):
+    """Serializer for array-like objects (numpy, JAX, PyTorch, TensorFlow, Warp, etc.)."""
+    array = to_numpy(data)
+    if array is None:
         return SKIP
 
     assert collected_state is not None
-    try:
-        if data.ndim == 0:  # It's a scalar
-            return data.item()
-    except AttributeError:
-        pass
+    if array.ndim == 0:  # It's a scalar
+        return array.item()
 
-    bytes_data = data.tobytes()
+    bytes_data = array.tobytes()
     return serialize_binary_data(
         collected_state.buffers,
         {
             "__type__": "ndarray",
             "data": bytes_data,
-            "dtype": str(data.dtype),
-            "shape": data.shape,
+            "dtype": str(array.dtype),
+            "shape": array.shape,
         },
     )
 

@@ -1,3 +1,9 @@
+import {
+  ndarray,
+  toNestedArray as toNestedArrayFromView,
+  type NdArrayView,
+} from "./ndarray";
+
 export type TypedArray =
   | Int8Array
   | Int16Array
@@ -12,52 +18,57 @@ export type TypedArray =
 /** Type representing arrays that contain BigInt values */
 export type BigIntArray = BigInt64Array | BigUint64Array;
 
+/** Options for evaluateNdarray */
+export interface EvaluateOptions {
+  /**
+   * How to return multidimensional arrays:
+   * - "view": NdArrayView with arr[i][j] access + .flat/.shape/.strides (default)
+   * - "nested": Copy to nested JS arrays
+   */
+  multidimensional?: "view" | "nested";
+}
+
 /**
  * Type guard to check if a value is a BigInt array type
- * @param value - Value to check
- * @returns True if the value is a BigInt array type (BigInt64Array or BigUint64Array)
  */
 export function isBigIntArray(value: unknown): value is BigIntArray {
   return value instanceof BigInt64Array || value instanceof BigUint64Array;
 }
 
+/** Maximum safe integer in JavaScript */
+const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+const MIN_SAFE_INTEGER = Number.MIN_SAFE_INTEGER;
+
 /**
- * Converts a BigInt array (BigInt64Array/BigUint64Array) to a regular number array.
- * @param value - The array to convert
- * @returns A regular Array of numbers if input is a BigInt array, otherwise returns the input unchanged
+ * Converts a BigInt array to a regular number array.
+ * Warns if any values exceed safe integer range.
  */
 function convertBigIntArray(value: unknown): number[] | unknown {
   if (value instanceof BigInt64Array || value instanceof BigUint64Array) {
-    return Array.from(value, Number);
+    let hasOverflow = false;
+    const result = Array.from(value, (v) => {
+      const n = Number(v);
+      if (!hasOverflow && (n > MAX_SAFE_INTEGER || n < MIN_SAFE_INTEGER)) {
+        hasOverflow = true;
+        console.warn(
+          `[colight-serde] BigInt value ${v} exceeds Number.MAX_SAFE_INTEGER. ` +
+            `Precision may be lost. Consider using smaller integer types.`,
+        );
+      }
+      return n;
+    });
+    return result;
   }
   return value;
 }
 
 /**
- * Reshapes a flat array into a nested array structure based on the provided dimensions.
- * The input array can be either a TypedArray (like Float32Array) or regular JavaScript Array.
- * The leaf arrays (deepest level) maintain the original array type, while the nested structure
- * uses regular JavaScript arrays.
- *
- * @param {TypedArray|Array} flat - The flat array to reshape
- * @param {number[]} dims - Array of dimensions specifying the desired shape
- * @param {number} [offset=0] - Starting offset into the flat array (used internally for recursion)
- * @param {number[]} [strides] - Element strides for each dimension
- * @returns {Array} A nested array matching the specified dimensions, with leaves maintaining the original type
- *
- * @example
- * // With regular Array
- * reshapeArray([1,2,3,4], [2,2])
- * // Returns: [[1,2], [3,4]]
- *
- * @example
- * // With TypedArray
- * const data = new Float32Array([1,2,3,4])
- * reshapeArray(data, [2,2])
- * // Returns nested arrays containing Float32Array slices:
- * // [Float32Array[1,2], Float32Array[3,4]]
+ * Compute element strides from shape and order.
  */
-function computeElementStrides(dims, order) {
+function computeElementStrides(
+  dims: number[],
+  order: "C" | "F",
+): number[] {
   const strides = new Array(dims.length);
   if (order === "F") {
     let acc = 1;
@@ -75,12 +86,17 @@ function computeElementStrides(dims, order) {
   return strides;
 }
 
-function sliceWithStride(flat, offset, length, stride) {
+function sliceWithStride(
+  flat: TypedArray | number[],
+  offset: number,
+  length: number,
+  stride: number,
+) {
   if (stride === 1 && typeof flat.slice === "function") {
     return flat.slice(offset, offset + length);
   }
   const out = ArrayBuffer.isView(flat)
-    ? new flat.constructor(length)
+    ? new (flat.constructor as any)(length)
     : new Array(length);
   for (let i = 0; i < length; i += 1) {
     out[i] = flat[offset + i * stride];
@@ -88,7 +104,16 @@ function sliceWithStride(flat, offset, length, stride) {
   return out;
 }
 
-export function reshapeArray(flat, dims, offset = 0, strides = null) {
+/**
+ * Reshape a flat array into nested arrays.
+ * Note: This copies data. For zero-copy access, use ndarray view.
+ */
+export function reshapeArray(
+  flat: TypedArray | number[],
+  dims: number[],
+  offset = 0,
+  strides: number[] | null = null,
+): any {
   const [dim, ...restDims] = dims;
   const stride = strides ? strides[0] : null;
 
@@ -106,7 +131,7 @@ export function reshapeArray(flat, dims, offset = 0, strides = null) {
   );
 }
 
-const dtypeMap = {
+const dtypeMap: Record<string, any> = {
   float32: Float32Array,
   float64: Float64Array,
   int8: Int8Array,
@@ -124,35 +149,52 @@ const dtypeMap = {
 
 /**
  * Infers the numpy dtype for a TypedArray by examining its constructor name.
- *
- * @param {TypedArray} value - TypedArray to analyze
- * @returns {string} Numpy dtype string (e.g. 'float32', 'int32', etc)
- * @throws {Error} If input is not a TypedArray or ArrayBuffer
  */
-export function inferDtype(value) {
+export function inferDtype(value: ArrayBuffer | ArrayBufferView): string {
   if (!(value instanceof ArrayBuffer || ArrayBuffer.isView(value))) {
-    throw new Error("Value must be a TypedArray");
+    throw new Error("Value must be a TypedArray or ArrayBuffer");
   }
 
-  return value.constructor.name.toLowerCase().replace("array", "");
+  const name = value.constructor.name.toLowerCase().replace("array", "");
+  // Handle ArrayBuffer specially - it's raw bytes, not a typed array
+  if (name === "buffer") {
+    return "uint8"; // Default interpretation for raw bytes
+  }
+  return name;
 }
 
 /**
- * Evaluates an ndarray node by converting the DataView buffer into a typed array
- * and optionally reshaping it into a multidimensional array.
- *
- * @param {Object} node - The ndarray node to evaluate
- * @param {DataView} node.data - The raw binary data as a DataView
- * @param {string} node.dtype - The numpy dtype string (e.g. 'float32', 'int32')
- * @param {number[]} node.shape - The shape of the array (e.g. [2,3] for 2x3 matrix)
- * @returns {TypedArray|Array} A typed array for 1D data, or nested array structure for multidimensional data
+ * Convert an NdArrayView to nested JavaScript arrays.
  */
-export function evaluateNdarray(node) {
+export function asNestedArray(view: NdArrayView): any {
+  return toNestedArrayFromView(view);
+}
+
+/**
+ * Evaluates an ndarray node by converting binary data to typed array.
+ *
+ * @param node - The ndarray metadata and data
+ * @param options - How to handle multidimensional arrays
+ * @returns TypedArray for 1D, or based on options for >1D
+ */
+export function evaluateNdarray(
+  node: {
+    data: DataView | ArrayBuffer | ArrayBufferView;
+    dtype: string;
+    shape: number[];
+    order?: "C" | "F";
+    strides?: number[];
+  },
+  options: EvaluateOptions = {},
+): TypedArray | number[] | NdArrayView {
   const { data, dtype, shape } = node;
   const order = node.order || "C";
   const wireStrides = node.strides || null;
+  const multidimensional = options.multidimensional ?? "view";
+
   const ArrayConstructor = dtypeMap[dtype] || Float64Array;
   const bytesPerElement = ArrayConstructor.BYTES_PER_ELEMENT;
+
   const view =
     data instanceof DataView
       ? data
@@ -160,43 +202,43 @@ export function evaluateNdarray(node) {
         ? new DataView(data.buffer, data.byteOffset, data.byteLength)
         : new DataView(data);
 
-  // Create typed array directly from the DataView's buffer
-  // Our format guarantees 8-byte alignment for all buffers
+  // Create typed array directly from the DataView's buffer (zero-copy)
   const flatArray = new ArrayConstructor(
     view.buffer,
     view.byteOffset,
     view.byteLength / bytesPerElement,
   );
 
-  // Convert BigInt arrays to regular number arrays
-  const convertedArray = convertBigIntArray(flatArray);
+  // Convert BigInt arrays to regular number arrays (with overflow warning)
+  const convertedArray = convertBigIntArray(flatArray) as TypedArray | number[];
+
   const elementStrides = wireStrides
     ? wireStrides.map((stride) => stride / bytesPerElement)
     : computeElementStrides(shape, order);
 
-  // If 1D, return the array directly
+  // 1D arrays are always returned directly
   if (shape.length <= 1) {
     return convertedArray;
   }
 
-  return reshapeArray(convertedArray, shape, 0, elementStrides);
+  // Handle multidimensional based on options
+  if (multidimensional === "nested") {
+    return reshapeArray(convertedArray, shape, 0, elementStrides);
+  }
+
+  // Default: return NdArrayView with .flat, .shape, .strides and [i][j] access
+  return ndarray(convertedArray, shape, elementStrides);
 }
 
 /**
- * Estimates the size of a JSON string in bytes and returns a human readable string.
- * Uses TextEncoder to get accurate UTF-8 encoded size.
- *
- * @param {string} jsonString - The JSON string to measure
- * @returns {string} Human readable size with units (B, KB, or MB) and 2 decimal places for KB/MB
+ * Estimates the size of a JSON string in bytes.
  */
-export function estimateJSONSize(jsonString) {
+export function estimateJSONSize(jsonString: string | null | undefined): string {
   if (!jsonString) return "0 B";
 
-  // Use TextEncoder to get accurate byte size for UTF-8 encoded string
   const encoder = new TextEncoder();
   const bytes = encoder.encode(jsonString).length;
 
-  // Convert bytes to KB or MB
   if (bytes < 1024) {
     return `${bytes} B`;
   } else if (bytes < 1024 * 1024) {
