@@ -152,7 +152,9 @@ export const ringFragCode = /*wgsl*/ `
 
 export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
   type: "EllipsoidAxes",
-  arrayFields: { float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"] },
+  arrayFields: {
+    float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"],
+  },
 
   defaults: {
     half_size: [0.5, 0.5, 0.5],

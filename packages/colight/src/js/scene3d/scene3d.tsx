@@ -48,7 +48,9 @@ const componentSpecs: Record<string, PrimitiveSpec<any>> = {
 function coerceToFloat32(value: unknown): Float32Array | unknown {
   if (isNdArray(value)) {
     const flat = value.flat;
-    return flat instanceof Float32Array ? flat : new Float32Array(flat as ArrayLike<number>);
+    return flat instanceof Float32Array
+      ? flat
+      : new Float32Array(flat as ArrayLike<number>);
   }
   if (Array.isArray(value)) {
     return new Float32Array(value);
@@ -277,7 +279,8 @@ function DevMenu({
     position: "fixed",
     backgroundColor: "white",
     border: "1px solid #e5e7eb",
-    boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
+    boxShadow:
+      "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
     borderRadius: "4px",
     padding: "4px",
     zIndex: 1000,
@@ -366,12 +369,7 @@ function SceneFromLayers({ layers }: SceneLayersProps) {
     }
   }
 
-  return (
-    <SceneInner
-      components={components}
-      {...props}
-    />
-  );
+  return <SceneInner components={components} {...props} />;
 }
 
 function SceneInner({
@@ -445,9 +443,15 @@ function SceneInner({
     const currentCamera = internalCameraRef.current;
 
     // Format the camera position as Python-compatible string
-    const formattedPosition = `[${Array.from(currentCamera.position).map((n) => n.toFixed(6)).join(", ")}]`;
-    const formattedTarget = `[${Array.from(currentCamera.target).map((n) => n.toFixed(6)).join(", ")}]`;
-    const formattedUp = `[${Array.from(currentCamera.up).map((n) => n.toFixed(6)).join(", ")}]`;
+    const formattedPosition = `[${Array.from(currentCamera.position)
+      .map((n) => n.toFixed(6))
+      .join(", ")}]`;
+    const formattedTarget = `[${Array.from(currentCamera.target)
+      .map((n) => n.toFixed(6))
+      .join(", ")}]`;
+    const formattedUp = `[${Array.from(currentCamera.up)
+      .map((n) => n.toFixed(6))
+      .join(", ")}]`;
 
     const pythonCode = `{
         "position": ${formattedPosition},

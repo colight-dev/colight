@@ -283,9 +283,7 @@ describe("Scene3D Components", () => {
 
       // Verify that the scale data was written correctly
       // Buffer data is now passed as ArrayBuffer (via .buffer property)
-      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(
-        true,
-      );
+      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(true);
     });
   });
 
@@ -422,9 +420,7 @@ describe("Scene3D Components", () => {
       const writeBuffer = mockQueue.writeBuffer as Mock;
       const bufferData = writeBuffer.mock.calls.map((call) => call[2]);
       // Buffer data is now passed as ArrayBuffer (via .buffer property)
-      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(
-        true,
-      );
+      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(true);
     });
   });
 

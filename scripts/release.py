@@ -21,14 +21,16 @@ import tomli_w
 from questionary import Style
 
 # Custom style
-style = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:cyan"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-    ("selected", "fg:green"),
-])
+style = Style(
+    [
+        ("qmark", "fg:cyan bold"),
+        ("question", "bold"),
+        ("answer", "fg:cyan"),
+        ("pointer", "fg:cyan bold"),
+        ("highlighted", "fg:cyan bold"),
+        ("selected", "fg:green"),
+    ]
+)
 
 # Package definitions
 # type: "python" = pyproject.toml only, "npm" = package.json only, "both" = both
@@ -69,14 +71,17 @@ def check_working_directory():
         text=True,
     )
     changed_files = [
-        f for f in result.stdout.strip().split("\n")
-        if f and f != "scripts/release.py"
+        f for f in result.stdout.strip().split("\n") if f and f != "scripts/release.py"
     ]
     if changed_files:
-        questionary.print("Error: There are unstaged changes to tracked files:", style="fg:red bold")
+        questionary.print(
+            "Error: There are unstaged changes to tracked files:", style="fg:red bold"
+        )
         for f in changed_files:
             questionary.print(f"  {f}", style="fg:red")
-        questionary.print("\nStage the changes you want to include, or stash them.", style="fg:yellow")
+        questionary.print(
+            "\nStage the changes you want to include, or stash them.", style="fg:yellow"
+        )
         sys.exit(1)
 
 
@@ -129,7 +134,9 @@ def bump_semver(current: str, bump_type: str) -> str:
     """Bump semver version."""
     parts = current.split(".")
     if len(parts) != 3:
-        questionary.print(f"Error: Invalid version format '{current}', expected x.y.z", style="fg:red")
+        questionary.print(
+            f"Error: Invalid version format '{current}', expected x.y.z", style="fg:red"
+        )
         sys.exit(1)
 
     major, minor, patch = map(int, parts)
@@ -151,10 +158,12 @@ def select_packages() -> list[str]:
         pkg = PACKAGES[key]
         version = get_current_version(key)
         name = pkg.get("npm_name", key)
-        choices.append(questionary.Choice(
-            title=f"{name} ({pkg['description']}) - {version}",
-            value=key,
-        ))
+        choices.append(
+            questionary.Choice(
+                title=f"{name} ({pkg['description']}) - {version}",
+                value=key,
+            )
+        )
 
     selected = questionary.checkbox(
         "Select packages to release:",
@@ -229,7 +238,9 @@ def update_changelog(new_version: str) -> bool:
             .strip()
         )
     except subprocess.CalledProcessError:
-        questionary.print("No previous tags found, skipping changelog generation", style="fg:yellow")
+        questionary.print(
+            "No previous tags found, skipping changelog generation", style="fg:yellow"
+        )
         return True
 
     commit_messages = (
@@ -258,7 +269,7 @@ def update_changelog(new_version: str) -> bool:
             categorized = False
             for category, prefix in categories.items():
                 if prefix and line.lower().startswith(prefix.lower()):
-                    cleaned_msg = line[len(prefix):].strip().lstrip("- •").strip()
+                    cleaned_msg = line[len(prefix) :].strip().lstrip("- •").strip()
                     categorized_commits[category].append(cleaned_msg)
                     categorized = True
                     break
@@ -295,7 +306,9 @@ def update_changelog(new_version: str) -> bool:
     questionary.print("\nNew changelog entry:", style="fg:cyan bold")
     print(changelog_entry)
 
-    if not questionary.confirm("Accept changelog entry?", default=True, style=style).ask():
+    if not questionary.confirm(
+        "Accept changelog entry?", default=True, style=style
+    ).ask():
         with open(changelog_path, "w") as f:
             f.write(original_content)
         questionary.print("Changelog update cancelled.", style="fg:yellow")
@@ -341,12 +354,14 @@ def main():
         if key == "colight":
             releases_colight = True
 
-        releases.append({
-            "key": key,
-            "pkg": pkg,
-            "current": current,
-            "new_version": new_version,
-        })
+        releases.append(
+            {
+                "key": key,
+                "pkg": pkg,
+                "current": current,
+                "new_version": new_version,
+            }
+        )
 
     # Summary
     questionary.print("\nRelease summary:", style="fg:cyan bold")
@@ -359,17 +374,21 @@ def main():
             targets.append("npm")
         questionary.print(
             f"  {name}: {rel['current']} → {rel['new_version']} ({', '.join(targets)})",
-            style="fg:green"
+            style="fg:green",
         )
     print()
 
-    if not questionary.confirm("Proceed with release?", default=True, style=style).ask():
+    if not questionary.confirm(
+        "Proceed with release?", default=True, style=style
+    ).ask():
         questionary.print("Aborted.", style="fg:yellow")
         sys.exit(0)
 
     # Update changelog for colight releases
     if releases_colight:
-        colight_version = next(r["new_version"] for r in releases if r["key"] == "colight")
+        colight_version = next(
+            r["new_version"] for r in releases if r["key"] == "colight"
+        )
         if not update_changelog(colight_version):
             questionary.print("Release cancelled.", style="fg:red")
             sys.exit(1)
@@ -419,16 +438,24 @@ def main():
             tag = f"{rel['key']}-v{rel['new_version']}"
         tags.append(tag)
         name = rel["pkg"].get("npm_name") or rel["pkg"].get("pypi_name") or rel["key"]
-        subprocess.run(["git", "tag", "-a", tag, "-m", f"Release {name} {rel['new_version']}"])
+        subprocess.run(
+            ["git", "tag", "-a", tag, "-m", f"Release {name} {rel['new_version']}"]
+        )
 
     questionary.print(f"\nCreated tags: {', '.join(tags)}", style="fg:green")
 
     # Push
-    if questionary.confirm("Push to origin? (triggers CI publish)", default=True, style=style).ask():
+    if questionary.confirm(
+        "Push to origin? (triggers CI publish)", default=True, style=style
+    ).ask():
         subprocess.run(["git", "push", "origin", "HEAD", "--tags"])
-        questionary.print("\nCI will handle publishing to PyPI and npm.", style="fg:yellow")
+        questionary.print(
+            "\nCI will handle publishing to PyPI and npm.", style="fg:yellow"
+        )
     else:
-        questionary.print("\nTo publish later, run: git push origin HEAD --tags", style="fg:yellow")
+        questionary.print(
+            "\nTo publish later, run: git push origin HEAD --tags", style="fg:yellow"
+        )
 
     questionary.print("\n  Done!\n", style="fg:cyan bold")
 

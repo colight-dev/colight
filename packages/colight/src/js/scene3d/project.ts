@@ -42,7 +42,11 @@ export function screenRay(
   glMatrix.vec4.transformMat4(near, near, inv);
   glMatrix.vec4.transformMat4(far, far, inv);
 
-  const origin: Vec3 = [near[0] / near[3], near[1] / near[3], near[2] / near[3]];
+  const origin: Vec3 = [
+    near[0] / near[3],
+    near[1] / near[3],
+    near[2] / near[3],
+  ];
   const farPoint: Vec3 = [far[0] / far[3], far[1] / far[3], far[2] / far[3]];
 
   const dx = farPoint[0] - origin[0];
@@ -103,8 +107,6 @@ export function isPointVisible(
   const ndcZ = clip[2] / clip[3];
 
   return (
-    ndcX >= -1 && ndcX <= 1 &&
-    ndcY >= -1 && ndcY <= 1 &&
-    ndcZ >= 0 && ndcZ <= 1
+    ndcX >= -1 && ndcX <= 1 && ndcY >= -1 && ndcY <= 1 && ndcZ >= 0 && ndcZ <= 1
   );
 }

@@ -200,6 +200,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [0.1.1] - 2024-06-30
 
 ### Added
+
 - Initial release of Colight extension with core functionalities:
   - Cell detection (explicit and implicit)
   - Code execution in Jupyter
@@ -208,4 +209,3 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Basic error handling and user feedback
 - Configuration options for cell markers
 - Initial test suite
-

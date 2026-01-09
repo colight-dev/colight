@@ -23,12 +23,10 @@ The live sync system enables real-time updates between the server (watching file
 ### Navigation Rules
 
 1. **When NOT pinned**:
-
    - If another file changes, automatically navigate to that file
    - Show the latest changes immediately
 
 2. **When pinned**:
-
    - Stay on the pinned file regardless of other file changes
    - The pinned file still receives its own updates when it changes
    - Other files' updates are processed in the background but don't cause navigation
@@ -44,17 +42,14 @@ The live sync system enables real-time updates between the server (watching file
 ### Client State
 
 1. **Navigation State**:
-
    - `currentFile`: The file currently being viewed
    - `currentPath`: The full path including directories
    - `isDirectory`: Whether viewing a directory or file
 
 2. **Pinning State**:
-
    - `pinnedFile`: The file path that is pinned (null if nothing pinned)
 
 3. **Content State**:
-
    - `blockResults`: Current block execution results for the displayed file
    - `latestRun`: Version number of the latest run from server
 
@@ -65,12 +60,10 @@ The live sync system enables real-time updates between the server (watching file
 ### Server State
 
 1. **File Monitoring**:
-
    - Active file watchers for the configured paths
    - File change detection and debouncing
 
 2. **Execution State**:
-
    - `IncrementalExecutor`: Maintains execution context and caching
    - Block dependency graph and execution order
    - Visual data store for generated visualizations
@@ -143,7 +136,6 @@ The server maintains minimal client knowledge:
 ### Client Decisions
 
 1. **Navigation**: Whether to navigate to a changed file based on:
-
    - Current pinned state
    - Whether the changed file is already being viewed
    - User interactions (clicking files, using command bar)
@@ -162,14 +154,12 @@ The server maintains minimal client knowledge:
 ## Expected Behaviors
 
 1. **File Change Detection**:
-
    - Server detects file change
    - Server executes changed blocks and their dependents
    - Server broadcasts updates to all clients
    - Each client decides independently whether to navigate
 
 2. **Manual Navigation**:
-
    - User clicks a file or uses command bar
    - Client sends `request-load` to server
    - Server processes and sends full file state
@@ -255,6 +245,7 @@ Implement client-aware execution and targeted updates:
      "watched": true // Whether any client is watching this file
    }
    ```
+
    - Sent to ALL clients (not just watchers)
    - Only sent when exactly one file changes in the throttle window (100ms)
    - Clients decide whether to navigate based on pin state
@@ -273,7 +264,6 @@ Implement client-aware execution and targeted updates:
    ```
 
 2. **Dependency Tracking** ✅:
-
    - Custom AST-based import analysis implemented
    - FileDependencyGraph class tracks forward and reverse dependencies
    - Handles relative and absolute imports, filters external dependencies
@@ -314,7 +304,6 @@ Implement client-aware execution and targeted updates:
 #### Client State Changes
 
 1. **Single-File State**:
-
    - Remove the accumulating `blockResults` for all files
    - Only store results for the currently viewed file
    - Clear state when navigating away
@@ -342,24 +331,20 @@ Implement client-aware execution and targeted updates:
 ### Open Questions / TBD
 
 1. **Dependency Detection**:
-
    - Should we use existing Python reload libraries (e.g., `watchdog`, `jurigged`)?
    - How deep should dependency tracking go? (stdlib imports? third-party?)
    - Cache dependency graph or recompute on each change?
 
 2. **Client Identity**:
-
    - How to generate stable client IDs?
    - Handle reconnection with same ID?
    - Clean up state for disconnected clients?
 
 3. **Multi-Client Scenarios**:
-
    - If multiple clients watch the same file, execute once and broadcast to all?
    - How to handle different clients with different pragma settings?
 
 4. **Performance Considerations**:
-
    - Lazy dependency resolution vs upfront graph building?
    - Should we batch file changes within a time window?
 

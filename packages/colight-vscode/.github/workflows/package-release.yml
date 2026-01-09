@@ -3,19 +3,18 @@ name: Package and Release VS Code Extension
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
-  
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-        
 
       - name: Yarn install
         run: yarn install

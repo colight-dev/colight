@@ -46,10 +46,7 @@ describe("@colight/serde", () => {
 
     it("should roundtrip arrays nested in arrays", () => {
       const original = {
-        frames: [
-          new Float32Array([1, 2]),
-          new Float32Array([3, 4]),
-        ],
+        frames: [new Float32Array([1, 2]), new Float32Array([3, 4])],
       };
       const [envelope, buffers] = packMessage(original);
 
@@ -172,7 +169,10 @@ describe("@colight/serde", () => {
       const view = ndarray([1, 2, 3, 4, 5, 6], [2, 3]);
       const nested = toNestedArray(view);
 
-      expect(nested).toEqual([[1, 2, 3], [4, 5, 6]]);
+      expect(nested).toEqual([
+        [1, 2, 3],
+        [4, 5, 6],
+      ]);
     });
   });
 

@@ -350,13 +350,25 @@ export const createBuffers = (
     size: vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(vb, 0, vertexData.buffer, vertexData.byteOffset, vertexData.byteLength);
+  device.queue.writeBuffer(
+    vb,
+    0,
+    vertexData.buffer,
+    vertexData.byteOffset,
+    vertexData.byteLength,
+  );
 
   const ib = device.createBuffer({
     size: indexData.byteLength,
     usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(ib, 0, indexData.buffer, indexData.byteOffset, indexData.byteLength);
+  device.queue.writeBuffer(
+    ib,
+    0,
+    indexData.buffer,
+    indexData.byteOffset,
+    indexData.byteLength,
+  );
 
   // Each vertex has 6 floats (position + normal)
   const vertexCount = vertexData.length / 6;
@@ -621,7 +633,9 @@ export interface EllipsoidComponentConfig extends BaseComponentConfig {
 
 export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
   type: "Ellipsoid",
-  arrayFields: { float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"] },
+  arrayFields: {
+    float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"],
+  },
   instancesPerElement: 1,
 
   defaults: {
@@ -786,7 +800,9 @@ export interface CuboidComponentConfig extends BaseComponentConfig {
 
 export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   type: "Cuboid",
-  arrayFields: { float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"] },
+  arrayFields: {
+    float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"],
+  },
   instancesPerElement: 1,
 
   defaults: {

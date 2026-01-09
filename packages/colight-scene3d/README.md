@@ -14,7 +14,13 @@ yarn add @colight/scene3d
 
 ```tsx
 import React from "react";
-import { Scene, PointCloud, Ellipsoid, Cuboid, LineBeams } from "@colight/scene3d";
+import {
+  Scene,
+  PointCloud,
+  Ellipsoid,
+  Cuboid,
+  LineBeams,
+} from "@colight/scene3d";
 
 const components = [
   PointCloud({

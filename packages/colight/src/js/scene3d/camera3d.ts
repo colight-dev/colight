@@ -517,4 +517,3 @@ export function hasCameraMoved(
   const dz = current[2] - last[2];
   return dx * dx + dy * dy + dz * dz > threshold;
 }
-

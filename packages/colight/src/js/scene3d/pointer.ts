@@ -29,7 +29,14 @@ export interface PointerContext {
   camera: CameraState | null;
 }
 
-export type CursorType = "auto" | "grab" | "grabbing" | "pointer" | "crosshair" | "move" | "default";
+export type CursorType =
+  | "auto"
+  | "grab"
+  | "grabbing"
+  | "pointer"
+  | "crosshair"
+  | "move"
+  | "default";
 
 /**
  * Hint about what cursor to display.

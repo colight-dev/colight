@@ -22,7 +22,7 @@ function normalizeMarkers(markers: unknown, fallback: string[]): string[] {
   }
   return markers.filter(
     (marker): marker is string =>
-      typeof marker === "string" && marker.trim().length > 0
+      typeof marker === "string" && marker.trim().length > 0,
   );
 }
 
@@ -30,11 +30,14 @@ function getEnabledCellMarkers(): string[] {
   const currentConfig = vscode.workspace.getConfiguration("colight");
   return normalizeMarkers(
     currentConfig.get("enabledCellMarkers"),
-    defaultCellMarkers
+    defaultCellMarkers,
   );
 }
 
-function lineStartsWithMarker(line: string, markers: readonly string[]): boolean {
+function lineStartsWithMarker(
+  line: string,
+  markers: readonly string[],
+): boolean {
   const trimmed = line.trimStart();
   return markers.some((marker) => trimmed.startsWith(marker));
 }
@@ -98,7 +101,7 @@ function checkForExplicitMarkers(document: vscode.TextDocument): boolean {
 export function getCellAtPosition(
   document: vscode.TextDocument,
   position: vscode.Position,
-  mode: "implicit" | "explicit" | "auto" = "auto"
+  mode: "implicit" | "explicit" | "auto" = "auto",
 ): Cell | null {
   if (mode === "implicit") {
     return getImplicitCell(document, position);
@@ -119,7 +122,7 @@ export function getCellAtPosition(
 
 function getExplicitCell(
   document: vscode.TextDocument,
-  position: vscode.Position
+  position: vscode.Position,
 ): Cell | null {
   let startLine = position.line;
   let endLine = position.line;
@@ -156,8 +159,8 @@ function getExplicitCell(
       startLine,
       0,
       endLine,
-      document.lineAt(endLine).text.length
-    )
+      document.lineAt(endLine).text.length,
+    ),
   );
   return { startLine, endLine, metadata, text };
 }
@@ -195,7 +198,7 @@ interface DocumentState {
 const documentStates = new Map<string, DocumentState>();
 
 function getDocumentState(
-  document: vscode.TextDocument | string
+  document: vscode.TextDocument | string,
 ): DocumentState {
   const key = typeof document === "string" ? document : document.uri.toString();
   if (!documentStates.has(key)) {
@@ -218,7 +221,7 @@ function hasExplicitCells(document: vscode.TextDocument): boolean {
 
 function getParseTree(
   document: vscode.TextDocument,
-  changes?: readonly vscode.TextDocumentContentChangeEvent[]
+  changes?: readonly vscode.TextDocumentContentChangeEvent[],
 ): Tree {
   const state = getDocumentState(document);
 
@@ -239,7 +242,7 @@ function getParseTree(
 
     const fragments = TreeFragment.applyChanges(
       TreeFragment.addTree(state.parseTree.tree),
-      mappedChanges
+      mappedChanges,
     );
     state.parseTree = {
       tree: parser.parse(new StringInput(document.getText()), fragments),
@@ -261,9 +264,11 @@ function getParseTree(
 
 function getImplicitCell(
   document: vscode.TextDocument,
-  position: vscode.Position
+  position: vscode.Position,
 ): Cell | null {
-  if (document.languageId !== "python") {return null;};
+  if (document.languageId !== "python") {
+    return null;
+  }
 
   const tree = getParseTree(document);
   let cursor = tree.cursor();
@@ -273,7 +278,9 @@ function getImplicitCell(
 
   // Find the top-level node at or before the cursor position
   while (cursor.parent()) {
-    if (cursor.node.parent === null) {break;};
+    if (cursor.node.parent === null) {
+      break;
+    }
   }
 
   // If we're at the Script node, find the first child that starts after the position
@@ -287,7 +294,9 @@ function getImplicitCell(
     }
   }
 
-  if (!cursor.node) {return null;};
+  if (!cursor.node) {
+    return null;
+  }
 
   let startNode = cursor.node;
   let endNode = cursor.node;
@@ -322,8 +331,8 @@ function getImplicitCell(
       startLine,
       0,
       endLine,
-      document.lineAt(endLine).text.length
-    )
+      document.lineAt(endLine).text.length,
+    ),
   );
 
   // Remove trailing newlines from cell
@@ -346,7 +355,7 @@ function isCommentNode(node: SyntaxNode): boolean {
 function boundaryBetween(
   code: string,
   fromNode: SyntaxNode,
-  toNode: SyntaxNode
+  toNode: SyntaxNode,
 ): boolean {
   if (!fromNode || !toNode) {
     return false;
@@ -363,15 +372,16 @@ function boundaryBetween(
 
   // Then check for double newlines between nodes
   // Order nodes so we always process them start->end
-  const [startNode, endNode] = isGoingUp 
-    ? [toNode, fromNode] 
+  const [startNode, endNode] = isGoingUp
+    ? [toNode, fromNode]
     : [fromNode, toNode];
 
   const textFrom = code.slice(startNode.from, startNode.to);
   const textBetween = code.slice(startNode.to, endNode.from);
 
   const firstNodeNewline = textFrom.endsWith("\n") ? 1 : 0;
-  const totalNewlines = firstNodeNewline + (textBetween.match(/\n/g) || []).length;
+  const totalNewlines =
+    firstNodeNewline + (textBetween.match(/\n/g) || []).length;
 
   return totalNewlines > 1;
 }
@@ -443,7 +453,7 @@ const decorations = {
   apply(
     editor: vscode.TextEditor,
     range: vscode.Range | null,
-    decorationType: vscode.TextEditorDecorationType
+    decorationType: vscode.TextEditorDecorationType,
   ) {
     if (range) {
       const state = getDocumentState(editor.document);
@@ -454,21 +464,23 @@ const decorations = {
         decorationType,
         decorationType === this.types.evaluating
           ? Array.from(state.activeFlashes)
-          : [range]
+          : [range],
       );
     }
   },
 
   getCellRange(
     editor: vscode.TextEditor,
-    cell: Cell | null
+    cell: Cell | null,
   ): vscode.Range | null {
-    if (!cell) {return null;};
+    if (!cell) {
+      return null;
+    }
     return new vscode.Range(
       cell.startLine,
       0,
       cell.endLine,
-      editor.document.lineAt(cell.endLine).text.length
+      editor.document.lineAt(cell.endLine).text.length,
     );
   },
 
@@ -489,14 +501,14 @@ const decorations = {
         this.apply(
           editor,
           new vscode.Range(range.start, range.start),
-          this.types.cellTopOn
+          this.types.cellTopOn,
         );
       } else {
         const topLineRange = new vscode.Range(
           range.start.line - 1,
           editor.document.lineAt(range.start.line - 1).text.length,
           range.start.line - 1,
-          editor.document.lineAt(range.start.line - 1).text.length
+          editor.document.lineAt(range.start.line - 1).text.length,
         );
         this.apply(editor, topLineRange, this.types.cellTopAbove);
       }
@@ -506,14 +518,14 @@ const decorations = {
         this.apply(
           editor,
           new vscode.Range(range.end, range.end),
-          this.types.cellBottomOn
+          this.types.cellBottomOn,
         );
       } else {
         const bottomLineRange = new vscode.Range(
           range.end.line + 1,
           0,
           range.end.line + 1,
-          0
+          0,
         );
         this.apply(editor, bottomLineRange, this.types.cellBottomBelow);
       }
@@ -522,7 +534,7 @@ const decorations = {
 
   flashCell(
     editor: vscode.TextEditor,
-    cell: Cell | null
+    cell: Cell | null,
   ): Promise<vscode.Disposable> {
     return new Promise((resolve) => {
       const range = this.getCellRange(editor, cell);
@@ -534,7 +546,7 @@ const decorations = {
             state.activeFlashes.delete(range);
             editor.setDecorations(
               this.types.evaluating,
-              Array.from(state.activeFlashes)
+              Array.from(state.activeFlashes),
             );
           },
         };
@@ -555,14 +567,14 @@ const decorations = {
 
   dispose() {
     Object.values(this.types).forEach((decorationType) =>
-      decorationType.dispose()
+      decorationType.dispose(),
     );
   },
 };
 
 function renderCommentsAsMarkdown(
   document: vscode.TextDocument,
-  cell: Cell
+  cell: Cell,
 ): string {
   const import_markdown = "# \nfrom IPython.display import display, Markdown";
 
@@ -579,10 +591,13 @@ function renderCommentsAsMarkdown(
 
   const tree = getParseTree(document);
   const cellStartOffset = document.offsetAt(
-    new vscode.Position(cell.startLine, 0)
+    new vscode.Position(cell.startLine, 0),
   );
   const cellEndOffset = document.offsetAt(
-    new vscode.Position(cell.endLine, document.lineAt(cell.endLine).text.length)
+    new vscode.Position(
+      cell.endLine,
+      document.lineAt(cell.endLine).text.length,
+    ),
   );
 
   let processedLines: string[] = [];
@@ -614,7 +629,9 @@ function renderCommentsAsMarkdown(
   }
 
   // Move to first child that's within our cell
-  if (!cursor.firstChild()) {return processedLines.join("\n");};
+  if (!cursor.firstChild()) {
+    return processedLines.join("\n");
+  }
 
   // Create a new cursor for iterating through children
   let childCursor = cursor;
@@ -622,7 +639,9 @@ function renderCommentsAsMarkdown(
 
   // Process all siblings within the cell bounds
   do {
-    if (childCursor.from >= cellEndOffset) {break;};
+    if (childCursor.from >= cellEndOffset) {
+      break;
+    }
 
     if (childCursor.type.name === "Comment") {
       // Get the position of the comment
@@ -632,8 +651,8 @@ function renderCommentsAsMarkdown(
         const commentText = document.getText(
           new vscode.Range(
             document.positionAt(childCursor.from),
-            document.positionAt(childCursor.to)
-          )
+            document.positionAt(childCursor.to),
+          ),
         );
         markdownChunk.push(commentText.slice(1).trim());
       } else {
@@ -641,8 +660,8 @@ function renderCommentsAsMarkdown(
         const commentText = document.getText(
           new vscode.Range(
             document.positionAt(childCursor.from),
-            document.positionAt(childCursor.to)
-          )
+            document.positionAt(childCursor.to),
+          ),
         );
         processedLines.push(commentText);
       }
@@ -653,8 +672,8 @@ function renderCommentsAsMarkdown(
       const nodeText = document.getText(
         new vscode.Range(
           document.positionAt(childCursor.from),
-          document.positionAt(childCursor.to)
-        )
+          document.positionAt(childCursor.to),
+        ),
       );
       processedLines.push(nodeText);
     }
@@ -688,7 +707,7 @@ function stripMarkdownCommentMarkers(cellText: string): string {
 async function evaluateCell(
   editor: vscode.TextEditor,
   cell: Cell | null,
-  renderComments?: boolean
+  renderComments?: boolean,
 ): Promise<void> {
   if (!cell) {
     vscode.window.showErrorMessage("No cell found at cursor position");
@@ -704,7 +723,7 @@ async function evaluateCell(
       // Strip just the markdown comment markers
       const markdownText = stripMarkdownCommentMarkers(cell.text);
       source = `from IPython.display import display, Markdown\ndisplay(Markdown(${JSON.stringify(
-        markdownText
+        markdownText,
       )}))`;
     } else {
       source = stripComments(cell.text);
@@ -712,7 +731,7 @@ async function evaluateCell(
   } else {
     // For implicit cells, use the existing comment rendering logic
     source =
-      renderComments ?? config.get("renderComments", true)
+      (renderComments ?? config.get("renderComments", true))
         ? renderCommentsAsMarkdown(editor.document, cell)
         : stripComments(cell.text);
   }
@@ -727,7 +746,7 @@ async function evaluateCell(
   try {
     await vscode.commands.executeCommand(
       "jupyter.execSelectionInteractive",
-      source
+      source,
     );
   } finally {
     (await flashDisposable).dispose();
@@ -736,7 +755,7 @@ async function evaluateCell(
 
 function moveToNextExplicitCell(
   editor: vscode.TextEditor,
-  currentCell: Cell
+  currentCell: Cell,
 ): void {
   const document = editor.document;
   let nextLine = currentCell.endLine + 1;
@@ -749,7 +768,7 @@ function moveToNextExplicitCell(
       editor.selection = new vscode.Selection(newPosition, newPosition);
       editor.revealRange(
         new vscode.Range(newPosition, newPosition),
-        vscode.TextEditorRevealType.InCenterIfOutsideViewport
+        vscode.TextEditorRevealType.InCenterIfOutsideViewport,
       );
       break;
     }
@@ -781,7 +800,7 @@ function moveToNextCell(editor: vscode.TextEditor, currentCell: Cell): void {
   if (nextLine < document.lineCount) {
     const nextCell = getCellAtPosition(
       document,
-      new vscode.Position(nextLine, 0)
+      new vscode.Position(nextLine, 0),
     );
     if (nextCell) {
       const newPosition = new vscode.Position(nextCell.startLine, 0);
@@ -790,14 +809,14 @@ function moveToNextCell(editor: vscode.TextEditor, currentCell: Cell): void {
       // Calculate the range to reveal, including the next cell and some context
       const endOfNextCell = new vscode.Position(
         nextCell.endLine,
-        document.lineAt(nextCell.endLine).text.length
+        document.lineAt(nextCell.endLine).text.length,
       );
       const rangeToReveal = new vscode.Range(newPosition, endOfNextCell);
 
       // Reveal the range with a small amount of padding above and below
       editor.revealRange(
         rangeToReveal,
-        vscode.TextEditorRevealType.InCenterIfOutsideViewport
+        vscode.TextEditorRevealType.InCenterIfOutsideViewport,
       );
     }
   }
@@ -814,7 +833,7 @@ function parseCells(document: vscode.TextDocument, upToLine?: number): Cell[] {
   while (currentLine <= lastLine) {
     const cell = getCellAtPosition(
       document,
-      new vscode.Position(currentLine, 0)
+      new vscode.Position(currentLine, 0),
     );
     if (cell) {
       cells.push(cell);
@@ -848,7 +867,7 @@ async function evaluateAllCells(editor: vscode.TextEditor): Promise<void> {
 
 async function evaluateCellsUpTo(
   editor: vscode.TextEditor,
-  targetCell: Cell
+  targetCell: Cell,
 ): Promise<void> {
   // TODO
   // figure out how to run cells in the active kernel without showing the result
@@ -861,22 +880,22 @@ async function evaluateCellsUpTo(
   // so we must set our selection to the next line.
   const runUntilLine = Math.min(targetCell.endLine + 1, document.lineCount);
   const safeRunUntilPosition = document.validatePosition(
-    new vscode.Position(runUntilLine, 0)
+    new vscode.Position(runUntilLine, 0),
   );
   editor.selection = new vscode.Selection(
     safeRunUntilPosition,
-    safeRunUntilPosition
+    safeRunUntilPosition,
   );
   await vscode.commands.executeCommand("jupyter.runtoline");
   editor.selection = originalSelection;
 }
 
 async function evaluateCellsAboveAndCurrent(
-  editor: vscode.TextEditor
+  editor: vscode.TextEditor,
 ): Promise<void> {
   const currentCell = getCellAtPosition(
     editor.document,
-    editor.selection.active
+    editor.selection.active,
   );
   if (!currentCell) {
     return;
@@ -958,14 +977,14 @@ function nodeAtCursor(cursorOffset: number, tree: Tree): SyntaxNode | null {
     .reduce((smallest, node) =>
       !smallest || node.to - node.from < smallest.to - smallest.from
         ? node
-        : smallest
+        : smallest,
     );
 }
 
 function getCellRange(
   document: vscode.TextDocument,
   position: vscode.Position,
-  mode: "implicit" | "explicit" | "auto" = "auto"
+  mode: "implicit" | "explicit" | "auto" = "auto",
 ): vscode.Range | null {
   const cell = getCellAtPosition(document, position, mode);
   if (!cell) {
@@ -975,8 +994,8 @@ function getCellRange(
     new vscode.Position(cell.startLine, 0),
     new vscode.Position(
       cell.endLine,
-      document.lineAt(cell.endLine).text.trimEnd().length
-    )
+      document.lineAt(cell.endLine).text.trimEnd().length,
+    ),
   );
 }
 function isLargerThan(range: vscode.Range, other: vscode.Range): boolean {
@@ -994,14 +1013,14 @@ function isLargerThan(range: vscode.Range, other: vscode.Range): boolean {
  */
 function nodeBounds(
   node: SyntaxNode,
-  document: vscode.TextDocument
+  document: vscode.TextDocument,
 ): { start: number; end: number } {
   let start = node.from;
   let end = node.to;
 
   // Get text content of node
   let nodeText = document.getText(
-    new vscode.Range(document.positionAt(start), document.positionAt(end))
+    new vscode.Range(document.positionAt(start), document.positionAt(end)),
   );
 
   if (node.type.name === "Body") {
@@ -1026,7 +1045,9 @@ function nodeBounds(
 }
 
 function expandSelection(editor: vscode.TextEditor): void {
-  if (editor.document.languageId !== "python") {return;};
+  if (editor.document.languageId !== "python") {
+    return;
+  }
 
   const document = editor.document;
   const currentSelection = editor.selection;
@@ -1035,7 +1056,7 @@ function expandSelection(editor: vscode.TextEditor): void {
   state.selectionStack.push(currentSelection);
   const currentRange = new vscode.Range(
     currentSelection.start,
-    currentSelection.end
+    currentSelection.end,
   );
 
   // Get next syntax-based selection
@@ -1060,7 +1081,9 @@ function expandSelection(editor: vscode.TextEditor): void {
         break;
       }
 
-      if (!cursor.parent()) {break;};
+      if (!cursor.parent()) {
+        break;
+      }
     }
 
     if (!syntaxNode) {
@@ -1074,7 +1097,7 @@ function expandSelection(editor: vscode.TextEditor): void {
     syntaxNode &&
       new vscode.Range(
         document.positionAt(nodeBounds(syntaxNode, document).start),
-        document.positionAt(nodeBounds(syntaxNode, document).end)
+        document.positionAt(nodeBounds(syntaxNode, document).end),
       ),
     // Cell-based ranges
     getCellRange(document, currentSelection.active, "implicit"),
@@ -1089,20 +1112,22 @@ function expandSelection(editor: vscode.TextEditor): void {
 
   // Find index of first range larger than current
   const nextRangeIndex = ranges.findIndex((range) =>
-    isLargerThan(range, currentRange)
+    isLargerThan(range, currentRange),
   );
 
   if (nextRangeIndex >= 0) {
     const selectedRange = ranges[nextRangeIndex];
     editor.selection = new vscode.Selection(
       selectedRange.start,
-      selectedRange.end
+      selectedRange.end,
     );
   }
 }
 
 function shrinkSelection(editor: vscode.TextEditor): void {
-  if (editor.document.languageId !== "python") {return;};
+  if (editor.document.languageId !== "python") {
+    return;
+  }
 
   const state = getDocumentState(editor.document);
   if (state.selectionStack.length > 0) {
@@ -1132,7 +1157,9 @@ function shrinkSelection(editor: vscode.TextEditor): void {
         break;
       }
     } else {
-      if (!cursor.nextSibling()) {break;};
+      if (!cursor.nextSibling()) {
+        break;
+      }
     }
   }
 
@@ -1142,7 +1169,7 @@ function shrinkSelection(editor: vscode.TextEditor): void {
   ) {
     const newSelection = new vscode.Selection(
       document.positionAt(targetNode.from),
-      document.positionAt(targetNode.to)
+      document.positionAt(targetNode.to),
     );
     editor.selection = newSelection;
   }
@@ -1174,11 +1201,11 @@ export function activate(context: vscode.ExtensionContext) {
           } else {
             await evaluateCell(
               editor,
-              getCellAtPosition(editor.document, editor.selection.active)
+              getCellAtPosition(editor.document, editor.selection.active),
             );
           }
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1192,12 +1219,12 @@ export function activate(context: vscode.ExtensionContext) {
             } else {
               await evaluateCell(
                 editor,
-                getImplicitCell(editor.document, editor.selection.active)
+                getImplicitCell(editor.document, editor.selection.active),
               );
             }
           }
-        }
-      )
+        },
+      ),
     );
 
     disposables.push(
@@ -1208,7 +1235,7 @@ export function activate(context: vscode.ExtensionContext) {
           if (editor && isStandardEditor(editor)) {
             const cell = getCellAtPosition(
               editor.document,
-              editor.selection.active
+              editor.selection.active,
             );
 
             if (cell) {
@@ -1216,8 +1243,8 @@ export function activate(context: vscode.ExtensionContext) {
               moveToNextCell(editor, cell);
             }
           }
-        }
-      )
+        },
+      ),
     );
 
     disposables.push(
@@ -1228,8 +1255,8 @@ export function activate(context: vscode.ExtensionContext) {
           if (editor && isStandardEditor(editor)) {
             await evaluateCellsAboveAndCurrent(editor);
           }
-        }
-      )
+        },
+      ),
     );
 
     disposables.push(
@@ -1237,7 +1264,7 @@ export function activate(context: vscode.ExtensionContext) {
         const state = getDocumentState(event.document);
         state.hasExplicitCells = null; // Reset the check when document changes
         getParseTree(event.document, event.contentChanges);
-      })
+      }),
     );
 
     disposables.push(
@@ -1246,7 +1273,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (isStandardEditor(editor)) {
           const cell = getCellAtPosition(
             editor.document,
-            editor.selection.active
+            editor.selection.active,
           );
           decorations.decorateCurrentCell(editor, cell);
 
@@ -1255,7 +1282,7 @@ export function activate(context: vscode.ExtensionContext) {
             clearSelectionStack(editor);
           }
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1268,7 +1295,7 @@ export function activate(context: vscode.ExtensionContext) {
           decorations.dispose();
           decorations.initTypes();
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1285,17 +1312,17 @@ export function activate(context: vscode.ExtensionContext) {
             (err) => {
               if (err) {
                 vscode.window.showErrorMessage(
-                  `Failed to save notebook: ${err.message}`
+                  `Failed to save notebook: ${err.message}`,
                 );
               } else {
                 vscode.window.showInformationMessage(
-                  `Notebook saved to ${notebookPath}`
+                  `Notebook saved to ${notebookPath}`,
                 );
               }
-            }
+            },
           );
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1304,7 +1331,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (editor && isStandardEditor(editor)) {
           expandSelection(editor);
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1313,7 +1340,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (editor && isStandardEditor(editor)) {
           shrinkSelection(editor);
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1322,7 +1349,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (vscode.window.activeTextEditor) {
           clearSelectionStack(vscode.window.activeTextEditor);
         }
-      })
+      }),
     );
 
     disposables.push(
@@ -1333,8 +1360,8 @@ export function activate(context: vscode.ExtensionContext) {
           if (editor && isStandardEditor(editor)) {
             await evaluateAllCells(editor);
           }
-        }
-      )
+        },
+      ),
     );
 
     disposables.push(
@@ -1345,8 +1372,8 @@ export function activate(context: vscode.ExtensionContext) {
           if (editor && isStandardEditor(editor)) {
             await evaluateToLastCell(editor);
           }
-        }
-      )
+        },
+      ),
     );
 
     // --- Colight Output Panel Commands ---
@@ -1367,7 +1394,7 @@ export function activate(context: vscode.ExtensionContext) {
           } else {
             const cell = getCellAtPosition(
               editor.document,
-              editor.selection.active
+              editor.selection.active,
             );
             if (!cell) {
               vscode.window.showWarningMessage("No cell found at cursor");
@@ -1382,7 +1409,10 @@ export function activate(context: vscode.ExtensionContext) {
 
           // Evaluate the code
           try {
-            console.log("[Colight] Evaluating code:", code.slice(0, 100) + "...");
+            console.log(
+              "[Colight] Evaluating code:",
+              code.slice(0, 100) + "...",
+            );
             const server = EvalServer.getInstance();
             const result = await server.eval(code, editor.document.fileName);
             console.log("[Colight] Got result:", {
@@ -1403,7 +1433,7 @@ export function activate(context: vscode.ExtensionContext) {
             } else {
               // No visual and no error - show a message
               vscode.window.showInformationMessage(
-                "Code evaluated but produced no visual output"
+                "Code evaluated but produced no visual output",
               );
             }
           } catch (err) {
@@ -1411,25 +1441,25 @@ export function activate(context: vscode.ExtensionContext) {
             const errorMessage =
               err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(
-              `Evaluation failed: ${errorMessage}`
+              `Evaluation failed: ${errorMessage}`,
             );
           }
-        }
-      )
+        },
+      ),
     );
 
     disposables.push(
       vscode.commands.registerCommand("extension.showOutputPanel", () => {
         const panel = OutputPanel.getInstance(context.extensionUri);
         panel.show();
-      })
+      }),
     );
 
     disposables.push(
       vscode.commands.registerCommand("extension.clearOutputPanel", () => {
         const panel = OutputPanel.getInstance(context.extensionUri);
         panel.clear();
-      })
+      }),
     );
 
     disposables.push(
@@ -1441,18 +1471,26 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (state === "running") {
           items.push(
-            { label: "$(debug-stop) Stop Server", description: "Stop the Colight eval server" },
-            { label: "$(debug-restart) Restart Server", description: "Restart the Colight eval server" }
+            {
+              label: "$(debug-stop) Stop Server",
+              description: "Stop the Colight eval server",
+            },
+            {
+              label: "$(debug-restart) Restart Server",
+              description: "Restart the Colight eval server",
+            },
           );
         } else if (state === "stopped") {
-          items.push(
-            { label: "$(play) Start Server", description: "Start the Colight eval server" }
-          );
+          items.push({
+            label: "$(play) Start Server",
+            description: "Start the Colight eval server",
+          });
         } else {
           // starting
-          items.push(
-            { label: "$(loading~spin) Starting...", description: "Server is starting up" }
-          );
+          items.push({
+            label: "$(loading~spin) Starting...",
+            description: "Server is starting up",
+          });
         }
 
         const selected = await vscode.window.showQuickPick(items, {
@@ -1477,7 +1515,7 @@ export function activate(context: vscode.ExtensionContext) {
             // Error already shown by EvalServer
           }
         }
-      })
+      }),
     );
 
     // Stop eval server on deactivation
@@ -1491,7 +1529,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.workspace.onDidCloseTextDocument((document) => {
         // Clean up all document-specific state
         documentStates.delete(document.uri.toString());
-      })
+      }),
     );
 
     context.subscriptions.push(...disposables);

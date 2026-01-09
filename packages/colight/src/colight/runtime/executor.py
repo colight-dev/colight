@@ -150,7 +150,9 @@ except ImportError:
                                         widget_id, filename
                                     )
                                     widget.callback_registry.clear()
-                                    result.colight_bytes = visual.to_bytes(widget=widget)
+                                    result.colight_bytes = visual.to_bytes(
+                                        widget=widget
+                                    )
                                 else:
                                     result.colight_bytes = visual.to_bytes()
                         except Exception as e:

@@ -75,4 +75,3 @@ ndarray values include both a buffer reference and array metadata.
 - For WebSockets, the common pattern is:
   1. Send JSON text frame.
   2. Send `buffer_count` binary frames.
-

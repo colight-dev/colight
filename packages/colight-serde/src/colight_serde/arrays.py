@@ -164,7 +164,9 @@ def register_jax() -> None:
     if "jax" in _REGISTERED:
         return
     _REGISTERED.add("jax")
-    register_array_converter(_is_jax_array, _convert_jax_array, priority=-10, name="jax")
+    register_array_converter(
+        _is_jax_array, _convert_jax_array, priority=-10, name="jax"
+    )
 
 
 def register_torch() -> None:

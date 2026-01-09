@@ -61,7 +61,9 @@ def create_demo_scene():
             onHover=Plot.js("(i) => $state.update({hover_point: i})"),
             decorations=[
                 {
-                    "indexes": Plot.js("$state.hover_point != null ? [$state.hover_point] : []"),
+                    "indexes": Plot.js(
+                        "$state.hover_point != null ? [$state.hover_point] : []"
+                    ),
                     "color": [1, 1, 0],
                     "scale": 1.5,
                 }
@@ -84,7 +86,9 @@ def create_demo_scene():
         # Cuboids with rotations
         r3f.Cuboid(
             centers=np.array([[0.0, -0.8, 0.0], [0.0, -0.8, 0.3]], dtype=np.float32),
-            half_sizes=np.array([[0.15, 0.05, 0.1], [0.1, 0.05, 0.1]], dtype=np.float32),
+            half_sizes=np.array(
+                [[0.15, 0.05, 0.1], [0.1, 0.05, 0.1]], dtype=np.float32
+            ),
             colors=np.array([[0.8, 0.2, 0.8], [0.2, 0.8, 0.8]], dtype=np.float32),
             quaternions=np.array(
                 [

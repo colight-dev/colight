@@ -434,9 +434,7 @@ def deserialize(
                 return deserialize_buffer_entry(value, bufs)
             # Skip __serde__ when recursing on dict without a type hint
             return {
-                k: recurse(v, None, bufs)
-                for k, v in value.items()
-                if k != "__serde__"
+                k: recurse(v, None, bufs) for k, v in value.items() if k != "__serde__"
             }
 
         if isinstance(value, list):

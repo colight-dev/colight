@@ -6,9 +6,9 @@ on:
     branches:
       - main
     tags:
-      - "v*"           # colight (Python + @colight/core npm)
-      - "scene3d-v*"   # @colight/scene3d npm
-      - "serde-v*"     # colight-serde (Python) + @colight/serde npm
+      - "v*" # colight (Python + @colight/core npm)
+      - "scene3d-v*" # @colight/scene3d npm
+      - "serde-v*" # colight-serde (Python) + @colight/serde npm
 
 jobs:
   check:

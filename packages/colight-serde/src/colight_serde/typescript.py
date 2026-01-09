@@ -60,7 +60,9 @@ def _python_type_to_ts(hint: Any, seen: Set[str], known_names: Set[str]) -> str:
     """
     handler = find_handler_for_hint(hint)
     if handler:
-        return handler.to_typescript(hint, recurse=_python_type_to_ts, seen=seen, known_names=known_names)
+        return handler.to_typescript(
+            hint, recurse=_python_type_to_ts, seen=seen, known_names=known_names
+        )
 
     # Fallback
     return "any"
@@ -123,7 +125,7 @@ def _generate_constructor(cls: Type, known_names: Set[str]) -> str:
     params_str = ", ".join(params)
     fields_str = ", ".join(f.name for f in dataclasses.fields(cls))
 
-    return f"export function {name}({params_str}): {name} {{\n  return {{ __serde__: \"{name}\", {fields_str} }};\n}}"
+    return f'export function {name}({params_str}): {name} {{\n  return {{ __serde__: "{name}", {fields_str} }};\n}}'
 
 
 def generate_typescript(

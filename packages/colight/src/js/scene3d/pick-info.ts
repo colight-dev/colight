@@ -87,9 +87,10 @@ export function encodeNormalToBytes(normal: Vec3): Vec3 {
  * - 4: +z (front)
  * - 5: -z (back)
  */
-export function detectCuboidFace(
-  localNormal: Vec3,
-): { index: number; name: FaceName } {
+export function detectCuboidFace(localNormal: Vec3): {
+  index: number;
+  name: FaceName;
+} {
   let hitAxis = 0;
   let hitSign = 1;
 

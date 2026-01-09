@@ -115,7 +115,10 @@
       // Inject experimental interface for bidirectional communication
       if (widgetId) {
         data.experimental = createExperimental(widgetId);
-        console.log("[Colight] Injected experimental interface for widget:", widgetId);
+        console.log(
+          "[Colight] Injected experimental interface for widget:",
+          widgetId,
+        );
       }
 
       // Create render target
@@ -208,9 +211,7 @@
 
   // Remove widget
   function removeWidget(evalId) {
-    const entries = container.querySelectorAll(
-      `[data-eval-id="${evalId}"]`,
-    );
+    const entries = container.querySelectorAll(`[data-eval-id="${evalId}"]`);
     entries.forEach((entry) => {
       const dispose = entry.__colightDispose;
       if (typeof dispose === "function") {
@@ -357,14 +358,25 @@
         console.log("[Colight] Received update_state:", msg);
         if (msg.widgetId && msg.updates) {
           const instance = window.colight?.instances?.[msg.widgetId];
-          console.log("[Colight] Widget instance lookup:", msg.widgetId, "found:", !!instance);
-          console.log("[Colight] All instances:", Object.keys(window.colight?.instances || {}));
+          console.log(
+            "[Colight] Widget instance lookup:",
+            msg.widgetId,
+            "found:",
+            !!instance,
+          );
+          console.log(
+            "[Colight] All instances:",
+            Object.keys(window.colight?.instances || {}),
+          );
           if (instance && instance.updateWithBuffers) {
             const buffers = (msg.buffers || []).map(base64ToBytes);
             instance.updateWithBuffers(msg.updates, buffers);
             console.log("[Colight] Applied updates to widget");
           } else {
-            console.warn("[Colight] Widget instance not found for update:", msg.widgetId);
+            console.warn(
+              "[Colight] Widget instance not found for update:",
+              msg.widgetId,
+            );
           }
         }
         break;

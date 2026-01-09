@@ -23,7 +23,6 @@ from typing import (
     Protocol,
     Set,
     Tuple,
-    Type,
     Union,
     get_args,
     get_origin,
@@ -225,9 +224,7 @@ class ArrayHandler(TypeHandler):
                 return f"NdArrayView<{ts_type}>"
         return "NdArrayView"
 
-    def _to_contiguous(
-        self, array: np.ndarray
-    ) -> Tuple[np.ndarray, Literal["C", "F"]]:
+    def _to_contiguous(self, array: np.ndarray) -> Tuple[np.ndarray, Literal["C", "F"]]:
         """Ensure array is contiguous and normalize byte order to little-endian."""
         # Normalize to little-endian for JS compatibility
         # byteorder: '<' = little, '>' = big, '=' = native, '|' = not applicable
@@ -572,8 +569,7 @@ class ListHandler(TypeHandler):
                         f"Tuple length mismatch: expected {len(args)}, got {len(value)}"
                     )
                 return tuple(
-                    recurse(v, arg_hint, buffers)
-                    for v, arg_hint in zip(value, args)
+                    recurse(v, arg_hint, buffers) for v, arg_hint in zip(value, args)
                 )
             # Variable-length tuple or untyped
             item_hint = args[0] if args else Any

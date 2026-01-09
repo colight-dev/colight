@@ -52,7 +52,7 @@ export class OutputPanel {
           vscode.Uri.joinPath(this.extensionUri, "media"),
           vscode.Uri.joinPath(this.extensionUri, "dist"),
         ],
-      }
+      },
     );
 
     this.panel.webview.html = this._getHtmlContent();
@@ -81,7 +81,7 @@ export class OutputPanel {
       (connected) => {
         this.isConnected = connected;
         this._sendConnectionState();
-      }
+      },
     );
   }
 
@@ -176,7 +176,10 @@ export class OutputPanel {
     this.widgetIdsByEvalId.clear();
   }
 
-  private _handleWebviewMessage(msg: { type: string; [key: string]: unknown }): void {
+  private _handleWebviewMessage(msg: {
+    type: string;
+    [key: string]: unknown;
+  }): void {
     switch (msg.type) {
       case "widget-command":
         // Forward widget command to server
@@ -184,19 +187,23 @@ export class OutputPanel {
           msg.widgetId as string,
           msg.command as string,
           (msg.params as Record<string, unknown>) || {},
-          msg.buffers as string[] | undefined
+          msg.buffers as string[] | undefined,
         );
         break;
 
       case "register-widget": {
         const evalId = msg.evalId as string | undefined;
         const widgetId = msg.widgetId as string | undefined;
-        console.log(`[OutputPanel] register-widget: evalId=${evalId}, widgetId=${widgetId}`);
+        console.log(
+          `[OutputPanel] register-widget: evalId=${evalId}, widgetId=${widgetId}`,
+        );
         if (!evalId || !widgetId) {
           break;
         }
         const entryExists = this.widgets.some((w) => w.evalId === evalId);
-        console.log(`[OutputPanel] entryExists=${entryExists}, widgets=${this.widgets.map(w => w.evalId).join(",")}`);
+        console.log(
+          `[OutputPanel] entryExists=${entryExists}, widgets=${this.widgets.map((w) => w.evalId).join(",")}`,
+        );
         if (!entryExists) {
           console.log(`[OutputPanel] Entry not found, disposing widget`);
           this.evalServer.disposeWidget(widgetId);
@@ -245,7 +252,7 @@ export class OutputPanel {
 
     // Get URI for the React bundle (includes everything)
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "media", "output-panel.js")
+      vscode.Uri.joinPath(this.extensionUri, "media", "output-panel.js"),
     );
 
     const nonce = this._getNonce();

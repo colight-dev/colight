@@ -81,7 +81,5 @@ When working on the package, navigate to the package directory or use the worksp
     ```
 - **Vitest Configuration**: The `vitest.config.mjs` includes all colight tests:
   ```javascript
-  include: [
-    "packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
-  ];
+  include: ["packages/colight/tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"];
   ```

@@ -15,9 +15,6 @@
       "@colight/serde": ["packages/colight-serde/src/js/index.ts"]
     }
   },
-  "include": [
-    "packages/colight/src/js",
-    "packages/colight-serde/src/js"
-  ],
+  "include": ["packages/colight/src/js", "packages/colight-serde/src/js"],
   "exclude": ["node_modules"]
 }

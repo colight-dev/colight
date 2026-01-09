@@ -34,17 +34,24 @@ function nextMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function serialize(payload: SerializableValue): [JsonValue, BufferLike[]] {
+export function serialize(
+  payload: SerializableValue,
+): [JsonValue, BufferLike[]] {
   return collectBuffers(payload);
 }
 
-export function deserialize(payload: JsonValue, buffers: BufferLike[]): unknown {
+export function deserialize(
+  payload: JsonValue,
+  buffers: BufferLike[],
+): unknown {
   function traverse(value: JsonValue): unknown {
     if (value && typeof value === "object") {
       const obj = value as { [key: string]: JsonValue };
       if (obj.__type__ === "ndarray" && obj.__buffer_index__ !== undefined) {
         const data = buffers[obj.__buffer_index__ as number];
-        return evaluateNdarray({ ...obj, data } as Parameters<typeof evaluateNdarray>[0]);
+        return evaluateNdarray({ ...obj, data } as Parameters<
+          typeof evaluateNdarray
+        >[0]);
       }
       if (obj.__buffer_index__ !== undefined) {
         return buffers[obj.__buffer_index__ as number];
@@ -77,7 +84,10 @@ export function packMessage(
   return [envelope, buffers];
 }
 
-export function unpackMessage(envelope: WireMessage, buffers: BufferLike[]): unknown {
+export function unpackMessage(
+  envelope: WireMessage,
+  buffers: BufferLike[],
+): unknown {
   if (
     envelope &&
     envelope.buffer_count !== undefined &&

@@ -19,7 +19,11 @@ import {
   readQuat,
   FACE_NAMES,
 } from "../../src/js/scene3d/pick-info.ts";
-import { readVec3, sub as subVec3, dot as dotVec3 } from "../../src/js/scene3d/vec3.ts";
+import {
+  readVec3,
+  sub as subVec3,
+  dot as dotVec3,
+} from "../../src/js/scene3d/vec3.ts";
 import { createCubeGeometry } from "../../src/js/scene3d/geometry.ts";
 
 describe("scene3d pick-info", () => {

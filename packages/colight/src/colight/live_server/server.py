@@ -206,7 +206,9 @@ class LiveServer:
         self.eval_mode = eval_mode
 
         self.connections: Set[Any] = set()  # WebSocket connections
-        self.widget_subscriptions: Dict[str, Set[Any]] = {}  # widgetId -> Set[websocket]
+        self.widget_subscriptions: Dict[
+            str, Set[Any]
+        ] = {}  # widgetId -> Set[websocket]
         self.client_registry = (
             ClientRegistry()
         )  # Track client file watches (absolute paths)
@@ -427,7 +429,9 @@ class LiveServer:
                             except Exception as exc:
                                 logger.debug(f"Failed to decode widget buffer: {exc}")
                         if widget_id and command:
-                            logger.info(f"[ws] widget-command for {widget_id}, known widgets: {list(self.widget_manager._widgets.keys())}")
+                            logger.info(
+                                f"[ws] widget-command for {widget_id}, known widgets: {list(self.widget_manager._widgets.keys())}"
+                            )
                             success, error = self.widget_manager.handle_command(
                                 widget_id, command, params, buffers
                             )
@@ -574,13 +578,17 @@ class LiveServer:
                                 # Get or create widget for bidirectional comms
                                 if hasattr(visual, "get_id"):
                                     widget_id = visual.get_id()
-                                    logger.info(f"[eval] Registering widget: {widget_id}")
+                                    logger.info(
+                                        f"[eval] Registering widget: {widget_id}"
+                                    )
                                     widget = self.widget_manager.get_widget(
                                         widget_id, file_path
                                     )
                                     widget.callback_registry.clear()
                                     colight_bytes = visual.to_bytes(widget=widget)
-                                    logger.info(f"[eval] Widget manager has widgets: {list(self.widget_manager._widgets.keys())}")
+                                    logger.info(
+                                        f"[eval] Widget manager has widgets: {list(self.widget_manager._widgets.keys())}"
+                                    )
                                 else:
                                     colight_bytes = visual.to_bytes()
                         except Exception as viz_err:
@@ -662,7 +670,11 @@ class LiveServer:
             if subscribers:
                 message_str = json.dumps(message)
                 await asyncio.gather(
-                    *(ws.send(message_str) for ws in subscribers if ws in self.connections),
+                    *(
+                        ws.send(message_str)
+                        for ws in subscribers
+                        if ws in self.connections
+                    ),
                     return_exceptions=True,
                 )
                 return
@@ -1126,7 +1138,7 @@ class LiveServer:
         )
 
         if self.eval_mode:
-            print(f"Colight eval server running")
+            print("Colight eval server running")
             print(f"  HTTP: http://{self.host}:{self.http_port}")
             print(f"  WebSocket: ws://{self.host}:{self.ws_port}")
         else:

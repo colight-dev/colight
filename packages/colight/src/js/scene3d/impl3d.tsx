@@ -62,7 +62,12 @@ import {
 import { normalize as normalizeQuat, rotateVector } from "./quaternion";
 import { screenRay } from "./project";
 import { Vec3, sub as subVec3, dot as dotVec3, readVec3 } from "./vec3";
-import { PointerContext, CursorHint, CursorType, createPointerContext } from "./pointer";
+import {
+  PointerContext,
+  CursorHint,
+  CursorType,
+  createPointerContext,
+} from "./pointer";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -690,7 +695,13 @@ export function SceneImpl({
 
   const createOrUpdatePickTextures = useCallback(() => {
     if (!gpuRef.current || !canvasRef.current) return;
-    const { device, pickTexture, pickPositionTexture, pickNormalTexture, pickDepthTexture } = gpuRef.current;
+    const {
+      device,
+      pickTexture,
+      pickPositionTexture,
+      pickNormalTexture,
+      pickDepthTexture,
+    } = gpuRef.current;
 
     // Get the actual canvas size
     const canvas = canvasRef.current;
@@ -1116,7 +1127,13 @@ export function SceneImpl({
         containerHeight,
         camState,
       );
-      device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer, uniformData.byteOffset, uniformData.byteLength);
+      device.queue.writeBuffer(
+        uniformBuffer,
+        0,
+        uniformData.buffer,
+        uniformData.byteOffset,
+        uniformData.byteLength,
+      );
 
       try {
         await renderPass({
@@ -1128,7 +1145,10 @@ export function SceneImpl({
         });
         onRenderComplete();
       } catch (err) {
-        console.error("[Debug] Error during renderPass:", err instanceof Error ? err.message : err);
+        console.error(
+          "[Debug] Error during renderPass:",
+          err instanceof Error ? err.message : err,
+        );
         onRenderComplete();
       }
 
@@ -1173,7 +1193,14 @@ export function SceneImpl({
         uniformBindGroup,
         renderObjects,
       } = gpuRef.current;
-      if (!pickTexture || !pickPositionTexture || !pickNormalTexture || !pickDepthTexture || !readbackBuffer) return;
+      if (
+        !pickTexture ||
+        !pickPositionTexture ||
+        !pickNormalTexture ||
+        !pickDepthTexture ||
+        !readbackBuffer
+      )
+        return;
 
       // Ensure picking data is ready for all objects
       for (let i = 0; i < renderObjects.length; i++) {
@@ -1292,7 +1319,11 @@ export function SceneImpl({
       readbackBuffer.unmap();
 
       const posArr = new Float32Array(positionReadbackBuffer.getMappedRange());
-      const position: [number, number, number] = [posArr[0], posArr[1], posArr[2]];
+      const position: [number, number, number] = [
+        posArr[0],
+        posArr[1],
+        posArr[2],
+      ];
       positionReadbackBuffer.unmap();
 
       const normArr = new Uint8Array(normalReadbackBuffer.getMappedRange());
@@ -1543,7 +1574,10 @@ export function SceneImpl({
 
   const faceNames = ["+x", "-x", "+y", "-y", "+z", "-z"];
 
-  function readQuat(arrayLike: ArrayLike<number>, index: number): [number, number, number, number] {
+  function readQuat(
+    arrayLike: ArrayLike<number>,
+    index: number,
+  ): [number, number, number, number] {
     const base = index * 4;
     return [
       arrayLike[base + 0],
@@ -1620,7 +1654,12 @@ export function SceneImpl({
         const center = readVec3(component.centers, elementIndex);
         const quat = getQuaternion(component, elementIndex, [0, 0, 0, 1]);
         const q = normalizeQuat(quat);
-        const qInv: [number, number, number, number] = [-q[0], -q[1], -q[2], q[3]];
+        const qInv: [number, number, number, number] = [
+          -q[0],
+          -q[1],
+          -q[2],
+          q[3],
+        ];
         const localPos = rotateVector(subVec3(position, center), qInv);
         info.local = { position: localPos };
 

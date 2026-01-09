@@ -315,7 +315,12 @@ def test_full_roundtrip() -> None:
     @dataclass
     class Frame:
         id: int
-        data: Annotated[NDArray[np.float32], Shape(None,)]
+        data: Annotated[
+            NDArray[np.float32],
+            Shape(
+                None,
+            ),
+        ]
         metadata: dict[str, str]
 
     original = Frame(
@@ -417,7 +422,12 @@ def test_type_registry_with_arrays() -> None:
     @dataclass
     class ArrayData:
         name: str
-        values: Annotated[NDArray[np.float32], Shape(None,)]
+        values: Annotated[
+            NDArray[np.float32],
+            Shape(
+                None,
+            ),
+        ]
 
     registry = TypeRegistry(ArrayData)
 

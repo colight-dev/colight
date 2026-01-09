@@ -7,10 +7,7 @@ import {
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DraggableViewer } from "../widget.jsx";
-import {
-  parseColightScript,
-  parseColightData,
-} from "../format.js";
+import { parseColightScript, parseColightData } from "../format.js";
 import { tw, md } from "../api.jsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.jsx";
 import CommandBar from "./CommandBar.jsx";
@@ -18,10 +15,7 @@ import TopBar from "./TopBar.jsx";
 import bylight from "./bylight.ts";
 import { getClientId } from "./client-id.js";
 import createLogger from "./logger.js";
-import {
-  encodeBufferToBase64,
-  decodeBase64ToUint8Array,
-} from "../base64.js";
+import { encodeBufferToBase64, decodeBase64ToUint8Array } from "../base64.js";
 
 // Custom hooks
 import { useNavigation } from "./hooks/useNavigation.js";

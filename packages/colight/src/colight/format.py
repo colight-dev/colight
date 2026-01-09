@@ -281,9 +281,7 @@ def parse_file(
 
 def parse_file_with_updates(
     file_path: Union[str, Path],
-) -> tuple[
-    Optional[Dict[str, Any]], List[bytes], List[Dict[str, Any]]
-]:
+) -> tuple[Optional[Dict[str, Any]], List[bytes], List[Dict[str, Any]]]:
     """
     Parse a .colight file and return update entries with buffers.
 

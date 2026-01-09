@@ -290,7 +290,12 @@ export interface BaseComponentConfig {
   decorations?: Decoration[];
 }
 
-export type PickEventType = "hover" | "click" | "dragstart" | "drag" | "dragend";
+export type PickEventType =
+  | "hover"
+  | "click"
+  | "dragstart"
+  | "drag"
+  | "dragend";
 
 export interface PickRay {
   origin: [number, number, number];
@@ -328,7 +333,13 @@ export interface PickInfo {
   event: PickEventType;
   component: { index: number; type: string };
   instanceIndex: number;
-  screen: { x: number; y: number; dpr: number; rectWidth: number; rectHeight: number };
+  screen: {
+    x: number;
+    y: number;
+    dpr: number;
+    rectWidth: number;
+    rectHeight: number;
+  };
   ray: PickRay;
   camera: PickCamera;
   hit?: PickHit;

@@ -90,7 +90,7 @@ print(generate_typescript(Mesh))
 import { packMessage } from "@colight/serde";
 
 const [envelope, buffers] = packMessage({
-    samples: new Float32Array([0.1, 0.2, 0.3, 0.4]),
+  samples: new Float32Array([0.1, 0.2, 0.3, 0.4]),
 });
 ```
 

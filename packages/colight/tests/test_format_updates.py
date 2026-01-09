@@ -3,7 +3,12 @@ import tempfile
 
 import colight.plot as Plot
 import numpy as np
-from colight.format import parse_file, parse_file_with_updates, save_updates, append_update
+from colight.format import (
+    parse_file,
+    parse_file_with_updates,
+    save_updates,
+    append_update,
+)
 
 
 def test_case_1_single_plot():

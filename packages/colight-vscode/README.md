@@ -5,8 +5,9 @@ Evaluate Python in an [interactive window](https://code.visualstudio.com/docs/py
 By default `ctrl-enter` evaluates the current cell and stays there, `shift-enter` evaluates & moves to the next cell.
 
 A "cell" is defined as:
-* the current line, function, or class, plus:
-* any adjacent cells not separated by a blank line
+
+- the current line, function, or class, plus:
+- any adjacent cells not separated by a blank line
 
 ![Colight Demo](images/demo.gif)
 
@@ -27,12 +28,12 @@ A "cell" is defined as:
 
 This extension contributes the following settings:
 
-* `colight.enabledCellMarkers`: An array of strings that define the cell markers. Default: `["# +", "# %%"]`
-* `colight.useExplicitCellsIfPresent`: If true, use explicit cell markers when present.
-* `colight.renderComments`: If true, renders comments as Markdown.
-* `colight.currentCell.borderWidth`: Border width for the current cell decoration.
-* `colight.currentCell.show`: Decorate the current cell with a border above/below.
-* `colight.debugMode`: Enable debug logging.
+- `colight.enabledCellMarkers`: An array of strings that define the cell markers. Default: `["# +", "# %%"]`
+- `colight.useExplicitCellsIfPresent`: If true, use explicit cell markers when present.
+- `colight.renderComments`: If true, renders comments as Markdown.
+- `colight.currentCell.borderWidth`: Border width for the current cell decoration.
+- `colight.currentCell.show`: Decorate the current cell with a border above/below.
+- `colight.debugMode`: Enable debug logging.
 
 ---
 

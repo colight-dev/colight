@@ -7,7 +7,8 @@ import { DraggableViewer, parseColightData } from "../widget.jsx";
 import { decodeBase64ToUint8Array, encodeBufferToBase64 } from "../base64.js";
 
 // Get VSCode API
-const vscode = typeof acquireVsCodeApi !== "undefined" ? acquireVsCodeApi() : null;
+const vscode =
+  typeof acquireVsCodeApi !== "undefined" ? acquireVsCodeApi() : null;
 
 // Inject styles
 const styleSheet = `
@@ -205,7 +206,10 @@ body {
 `;
 
 // Inject styles on load
-if (typeof document !== "undefined" && !document.getElementById("colight-panel-styles")) {
+if (
+  typeof document !== "undefined" &&
+  !document.getElementById("colight-panel-styles")
+) {
   const style = document.createElement("style");
   style.id = "colight-panel-styles";
   style.textContent = styleSheet;
@@ -410,10 +414,14 @@ function OutputPanelApp() {
           {/* Connection status */}
           <div
             className={`connection-status ${connected ? "connected" : ""}`}
-            title={connected ? "Eval server connected" : "Eval server disconnected"}
+            title={
+              connected ? "Eval server connected" : "Eval server disconnected"
+            }
           >
             <span className="status-dot" />
-            <span className="status-label">{connected ? "Connected" : "Disconnected"}</span>
+            <span className="status-label">
+              {connected ? "Connected" : "Disconnected"}
+            </span>
           </div>
 
           <button className="clear-btn" onClick={handleClear} title="Clear all">

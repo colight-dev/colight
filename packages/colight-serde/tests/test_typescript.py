@@ -218,7 +218,10 @@ def test_constructors_with_arrays():
     assert "points: NdArrayView<Float32Array, [number, 3]>;" in ts
 
     # Should include simple constructor (no buffer extraction)
-    assert "export function Trajectory(name: string, points: NdArrayView<Float32Array, [number, 3]>): Trajectory {" in ts
+    assert (
+        "export function Trajectory(name: string, points: NdArrayView<Float32Array, [number, 3]>): Trajectory {"
+        in ts
+    )
     assert 'return { __serde__: "Trajectory", name, points };' in ts
 
 

@@ -29,7 +29,8 @@ export default defineConfig({
   ],
   // Run local server before starting tests
   webServer: {
-    command: "uv run python -m colight_cli serve packages/colight/tests/e2e/fixtures --port 8000",
+    command:
+      "uv run python -m colight_cli serve packages/colight/tests/e2e/fixtures --port 8000",
     url: "http://127.0.0.1:8000",
     reuseExistingServer: !process.env.CI,
     timeout: 30000,

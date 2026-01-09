@@ -46,9 +46,7 @@ def _load_embed_js() -> str:
         raise FileNotFoundError(f"embed.js not found at {embed_path}") from e
 
 
-def _build_inline_view_html(
-    colight_base64: str, embed_js: str, title: str
-) -> str:
+def _build_inline_view_html(colight_base64: str, embed_js: str, title: str) -> str:
     safe_embed_js = embed_js.replace("</script>", "<\\/script>")
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -118,7 +116,7 @@ def _warn_unknown_keys(update_keys: set[str], known_keys: set[str], label: str) 
 
 
 def _collect_colight_entries(
-    input_paths: tuple[pathlib.Path, ...]
+    input_paths: tuple[pathlib.Path, ...],
 ) -> tuple[dict, list[bytes], list[dict]]:
     base_data = None
     base_buffers: list[bytes] = []
@@ -128,9 +126,7 @@ def _collect_colight_entries(
         data, buffers, updates = parse_file_with_updates(path)
         if idx == 0:
             if data is None:
-                raise ValueError(
-                    f"First input must contain initial state: {path}"
-                )
+                raise ValueError(f"First input must contain initial state: {path}")
             base_data = data
             base_buffers = buffers
         elif data is not None:
@@ -155,10 +151,7 @@ def _state_updates_from_animate_by(data: dict) -> tuple[list[dict], Optional[int
     if isinstance(range_val, int):
         range_val = [0, range_val - 1]
     step = meta.get("step") or 1
-    updates = [
-        {meta["key"]: i}
-        for i in range(range_val[0], range_val[1] + 1, step)
-    ]
+    updates = [{meta["key"]: i} for i in range(range_val[0], range_val[1] + 1, step)]
     return updates, meta.get("fps")
 
 
@@ -326,9 +319,7 @@ def render(
         return
 
     try:
-        base_data, base_buffers, update_entries = _collect_colight_entries(
-            input_paths
-        )
+        base_data, base_buffers, update_entries = _collect_colight_entries(input_paths)
     except ValueError as e:
         click.echo(f"Error: {e}")
         return

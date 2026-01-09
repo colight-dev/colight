@@ -317,7 +317,9 @@ def to_json_with_state(
     ast = to_json(layout_item, collected_state=collected_state)
 
     # Serialize Python listeners to register callbacks
-    py_listeners_json = to_json(collected_state.listeners["py"], collected_state=collected_state)
+    py_listeners_json = to_json(
+        collected_state.listeners["py"], collected_state=collected_state
+    )
 
     json = to_json(
         {
@@ -414,7 +416,10 @@ class WidgetState:
 class Widget(anywidget.AnyWidget):
     _esm = ANYWIDGET_PATH
     # CSS is now embedded in the JS bundle
-    data = traitlets.Any().tag(sync=True, to_json=lambda value, widget: to_json_with_state(value, widget=widget))
+    data = traitlets.Any().tag(
+        sync=True,
+        to_json=lambda value, widget: to_json_with_state(value, widget=widget),
+    )
 
     def __init__(self, ast: Any):
         self.callback_registry: Dict[str, Callable] = {}

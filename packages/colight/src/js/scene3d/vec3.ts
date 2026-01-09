@@ -46,10 +46,7 @@ export function distance(a: Vec3, b: Vec3): number {
 /**
  * Read a Vec3 from a flat array at the given index.
  */
-export function readVec3(
-  arrayLike: ArrayLike<number>,
-  index: number,
-): Vec3 {
+export function readVec3(arrayLike: ArrayLike<number>, index: number): Vec3 {
   const base = index * 3;
   return [arrayLike[base + 0], arrayLike[base + 1], arrayLike[base + 2]];
 }

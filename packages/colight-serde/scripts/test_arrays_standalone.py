@@ -34,7 +34,6 @@ import torch  # noqa: F401
 
 # Now import arrays module - it will auto-register jax and torch
 from colight_serde.arrays import (
-    auto_register,
     is_array_like,
     register_array_converter,
     register_jax,
@@ -122,7 +121,6 @@ def test_torch_tensor_requires_grad():
 
 def test_torch_cuda_tensor():
     """Test PyTorch CUDA tensor (if available)."""
-    import torch
 
     if not torch.cuda.is_available():
         print("  (CUDA not available, skipping)")
@@ -250,7 +248,6 @@ def test_manual_registration_idempotent():
 def test_mixed_dtypes():
     """Test arrays with different dtypes."""
     import jax.numpy as jnp
-    import torch
 
     # Float32
     jax_f32 = jnp.array([1.0, 2.0], dtype=jnp.float32)

@@ -60,7 +60,7 @@ function ndarray(data, shape, strides, offset = 0) {
         data,
         shape.slice(1),
         actualStrides.slice(1),
-        offset + i * actualStrides[0]
+        offset + i * actualStrides[0],
       );
     },
 
@@ -75,7 +75,7 @@ function ndarray(data, shape, strides, offset = 0) {
         data,
         shape.slice(1),
         actualStrides.slice(1),
-        offset + i * actualStrides[0]
+        offset + i * actualStrides[0],
       );
     },
 
@@ -87,7 +87,8 @@ function ndarray(data, shape, strides, offset = 0) {
           callback(data[offset + i * s0], i);
         }
       } else if (ndim === 2) {
-        const s0 = actualStrides[0], s1 = actualStrides[1];
+        const s0 = actualStrides[0],
+          s1 = actualStrides[1];
         for (let i = 0; i < shape[0]; i++) {
           const base = offset + i * s0;
           for (let j = 0; j < shape[1]; j++) {
@@ -95,7 +96,9 @@ function ndarray(data, shape, strides, offset = 0) {
           }
         }
       } else if (ndim === 3) {
-        const s0 = actualStrides[0], s1 = actualStrides[1], s2 = actualStrides[2];
+        const s0 = actualStrides[0],
+          s1 = actualStrides[1],
+          s2 = actualStrides[2];
         for (let i = 0; i < shape[0]; i++) {
           const base0 = offset + i * s0;
           for (let j = 0; j < shape[1]; j++) {
@@ -128,7 +131,8 @@ function ndarray(data, shape, strides, offset = 0) {
           acc = callback(acc, data[offset + i * s0], i);
         }
       } else if (ndim === 2) {
-        const s0 = actualStrides[0], s1 = actualStrides[1];
+        const s0 = actualStrides[0],
+          s1 = actualStrides[1];
         for (let i = 0; i < shape[0]; i++) {
           const base = offset + i * s0;
           for (let j = 0; j < shape[1]; j++) {
@@ -136,7 +140,9 @@ function ndarray(data, shape, strides, offset = 0) {
           }
         }
       } else if (ndim === 3) {
-        const s0 = actualStrides[0], s1 = actualStrides[1], s2 = actualStrides[2];
+        const s0 = actualStrides[0],
+          s1 = actualStrides[1],
+          s2 = actualStrides[2];
         for (let i = 0; i < shape[0]; i++) {
           const base0 = offset + i * s0;
           for (let j = 0; j < shape[1]; j++) {
@@ -275,67 +281,103 @@ console.log();
 console.log("--- Row Iteration (sum 1000 elements) ---");
 console.log();
 
-benchmark("arr.row(i).reduce((a,v) => a+v, 0)", () => {
-  return view2d.row(midRow).reduce((a, v) => a + v, 0);
-}, 1000);
+benchmark(
+  "arr.row(i).reduce((a,v) => a+v, 0)",
+  () => {
+    return view2d.row(midRow).reduce((a, v) => a + v, 0);
+  },
+  1000,
+);
 
-benchmark("prefetched row.reduce((a,v) => a+v, 0)", () => {
-  return preRow.reduce((a, v) => a + v, 0);
-}, 1000);
+benchmark(
+  "prefetched row.reduce((a,v) => a+v, 0)",
+  () => {
+    return preRow.reduce((a, v) => a + v, 0);
+  },
+  1000,
+);
 
-benchmark("manual flat loop", () => {
-  let sum = 0;
-  const base = midRow * cols;
-  for (let j = 0; j < cols; j++) {
-    sum += data2d[base + j];
-  }
-  return sum;
-}, 1000);
+benchmark(
+  "manual flat loop",
+  () => {
+    let sum = 0;
+    const base = midRow * cols;
+    for (let j = 0; j < cols; j++) {
+      sum += data2d[base + j];
+    }
+    return sum;
+  },
+  1000,
+);
 
 console.log();
 console.log("--- Full Array Iteration (100K elements) ---");
 console.log();
 
-benchmark("arr.reduce((a,v) => a+v, 0)", () => {
-  return view2d.reduce((a, v) => a + v, 0);
-}, 100);
+benchmark(
+  "arr.reduce((a,v) => a+v, 0)",
+  () => {
+    return view2d.reduce((a, v) => a + v, 0);
+  },
+  100,
+);
 
-benchmark("arr.mapRows(r => r.reduce(sum))", () => {
-  return view2d.mapRows((r) => r.reduce((a, v) => a + v, 0));
-}, 100);
+benchmark(
+  "arr.mapRows(r => r.reduce(sum))",
+  () => {
+    return view2d.mapRows((r) => r.reduce((a, v) => a + v, 0));
+  },
+  100,
+);
 
-benchmark("manual flat iteration", () => {
-  let sum = 0;
-  for (let i = 0; i < data2d.length; i++) {
-    sum += data2d[i];
-  }
-  return sum;
-}, 100);
+benchmark(
+  "manual flat iteration",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < data2d.length; i++) {
+      sum += data2d[i];
+    }
+    return sum;
+  },
+  100,
+);
 
 console.log();
 console.log("--- Row Sums (100 rows) ---");
 console.log();
 
-benchmark("arr.mapRows(r => r.reduce(sum))", () => {
-  return view2d.mapRows((r) => r.reduce((a, v) => a + v, 0));
-}, 100);
+benchmark(
+  "arr.mapRows(r => r.reduce(sum))",
+  () => {
+    return view2d.mapRows((r) => r.reduce((a, v) => a + v, 0));
+  },
+  100,
+);
 
-benchmark("arr.map(slice => slice.reduce(sum))", () => {
-  return view2d.map((slice) => slice.reduce((a, v) => a + v, 0));
-}, 100);
+benchmark(
+  "arr.map(slice => slice.reduce(sum))",
+  () => {
+    return view2d.map((slice) => slice.reduce((a, v) => a + v, 0));
+  },
+  100,
+);
 
-benchmark("manual nested loop", () => {
-  const sums = new Array(rows);
-  for (let i = 0; i < rows; i++) {
-    let sum = 0;
-    const base = i * cols;
-    for (let j = 0; j < cols; j++) {
-      sum += data2d[base + j];
+benchmark(
+  "manual nested loop",
+  () => {
+    const sums = new Array(rows);
+    for (let i = 0; i < rows; i++) {
+      let sum = 0;
+      const base = i * cols;
+      for (let j = 0; j < cols; j++) {
+        sum += data2d[base + j];
+      }
+      sums[i] = sum;
     }
-    sums[i] = sum;
-  }
-  return sums;
-}, 100);
+    return sums;
+  },
+  100,
+);
 
 console.log();
 console.log("--- 3D Array (10x20x30 = 6000 elements) ---");
@@ -358,13 +400,21 @@ benchmark("arr.slice(i).slice(j).get(k)", () => {
   return view3d.slice(5).slice(10).get(15);
 });
 
-benchmark("arr.reduce (sum 6000 elements)", () => {
-  return view3d.reduce((a, v) => a + v, 0);
-}, 100);
+benchmark(
+  "arr.reduce (sum 6000 elements)",
+  () => {
+    return view3d.reduce((a, v) => a + v, 0);
+  },
+  100,
+);
 
-benchmark("arr.map(plane => plane.reduce(sum))", () => {
-  return view3d.map((plane) => plane.reduce((a, v) => a + v, 0));
-}, 100);
+benchmark(
+  "arr.map(plane => plane.reduce(sum))",
+  () => {
+    return view3d.map((plane) => plane.reduce((a, v) => a + v, 0));
+  },
+  100,
+);
 
 console.log();
 console.log("=".repeat(80));

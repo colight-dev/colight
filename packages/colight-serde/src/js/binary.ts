@@ -65,10 +65,7 @@ function convertBigIntArray(value: unknown): number[] | unknown {
 /**
  * Compute element strides from shape and order.
  */
-function computeElementStrides(
-  dims: number[],
-  order: "C" | "F",
-): number[] {
+function computeElementStrides(dims: number[], order: "C" | "F"): number[] {
   const strides = new Array(dims.length);
   if (order === "F") {
     let acc = 1;
@@ -233,7 +230,9 @@ export function evaluateNdarray(
 /**
  * Estimates the size of a JSON string in bytes.
  */
-export function estimateJSONSize(jsonString: string | null | undefined): string {
+export function estimateJSONSize(
+  jsonString: string | null | undefined,
+): string {
   if (!jsonString) return "0 B";
 
   const encoder = new TextEncoder();

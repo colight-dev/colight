@@ -154,19 +154,16 @@ export function replaceBuffers(
   function traverse(value: JsonValue): unknown {
     if (value && typeof value === "object") {
       const obj = value as { [key: string]: JsonValue };
-      if (
-        obj.__type__ === "ndarray" &&
-        obj.__buffer_index__ !== undefined
-      ) {
-        const result = { ...obj, data: buffers[obj.__buffer_index__ as number] };
+      if (obj.__type__ === "ndarray" && obj.__buffer_index__ !== undefined) {
+        const result = {
+          ...obj,
+          data: buffers[obj.__buffer_index__ as number],
+        };
         delete (result as { __buffer_index__?: unknown }).__buffer_index__;
         return result;
       }
       // Raw buffer reference (no __type__)
-      if (
-        obj.__buffer_index__ !== undefined &&
-        obj.__type__ === undefined
-      ) {
+      if (obj.__buffer_index__ !== undefined && obj.__type__ === undefined) {
         return buffers[obj.__buffer_index__ as number];
       }
       if (Array.isArray(value)) {

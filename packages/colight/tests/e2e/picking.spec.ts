@@ -150,7 +150,9 @@ test.describe("Scene3D Picking", () => {
       const match = pickData.match(/\[([-\d.,\s]+)\]\s*$/);
       if (match) {
         const normalStr = match[1];
-        const normal = normalStr.split(",").map((s: string) => parseFloat(s.trim()));
+        const normal = normalStr
+          .split(",")
+          .map((s: string) => parseFloat(s.trim()));
         console.log("Parsed normal:", normal);
 
         // Normal should be roughly unit length

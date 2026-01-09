@@ -81,7 +81,10 @@ export interface RowAccessor {
   /** Iterate over elements */
   forEach(callback: (value: number, index: number) => void): void;
   /** Reduce over elements */
-  reduce<U>(callback: (acc: U, value: number, index: number) => U, initial: U): U;
+  reduce<U>(
+    callback: (acc: U, value: number, index: number) => U,
+    initial: U,
+  ): U;
 }
 
 /**
@@ -123,9 +126,7 @@ export interface NdArrayView<
   slice(i: number): SliceResult<T, S>;
 
   /** Iterate over all elements with callback */
-  forEach(
-    callback: (value: number, ...indices: number[]) => void,
-  ): void;
+  forEach(callback: (value: number, ...indices: number[]) => void): void;
 
   /** Reduce over all elements */
   reduce<U>(

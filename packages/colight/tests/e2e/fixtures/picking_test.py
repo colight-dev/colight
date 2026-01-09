@@ -1,7 +1,7 @@
 # Picking test scene - a simple cube at origin for testing pick info
 # Run with: uv run python -m colight_cli serve packages/colight/tests/e2e/fixtures --port 8000
 
-from colight.scene3d import Scene, Cuboid
+from colight.scene3d import Cuboid
 
 # Create a simple axis-aligned cube at origin
 Cuboid(

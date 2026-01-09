@@ -53,7 +53,7 @@ export class EvalServer {
   private _createStatusBarItem(): void {
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
-      100
+      100,
     );
     this.statusBarItem.command = "extension.evalServerMenu";
     this._updateStatusBar();
@@ -66,19 +66,21 @@ export class EvalServer {
     switch (this._state) {
       case "stopped":
         this.statusBarItem.text = "$(circle-outline) Colight";
-        this.statusBarItem.tooltip = "Colight eval server: Stopped\nClick for options";
+        this.statusBarItem.tooltip =
+          "Colight eval server: Stopped\nClick for options";
         this.statusBarItem.backgroundColor = undefined;
         break;
       case "starting":
         this.statusBarItem.text = "$(sync~spin) Colight";
         this.statusBarItem.tooltip = "Colight eval server: Starting...";
         this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-          "statusBarItem.warningBackground"
+          "statusBarItem.warningBackground",
         );
         break;
       case "running":
         this.statusBarItem.text = "$(circle-filled) Colight";
-        this.statusBarItem.tooltip = "Colight eval server: Running\nClick for options";
+        this.statusBarItem.tooltip =
+          "Colight eval server: Running\nClick for options";
         this.statusBarItem.backgroundColor = undefined;
         break;
     }
@@ -160,10 +162,19 @@ export class EvalServer {
     // 3. Try 'python -m colight eval' (if colight is installed as package)
 
     const commands = [
-      { cmd: "uv", args: ["run", "colight", "eval", "--port", String(this.port)] },
+      {
+        cmd: "uv",
+        args: ["run", "colight", "eval", "--port", String(this.port)],
+      },
       { cmd: "colight", args: ["eval", "--port", String(this.port)] },
-      { cmd: "python", args: ["-m", "colight", "eval", "--port", String(this.port)] },
-      { cmd: "python3", args: ["-m", "colight", "eval", "--port", String(this.port)] },
+      {
+        cmd: "python",
+        args: ["-m", "colight", "eval", "--port", String(this.port)],
+      },
+      {
+        cmd: "python3",
+        args: ["-m", "colight", "eval", "--port", String(this.port)],
+      },
     ];
 
     let lastError: Error | null = null;
@@ -226,7 +237,7 @@ export class EvalServer {
     if (!this.process || this.process.killed) {
       const errorMsg = lastError?.message || "Unknown error";
       vscode.window.showErrorMessage(
-        `Failed to start Colight eval server. Make sure 'colight' is installed. Error: ${errorMsg}`
+        `Failed to start Colight eval server. Make sure 'colight' is installed. Error: ${errorMsg}`,
       );
       throw new Error(`Failed to start eval server: ${errorMsg}`);
     }
@@ -295,7 +306,9 @@ export class EvalServer {
       });
 
       this.ws.on("close", (code, reason) => {
-        log(`WebSocket disconnected: code=${code}, reason=${reason?.toString() || 'none'}`);
+        log(
+          `WebSocket disconnected: code=${code}, reason=${reason?.toString() || "none"}`,
+        );
         console.log("WebSocket disconnected from eval server");
         this.ws = null;
         this._setConnected(false);
@@ -373,7 +386,7 @@ export class EvalServer {
     widgetId: string,
     command: string,
     params: Record<string, unknown>,
-    buffers?: string[]
+    buffers?: string[],
   ): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
@@ -432,12 +445,15 @@ export class EvalServer {
     try {
       const { exec } = await import("child_process");
       await new Promise<void>((resolve) => {
-        exec(`lsof -ti:${this.port},${this.wsPort} | xargs kill -9 2>/dev/null`, (err) => {
-          if (!err) {
-            log("Killed external server process");
-          }
-          resolve();
-        });
+        exec(
+          `lsof -ti:${this.port},${this.wsPort} | xargs kill -9 2>/dev/null`,
+          (err) => {
+            if (!err) {
+              log("Killed external server process");
+            }
+            resolve();
+          },
+        );
       });
       // Wait a moment for the process to fully terminate
       await new Promise((r) => setTimeout(r, 500));

@@ -53,7 +53,11 @@ function ndarray(data, shape, strides, offset = 0) {
       } else if (ndim === 2) {
         for (let i = 0; i < shape[0]; i++) {
           for (let j = 0; j < shape[1]; j++) {
-            callback(data[offset + i * actualStrides[0] + j * actualStrides[1]], i, j);
+            callback(
+              data[offset + i * actualStrides[0] + j * actualStrides[1]],
+              i,
+              j,
+            );
           }
         }
       }
@@ -68,7 +72,12 @@ function ndarray(data, shape, strides, offset = 0) {
       } else if (ndim === 2) {
         for (let i = 0; i < shape[0]; i++) {
           for (let j = 0; j < shape[1]; j++) {
-            acc = callback(acc, data[offset + i * actualStrides[0] + j * actualStrides[1]], i, j);
+            acc = callback(
+              acc,
+              data[offset + i * actualStrides[0] + j * actualStrides[1]],
+              i,
+              j,
+            );
           }
         }
       }
@@ -85,22 +94,27 @@ function ndarray(data, shape, strides, offset = 0) {
       for (let i = 0; i < shape[0]; i++) {
         const rowOffset = offset + i * rowStride;
         // Pass a lightweight row accessor
-        results[i] = callback({
-          get(j) { return data[rowOffset + j * colStride]; },
-          length: cols,
-          forEach(cb) {
-            for (let j = 0; j < cols; j++) {
-              cb(data[rowOffset + j * colStride], j);
-            }
+        results[i] = callback(
+          {
+            get(j) {
+              return data[rowOffset + j * colStride];
+            },
+            length: cols,
+            forEach(cb) {
+              for (let j = 0; j < cols; j++) {
+                cb(data[rowOffset + j * colStride], j);
+              }
+            },
+            reduce(cb, init) {
+              let acc = init;
+              for (let j = 0; j < cols; j++) {
+                acc = cb(acc, data[rowOffset + j * colStride], j);
+              }
+              return acc;
+            },
           },
-          reduce(cb, init) {
-            let acc = init;
-            for (let j = 0; j < cols; j++) {
-              acc = cb(acc, data[rowOffset + j * colStride], j);
-            }
-            return acc;
-          },
-        }, i);
+          i,
+        );
       }
       return results;
     },
@@ -116,7 +130,9 @@ function ndarray(data, shape, strides, offset = 0) {
         }
       } else {
         // General case
-        this.forEach((val) => { total += val; });
+        this.forEach((val) => {
+          total += val;
+        });
       }
       return total;
     },
@@ -291,102 +307,144 @@ console.log();
 console.log("--- Row Iteration (sum one row of 100 elements) [10K iters] ---");
 console.log();
 
-benchmark("arr[row][j] loop (uncached)", () => {
-  let sum = 0;
-  for (let j = 0; j < size; j++) {
-    sum += viewUncached[midI][j];
-  }
-  return sum;
-}, 10000);
+benchmark(
+  "arr[row][j] loop (uncached)",
+  () => {
+    let sum = 0;
+    for (let j = 0; j < size; j++) {
+      sum += viewUncached[midI][j];
+    }
+    return sum;
+  },
+  10000,
+);
 
-benchmark("arr[row][j] loop (cached)", () => {
-  let sum = 0;
-  for (let j = 0; j < size; j++) {
-    sum += viewCached[midI][j];
-  }
-  return sum;
-}, 10000);
+benchmark(
+  "arr[row][j] loop (cached)",
+  () => {
+    let sum = 0;
+    for (let j = 0; j < size; j++) {
+      sum += viewCached[midI][j];
+    }
+    return sum;
+  },
+  10000,
+);
 
-benchmark("row = arr[i]; row[j] loop (hoist row access)", () => {
-  let sum = 0;
-  const row = viewUncached[midI];
-  for (let j = 0; j < size; j++) {
-    sum += row[j];
-  }
-  return sum;
-}, 10000);
+benchmark(
+  "row = arr[i]; row[j] loop (hoist row access)",
+  () => {
+    let sum = 0;
+    const row = viewUncached[midI];
+    for (let j = 0; j < size; j++) {
+      sum += row[j];
+    }
+    return sum;
+  },
+  10000,
+);
 
-benchmark("arr.get(row, j) loop", () => {
-  let sum = 0;
-  for (let j = 0; j < size; j++) {
-    sum += viewUncached.get(midI, j);
-  }
-  return sum;
-}, 10000);
+benchmark(
+  "arr.get(row, j) loop",
+  () => {
+    let sum = 0;
+    for (let j = 0; j < size; j++) {
+      sum += viewUncached.get(midI, j);
+    }
+    return sum;
+  },
+  10000,
+);
 
-benchmark("arr.flat[row * stride + j] loop (manual)", () => {
-  let sum = 0;
-  const base = midI * size;
-  for (let j = 0; j < size; j++) {
-    sum += data[base + j];
-  }
-  return sum;
-}, 10000);
+benchmark(
+  "arr.flat[row * stride + j] loop (manual)",
+  () => {
+    let sum = 0;
+    const base = midI * size;
+    for (let j = 0; j < size; j++) {
+      sum += data[base + j];
+    }
+    return sum;
+  },
+  10000,
+);
 
 console.log();
 
 // Test 3: Full matrix iteration
-console.log("--- Full Matrix Iteration (sum all 10,000 elements) [100 iters] ---");
+console.log(
+  "--- Full Matrix Iteration (sum all 10,000 elements) [100 iters] ---",
+);
 console.log();
 
-benchmark("arr[i][j] nested loop (uncached)", () => {
-  let sum = 0;
-  for (let i = 0; i < size; i++) {
-    for (let j = 0; j < size; j++) {
-      sum += viewUncached[i][j];
+benchmark(
+  "arr[i][j] nested loop (uncached)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size; j++) {
+        sum += viewUncached[i][j];
+      }
     }
-  }
-  return sum;
-}, 100);
+    return sum;
+  },
+  100,
+);
 
-benchmark("arr[i][j] nested loop (cached)", () => {
-  let sum = 0;
-  for (let i = 0; i < size; i++) {
-    for (let j = 0; j < size; j++) {
-      sum += viewCached[i][j];
+benchmark(
+  "arr[i][j] nested loop (cached)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size; j++) {
+        sum += viewCached[i][j];
+      }
     }
-  }
-  return sum;
-}, 100);
+    return sum;
+  },
+  100,
+);
 
-benchmark("row = arr[i]; row[j] nested (hoist row)", () => {
-  let sum = 0;
-  for (let i = 0; i < size; i++) {
-    const row = viewUncached[i];
-    for (let j = 0; j < size; j++) {
-      sum += row[j];
+benchmark(
+  "row = arr[i]; row[j] nested (hoist row)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < size; i++) {
+      const row = viewUncached[i];
+      for (let j = 0; j < size; j++) {
+        sum += row[j];
+      }
     }
-  }
-  return sum;
-}, 100);
+    return sum;
+  },
+  100,
+);
 
-benchmark("arr.get(i, j) nested loop", () => {
-  let sum = 0;
-  for (let i = 0; i < size; i++) {
-    for (let j = 0; j < size; j++) {
-      sum += viewUncached.get(i, j);
+benchmark(
+  "arr.get(i, j) nested loop",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size; j++) {
+        sum += viewUncached.get(i, j);
+      }
     }
-  }
-  return sum;
-}, 100);
+    return sum;
+  },
+  100,
+);
 
-benchmark("arr.flat direct iteration", () => {
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    sum += data[i];
-  }
-  return sum;
-}, 100);
+benchmark(
+  "arr.flat direct iteration",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i];
+    }
+    return sum;
+  },
+  100,
+);
 
 console.log();
 
@@ -432,29 +490,41 @@ for (let n = 0; n < 1000; n++) {
   ]);
 }
 
-benchmark("arr[i][j] random (uncached)", () => {
-  let sum = 0;
-  for (const [i, j] of randomIndices) {
-    sum += viewUncached[i][j];
-  }
-  return sum;
-}, 1000);
+benchmark(
+  "arr[i][j] random (uncached)",
+  () => {
+    let sum = 0;
+    for (const [i, j] of randomIndices) {
+      sum += viewUncached[i][j];
+    }
+    return sum;
+  },
+  1000,
+);
 
-benchmark("arr[i][j] random (cached)", () => {
-  let sum = 0;
-  for (const [i, j] of randomIndices) {
-    sum += viewCached[i][j];
-  }
-  return sum;
-}, 1000);
+benchmark(
+  "arr[i][j] random (cached)",
+  () => {
+    let sum = 0;
+    for (const [i, j] of randomIndices) {
+      sum += viewCached[i][j];
+    }
+    return sum;
+  },
+  1000,
+);
 
-benchmark("arr.get(i, j) random", () => {
-  let sum = 0;
-  for (const [i, j] of randomIndices) {
-    sum += viewUncached.get(i, j);
-  }
-  return sum;
-}, 1000);
+benchmark(
+  "arr.get(i, j) random",
+  () => {
+    let sum = 0;
+    for (const [i, j] of randomIndices) {
+      sum += viewUncached.get(i, j);
+    }
+    return sum;
+  },
+  1000,
+);
 
 console.log();
 
@@ -486,98 +556,138 @@ benchmark("arr.get(i, j) single access", () => {
 
 console.log();
 
-benchmark("Sum row (1000 elems) arr[row][j] (uncached)", () => {
-  let sum = 0;
-  for (let j = 0; j < cols; j++) {
-    sum += viewWide[midRow][j];
-  }
-  return sum;
-}, 1000);
-
-benchmark("Sum row (1000 elems) arr[row][j] (cached)", () => {
-  let sum = 0;
-  for (let j = 0; j < cols; j++) {
-    sum += viewWideCached[midRow][j];
-  }
-  return sum;
-}, 1000);
-
-benchmark("Sum row (1000 elems) hoisted: row[j]", () => {
-  let sum = 0;
-  const row = viewWide[midRow];
-  for (let j = 0; j < cols; j++) {
-    sum += row[j];
-  }
-  return sum;
-}, 1000);
-
-benchmark("Sum row (1000 elems) arr.get(row, j)", () => {
-  let sum = 0;
-  for (let j = 0; j < cols; j++) {
-    sum += viewWide.get(midRow, j);
-  }
-  return sum;
-}, 1000);
-
-benchmark("Sum row (1000 elems) flat[base + j]", () => {
-  let sum = 0;
-  const base = midRow * cols;
-  for (let j = 0; j < cols; j++) {
-    sum += dataWide[base + j];
-  }
-  return sum;
-}, 1000);
-
-console.log();
-
-benchmark("Sum all 100K elems arr[i][j] (uncached)", () => {
-  let sum = 0;
-  for (let i = 0; i < rows; i++) {
+benchmark(
+  "Sum row (1000 elems) arr[row][j] (uncached)",
+  () => {
+    let sum = 0;
     for (let j = 0; j < cols; j++) {
-      sum += viewWide[i][j];
+      sum += viewWide[midRow][j];
     }
-  }
-  return sum;
-}, 10);
+    return sum;
+  },
+  1000,
+);
 
-benchmark("Sum all 100K elems arr[i][j] (cached)", () => {
-  let sum = 0;
-  for (let i = 0; i < rows; i++) {
+benchmark(
+  "Sum row (1000 elems) arr[row][j] (cached)",
+  () => {
+    let sum = 0;
     for (let j = 0; j < cols; j++) {
-      sum += viewWideCached[i][j];
+      sum += viewWideCached[midRow][j];
     }
-  }
-  return sum;
-}, 10);
+    return sum;
+  },
+  1000,
+);
 
-benchmark("Sum all 100K elems hoisted row[j]", () => {
-  let sum = 0;
-  for (let i = 0; i < rows; i++) {
-    const row = viewWide[i];
+benchmark(
+  "Sum row (1000 elems) hoisted: row[j]",
+  () => {
+    let sum = 0;
+    const row = viewWide[midRow];
     for (let j = 0; j < cols; j++) {
       sum += row[j];
     }
-  }
-  return sum;
-}, 10);
+    return sum;
+  },
+  1000,
+);
 
-benchmark("Sum all 100K elems arr.get(i, j)", () => {
-  let sum = 0;
-  for (let i = 0; i < rows; i++) {
+benchmark(
+  "Sum row (1000 elems) arr.get(row, j)",
+  () => {
+    let sum = 0;
     for (let j = 0; j < cols; j++) {
-      sum += viewWide.get(i, j);
+      sum += viewWide.get(midRow, j);
     }
-  }
-  return sum;
-}, 10);
+    return sum;
+  },
+  1000,
+);
 
-benchmark("Sum all 100K elems flat iteration", () => {
-  let sum = 0;
-  for (let i = 0; i < dataWide.length; i++) {
-    sum += dataWide[i];
-  }
-  return sum;
-}, 10);
+benchmark(
+  "Sum row (1000 elems) flat[base + j]",
+  () => {
+    let sum = 0;
+    const base = midRow * cols;
+    for (let j = 0; j < cols; j++) {
+      sum += dataWide[base + j];
+    }
+    return sum;
+  },
+  1000,
+);
+
+console.log();
+
+benchmark(
+  "Sum all 100K elems arr[i][j] (uncached)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        sum += viewWide[i][j];
+      }
+    }
+    return sum;
+  },
+  10,
+);
+
+benchmark(
+  "Sum all 100K elems arr[i][j] (cached)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        sum += viewWideCached[i][j];
+      }
+    }
+    return sum;
+  },
+  10,
+);
+
+benchmark(
+  "Sum all 100K elems hoisted row[j]",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < rows; i++) {
+      const row = viewWide[i];
+      for (let j = 0; j < cols; j++) {
+        sum += row[j];
+      }
+    }
+    return sum;
+  },
+  10,
+);
+
+benchmark(
+  "Sum all 100K elems arr.get(i, j)",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        sum += viewWide.get(i, j);
+      }
+    }
+    return sum;
+  },
+  10,
+);
+
+benchmark(
+  "Sum all 100K elems flat iteration",
+  () => {
+    let sum = 0;
+    for (let i = 0; i < dataWide.length; i++) {
+      sum += dataWide[i];
+    }
+    return sum;
+  },
+  10,
+);
 
 console.log();
 
@@ -585,23 +695,41 @@ console.log();
 console.log("--- Callback-based Iteration (100x1000 = 100K elements) ---");
 console.log();
 
-benchmark("arr.sum() (built-in)", () => {
-  return viewWide.sum();
-}, 100);
+benchmark(
+  "arr.sum() (built-in)",
+  () => {
+    return viewWide.sum();
+  },
+  100,
+);
 
-benchmark("arr.reduce((acc, v) => acc + v, 0)", () => {
-  return viewWide.reduce((acc, v) => acc + v, 0);
-}, 100);
+benchmark(
+  "arr.reduce((acc, v) => acc + v, 0)",
+  () => {
+    return viewWide.reduce((acc, v) => acc + v, 0);
+  },
+  100,
+);
 
-benchmark("arr.forEach with external sum", () => {
-  let sum = 0;
-  viewWide.forEach((v) => { sum += v; });
-  return sum;
-}, 100);
+benchmark(
+  "arr.forEach with external sum",
+  () => {
+    let sum = 0;
+    viewWide.forEach((v) => {
+      sum += v;
+    });
+    return sum;
+  },
+  100,
+);
 
-benchmark("arr.mapRows(row => row.reduce(sum))", () => {
-  return viewWide.mapRows((row) => row.reduce((a, v) => a + v, 0));
-}, 100);
+benchmark(
+  "arr.mapRows(row => row.reduce(sum))",
+  () => {
+    return viewWide.mapRows((row) => row.reduce((a, v) => a + v, 0));
+  },
+  100,
+);
 
 console.log();
 
@@ -609,43 +737,59 @@ console.log();
 console.log("--- Row Sums (100 rows of 1000 elements each) ---");
 console.log();
 
-benchmark("arr[i].reduce manual loop", () => {
-  const sums = new Array(rows);
-  for (let i = 0; i < rows; i++) {
-    let sum = 0;
-    for (let j = 0; j < cols; j++) {
-      sum += viewWide[i][j];
+benchmark(
+  "arr[i].reduce manual loop",
+  () => {
+    const sums = new Array(rows);
+    for (let i = 0; i < rows; i++) {
+      let sum = 0;
+      for (let j = 0; j < cols; j++) {
+        sum += viewWide[i][j];
+      }
+      sums[i] = sum;
     }
-    sums[i] = sum;
-  }
-  return sums;
-}, 10);
+    return sums;
+  },
+  10,
+);
 
-benchmark("arr.mapRows(row => row.reduce(...))", () => {
-  return viewWide.mapRows((row) => row.reduce((a, v) => a + v, 0));
-}, 10);
+benchmark(
+  "arr.mapRows(row => row.reduce(...))",
+  () => {
+    return viewWide.mapRows((row) => row.reduce((a, v) => a + v, 0));
+  },
+  10,
+);
 
-benchmark("Manual flat with stride", () => {
-  const sums = new Array(rows);
-  for (let i = 0; i < rows; i++) {
-    let sum = 0;
-    const base = i * cols;
-    for (let j = 0; j < cols; j++) {
-      sum += dataWide[base + j];
+benchmark(
+  "Manual flat with stride",
+  () => {
+    const sums = new Array(rows);
+    for (let i = 0; i < rows; i++) {
+      let sum = 0;
+      const base = i * cols;
+      for (let j = 0; j < cols; j++) {
+        sum += dataWide[base + j];
+      }
+      sums[i] = sum;
     }
-    sums[i] = sum;
-  }
-  return sums;
-}, 10);
+    return sums;
+  },
+  10,
+);
 
 console.log();
 console.log("=".repeat(75));
 console.log("Analysis:");
 console.log();
 console.log("1. SINGLE ACCESS: Uncached proxy ~2-3x slower than .get()");
-console.log("   Cached proxy brings it close to .get() for repeated same-index access");
+console.log(
+  "   Cached proxy brings it close to .get() for repeated same-index access",
+);
 console.log();
-console.log("2. ROW ITERATION: Hoisting row access (row = arr[i]) is key optimization");
+console.log(
+  "2. ROW ITERATION: Hoisting row access (row = arr[i]) is key optimization",
+);
 console.log("   This creates proxy once, then 1D access is fast");
 console.log();
 console.log("3. FULL MATRIX: .get(i,j) is ~2-3x faster than arr[i][j]");
