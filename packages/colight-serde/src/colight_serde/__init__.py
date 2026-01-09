@@ -13,9 +13,13 @@ from .arrays import (
 from .handlers import Shape
 from .serialization import (
     BufferCollector,
+    TypeRegistry,
     deserialize,
     deserialize_buffer_entry,
+    get_registered_type,
     pack_message,
+    register_type,
+    register_types,
     replace_buffers,
     serialize,
     serialize_binary_data,
@@ -38,9 +42,13 @@ __all__ = [
     "to_numpy",
     # Serialization
     "BufferCollector",
+    "TypeRegistry",
     "deserialize",
     "deserialize_buffer_entry",
+    "get_registered_type",
     "pack_message",
+    "register_type",
+    "register_types",
     "replace_buffers",
     "serialize",
     "serialize_binary_data",

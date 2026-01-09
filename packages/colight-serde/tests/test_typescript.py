@@ -177,3 +177,81 @@ def test_tuple_ellipsis_generates_array():
     assert "items: number[];" in ts
     # Fixed-length tuple -> tuple type
     assert "fixed: [number, string, number];" in ts
+
+
+# --- Constructor generation tests ---
+
+
+def test_constructors_basic():
+    """Test constructor generation for basic types."""
+
+    @dataclass
+    class Point:
+        x: float
+        y: float
+        z: float
+
+    ts = generate_typescript(Point)
+
+    # Should include interface with __serde__ tag
+    assert "export interface Point {" in ts
+    assert '__serde__: "Point";' in ts
+
+    # Should include constructor function
+    assert "export function Point(x: number, y: number, z: number): Point {" in ts
+    assert 'return { __serde__: "Point", x, y, z };' in ts
+
+
+def test_constructors_with_arrays():
+    """Test constructor generation for array types."""
+
+    @dataclass
+    class Trajectory:
+        name: str
+        points: Annotated[NDArray[np.float32], Shape(None, 3)]
+
+    ts = generate_typescript(Trajectory)
+
+    # Should include interface with __serde__ and array field
+    assert "export interface Trajectory {" in ts
+    assert '__serde__: "Trajectory";' in ts
+    assert "points: NdArrayView<Float32Array, [number, 3]>;" in ts
+
+    # Should include simple constructor (no buffer extraction)
+    assert "export function Trajectory(name: string, points: NdArrayView<Float32Array, [number, 3]>): Trajectory {" in ts
+    assert 'return { __serde__: "Trajectory", name, points };' in ts
+
+
+def test_constructors_nested():
+    """Test constructor generation for nested dataclasses."""
+
+    @dataclass
+    class Inner:
+        value: int
+
+    @dataclass
+    class Outer:
+        name: str
+        inner: Inner
+
+    ts = generate_typescript(Inner, Outer)
+
+    # Should have constructors for both
+    assert "export function Inner(value: number): Inner {" in ts
+    assert "export function Outer(name: string, inner: Inner): Outer {" in ts
+    # Both should just pass through fields (no special handling)
+    assert 'return { __serde__: "Inner", value };' in ts
+    assert 'return { __serde__: "Outer", name, inner };' in ts
+
+
+def test_constructors_import():
+    """Test that constructors generate proper import (type-only)."""
+
+    @dataclass
+    class Simple:
+        x: float
+
+    ts = generate_typescript(Simple)
+
+    # Should only import type (no isNdArray needed for simple constructors)
+    assert 'import type { NdArrayView } from "@colight/serde";' in ts

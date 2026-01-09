@@ -1,4 +1,67 @@
-import { inferDtype } from "./binary";
+import { inferDtype, TypedArray } from "./binary";
+import { isNdArray, NdArrayView } from "./ndarray";
+
+/**
+ * Serialized ndarray reference - what gets sent over the wire.
+ */
+export interface SerializedNdArray {
+  __type__: "ndarray";
+  __buffer_index__: number;
+  dtype: string;
+  shape: number[];
+  strides: number[];
+  order: "C" | "F";
+}
+
+/**
+ * Serialize an NdArrayView or TypedArray to wire format.
+ *
+ * Accepts either:
+ * - NdArrayView: uses .flat and .shape for full shape info
+ * - TypedArray: treated as 1D array
+ *
+ * Returns [reference, buffer] where reference contains metadata
+ * and buffer is the raw ArrayBuffer to be sent out-of-band.
+ *
+ * Example:
+ *   const [ref, buffer] = serializeNdArray(myView);
+ *   buffers.push(buffer);
+ *   ref.__buffer_index__ = buffers.length - 1;
+ */
+export function serializeNdArray(
+  value: NdArrayView | TypedArray,
+): [Omit<SerializedNdArray, "__buffer_index__">, ArrayBuffer] {
+  if (isNdArray(value)) {
+    // NdArrayView - full shape info available
+    const flat = value.flat as TypedArray;
+    const dtype = inferDtype(flat);
+    const bytesPerElement = (flat as Uint8Array).BYTES_PER_ELEMENT ?? 1;
+    return [
+      {
+        __type__: "ndarray",
+        dtype,
+        shape: [...value.shape],
+        strides: value.strides.map((s) => s * bytesPerElement),
+        order: "C",
+      },
+      flat.buffer,
+    ];
+  }
+
+  // TypedArray - treat as 1D
+  const dtype = inferDtype(value);
+  const bytesPerElement = (value as Uint8Array).BYTES_PER_ELEMENT ?? 1;
+  return [
+    {
+      __type__: "ndarray",
+      dtype,
+      shape: [value.length],
+      strides: [bytesPerElement],
+      order: "C",
+    },
+    value.buffer,
+  ];
+}
 
 /**
  * Recursively traverse data structure, extracting binary buffers.

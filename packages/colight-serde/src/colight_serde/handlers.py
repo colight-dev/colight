@@ -132,6 +132,32 @@ class TypeHandler(ABC):
         """
         ...
 
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> Any:
+        """Deserialize wire format back to Python value.
+
+        Args:
+            value: The wire format value (JSON-like)
+            hint: The expected Python type hint
+            buffers: List of binary buffers
+            recurse: Function to call for nested deserialization
+
+        Returns:
+            The reconstructed Python value
+
+        Note:
+            Not all handlers implement deserialization. Those that don't
+            will raise NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support deserialization"
+        )
+
 
 class ArrayHandler(TypeHandler):
     """Handles numpy arrays and array-like types (JAX, PyTorch, etc)."""
@@ -212,6 +238,33 @@ class ArrayHandler(TypeHandler):
             return np.asfortranarray(array), "F"
         return np.ascontiguousarray(array), "C"
 
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> np.ndarray:
+        """Reconstruct numpy array from wire format."""
+        if not isinstance(value, dict) or value.get("__type__") != "ndarray":
+            raise ValueError(f"Expected ndarray wire format, got {type(value)}")
+
+        buffer_idx = value["__buffer_index__"]
+        buffer = buffers[buffer_idx]
+        dtype = np.dtype(value.get("dtype", "float64"))
+        shape = tuple(value.get("shape", [len(buffer) // dtype.itemsize]))
+        order = value.get("order", "C")
+        strides = value.get("strides")
+
+        if strides is not None:
+            return np.ndarray(
+                shape=shape,
+                dtype=dtype,
+                buffer=buffer,
+                strides=tuple(int(s) for s in strides),
+            )
+        return np.frombuffer(buffer, dtype=dtype).reshape(shape, order=order)
+
 
 class DataclassHandler(TypeHandler):
     """Handles dataclass instances and types."""
@@ -229,8 +282,11 @@ class DataclassHandler(TypeHandler):
         recurse: Any,
     ) -> Any:
         return {
-            f.name: recurse(getattr(value, f.name), collector)
-            for f in dataclasses.fields(value)
+            "__serde__": type(value).__name__,
+            **{
+                f.name: recurse(getattr(value, f.name), collector)
+                for f in dataclasses.fields(value)
+            },
         }
 
     def to_typescript(
@@ -243,6 +299,42 @@ class DataclassHandler(TypeHandler):
         name = hint.__name__
         seen.add(name)
         return name
+
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> Any:
+        """Reconstruct dataclass from wire format."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected dict for dataclass, got {type(value)}")
+
+        # Get field type hints
+        try:
+            from typing import get_type_hints
+
+            field_hints = get_type_hints(hint, include_extras=True)
+        except Exception:
+            field_hints = getattr(hint, "__annotations__", {})
+
+        # Reconstruct each field
+        kwargs = {}
+        for field in dataclasses.fields(hint):
+            if field.name not in value:
+                # Check if field has a default
+                if (
+                    field.default is not dataclasses.MISSING
+                    or field.default_factory is not dataclasses.MISSING
+                ):
+                    continue
+                raise ValueError(f"Missing required field: {field.name}")
+
+            field_hint = field_hints.get(field.name, Any)
+            kwargs[field.name] = recurse(value[field.name], field_hint, buffers)
+
+        return hint(**kwargs)
 
 
 class PrimitiveHandler(TypeHandler):
@@ -279,6 +371,16 @@ class PrimitiveHandler(TypeHandler):
         known_names: Set[str],
     ) -> str:
         return self._TS_MAP.get(hint, "any")
+
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> Any:
+        """Primitives pass through unchanged."""
+        return value
 
 
 class NumpyScalarHandler(TypeHandler):
@@ -337,6 +439,21 @@ class BytesHandler(TypeHandler):
     ) -> str:
         return "ArrayBuffer"
 
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> bytes:
+        """Reconstruct bytes from wire format."""
+        if isinstance(value, dict) and "__buffer_index__" in value:
+            buffer = buffers[value["__buffer_index__"]]
+            return bytes(buffer) if not isinstance(buffer, bytes) else buffer
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return bytes(value)
+        raise ValueError(f"Expected buffer reference or bytes, got {type(value)}")
+
 
 class DictHandler(TypeHandler):
     """Handles dict types."""
@@ -371,6 +488,21 @@ class DictHandler(TypeHandler):
                 return f"{{ [key: {key_type}]: {val_type} }}"
             return f"Record<{key_type}, {val_type}>"
         return "Record<string, any>"
+
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> Dict[Any, Any]:
+        """Reconstruct dict from wire format."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected dict, got {type(value)}")
+
+        args = get_args(hint)
+        value_hint = args[1] if len(args) == 2 else Any
+        return {k: recurse(v, value_hint, buffers) for k, v in value.items()}
 
 
 class ListHandler(TypeHandler):
@@ -417,6 +549,39 @@ class ListHandler(TypeHandler):
             inner = recurse(args[0], seen, known_names)
             return f"{inner}[]"
         return "any[]"
+
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> List[Any] | Tuple[Any, ...]:
+        """Reconstruct list/tuple from wire format."""
+        if not isinstance(value, list):
+            raise ValueError(f"Expected list, got {type(value)}")
+
+        origin = get_origin(hint)
+        args = get_args(hint)
+
+        if origin is tuple:
+            if args and len(args) >= 2 and args[-1] is not ...:
+                # Fixed-length tuple: tuple[A, B, C]
+                if len(value) != len(args):
+                    raise ValueError(
+                        f"Tuple length mismatch: expected {len(args)}, got {len(value)}"
+                    )
+                return tuple(
+                    recurse(v, arg_hint, buffers)
+                    for v, arg_hint in zip(value, args)
+                )
+            # Variable-length tuple or untyped
+            item_hint = args[0] if args else Any
+            return tuple(recurse(v, item_hint, buffers) for v in value)
+
+        # list
+        item_hint = args[0] if args else Any
+        return [recurse(v, item_hint, buffers) for v in value]
 
 
 class UnionHandler(TypeHandler):
@@ -573,6 +738,20 @@ class AnnotatedHandler(TypeHandler):
 
         # No Shape - recurse on base type
         return recurse(base_type, seen, known_names)
+
+    def deserialize(
+        self,
+        value: Any,
+        hint: Any,
+        buffers: List[Buffer],
+        recurse: Any,
+    ) -> Any:
+        """Unwrap Annotated and deserialize the base type."""
+        args = get_args(hint)
+        if not args:
+            return value
+        base_type = args[0]
+        return recurse(value, base_type, buffers)
 
 
 class LiteralHandler(TypeHandler):

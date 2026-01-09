@@ -9,6 +9,7 @@ import {
   toNestedArray,
   inferDtype,
   asNestedArray,
+  serializeNdArray,
 } from "../../src/js/index";
 
 describe("@colight/serde", () => {
@@ -264,6 +265,68 @@ describe("@colight/serde", () => {
       expect(() => unpackMessage(envelope, buffers)).toThrow(
         "buffer_count mismatch",
       );
+    });
+  });
+
+  describe("serializeNdArray", () => {
+    it("should serialize TypedArray to wire format", () => {
+      const arr = new Float32Array([1, 2, 3, 4]);
+      const [ref, buffer] = serializeNdArray(arr);
+
+      expect(ref.__type__).toBe("ndarray");
+      expect(ref.dtype).toBe("float32");
+      expect(ref.shape).toEqual([4]);
+      expect(ref.order).toBe("C");
+      expect(ref.strides).toEqual([4]); // 4 bytes per float32
+      expect(buffer).toBe(arr.buffer);
+    });
+
+    it("should serialize NdArrayView with full shape info", () => {
+      const flat = new Float32Array([1, 2, 3, 4, 5, 6]);
+      const view = ndarray(flat, [2, 3]);
+      const [ref, buffer] = serializeNdArray(view);
+
+      expect(ref.__type__).toBe("ndarray");
+      expect(ref.dtype).toBe("float32");
+      expect(ref.shape).toEqual([2, 3]);
+      expect(ref.order).toBe("C");
+      // strides in bytes: [3*4, 1*4] = [12, 4]
+      expect(ref.strides).toEqual([12, 4]);
+      expect(buffer).toBe(flat.buffer);
+    });
+
+    it("should serialize different dtypes correctly", () => {
+      const tests = [
+        { arr: new Int32Array([1, 2]), dtype: "int32", stride: 4 },
+        { arr: new Uint8Array([1, 2]), dtype: "uint8", stride: 1 },
+        { arr: new Float64Array([1, 2]), dtype: "float64", stride: 8 },
+      ];
+
+      for (const { arr, dtype, stride } of tests) {
+        const [ref] = serializeNdArray(arr);
+        expect(ref.dtype).toBe(dtype);
+        expect(ref.strides).toEqual([stride]);
+      }
+    });
+
+    it("should produce wire format compatible with Python deserialize", () => {
+      // This test verifies the format matches what Python expects
+      const flat = new Float32Array([1, 2, 3, 4, 5, 6]);
+      const view = ndarray(flat, [2, 3]);
+      const [ref, buffer] = serializeNdArray(view);
+
+      // Add buffer index as would happen during collection
+      const wireRef = { ...ref, __buffer_index__: 0 };
+
+      // Should match Python's expected format exactly
+      expect(wireRef).toEqual({
+        __type__: "ndarray",
+        __buffer_index__: 0,
+        dtype: "float32",
+        shape: [2, 3],
+        order: "C",
+        strides: [12, 4],
+      });
     });
   });
 });

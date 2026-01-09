@@ -68,7 +68,11 @@ def _python_type_to_ts(hint: Any, seen: Set[str], known_names: Set[str]) -> str:
 
 def _generate_interface(cls: Type, seen: Set[str], known_names: Set[str]) -> str:
     """Generate TypeScript interface for a single dataclass."""
-    lines = [f"export interface {cls.__name__} {{"]
+    name = cls.__name__
+    lines = [f"export interface {name} {{"]
+
+    # Always include __serde__ tag for round-tripping
+    lines.append(f'  __serde__: "{name}";')
 
     try:
         # include_extras=True preserves Annotated wrappers
@@ -95,6 +99,33 @@ def _generate_interface(cls: Type, seen: Set[str], known_names: Set[str]) -> str
     return "\n".join(lines)
 
 
+def _generate_constructor(cls: Type, known_names: Set[str]) -> str:
+    """Generate TypeScript constructor function for a single dataclass.
+
+    The constructor simply creates an object with the __serde__ tag and
+    the provided fields. Buffer extraction happens later via packMessage.
+    """
+    name = cls.__name__
+
+    try:
+        hints = get_type_hints(cls, include_extras=True)
+    except Exception:
+        hints = getattr(cls, "__annotations__", {})
+
+    # Build parameter list
+    params = []
+    for field in dataclasses.fields(cls):
+        field_name = field.name
+        hint = hints.get(field_name, Any)
+        ts_type = _python_type_to_ts(hint, set(), known_names)
+        params.append(f"{field_name}: {ts_type}")
+
+    params_str = ", ".join(params)
+    fields_str = ", ".join(f.name for f in dataclasses.fields(cls))
+
+    return f"export function {name}({params_str}): {name} {{\n  return {{ __serde__: \"{name}\", {fields_str} }};\n}}"
+
+
 def generate_typescript(
     *classes: Type,
     include_imports: bool = True,
@@ -119,6 +150,7 @@ def generate_typescript(
 
     seen: Set[str] = set()
     interfaces: List[str] = []
+    constructors: List[str] = []
 
     # Generate interfaces in dependency order
     pending = list(classes)
@@ -131,9 +163,9 @@ def generate_typescript(
         if name in generated:
             continue
 
-        # Generate interface and track dependencies
-        interface = _generate_interface(cls, seen, known_names)
-        interfaces.append(interface)
+        # Generate interface and constructor
+        interfaces.append(_generate_interface(cls, seen, known_names))
+        constructors.append(_generate_constructor(cls, known_names))
         generated.add(name)
 
     # Build output
@@ -150,6 +182,11 @@ def generate_typescript(
 
     # Interfaces
     parts.extend(interfaces)
+
+    # Constructors
+    if constructors:
+        parts.append("")
+        parts.extend(constructors)
 
     return "\n".join(parts) + "\n"
 
@@ -169,6 +206,9 @@ def write_typescript(
     Example:
         write_typescript("types.ts", Point3D, Pose, Trajectory)
     """
-    content = generate_typescript(*classes, include_imports=include_imports)
+    content = generate_typescript(
+        *classes,
+        include_imports=include_imports,
+    )
     with open(path, "w") as f:
         f.write(content)
