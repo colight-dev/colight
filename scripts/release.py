@@ -1,29 +1,101 @@
+#!/usr/bin/env python3
+"""Interactive release script for colight packages.
+
+Usage:
+    uv run python scripts/release.py
+    yarn release
+
+Requires:
+    uv add --dev questionary
+"""
+
+import json
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 
-import toml
+import questionary
+import tomllib
+import tomli_w
+from questionary import Style
+
+# Custom style
+style = Style([
+    ("qmark", "fg:cyan bold"),
+    ("question", "bold"),
+    ("answer", "fg:cyan"),
+    ("pointer", "fg:cyan bold"),
+    ("highlighted", "fg:cyan bold"),
+    ("selected", "fg:green"),
+])
+
+# Package definitions
+PACKAGES = {
+    "colight": {
+        "type": "python",
+        "path": "packages/colight",
+        "version_file": "packages/colight/pyproject.toml",
+        "description": "Python",
+    },
+    "scene3d": {
+        "type": "npm",
+        "path": "packages/colight-scene3d",
+        "version_file": "packages/colight-scene3d/package.json",
+        "npm_name": "@colight/scene3d",
+        "description": "npm",
+    },
+    "serde": {
+        "type": "npm",
+        "path": "packages/colight-serde",
+        "version_file": "packages/colight-serde/package.json",
+        "npm_name": "@colight/serde",
+        "description": "npm",
+    },
+}
 
 
 def check_working_directory():
-    # Check for uncommitted changes
+    """Ensure no unstaged changes (staged changes are allowed and will be included)."""
     result = subprocess.run(
-        ["git", "status", "--porcelain"], capture_output=True, text=True
+        ["git", "diff", "--name-only"],
+        capture_output=True,
+        text=True,
     )
-    if result.stdout:
-        print("Error: There are uncommitted changes in the working directory.")
-        print("Please commit or stash these changes before running the release script.")
+    changed_files = [
+        f for f in result.stdout.strip().split("\n")
+        if f and f != "scripts/release.py"
+    ]
+    if changed_files:
+        questionary.print("Error: There are unstaged changes to tracked files:", style="fg:red bold")
+        for f in changed_files:
+            questionary.print(f"  {f}", style="fg:red")
+        questionary.print("\nStage the changes you want to include, or stash them.", style="fg:yellow")
         sys.exit(1)
 
 
-def get_next_version(alpha_name=None):
-    # Get the next regular version first
+def get_current_version(package_key: str) -> str:
+    """Get current version from package file."""
+    pkg = PACKAGES[package_key]
+    path = Path(pkg["version_file"])
+
+    if pkg["type"] == "python":
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        return data["project"]["version"]
+    else:
+        with open(path) as f:
+            data = json.load(f)
+        return data["version"]
+
+
+def get_next_calver() -> str:
+    """Get next calver version for colight."""
     today = datetime.now()
     year = today.year
     month = today.month
     year_month = f"{year}.{month}"
 
-    # Match both formats by providing both patterns
     padded_month = f"{month:02d}"
     tags = (
         subprocess.check_output(
@@ -34,62 +106,117 @@ def get_next_version(alpha_name=None):
         .split("\n")
     )
 
-    # Filter out dev versions and empty strings, and remove the 'v' prefix
     release_tags = [tag[1:] for tag in tags if tag and not tag.endswith(".dev")]
-
-    # Further filter out alpha versions when determining the next patch number
     regular_versions = [tag for tag in release_tags if "alpha" not in tag]
 
     if not regular_versions:
-        next_version = f"{year_month}.1"
+        return f"{year_month}.1"
     else:
         patch_numbers = [int(tag.split(".")[-1]) for tag in regular_versions]
         next_patch = max(patch_numbers) + 1
-        next_version = f"{year_month}.{next_patch}"
+        return f"{year_month}.{next_patch}"
 
-    if alpha_name:
-        # Create alpha version with timestamp (YYYYMMDDHHMM)
-        timestamp = datetime.now().strftime("%Y%m%d%H%M")
-        # Use hyphen format for alpha versions to be npm-compatible
-        return f"{next_version}-alpha.{timestamp}"
+
+def bump_semver(current: str, bump_type: str) -> str:
+    """Bump semver version."""
+    parts = current.split(".")
+    if len(parts) != 3:
+        questionary.print(f"Error: Invalid version format '{current}', expected x.y.z", style="fg:red")
+        sys.exit(1)
+
+    major, minor, patch = map(int, parts)
+
+    if bump_type == "major":
+        return f"{major + 1}.0.0"
+    elif bump_type == "minor":
+        return f"{major}.{minor + 1}.0"
+    elif bump_type == "patch":
+        return f"{major}.{minor}.{patch + 1}"
     else:
-        return next_version
+        raise ValueError(f"Invalid bump type: {bump_type}")
 
 
-def update_pyproject_toml(new_version):
-    """Update version in all package pyproject.toml files."""
-    from pathlib import Path
+def select_packages() -> list[str]:
+    """Interactive package selection with checkboxes."""
+    choices = []
+    for key in PACKAGES:
+        pkg = PACKAGES[key]
+        version = get_current_version(key)
+        name = pkg.get("npm_name", key)
+        choices.append(questionary.Choice(
+            title=f"{name} ({pkg['description']}) - {version}",
+            value=key,
+        ))
 
-    # Update all packages in packages/ directory
-    packages_dir = Path("packages")
-    updated_files = []
+    selected = questionary.checkbox(
+        "Select packages to release:",
+        choices=choices,
+        style=style,
+    ).ask()
 
-    for package_dir in packages_dir.iterdir():
-        if package_dir.is_dir():
-            pyproject_path = package_dir / "pyproject.toml"
-            if pyproject_path.exists():
-                with open(pyproject_path, "r") as f:
-                    data = toml.load(f)
+    if not selected:
+        questionary.print("No packages selected.", style="fg:yellow")
+        sys.exit(0)
 
-                if "project" in data and "version" in data["project"]:
-                    data["project"]["version"] = new_version
-
-                    with open(pyproject_path, "w") as f:
-                        toml.dump(data, f)
-
-                    updated_files.append(str(pyproject_path))
-                    print(f"Updated {pyproject_path} with new version: {new_version}")
-
-    return updated_files
+    return selected
 
 
-def update_changelog(new_version):
-    # Get commit messages since last tag
-    last_tag = (
-        subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"])
-        .decode()
-        .strip()
-    )
+def get_bump_type(package_key: str) -> str:
+    """Ask for semver bump type."""
+    current = get_current_version(package_key)
+    pkg = PACKAGES[package_key]
+    name = pkg.get("npm_name", package_key)
+
+    bump_type = questionary.select(
+        f"{name} ({current}) - bump type:",
+        choices=[
+            questionary.Choice("patch", value="patch"),
+            questionary.Choice("minor", value="minor"),
+            questionary.Choice("major", value="major"),
+        ],
+        style=style,
+    ).ask()
+
+    if not bump_type:
+        sys.exit(0)
+
+    return bump_type
+
+
+def update_version(package_key: str, new_version: str) -> Path:
+    """Update version in package file."""
+    pkg = PACKAGES[package_key]
+    path = Path(pkg["version_file"])
+
+    if pkg["type"] == "python":
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        data["project"]["version"] = new_version
+        with open(path, "wb") as f:
+            tomli_w.dump(data, f)
+    else:
+        with open(path) as f:
+            data = json.load(f)
+        data["version"] = new_version
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+
+    return path
+
+
+def update_changelog(new_version: str) -> bool:
+    """Generate changelog entry for colight release."""
+    try:
+        last_tag = (
+            subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"])
+            .decode()
+            .strip()
+        )
+    except subprocess.CalledProcessError:
+        questionary.print("No previous tags found, skipping changelog generation", style="fg:yellow")
+        return True
+
     commit_messages = (
         subprocess.check_output(
             ["git", "log", f"{last_tag}..HEAD", "--pretty=format:%B"]
@@ -97,15 +224,14 @@ def update_changelog(new_version):
         .decode()
         .split("\n\n")
     )
-    # Define categories and their prefixes
+
     categories = {
         "New Features": "feat:",
         "Bug Fixes": "fix:",
         "Documentation": "docs:",
-        "Other Changes": None,  # This will catch all other commits
+        "Other Changes": None,
     }
 
-    # Categorize commits
     categorized_commits = {category: [] for category in categories}
 
     for msg in commit_messages:
@@ -117,21 +243,14 @@ def update_changelog(new_version):
             categorized = False
             for category, prefix in categories.items():
                 if prefix and line.lower().startswith(prefix.lower()):
-                    # Remove the prefix and clean up the message
-                    cleaned_msg = line[len(prefix) :].strip()
-                    # Remove leading dash or bullet if present
-                    cleaned_msg = cleaned_msg.lstrip("- •")
-                    cleaned_msg = cleaned_msg.strip()
+                    cleaned_msg = line[len(prefix):].strip().lstrip("- •").strip()
                     categorized_commits[category].append(cleaned_msg)
                     categorized = True
                     break
             if not categorized:
-                # Remove leading dash or bullet if present for uncategorized commits
                 cleaned_line = line.lstrip("- •").strip()
                 categorized_commits["Other Changes"].append(cleaned_line)
-        print("---")
 
-    # Prepare changelog entry
     changelog_entry = (
         f"### [{new_version}] - {datetime.now().strftime('%b %d, %Y')}\n\n"
     )
@@ -139,102 +258,151 @@ def update_changelog(new_version):
     for category, commits in categorized_commits.items():
         if commits:
             changelog_entry += f"#### {category}\n"
-            # Add dash prefix only if not already present
             changelog_entry += "\n".join(f"- {commit}" for commit in commits)
             changelog_entry += "\n\n"
 
-    # Remove empty "Other Changes" section if it's the only one
     if (
         len([c for c in categorized_commits.values() if c]) == 1
         and categorized_commits["Other Changes"]
     ):
         changelog_entry = changelog_entry.replace("#### Other Changes\n", "")
 
-    # Save original content of CHANGELOG.md
-    with open("CHANGELOG.md", "r") as f:
-        original_content = f.read()
+    changelog_path = Path("CHANGELOG.md")
+    if changelog_path.exists():
+        with open(changelog_path) as f:
+            original_content = f.read()
+    else:
+        original_content = ""
 
-    # Prepend to CHANGELOG.md
-    with open("CHANGELOG.md", "w") as f:
+    with open(changelog_path, "w") as f:
         f.write(changelog_entry + original_content)
 
-    # Print the new changelog entry to the terminal
-    print("\nNew changelog entry:")
+    questionary.print("\nNew changelog entry:", style="fg:cyan bold")
     print(changelog_entry)
 
-    # Pause for user to review and potentially edit
-    user_input = input(
-        "\nReview the changelog entry. Press Enter to continue or 'q' to cancel: "
-    )
-
-    if user_input.lower() == "q":
-        # Revert the changelog
-        with open("CHANGELOG.md", "w") as f:
+    if not questionary.confirm("Accept changelog entry?", default=True, style=style).ask():
+        with open(changelog_path, "w") as f:
             f.write(original_content)
-        print("Changelog update cancelled and reverted.")
+        questionary.print("Changelog update cancelled.", style="fg:yellow")
         return False
 
     return True
 
 
 def main():
-    # Check for uncommitted changes
+    questionary.print("\n  colight release\n", style="fg:cyan bold")
+
     check_working_directory()
 
-    # Add command line argument parsing
-    alpha_name = None
-    if len(sys.argv) > 2 and sys.argv[1] == "--alpha":
-        alpha_name = sys.argv[2]
+    selected = select_packages()
 
-    new_version = get_next_version(alpha_name)
-    files_to_add = ["uv.lock"]
+    # Determine versions for each selected package
+    releases = []
+    has_python = False
+    has_npm = False
 
-    # Print version prominently for easy copying
-    print("\n" + "=" * 50)
-    print(f"Version: {new_version}")
-    print("=" * 50 + "\n")
+    for key in selected:
+        pkg = PACKAGES[key]
+        current = get_current_version(key)
 
-    if alpha_name:
-        # For alpha releases, create a simpler changelog entry
-        with open("CHANGELOG.md", "r") as f:
-            original_content = f.read()
+        if pkg["type"] == "python":
+            new_version = get_next_calver()
+            has_python = True
+        else:
+            bump_type = get_bump_type(key)
+            new_version = bump_semver(current, bump_type)
+            has_npm = True
 
-        alpha_entry = (
-            f"### [{new_version}] - {datetime.now().strftime('%b %d, %Y')}\n\n"
-        )
-        alpha_entry += "Alpha release for testing.\n\n"
+        releases.append({
+            "key": key,
+            "pkg": pkg,
+            "current": current,
+            "new_version": new_version,
+        })
 
-        with open("CHANGELOG.md", "w") as f:
-            f.write(alpha_entry + original_content)
+    # Summary
+    questionary.print("\nRelease summary:", style="fg:cyan bold")
+    for rel in releases:
+        name = rel["pkg"].get("npm_name", rel["key"])
+        questionary.print(f"  {name}: {rel['current']} → {rel['new_version']}", style="fg:green")
+    print()
 
-        updated_files = update_pyproject_toml(new_version)
-        files_to_add.extend(updated_files + ["CHANGELOG.md"])
-    else:
-        if not update_changelog(new_version):
-            print("Release process cancelled.")
-            return
-        updated_files = update_pyproject_toml(new_version)
-        files_to_add.extend(updated_files + ["CHANGELOG.md"])
+    if not questionary.confirm("Proceed with release?", default=True, style=style).ask():
+        questionary.print("Aborted.", style="fg:yellow")
+        sys.exit(0)
 
-    # Add changes
+    # Update changelog for colight releases
+    if has_python:
+        colight_version = next(r["new_version"] for r in releases if r["key"] == "colight")
+        if not update_changelog(colight_version):
+            questionary.print("Release cancelled.", style="fg:red")
+            sys.exit(1)
+
+    # Update all version files
+    files_to_add = []
+    for rel in releases:
+        path = update_version(rel["key"], rel["new_version"])
+        files_to_add.append(str(path))
+        questionary.print(f"  Updated {path}", style="fg:green")
+
+    # Add changelog and uv.lock if python package included
+    if has_python:
+        files_to_add.extend(["CHANGELOG.md", "uv.lock"])
+
+    # Build if npm packages included
+    if has_npm:
+        questionary.print("\nBuilding...", style="fg:cyan")
+        result = subprocess.run(["yarn", "build"])
+        if result.returncode != 0:
+            questionary.print("Build failed!", style="fg:red bold")
+            sys.exit(1)
+
+    # Git operations
     subprocess.run(["git", "add"] + files_to_add)
-
-    # Run pre-commit
     subprocess.run(["pre-commit", "run", "--all-files"])
-
-    # Add changes again (in case pre-commit made modifications)
     subprocess.run(["git", "add"] + files_to_add)
 
-    # Commit changes
-    subprocess.run(["git", "commit", "-m", f"Release version {new_version}"])
+    # Commit message
+    if len(releases) == 1:
+        rel = releases[0]
+        commit_msg = f"release({rel['key']}): {rel['new_version']}"
+    else:
+        parts = [f"{r['key']}@{r['new_version']}" for r in releases]
+        commit_msg = f"release: {', '.join(parts)}"
 
-    # Create and push tag
-    subprocess.run(
-        ["git", "tag", "-a", f"v{new_version}", "-m", f"Release version {new_version}"]
-    )
-    subprocess.run(["git", "push", "origin", "main", "--tags"])
+    subprocess.run(["git", "commit", "-m", commit_msg])
 
-    print(f"Released version {new_version}")
+    # Create tags
+    tags = []
+    for rel in releases:
+        if rel["pkg"]["type"] == "python":
+            tag = f"v{rel['new_version']}"
+        else:
+            tag = f"{rel['key']}-v{rel['new_version']}"
+        tags.append(tag)
+        name = rel["pkg"].get("npm_name", rel["key"])
+        subprocess.run(["git", "tag", "-a", tag, "-m", f"Release {name} {rel['new_version']}"])
+
+    questionary.print(f"\nCreated tags: {', '.join(tags)}", style="fg:green")
+
+    # Push
+    if questionary.confirm("Push to origin?", default=True, style=style).ask():
+        subprocess.run(["git", "push", "origin", "HEAD", "--tags"])
+
+    # Publish npm packages
+    if has_npm:
+        if questionary.confirm("Publish npm packages?", default=True, style=style).ask():
+            for rel in releases:
+                if rel["pkg"]["type"] == "npm":
+                    name = rel["pkg"]["npm_name"]
+                    questionary.print(f"\nPublishing {name}...", style="fg:cyan")
+                    result = subprocess.run(["npm", "publish"], cwd=rel["pkg"]["path"])
+                    if result.returncode != 0:
+                        questionary.print(f"Failed to publish {name}", style="fg:red")
+                    else:
+                        questionary.print(f"Published {name}@{rel['new_version']}", style="fg:green")
+
+    questionary.print("\n  Done!\n", style="fg:cyan bold")
 
 
 if __name__ == "__main__":
