@@ -1,6 +1,6 @@
 {
   "name": "@colight/serde",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Wire protocol for sending NumPy arrays and binary data alongside JSON.",
   "license": "Apache-2.0",
   "type": "module",
