@@ -14,36 +14,73 @@ import React, {
   useRef,
   useContext,
 } from "react";
-import { SceneInner } from "./impl3d";
+import { SceneImpl } from "./impl3d";
 import {
   ComponentConfig,
   PointCloudComponentConfig,
   CuboidComponentConfig,
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
+  pointCloudSpec,
+  ellipsoidSpec,
+  cuboidSpec,
+  lineBeamsSpec,
 } from "./components";
-import { NOOP_READY_STATE, ReadyState } from "./types";
+import { NOOP_READY_STATE, ReadyState, PrimitiveSpec } from "./types";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { PointerContext, CursorHint } from "./pointer";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
 import { $StateContext } from "../context";
+import { isNdArray } from "../serde";
+
+/** Registry mapping component type names to their specs */
+const componentSpecs: Record<string, PrimitiveSpec<any>> = {
+  PointCloud: pointCloudSpec,
+  Ellipsoid: ellipsoidSpec,
+  EllipsoidAxes: ellipsoidSpec,
+  Cuboid: cuboidSpec,
+  LineBeams: lineBeamsSpec,
+};
 
 /**
- * Helper function to coerce specified fields to Float32Array if they exist and are arrays
+ * Coerce a value to Float32Array if it's an array-like type.
+ * Handles NdArrayView, regular arrays, and other TypedArrays.
  */
-function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
-  const result = obj;
-  for (const field of fields) {
-    const value = obj[field];
-    if (Array.isArray(value)) {
-      (result[field] as any) = new Float32Array(value);
-    } else if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
-      (result[field] as any) = new Float32Array(value.buffer);
+function coerceToFloat32(value: unknown): Float32Array | unknown {
+  if (isNdArray(value)) {
+    const flat = value.flat;
+    return flat instanceof Float32Array ? flat : new Float32Array(flat as ArrayLike<number>);
+  }
+  if (Array.isArray(value)) {
+    return new Float32Array(value);
+  }
+  if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
+    return new Float32Array((value as Float32Array).buffer);
+  }
+  return value;
+}
+
+/**
+ * Coerce array fields on a component based on its spec's arrayFields.
+ * Mutates the component in place for efficiency.
+ */
+function coerceComponentArrays<T extends { type: string }>(component: T): T {
+  const spec = componentSpecs[component.type];
+  if (!spec?.arrayFields) return component;
+
+  const { float32: float32Fields } = spec.arrayFields;
+  if (float32Fields) {
+    for (const field of float32Fields) {
+      const value = (component as any)[field];
+      if (value !== undefined) {
+        (component as any)[field] = coerceToFloat32(value);
+      }
     }
   }
-  return result;
+
+  return component;
 }
 
 /**
@@ -85,12 +122,9 @@ export function deco(
  * @returns {PointCloudComponentConfig} Configuration for rendering points in 3D space
  */
 export function PointCloud(
-  props: PointCloudComponentConfig,
+  props: Omit<PointCloudComponentConfig, "type">,
 ): PointCloudComponentConfig {
-  return {
-    ...coerceFloat32Fields(props, ["centers", "colors", "sizes"]),
-    type: "PointCloud",
-  };
+  return { ...props, type: "PointCloud" };
 }
 
 /**
@@ -113,13 +147,7 @@ export function Ellipsoid(
   const fillMode = props.fill_mode || "Solid";
 
   return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
+    ...props,
     half_size,
     type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
   };
@@ -130,7 +158,9 @@ export function Ellipsoid(
  * @param props - Cuboid configuration properties
  * @returns {CuboidComponentConfig} Configuration for rendering cuboids in 3D space
  */
-export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
+export function Cuboid(
+  props: Omit<CuboidComponentConfig, "type">,
+): CuboidComponentConfig {
   const half_size =
     typeof props.half_size === "number"
       ? ([props.half_size, props.half_size, props.half_size] as [
@@ -141,13 +171,7 @@ export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
       : props.half_size;
 
   return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
+    ...props,
     half_size,
     type: "Cuboid",
   };
@@ -159,12 +183,9 @@ export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
  * @returns {LineBeamsComponentConfig} Configuration for rendering line beams in 3D space
  */
 export function LineBeams(
-  props: LineBeamsComponentConfig,
+  props: Omit<LineBeamsComponentConfig, "type">,
 ): LineBeamsComponentConfig {
-  return {
-    ...coerceFloat32Fields(props, ["points", "colors"]),
-    type: "LineBeams",
-  };
+  return { ...props, type: "LineBeams" };
 }
 
 /**
@@ -285,6 +306,11 @@ function DevMenu({
   );
 }
 
+/** Props for Scene when using layers-based API */
+interface SceneLayersProps {
+  layers: any[];
+}
+
 /**
  * A React component for rendering 3D scenes.
  *
@@ -294,9 +320,14 @@ function DevMenu({
  * - Mouse interaction and picking
  * - Efficient rendering of multiple primitive types
  *
+ * Can be called with either:
+ * - `layers` prop: For layer-based composition with automatic coercion
+ * - `components` prop: For direct component array (SceneProps)
+ *
  * @component
  * @example
  * ```tsx
+ * // Using components directly
  * <Scene
  *   components={[
  *     PointCloud({ centers: points, color: [1,0,0] }),
@@ -304,12 +335,22 @@ function DevMenu({
  *   ]}
  *   width={800}
  *   height={600}
- *   onCameraChange={handleCameraChange}
- *   controls={['fps']}  // Show FPS counter
  * />
+ *
+ * // Using layers (from Python/serde)
+ * <Scene layers={[pointCloudLayer, ellipsoidLayer, { width: 800 }]} />
  * ```
  */
-export function SceneWithLayers({ layers }: { layers: any[] }) {
+export function Scene(props: SceneLayersProps | SceneProps) {
+  // Dispatch based on whether we have layers or components
+  if ("layers" in props) {
+    return <SceneFromLayers layers={props.layers} />;
+  }
+  return <SceneInner {...props} />;
+}
+
+/** Internal component for processing layers into components */
+function SceneFromLayers({ layers }: SceneLayersProps) {
   const readyState = useContext($StateContext) ?? NOOP_READY_STATE;
   const components: any[] = [];
   const props: any = {};
@@ -317,7 +358,7 @@ export function SceneWithLayers({ layers }: { layers: any[] }) {
   for (const layer of layers) {
     if (!layer) continue;
 
-    if (Array.isArray(layer) && layer[0] === SceneWithLayers) {
+    if (Array.isArray(layer) && layer[0] === Scene) {
       components.push(...layer[1].layers);
     } else if (layer.type) {
       components.push(layer);
@@ -330,7 +371,7 @@ export function SceneWithLayers({ layers }: { layers: any[] }) {
   const resolvedReadyState = propsReadyState ?? readyState;
 
   return (
-    <Scene
+    <SceneInner
       components={components}
       {...restProps}
       readyState={resolvedReadyState}
@@ -338,8 +379,8 @@ export function SceneWithLayers({ layers }: { layers: any[] }) {
   );
 }
 
-export function Scene({
-  components,
+function SceneInner({
+  components: rawComponents,
   width,
   height,
   aspectRatio = 1,
@@ -355,6 +396,11 @@ export function Scene({
   cursor,
   onCursorHint,
 }: SceneProps) {
+  // Coerce array fields on all components based on their spec's arrayFields
+  const components = useMemo(
+    () => rawComponents.map(coerceComponentArrays),
+    [rawComponents],
+  );
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
     ...DEFAULT_CAMERA,
@@ -432,7 +478,7 @@ export function Scene({
     >
       {dimensions && (
         <>
-          <SceneInner
+          <SceneImpl
             components={components}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}

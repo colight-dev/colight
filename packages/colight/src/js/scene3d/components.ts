@@ -441,6 +441,7 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
 
 export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
   type: "PointCloud",
+  arrayFields: { float32: ["centers", "colors", "sizes"] },
   instancesPerElement: 1,
 
   defaults: {
@@ -620,6 +621,7 @@ export interface EllipsoidComponentConfig extends BaseComponentConfig {
 
 export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
   type: "Ellipsoid",
+  arrayFields: { float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"] },
   instancesPerElement: 1,
 
   defaults: {
@@ -784,6 +786,7 @@ export interface CuboidComponentConfig extends BaseComponentConfig {
 
 export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   type: "Cuboid",
+  arrayFields: { float32: ["centers", "half_sizes", "quaternions", "colors", "alphas"] },
   instancesPerElement: 1,
 
   defaults: {
@@ -975,6 +978,7 @@ function countSegments(elem: LineBeamsComponentConfig): number {
 
 export const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
   type: "LineBeams",
+  arrayFields: { float32: ["points", "colors"] },
   instancesPerElement: 1,
 
   defaults: {

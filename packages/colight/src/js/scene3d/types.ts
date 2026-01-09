@@ -18,6 +18,14 @@ export interface PrimitiveSpec<ConfigType> {
   type: string;
 
   /**
+   * Fields that should be coerced to typed arrays.
+   * Used by Scene to normalize NdArrayView and regular arrays.
+   */
+  arrayFields: {
+    float32?: (keyof ConfigType)[];
+  };
+
+  /**
    * Default values for the primitive's properties
    */
   defaults?: ElementConstants;

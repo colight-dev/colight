@@ -172,7 +172,7 @@ class Scene(Plot.LayoutItem):
         components = [
             e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
         ]
-        return [Plot.JSRef("scene3d.SceneWithLayers"), {"layers": components}]
+        return [Plot.JSRef("scene3d.Scene"), {"layers": components}]
 
 
 def flatten_array(arr: Any, dtype: Any = np.float32) -> Any:

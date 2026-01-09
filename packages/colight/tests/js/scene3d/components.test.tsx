@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
 import { render, act } from "@testing-library/react";
 import React from "react";
-import { SceneInner } from "../../../src/js/scene3d/impl3d";
+import { SceneImpl as SceneImpl } from "../../../src/js/scene3d/impl3d";
 import type {
   ComponentConfig,
   PointCloudComponentConfig,
@@ -15,8 +15,8 @@ describe("Scene3D Components", () => {
   let mockDevice: GPUDevice;
   let mockQueue: GPUQueue;
   let mockContext: GPUCanvasContext;
-  let WrappedSceneInner: React.ComponentType<
-    React.ComponentProps<typeof SceneInner>
+  let WrappedSceneImpl: React.ComponentType<
+    React.ComponentProps<typeof SceneImpl>
   >;
 
   beforeEach(() => {
@@ -26,7 +26,7 @@ describe("Scene3D Components", () => {
     setupWebGPU();
 
     // Create wrapped component with blank state
-    WrappedSceneInner = withBlankState(SceneInner);
+    WrappedSceneImpl = withBlankState(SceneImpl);
 
     // Create detailed WebGPU mocks with software rendering capabilities
     mockQueue = {
@@ -128,7 +128,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -167,7 +167,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -193,7 +193,7 @@ describe("Scene3D Components", () => {
       let result;
       await act(async () => {
         result = render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={initialComponents}
             containerWidth={800}
             containerHeight={600}
@@ -216,7 +216,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         result!.rerender(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={updatedComponents}
             containerWidth={800}
             containerHeight={600}
@@ -241,7 +241,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -269,7 +269,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -302,7 +302,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -331,7 +331,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -357,7 +357,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}
@@ -410,7 +410,7 @@ describe("Scene3D Components", () => {
 
       await act(async () => {
         render(
-          <WrappedSceneInner
+          <WrappedSceneImpl
             components={components}
             containerWidth={800}
             containerHeight={600}

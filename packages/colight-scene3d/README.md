@@ -48,4 +48,4 @@ export function Example() {
 
 ## API
 
-Exports: `Scene`, `SceneWithLayers`, `PointCloud`, `Ellipsoid`, `Cuboid`, `LineBeams`, `deco`, `computeCanvasDimensions`, `SceneInner`, `DEFAULT_CAMERA`.
+Exports: `Scene`, `PointCloud`, `Ellipsoid`, `Cuboid`, `LineBeams`, `deco`, `computeCanvasDimensions`, `DEFAULT_CAMERA`.

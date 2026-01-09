@@ -1,7 +1,6 @@
 // Scene components
 export {
   Scene,
-  SceneWithLayers,
   PointCloud,
   Ellipsoid,
   Cuboid,
@@ -9,7 +8,6 @@ export {
   deco,
   computeCanvasDimensions,
 } from "./scene3d";
-export { SceneInner } from "./impl3d";
 
 // Camera
 export { DEFAULT_CAMERA } from "./camera3d";

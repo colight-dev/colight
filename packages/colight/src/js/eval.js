@@ -1,6 +1,6 @@
 import * as api from "./api";
 import * as Plot from "@observablehq/plot";
-import { evaluateNdarray, isNdArray } from "./serde";
+import { evaluateNdarray } from "./serde";
 import { serializeEvent } from "./utils";
 import * as globals from "./globals";
 
@@ -211,11 +211,8 @@ export function evaluate(node, $state, experimental, buffers) {
       if (node.__buffer_index__ !== undefined) {
         node.data = buffers[node.__buffer_index__];
       }
-      const result = evaluateNdarray(node);
-      // For backward compatibility, unwrap NdArrayView to return the raw flat array.
-      // Consumers needing shape/strides should use evaluateNdarray directly with access
-      // to the result's .shape and .strides properties.
-      node.array = isNdArray(result) ? result.flat : result;
+      // Multidimensional arrays return NdArrayView; 1D arrays return typed arrays.
+      node.array = evaluateNdarray(node);
       return node.array;
     default:
       return Object.fromEntries(

@@ -71,7 +71,7 @@ function align16(value: number): number {
   return Math.ceil(value / 16) * 16;
 }
 
-export interface SceneInnerProps {
+export interface SceneImplProps {
   /** Array of 3D components to render in the scene */
   components: ComponentConfig[];
 
@@ -424,7 +424,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
 // Re-export for backwards compatibility
 export { screenRay } from "./project";
 
-export function SceneInner({
+export function SceneImpl({
   components,
   containerWidth,
   containerHeight,
@@ -439,7 +439,7 @@ export function SceneInner({
   pointerRef,
   cursor: cursorMode = "manual",
   onCursorHint,
-}: SceneInnerProps) {
+}: SceneImplProps) {
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
     device: GPUDevice;
