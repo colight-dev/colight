@@ -6,14 +6,16 @@
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.mjs",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
     }
   },
   "files": [
-    "dist/index.mjs",
+    "dist",
     "README.md",
     "LICENSE"
   ],

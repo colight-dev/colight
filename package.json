@@ -63,7 +63,7 @@
   "scripts": {
     "release": "uv run python scripts/release.py $*",
     "alpha": "uv run python scripts/release.py --alpha",
-    "build": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs && tsc -p packages/colight-serde/tsconfig.json",
     "dev": "node esbuild.config.mjs --watch",
     "docs:watch": "yarn build && uv run python -m mkdocs serve",
     "docs:build": "yarn build && uv run python -m mkdocs build",

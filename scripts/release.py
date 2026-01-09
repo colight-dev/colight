@@ -31,26 +31,32 @@ style = Style([
 ])
 
 # Package definitions
+# type: "python" = pyproject.toml only, "npm" = package.json only, "both" = both
 PACKAGES = {
     "colight": {
         "type": "python",
         "path": "packages/colight",
-        "version_file": "packages/colight/pyproject.toml",
+        "pyproject": "packages/colight/pyproject.toml",
+        "versioning": "calver",
         "description": "Python",
     },
     "scene3d": {
         "type": "npm",
         "path": "packages/colight-scene3d",
-        "version_file": "packages/colight-scene3d/package.json",
+        "package_json": "packages/colight-scene3d/package.json",
         "npm_name": "@colight/scene3d",
+        "versioning": "semver",
         "description": "npm",
     },
     "serde": {
-        "type": "npm",
+        "type": "both",
         "path": "packages/colight-serde",
-        "version_file": "packages/colight-serde/package.json",
+        "pyproject": "packages/colight-serde/pyproject.toml",
+        "package_json": "packages/colight-serde/package.json",
         "npm_name": "@colight/serde",
-        "description": "npm",
+        "pypi_name": "colight-serde",
+        "versioning": "semver",
+        "description": "Python + npm",
     },
 }
 
@@ -77,13 +83,15 @@ def check_working_directory():
 def get_current_version(package_key: str) -> str:
     """Get current version from package file."""
     pkg = PACKAGES[package_key]
-    path = Path(pkg["version_file"])
 
-    if pkg["type"] == "python":
+    # Prefer pyproject.toml if it exists, else package.json
+    if "pyproject" in pkg:
+        path = Path(pkg["pyproject"])
         with open(path, "rb") as f:
             data = tomllib.load(f)
         return data["project"]["version"]
     else:
+        path = Path(pkg["package_json"])
         with open(path) as f:
             data = json.load(f)
         return data["version"]
@@ -183,26 +191,33 @@ def get_bump_type(package_key: str) -> str:
     return bump_type
 
 
-def update_version(package_key: str, new_version: str) -> Path:
-    """Update version in package file."""
+def update_version(package_key: str, new_version: str) -> list[Path]:
+    """Update version in package file(s). Returns list of updated paths."""
     pkg = PACKAGES[package_key]
-    path = Path(pkg["version_file"])
+    updated_paths = []
 
-    if pkg["type"] == "python":
+    # Update pyproject.toml if present
+    if "pyproject" in pkg:
+        path = Path(pkg["pyproject"])
         with open(path, "rb") as f:
             data = tomllib.load(f)
         data["project"]["version"] = new_version
         with open(path, "wb") as f:
             tomli_w.dump(data, f)
-    else:
+        updated_paths.append(path)
+
+    # Update package.json if present
+    if "package_json" in pkg:
+        path = Path(pkg["package_json"])
         with open(path) as f:
             data = json.load(f)
         data["version"] = new_version
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
+        updated_paths.append(path)
 
-    return path
+    return updated_paths
 
 
 def update_changelog(new_version: str) -> bool:
@@ -289,6 +304,16 @@ def update_changelog(new_version: str) -> bool:
     return True
 
 
+def has_npm(pkg: dict) -> bool:
+    """Check if package publishes to npm."""
+    return pkg["type"] in ("npm", "both")
+
+
+def has_pypi(pkg: dict) -> bool:
+    """Check if package publishes to PyPI."""
+    return pkg["type"] in ("python", "both")
+
+
 def main():
     questionary.print("\n  colight release\n", style="fg:cyan bold")
 
@@ -298,20 +323,26 @@ def main():
 
     # Determine versions for each selected package
     releases = []
-    has_python = False
-    has_npm = False
+    any_npm = False
+    any_pypi = False
+    releases_colight = False
 
     for key in selected:
         pkg = PACKAGES[key]
         current = get_current_version(key)
 
-        if pkg["type"] == "python":
+        if pkg["versioning"] == "calver":
             new_version = get_next_calver()
-            has_python = True
         else:
             bump_type = get_bump_type(key)
             new_version = bump_semver(current, bump_type)
-            has_npm = True
+
+        if has_npm(pkg):
+            any_npm = True
+        if has_pypi(pkg):
+            any_pypi = True
+        if key == "colight":
+            releases_colight = True
 
         releases.append({
             "key": key,
@@ -323,8 +354,16 @@ def main():
     # Summary
     questionary.print("\nRelease summary:", style="fg:cyan bold")
     for rel in releases:
-        name = rel["pkg"].get("npm_name", rel["key"])
-        questionary.print(f"  {name}: {rel['current']} → {rel['new_version']}", style="fg:green")
+        name = rel["pkg"].get("npm_name") or rel["pkg"].get("pypi_name") or rel["key"]
+        targets = []
+        if has_pypi(rel["pkg"]):
+            targets.append("PyPI")
+        if has_npm(rel["pkg"]):
+            targets.append("npm")
+        questionary.print(
+            f"  {name}: {rel['current']} → {rel['new_version']} ({', '.join(targets)})",
+            style="fg:green"
+        )
     print()
 
     if not questionary.confirm("Proceed with release?", default=True, style=style).ask():
@@ -332,7 +371,7 @@ def main():
         sys.exit(0)
 
     # Update changelog for colight releases
-    if has_python:
+    if releases_colight:
         colight_version = next(r["new_version"] for r in releases if r["key"] == "colight")
         if not update_changelog(colight_version):
             questionary.print("Release cancelled.", style="fg:red")
@@ -341,16 +380,17 @@ def main():
     # Update all version files
     files_to_add = []
     for rel in releases:
-        path = update_version(rel["key"], rel["new_version"])
-        files_to_add.append(str(path))
-        questionary.print(f"  Updated {path}", style="fg:green")
+        paths = update_version(rel["key"], rel["new_version"])
+        for path in paths:
+            files_to_add.append(str(path))
+            questionary.print(f"  Updated {path}", style="fg:green")
 
-    # Add changelog and uv.lock if python package included
-    if has_python:
+    # Add changelog and uv.lock if colight included
+    if releases_colight:
         files_to_add.extend(["CHANGELOG.md", "uv.lock"])
 
     # Build if npm packages included
-    if has_npm:
+    if any_npm:
         questionary.print("\nBuilding...", style="fg:cyan")
         result = subprocess.run(["yarn", "build"])
         if result.returncode != 0:
@@ -375,12 +415,13 @@ def main():
     # Create tags
     tags = []
     for rel in releases:
-        if rel["pkg"]["type"] == "python":
+        # colight uses v{version}, others use {key}-v{version}
+        if rel["key"] == "colight":
             tag = f"v{rel['new_version']}"
         else:
             tag = f"{rel['key']}-v{rel['new_version']}"
         tags.append(tag)
-        name = rel["pkg"].get("npm_name", rel["key"])
+        name = rel["pkg"].get("npm_name") or rel["pkg"].get("pypi_name") or rel["key"]
         subprocess.run(["git", "tag", "-a", tag, "-m", f"Release {name} {rel['new_version']}"])
 
     questionary.print(f"\nCreated tags: {', '.join(tags)}", style="fg:green")
@@ -390,17 +431,21 @@ def main():
         subprocess.run(["git", "push", "origin", "HEAD", "--tags"])
 
     # Publish npm packages
-    if has_npm:
-        if questionary.confirm("Publish npm packages?", default=True, style=style).ask():
+    if any_npm:
+        if questionary.confirm("Publish to npm?", default=True, style=style).ask():
             for rel in releases:
-                if rel["pkg"]["type"] == "npm":
+                if has_npm(rel["pkg"]):
                     name = rel["pkg"]["npm_name"]
-                    questionary.print(f"\nPublishing {name}...", style="fg:cyan")
+                    questionary.print(f"\nPublishing {name} to npm...", style="fg:cyan")
                     result = subprocess.run(["npm", "publish"], cwd=rel["pkg"]["path"])
                     if result.returncode != 0:
                         questionary.print(f"Failed to publish {name}", style="fg:red")
                     else:
                         questionary.print(f"Published {name}@{rel['new_version']}", style="fg:green")
+
+    # Note about PyPI - typically done via CI
+    if any_pypi:
+        questionary.print("\nPyPI publishing is handled by CI on tag push.", style="fg:yellow")
 
     questionary.print("\n  Done!\n", style="fg:cyan bold")
 

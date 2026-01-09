@@ -1,5 +1,25 @@
 import { collectBuffers } from "./buffers";
-import { evaluateNdarray } from "./binary";
+import { evaluateNdarray, TypedArray } from "./binary";
+import type { NdArrayView } from "./ndarray";
+
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+type SerializableValue =
+  | JsonValue
+  | ArrayBuffer
+  | ArrayBufferView
+  | NdArrayView
+  | TypedArray
+  | SerializableValue[]
+  | { [key: string]: SerializableValue };
+
+type BufferLike = ArrayBuffer | ArrayBufferView;
 
 export interface WireMessage<T = unknown> {
   message_id: string | number;
@@ -7,32 +27,33 @@ export interface WireMessage<T = unknown> {
   payload: T;
 }
 
-function nextMessageId() {
+function nextMessageId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function serialize(payload) {
+export function serialize(payload: SerializableValue): [JsonValue, BufferLike[]] {
   return collectBuffers(payload);
 }
 
-export function deserialize(payload, buffers) {
-  function traverse(value) {
+export function deserialize(payload: JsonValue, buffers: BufferLike[]): unknown {
+  function traverse(value: JsonValue): unknown {
     if (value && typeof value === "object") {
-      if (value.__type__ === "ndarray" && value.__buffer_index__ !== undefined) {
-        const data = buffers[value.__buffer_index__];
-        return evaluateNdarray({ ...value, data });
+      const obj = value as { [key: string]: JsonValue };
+      if (obj.__type__ === "ndarray" && obj.__buffer_index__ !== undefined) {
+        const data = buffers[obj.__buffer_index__ as number];
+        return evaluateNdarray({ ...obj, data } as Parameters<typeof evaluateNdarray>[0]);
       }
-      if (value.__buffer_index__ !== undefined) {
-        return buffers[value.__buffer_index__];
+      if (obj.__buffer_index__ !== undefined) {
+        return buffers[obj.__buffer_index__ as number];
       }
       if (Array.isArray(value)) {
         return value.map(traverse);
       }
-      const result = {};
-      for (const [key, val] of Object.entries(value)) {
+      const result: { [key: string]: unknown } = {};
+      for (const [key, val] of Object.entries(obj)) {
         result[key] = traverse(val);
       }
       return result;
@@ -43,9 +64,12 @@ export function deserialize(payload, buffers) {
   return traverse(payload);
 }
 
-export function packMessage(payload, messageId = null) {
+export function packMessage(
+  payload: SerializableValue,
+  messageId: string | number | null = null,
+): [WireMessage, BufferLike[]] {
   const [serialized, buffers] = serialize(payload);
-  const envelope = {
+  const envelope: WireMessage = {
     message_id: messageId ?? nextMessageId(),
     buffer_count: buffers.length,
     payload: serialized,
@@ -53,7 +77,7 @@ export function packMessage(payload, messageId = null) {
   return [envelope, buffers];
 }
 
-export function unpackMessage(envelope, buffers) {
+export function unpackMessage(envelope: WireMessage, buffers: BufferLike[]): unknown {
   if (
     envelope &&
     envelope.buffer_count !== undefined &&
@@ -63,5 +87,5 @@ export function unpackMessage(envelope, buffers) {
       `buffer_count mismatch: expected ${envelope.buffer_count}, got ${buffers.length}`,
     );
   }
-  return deserialize(envelope.payload, buffers);
+  return deserialize(envelope.payload as JsonValue, buffers);
 }

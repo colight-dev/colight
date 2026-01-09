@@ -1,5 +1,24 @@
 import { inferDtype, TypedArray } from "./binary";
-import { isNdArray, NdArrayView } from "./ndarray";
+import { isNdArray, NdArrayView, TypedArrayLike } from "./ndarray";
+
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+type SerializableValue =
+  | JsonValue
+  | ArrayBuffer
+  | ArrayBufferView
+  | NdArrayView
+  | TypedArray
+  | SerializableValue[]
+  | { [key: string]: SerializableValue };
+
+type BufferLike = ArrayBuffer | ArrayBufferView;
 
 /**
  * Serialized ndarray reference - what gets sent over the wire.
@@ -44,7 +63,7 @@ export function serializeNdArray(
         strides: value.strides.map((s) => s * bytesPerElement),
         order: "C",
       },
-      flat.buffer,
+      flat.buffer as ArrayBuffer,
     ];
   }
 
@@ -59,7 +78,7 @@ export function serializeNdArray(
       strides: [bytesPerElement],
       order: "C",
     },
-    value.buffer,
+    value.buffer as ArrayBuffer,
   ];
 }
 
@@ -71,10 +90,12 @@ export function serializeNdArray(
  *
  * Returns [serializedData, buffers] where serializedData has buffer references.
  */
-export function collectBuffers(data) {
-  const buffers = [];
+export function collectBuffers(
+  data: SerializableValue,
+): [JsonValue, BufferLike[]] {
+  const buffers: BufferLike[] = [];
 
-  function traverse(value) {
+  function traverse(value: SerializableValue): JsonValue {
     // Raw ArrayBuffer - store as plain buffer reference (no type)
     if (value instanceof ArrayBuffer) {
       const index = buffers.length;
@@ -86,12 +107,13 @@ export function collectBuffers(data) {
     if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
       const index = buffers.length;
       buffers.push(value);
+      const typedArray = value as TypedArrayLike;
       return {
         __buffer_index__: index,
         __type__: "ndarray",
         dtype: inferDtype(value),
-        shape: [value.length],
-        strides: [value.BYTES_PER_ELEMENT],
+        shape: [typedArray.length],
+        strides: [(typedArray as Uint8Array).BYTES_PER_ELEMENT ?? 1],
         order: "C",
       };
     }
@@ -108,14 +130,14 @@ export function collectBuffers(data) {
     }
 
     if (value && typeof value === "object") {
-      const result = {};
+      const result: { [key: string]: JsonValue } = {};
       for (const [key, val] of Object.entries(value)) {
-        result[key] = traverse(val);
+        result[key] = traverse(val as SerializableValue);
       }
       return result;
     }
 
-    return value;
+    return value as JsonValue;
   }
 
   return [traverse(data), buffers];
@@ -125,29 +147,33 @@ export function collectBuffers(data) {
  * Replace buffer references with actual buffer data.
  * Used internally during deserialization before evaluateNdarray.
  */
-export function replaceBuffers(data, buffers) {
-  function traverse(value) {
+export function replaceBuffers(
+  data: JsonValue,
+  buffers: BufferLike[],
+): unknown {
+  function traverse(value: JsonValue): unknown {
     if (value && typeof value === "object") {
+      const obj = value as { [key: string]: JsonValue };
       if (
-        value.__type__ === "ndarray" &&
-        value.__buffer_index__ !== undefined
+        obj.__type__ === "ndarray" &&
+        obj.__buffer_index__ !== undefined
       ) {
-        value.data = buffers[value.__buffer_index__];
-        delete value.__buffer_index__;
-        return value;
+        const result = { ...obj, data: buffers[obj.__buffer_index__ as number] };
+        delete (result as { __buffer_index__?: unknown }).__buffer_index__;
+        return result;
       }
       // Raw buffer reference (no __type__)
       if (
-        value.__buffer_index__ !== undefined &&
-        value.__type__ === undefined
+        obj.__buffer_index__ !== undefined &&
+        obj.__type__ === undefined
       ) {
-        return buffers[value.__buffer_index__];
+        return buffers[obj.__buffer_index__ as number];
       }
       if (Array.isArray(value)) {
         return value.map(traverse);
       }
-      const result = {};
-      for (const [key, val] of Object.entries(value)) {
+      const result: { [key: string]: unknown } = {};
+      for (const [key, val] of Object.entries(obj)) {
         result[key] = traverse(val);
       }
       return result;
