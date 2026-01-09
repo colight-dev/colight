@@ -80,7 +80,7 @@ def evaluate_python(
     if pragma:
         pragma_tags = parse_pragma_arg(pragma)
         # Merge with document tags
-        from .model import TagSet
+        from colight.runtime.model import TagSet
 
         document.tags = document.tags | TagSet(frozenset(pragma_tags))
 

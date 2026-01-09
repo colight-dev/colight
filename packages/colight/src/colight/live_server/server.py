@@ -824,7 +824,7 @@ class LiveServer:
                 )
 
                 # Execute incrementally and stream results
-                from .json_api import JsonDocumentGenerator
+                from colight.publish.json_api import JsonDocumentGenerator
 
                 generator = JsonDocumentGenerator(
                     verbose=self.verbose,

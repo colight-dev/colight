@@ -1,9 +1,10 @@
 import asyncio
 import base64
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from colight_serde import replace_buffers
+from colight_serde.serialization import Buffer
 from colight.widget import SubscriptableNamespace, WidgetState
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class LiveWidgetManager:
                 if updates is None:
                     return (False, "Missing 'updates' parameter")
                 if buffers:
-                    updates = replace_buffers(updates, buffers)
+                    updates = replace_buffers(updates, cast(List[Buffer], buffers))
                 widget.state.accept_js_updates(updates)
                 return (True, None)
 
@@ -102,7 +103,7 @@ class LiveWidgetManager:
                     return (False, error)
                 event = params.get("event", {})
                 if buffers:
-                    event = replace_buffers(event, buffers)
+                    event = replace_buffers(event, cast(List[Buffer], buffers))
                 if isinstance(event, dict):
                     event = SubscriptableNamespace(**event)
                 widget.callback_registry[callback_id](widget, event)

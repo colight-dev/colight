@@ -1,5 +1,5 @@
 import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union, Tuple, cast
 from types import SimpleNamespace
 
 import anywidget
@@ -10,6 +10,7 @@ import warnings
 from colight.env import CONFIG, ANYWIDGET_PATH
 from colight.protocols import Collector
 from colight_serde import serialize_binary_data, replace_buffers, to_numpy
+from colight_serde.serialization import Buffer
 from colight.state_operations import entry_id, normalize_updates, apply_updates
 
 
@@ -438,7 +439,7 @@ class Widget(anywidget.AnyWidget):
     ) -> tuple[str, list[bytes]]:
         f = self.callback_registry[params["id"]]
         if f is not None:
-            event = replace_buffers(params["event"], buffers)
+            event = replace_buffers(params["event"], cast(List[Buffer], buffers))
             print(event)
             event = SubscriptableNamespace(**event)
             f(self, event)
@@ -448,6 +449,6 @@ class Widget(anywidget.AnyWidget):
     def handle_updates(
         self, params: dict[str, Any], buffers: list[bytes]
     ) -> tuple[str, list[bytes]]:
-        updates = replace_buffers(params["updates"], buffers)
+        updates = replace_buffers(params["updates"], cast(List[Buffer], buffers))
         self.state.accept_js_updates(updates)
         return "ok", []
