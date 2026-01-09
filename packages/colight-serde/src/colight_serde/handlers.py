@@ -810,10 +810,210 @@ class AnyHandler(TypeHandler):
         return "any"
 
 
+class GenericDataclassHandler(TypeHandler):
+    """Handles generic dataclass types like Mask[T] where T is resolved.
+
+    This handles parameterized dataclasses by
+    generating a TypeScript inline object type for the base class with the
+    type parameter resolved.
+    """
+
+    def _is_generic_dataclass(self, hint: Any) -> bool:
+        """Check if hint is a parameterized dataclass."""
+        origin = get_origin(hint)
+        if origin is None:
+            return False
+        # Check if the origin is a dataclass
+        return dataclasses.is_dataclass(origin)
+
+    def matches_value(self, value: Any) -> bool:
+        return False  # Type-level only
+
+    def matches_hint(self, hint: Any) -> bool:
+        return self._is_generic_dataclass(hint)
+
+    def serialize(
+        self,
+        value: Any,
+        collector: Optional[BufferCollectorProtocol],
+        recurse: Any,
+    ) -> Any:
+        raise NotImplementedError("Generic dataclass hints are type-level only")
+
+    def to_typescript(
+        self,
+        hint: Any,
+        recurse: Any,
+        seen: Set[str],
+        known_names: Set[str],
+    ) -> str:
+        origin = get_origin(hint)
+        args = get_args(hint)
+
+        # Get the base class name
+        name = origin.__name__
+
+        # Generate inline interface based on dataclass fields
+        if dataclasses.is_dataclass(origin):
+            # Get field type hints
+            try:
+                from typing import get_type_hints
+
+                field_hints = get_type_hints(origin, include_extras=True)
+            except Exception:
+                field_hints = getattr(origin, "__annotations__", {})
+
+            # Build object type parts
+            parts = [f'__serde__: "{name}"']
+            for field in dataclasses.fields(origin):
+                field_hint = field_hints.get(field.name, Any)
+
+                # If the field hint is a TypeVar, resolve it from args
+                # TypeVar has __name__ attribute and is in typing module
+                if (
+                    hasattr(field_hint, "__name__")
+                    and hasattr(field_hint, "__bound__")
+                    and args
+                ):
+                    # It's a TypeVar - use the first type argument
+                    field_hint = args[0]
+
+                ts_type = recurse(field_hint, seen, known_names)
+                parts.append(f"{field.name}: {ts_type}")
+
+            return "{ " + "; ".join(parts) + " }"
+
+        # Fallback
+        return "any"
+
+
+class JaxtypingHandler(TypeHandler):
+    """Handles jaxtyping array types like Float[Array, '...'], Int[Array, '...'].
+
+    These are typed array hints from the jaxtyping library. We map them to
+    appropriate TypeScript NdArrayView types based on their dtype category.
+    """
+
+    # Map jaxtyping dtype categories to TypeScript types
+    _DTYPE_MAP = {
+        # Float types -> Float32Array (most common in practice)
+        "float": "Float32Array",
+        "float32": "Float32Array",
+        "float64": "Float64Array",
+        "float16": "Float32Array",  # Upcast for TS compatibility
+        "bfloat16": "Float32Array",
+        # Int types -> Int32Array (most common)
+        "int": "Int32Array",
+        "int8": "Int8Array",
+        "int16": "Int16Array",
+        "int32": "Int32Array",
+        "int64": "number[]",  # BigInt64Array not widely used
+        # Unsigned int types
+        "uint": "Uint32Array",
+        "uint8": "Uint8Array",
+        "uint16": "Uint16Array",
+        "uint32": "Uint32Array",
+        "uint64": "number[]",
+        # Bool
+        "bool": "Uint8Array",  # Boolean arrays as uint8
+    }
+
+    def _is_jaxtyping_hint(self, hint: Any) -> bool:
+        """Check if hint is a jaxtyping array type."""
+        # jaxtyping types have a special metaclass from jaxtyping._array_types
+        hint_module = getattr(type(hint), "__module__", "")
+        return hint_module.startswith("jaxtyping")
+
+    def _get_dtype_category(self, hint: Any) -> Optional[str]:
+        """Extract dtype category from jaxtyping hint."""
+        # jaxtyping hints have a 'dtypes' attribute with allowed dtype names
+        dtypes = getattr(hint, "dtypes", None)
+        if not dtypes:
+            return None
+
+        # Check for common dtype patterns
+        dtypes_set = set(dtypes)
+
+        # Float types (float8 variants, bfloat16, float16, float32, float64)
+        float_dtypes = {
+            "float8_e4m3b11fnuz",
+            "float8_e4m3fn",
+            "float8_e4m3fnuz",
+            "float8_e5m2",
+            "float8_e5m2fnuz",
+            "bfloat16",
+            "float16",
+            "float32",
+            "float64",
+        }
+        if dtypes_set & float_dtypes:
+            # Prefer float32 if available, otherwise use generic float
+            if "float32" in dtypes_set:
+                return "float32"
+            if "float64" in dtypes_set:
+                return "float64"
+            return "float"
+
+        # Int types
+        int_dtypes = {"int8", "int16", "int32", "int64"}
+        if dtypes_set & int_dtypes:
+            if "int32" in dtypes_set:
+                return "int32"
+            if "int64" in dtypes_set:
+                return "int64"
+            return "int"
+
+        # Unsigned int types
+        uint_dtypes = {"uint8", "uint16", "uint32", "uint64"}
+        if dtypes_set & uint_dtypes:
+            if "uint8" in dtypes_set:
+                return "uint8"
+            if "uint32" in dtypes_set:
+                return "uint32"
+            return "uint"
+
+        # Bool
+        if "bool" in dtypes_set:
+            return "bool"
+
+        return None
+
+    def matches_value(self, value: Any) -> bool:
+        return False  # jaxtyping hints are type-level only
+
+    def matches_hint(self, hint: Any) -> bool:
+        return self._is_jaxtyping_hint(hint)
+
+    def serialize(
+        self,
+        value: Any,
+        collector: Optional[BufferCollectorProtocol],
+        recurse: Any,
+    ) -> Any:
+        raise NotImplementedError("jaxtyping hints are type-level only")
+
+    def to_typescript(
+        self,
+        hint: Any,
+        recurse: Any,
+        seen: Set[str],
+        known_names: Set[str],
+    ) -> str:
+        dtype_category = self._get_dtype_category(hint)
+        if dtype_category:
+            ts_type = self._DTYPE_MAP.get(dtype_category, "Float32Array")
+            if ts_type == "number[]":
+                return ts_type
+            return f"NdArrayView<{ts_type}>"
+        return "NdArrayView"
+
+
 # Handler registry - order matters (more specific handlers first)
 HANDLERS: List[TypeHandler] = [
     NumpyScalarHandler(),
     ArrayHandler(),
+    JaxtypingHandler(),  # Before DataclassHandler - matches jaxtyping array hints
+    GenericDataclassHandler(),  # Handles Mask[T] and other parameterized dataclasses
     BytesHandler(),
     DataclassHandler(),
     PrimitiveHandler(),

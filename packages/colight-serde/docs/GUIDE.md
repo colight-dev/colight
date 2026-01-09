@@ -173,18 +173,33 @@ Output:
 import type { NdArrayView } from "@colight/serde";
 
 export interface Pose {
+  __serde__: "Pose";
   posquat: NdArrayView<Float32Array>;
 }
 export interface Keypoints {
+  __serde__: "Keypoints";
   positions: NdArrayView<Float32Array>;
   object_ids: NdArrayView<Int32Array>;
 }
 export interface Scenario {
+  __serde__: "Scenario";
   camera_poses: Pose;
   object_poses: Pose;
   keypoints: Keypoints;
 }
+
+export function Pose(posquat: NdArrayView<Float32Array>): Pose {
+  return { __serde__: "Pose", posquat };
+}
+export function Keypoints(positions: NdArrayView<Float32Array>, object_ids: NdArrayView<Int32Array>): Keypoints {
+  return { __serde__: "Keypoints", positions, object_ids };
+}
+export function Scenario(camera_poses: Pose, object_poses: Pose, keypoints: Keypoints): Scenario {
+  return { __serde__: "Scenario", camera_poses, object_poses, keypoints };
+}
 ```
+
+The `__serde__` tag enables round-trip deserialization back to Python dataclasses.
 
 ### 4. Array Shape Annotations
 
@@ -424,6 +439,52 @@ class TypeHandler(ABC):
     def to_typescript(self, hint, recurse, seen, known_names) -> str:
         """Generate TypeScript type string."""
         ...
+
+    def deserialize(self, value, hint, buffers, recurse) -> Any:
+        """Deserialize wire format back to Python value."""
+        ...
 ```
 
 The `recurse` parameter allows handlers to delegate nested types back to the registry.
+
+## Bi-directional Communication
+
+colight-serde supports full round-trip serialization. Messages created in TypeScript can be deserialized back to Python dataclasses.
+
+### Register Types for Deserialization
+
+```python
+from colight_serde import register_types, unpack_message
+
+# Register your dataclasses
+register_types(Pose, Keypoints, Scenario)
+
+# Now unpack_message can reconstruct dataclass instances
+envelope, buffers = receive_from_websocket()
+scenario = unpack_message(envelope, buffers)  # Returns Scenario instance, not dict
+```
+
+### TypeScript → Python Flow
+
+```typescript
+import { packMessage, Scenario, Pose, Keypoints } from "./types";
+
+// Use generated constructor functions
+const scenario = Scenario(
+  Pose(new Float32Array([0, 0, 0, 0, 0, 0, 1])),
+  Pose(new Float32Array([1, 0, 0, 0, 0, 0, 1])),
+  Keypoints(new Float32Array([...]), new Int32Array([...]))
+);
+
+// Pack and send
+const [envelope, buffers] = packMessage(scenario);
+ws.send(JSON.stringify(envelope));
+buffers.forEach(b => ws.send(b));
+```
+
+```python
+# Python receives and reconstructs the dataclass
+scenario = unpack_message(envelope, buffers)
+assert isinstance(scenario, Scenario)
+assert isinstance(scenario.camera_poses, Pose)
+```

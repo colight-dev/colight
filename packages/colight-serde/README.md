@@ -75,11 +75,13 @@ class Mesh:
 
 # Generate TypeScript
 print(generate_typescript(Mesh))
-# interface Mesh {
+# export interface Mesh {
+#   __serde__: "Mesh";
 #   vertices: NdArrayView<Float32Array>;
 #   indices: NdArrayView<Uint32Array>;
 #   name: string;
 # }
+# export function Mesh(vertices: ..., indices: ..., name: string): Mesh { ... }
 ```
 
 ### JavaScript → Python
