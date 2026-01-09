@@ -22,7 +22,7 @@ import {
 } from "../components";
 
 import { packID } from "../picking";
-import { acopy } from "../../utils";
+import { acopy } from "../utils";
 
 import { createEllipsoidAxes } from "../geometry";
 

@@ -324,7 +324,6 @@ def main():
     # Determine versions for each selected package
     releases = []
     any_npm = False
-    any_pypi = False
     releases_colight = False
 
     for key in selected:
@@ -339,8 +338,6 @@ def main():
 
         if has_npm(pkg):
             any_npm = True
-        if has_pypi(pkg):
-            any_pypi = True
         if key == "colight":
             releases_colight = True
 
@@ -427,25 +424,11 @@ def main():
     questionary.print(f"\nCreated tags: {', '.join(tags)}", style="fg:green")
 
     # Push
-    if questionary.confirm("Push to origin?", default=True, style=style).ask():
+    if questionary.confirm("Push to origin? (triggers CI publish)", default=True, style=style).ask():
         subprocess.run(["git", "push", "origin", "HEAD", "--tags"])
-
-    # Publish npm packages
-    if any_npm:
-        if questionary.confirm("Publish to npm?", default=True, style=style).ask():
-            for rel in releases:
-                if has_npm(rel["pkg"]):
-                    name = rel["pkg"]["npm_name"]
-                    questionary.print(f"\nPublishing {name} to npm...", style="fg:cyan")
-                    result = subprocess.run(["npm", "publish"], cwd=rel["pkg"]["path"])
-                    if result.returncode != 0:
-                        questionary.print(f"Failed to publish {name}", style="fg:red")
-                    else:
-                        questionary.print(f"Published {name}@{rel['new_version']}", style="fg:green")
-
-    # Note about PyPI - typically done via CI
-    if any_pypi:
-        questionary.print("\nPyPI publishing is handled by CI on tag push.", style="fg:yellow")
+        questionary.print("\nCI will handle publishing to PyPI and npm.", style="fg:yellow")
+    else:
+        questionary.print("\nTo publish later, run: git push origin HEAD --tags", style="fg:yellow")
 
     questionary.print("\n  Done!\n", style="fg:cyan bold")
 

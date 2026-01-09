@@ -282,8 +282,8 @@ describe("Scene3D Components", () => {
       const bufferData = writeBuffer.mock.calls.map((call) => call[2]);
 
       // Verify that the scale data was written correctly
-      // This might need adjustment based on your actual buffer layout
-      expect(bufferData.some((data) => data instanceof Float32Array)).toBe(
+      // Buffer data is now passed as ArrayBuffer (via .buffer property)
+      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(
         true,
       );
     });
@@ -421,7 +421,8 @@ describe("Scene3D Components", () => {
 
       const writeBuffer = mockQueue.writeBuffer as Mock;
       const bufferData = writeBuffer.mock.calls.map((call) => call[2]);
-      expect(bufferData.some((data) => data instanceof Float32Array)).toBe(
+      // Buffer data is now passed as ArrayBuffer (via .buffer property)
+      expect(bufferData.some((data) => data instanceof ArrayBuffer)).toBe(
         true,
       );
     });

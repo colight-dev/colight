@@ -1,5 +1,5 @@
 import * as glMatrix from "gl-matrix";
-import type { TypedArray } from "../serde";
+import type { TypedArray } from "@colight/serde";
 
 export interface CameraParams {
   position: [number, number, number] | TypedArray;

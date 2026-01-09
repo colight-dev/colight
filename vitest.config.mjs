@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config'
+import path from 'path'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@colight/serde': path.resolve(__dirname, 'packages/colight-serde/src/js/index.ts')
+    }
+  },
   test: {
     environment: 'jsdom',
     globals: true,

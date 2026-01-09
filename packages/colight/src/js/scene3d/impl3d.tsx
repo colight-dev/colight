@@ -9,8 +9,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { throttle, deepEqualModuloTypedArrays } from "../utils";
-import { useCanvasSnapshot } from "../canvasSnapshot";
+import { throttle, deepEqualModuloTypedArrays } from "./utils";
+import { useCanvasSnapshot } from "./canvasSnapshot";
 import {
   CameraParams,
   CameraState,
@@ -28,6 +28,7 @@ import {
   getViewMatrix,
 } from "./camera3d";
 
+// @ts-ignore - lodash-es types are available via @types/lodash-es
 import isEqual from "lodash-es/isEqual";
 
 import { ellipsoidAxesSpec } from "./components/ring";
@@ -56,6 +57,7 @@ import {
   NOOP_READY_STATE,
   ReadyState,
   PickInfo,
+  PickEventType,
 } from "./types";
 import { normalize as normalizeQuat, rotateVector } from "./quaternion";
 import { screenRay } from "./project";
@@ -113,6 +115,9 @@ export interface SceneImplProps {
 
   /** Callback fired when cursor hint changes (when cursor="auto" or for custom handling) */
   onCursorHint?: (hint: CursorHint) => void;
+
+  /** Optional custom hook for canvas snapshot functionality (PDF export, etc.) */
+  useCanvasSnapshotHook?: typeof useCanvasSnapshot;
 }
 
 function initGeometryResources(
@@ -1111,7 +1116,7 @@ export function SceneImpl({
         containerHeight,
         camState,
       );
-      device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+      device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer, uniformData.byteOffset, uniformData.byteLength);
 
       try {
         await renderPass({
@@ -1123,7 +1128,7 @@ export function SceneImpl({
         });
         onRenderComplete();
       } catch (err) {
-        console.error("[Debug] Error during renderPass:", err.message);
+        console.error("[Debug] Error during renderPass:", err instanceof Error ? err.message : err);
         onRenderComplete();
       }
 
@@ -1579,6 +1584,7 @@ export function SceneImpl({
     const ray = screenRay(screenX, screenY, rect, camera);
     if (!ray) return null;
 
+    const cameraParams = createCameraParams(camera);
     const info: PickInfo = {
       event: mode,
       component: { index: componentIndex, type: component.type },
@@ -1591,7 +1597,14 @@ export function SceneImpl({
         rectHeight: rect.height,
       },
       ray,
-      camera: createCameraParams(camera),
+      camera: {
+        position: cameraParams.position as [number, number, number],
+        target: cameraParams.target as [number, number, number],
+        up: cameraParams.up as [number, number, number],
+        fov: cameraParams.fov,
+        near: cameraParams.near,
+        far: cameraParams.far,
+      },
     };
 
     if (position) {
@@ -1607,7 +1620,7 @@ export function SceneImpl({
         const center = readVec3(component.centers, elementIndex);
         const quat = getQuaternion(component, elementIndex, [0, 0, 0, 1]);
         const q = normalizeQuat(quat);
-        const qInv = [-q[0], -q[1], -q[2], q[3]];
+        const qInv: [number, number, number, number] = [-q[0], -q[1], -q[2], q[3]];
         const localPos = rotateVector(subVec3(position, center), qInv);
         info.local = { position: localPos };
 
@@ -1637,12 +1650,12 @@ export function SceneImpl({
           elementIndex,
         );
         if (segmentPointIndex !== undefined) {
-          const start = [
+          const start: Vec3 = [
             component.points[segmentPointIndex * 4 + 0],
             component.points[segmentPointIndex * 4 + 1],
             component.points[segmentPointIndex * 4 + 2],
           ];
-          const end = [
+          const end: Vec3 = [
             component.points[(segmentPointIndex + 1) * 4 + 0],
             component.points[(segmentPointIndex + 1) * 4 + 1],
             component.points[(segmentPointIndex + 1) * 4 + 2],

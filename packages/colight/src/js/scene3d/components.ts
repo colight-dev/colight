@@ -45,7 +45,7 @@ import {
   ElementConstants,
 } from "./types";
 
-import { acopy } from "../utils";
+import { acopy } from "./utils";
 
 /** ===================== DECORATIONS + COMMON UTILS ===================== **/
 
@@ -350,13 +350,13 @@ export const createBuffers = (
     size: vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(vb, 0, vertexData);
+  device.queue.writeBuffer(vb, 0, vertexData.buffer, vertexData.byteOffset, vertexData.byteLength);
 
   const ib = device.createBuffer({
     size: indexData.byteLength,
     usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(ib, 0, indexData);
+  device.queue.writeBuffer(ib, 0, indexData.buffer, indexData.byteOffset, indexData.byteLength);
 
   // Each vertex has 6 floats (position + normal)
   const vertexCount = vertexData.length / 6;
@@ -419,9 +419,9 @@ const computeConstants = (spec: any, elem: any) => {
 
 const constantsCache = new WeakMap<BaseComponentConfig, ElementConstants>();
 
-const getElementConstants = (
-  spec: PrimitiveSpec<BaseComponentConfig>,
-  elem: BaseComponentConfig,
+const getElementConstants = <ConfigType extends BaseComponentConfig>(
+  spec: PrimitiveSpec<ConfigType>,
+  elem: ConfigType,
 ): ElementConstants => {
   let constants = constantsCache.get(elem);
   if (constants) return constants;

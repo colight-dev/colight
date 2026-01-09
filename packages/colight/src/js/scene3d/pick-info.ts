@@ -169,6 +169,7 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
   const ray = screenRay(screenX, screenY, rect, camera);
   if (!ray) return null;
 
+  const cameraParams = createCameraParams(camera);
   const info: PickInfo = {
     event: mode,
     component: { index: componentIndex, type: component.type },
@@ -177,9 +178,18 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
       x: screenX,
       y: screenY,
       dpr: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
     },
     ray,
-    camera: createCameraParams(camera),
+    camera: {
+      position: cameraParams.position as [number, number, number],
+      target: cameraParams.target as [number, number, number],
+      up: cameraParams.up as [number, number, number],
+      fov: cameraParams.fov,
+      near: cameraParams.near,
+      far: cameraParams.far,
+    },
   };
 
   if (position) {

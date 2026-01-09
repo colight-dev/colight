@@ -59,3 +59,10 @@ export type {
 // Other types
 export { NOOP_READY_STATE } from "./types";
 export type { Decoration, PickInfo, ReadyState, PickHit, PickRay } from "./types";
+
+// Canvas snapshot utilities (for PDF export, screenshots)
+export {
+  createCanvasOverlays,
+  removeCanvasOverlays,
+  getCanvasCount,
+} from "./canvasSnapshot";

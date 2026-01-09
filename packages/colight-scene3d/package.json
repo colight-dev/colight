@@ -9,8 +9,12 @@
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/scene3d.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/scene3d.mjs"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/scene3d.mjs"
+    }
   },
   "files": [
     "dist",

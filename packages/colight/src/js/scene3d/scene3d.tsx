@@ -12,7 +12,6 @@ import React, {
   useCallback,
   useEffect,
   useRef,
-  useContext,
 } from "react";
 import { SceneImpl } from "./impl3d";
 import {
@@ -29,11 +28,9 @@ import {
 import { NOOP_READY_STATE, ReadyState, PrimitiveSpec } from "./types";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { PointerContext, CursorHint } from "./pointer";
-import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
-import { tw } from "../utils";
-import { $StateContext } from "../context";
-import { isNdArray } from "../serde";
+import { isNdArray } from "@colight/serde";
+import { useContainerWidth } from "./hooks";
 
 /** Registry mapping component type names to their specs */
 const componentSpecs: Record<string, PrimitiveSpec<any>> = {
@@ -276,29 +273,32 @@ function DevMenu({
 
   if (!position) return null;
 
+  const menuStyle: React.CSSProperties = {
+    position: "fixed",
+    backgroundColor: "white",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
+    borderRadius: "4px",
+    padding: "4px",
+    zIndex: 1000,
+    top: position.y,
+    left: position.x,
+  };
+
+  const menuItemStyle: React.CSSProperties = {
+    padding: "8px 16px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+
   return (
-    <div
-      className={tw(
-        "fixed bg-white border border-gray-200 shadow-lg rounded p-1 z-[1000]",
-      )}
-      style={{
-        top: position.y,
-        left: position.x,
-      }}
-    >
-      <div
-        onClick={onToggleFps}
-        className={tw(
-          "px-4 py-2 cursor-pointer whitespace-nowrap hover:bg-gray-100",
-        )}
-      >
+    <div style={menuStyle}>
+      <div onClick={onToggleFps} style={menuItemStyle}>
         {showFps ? "Hide" : "Show"} FPS Counter
       </div>
       <div
         onClick={onCopyCamera}
-        className={tw(
-          "px-4 py-2 cursor-pointer whitespace-nowrap border-t border-gray-100 hover:bg-gray-100",
-        )}
+        style={{ ...menuItemStyle, borderTop: "1px solid #f3f4f6" }}
       >
         Copy Camera Position
       </div>
@@ -351,7 +351,6 @@ export function Scene(props: SceneLayersProps | SceneProps) {
 
 /** Internal component for processing layers into components */
 function SceneFromLayers({ layers }: SceneLayersProps) {
-  const readyState = useContext($StateContext) ?? NOOP_READY_STATE;
   const components: any[] = [];
   const props: any = {};
 
@@ -367,14 +366,10 @@ function SceneFromLayers({ layers }: SceneLayersProps) {
     }
   }
 
-  const { readyState: propsReadyState, ...restProps } = props;
-  const resolvedReadyState = propsReadyState ?? readyState;
-
   return (
     <SceneInner
       components={components}
-      {...restProps}
-      readyState={resolvedReadyState}
+      {...props}
     />
   );
 }
@@ -413,7 +408,7 @@ function SceneInner({
   );
 
   const cameraChangeCallback = useCallback(
-    (camera) => {
+    (camera: CameraParams) => {
       internalCameraRef.current = camera;
       onCameraChange?.(camera);
     },
@@ -450,9 +445,9 @@ function SceneInner({
     const currentCamera = internalCameraRef.current;
 
     // Format the camera position as Python-compatible string
-    const formattedPosition = `[${currentCamera.position.map((n) => n.toFixed(6)).join(", ")}]`;
-    const formattedTarget = `[${currentCamera.target.map((n) => n.toFixed(6)).join(", ")}]`;
-    const formattedUp = `[${currentCamera.up.map((n) => n.toFixed(6)).join(", ")}]`;
+    const formattedPosition = `[${Array.from(currentCamera.position).map((n) => n.toFixed(6)).join(", ")}]`;
+    const formattedTarget = `[${Array.from(currentCamera.target).map((n) => n.toFixed(6)).join(", ")}]`;
+    const formattedUp = `[${Array.from(currentCamera.up).map((n) => n.toFixed(6)).join(", ")}]`;
 
     const pythonCode = `{
         "position": ${formattedPosition},
@@ -469,11 +464,18 @@ function SceneInner({
     setMenuPosition(null);
   }, []);
 
+  const containerStyle: React.CSSProperties = {
+    fontSize: "16px",
+    position: "relative",
+    width: "100%",
+    ...style,
+  };
+
   return (
     <div
-      ref={containerRef as React.RefObject<HTMLDivElement | null>}
-      className={`${className || ""} ${tw("text-base relative w-full")}`}
-      style={{ ...style }}
+      ref={containerRef}
+      className={className || undefined}
+      style={containerStyle}
       onContextMenu={handleContextMenu}
     >
       {dimensions && (
