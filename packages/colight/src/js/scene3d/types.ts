@@ -1,3 +1,11 @@
+export interface ReadyState {
+  beginUpdate: (label: string) => () => void;
+}
+
+export const NOOP_READY_STATE: ReadyState = {
+  beginUpdate: () => () => {},
+};
+
 export interface PipelineCacheEntry {
   pipeline: GPURenderPipeline;
   device: GPUDevice;
@@ -8,6 +16,14 @@ export interface PrimitiveSpec<ConfigType> {
    * The type/name of this primitive spec
    */
   type: string;
+
+  /**
+   * Fields that should be coerced to typed arrays.
+   * Used by Scene to normalize NdArrayView and regular arrays.
+   */
+  arrayFields?: {
+    float32?: (keyof ConfigType)[];
+  };
 
   /**
    * Default values for the primitive's properties
@@ -190,6 +206,32 @@ export interface PrimitiveSpec<ConfigType> {
   ): GPURenderPipeline;
 
   /**
+   * Creates or retrieves a cached overlay render pipeline for this primitive.
+   * Overlay pipelines render in front of scene geometry (depthCompare: "always", no depth write).
+   * @param device The WebGPU device
+   * @param bindGroupLayout Layout for uniform bindings
+   * @param cache Pipeline cache to prevent duplicate creation
+   */
+  getOverlayPipeline(
+    device: GPUDevice,
+    bindGroupLayout: GPUBindGroupLayout,
+    cache: Map<string, PipelineCacheEntry>,
+  ): GPURenderPipeline;
+
+  /**
+   * Creates or retrieves a cached overlay picking pipeline for this primitive.
+   * Overlay picking pipelines render in front of scene geometry for picking priority.
+   * @param device The WebGPU device
+   * @param bindGroupLayout Layout for uniform bindings
+   * @param cache Pipeline cache to prevent duplicate creation
+   */
+  getOverlayPickingPipeline(
+    device: GPUDevice,
+    bindGroupLayout: GPUBindGroupLayout,
+    cache: Map<string, PipelineCacheEntry>,
+  ): GPURenderPipeline;
+
+  /**
    * Creates the base geometry buffers needed for this primitive type.
    * These buffers are shared across all instances of the primitive.
    */
@@ -203,6 +245,19 @@ export interface Decoration {
   scale?: number;
 }
 
+/**
+ * Properties to apply when an instance is hovered.
+ * These are applied automatically without needing to track hover state externally.
+ */
+export interface HoverProps {
+  /** RGB color to apply on hover */
+  color?: [number, number, number];
+  /** Alpha (opacity) to apply on hover */
+  alpha?: number;
+  /** Scale multiplier to apply on hover */
+  scale?: number;
+}
+
 export interface ElementConstants {
   half_size?: number[] | Float32Array | number;
   quaternion?: number[] | Float32Array;
@@ -213,27 +268,23 @@ export interface ElementConstants {
 }
 
 /**
- * Event data passed to scene-level picking callbacks.
+ * Render layer for a component.
+ * - "scene": Normal rendering with depth test/write (default)
+ * - "overlay": Renders in front of scene geometry, always visible
  */
-export interface PickEvent {
-  /** The primitive type (e.g., 'PointCloud', 'Ellipsoid', 'Cuboid') */
-  type: string;
-  /** User-provided component identifier, if specified */
-  id?: string;
-  /** Index of the picked element within the component */
-  index: number;
-  /** World-space position of the picked element center */
-  position: [number, number, number];
-}
+export type RenderLayer = "scene" | "overlay";
 
 export interface BaseComponentConfig {
-  /**
-   * Optional identifier for this component.
-   * Used to identify the component in scene-level picking callbacks.
-   */
-  id?: string;
-
   constants?: ElementConstants;
+
+  /**
+   * Render layer for this component.
+   * - "scene": Normal rendering with depth test/write (default)
+   * - "overlay": Renders in front of scene geometry (no depth test),
+   *              useful for gizmos, helpers, and always-visible UI elements.
+   *              Overlay components are also picked with priority over scene components.
+   */
+  layer?: RenderLayer;
   /**
    * Per-instance RGB color values as a Float32Array of RGB triplets.
    * Each instance requires 3 consecutive values in the range [0,1].
@@ -271,16 +322,211 @@ export interface BaseComponentConfig {
   onHover?: (index: number | null) => void;
 
   /**
+   * Callback fired when the mouse hovers with detailed pick info.
+   * Receives null when hover ends.
+   */
+  onHoverDetail?: (info: PickInfo | null) => void;
+
+  /**
    * Callback fired when an instance is clicked.
    * The index parameter is the clicked instance index.
    */
   onClick?: (index: number) => void;
 
   /**
+   * Callback fired when an instance is clicked with detailed pick info.
+   */
+  onClickDetail?: (info: PickInfo) => void;
+
+  /**
+   * Callback fired when drag starts on this component.
+   */
+  onDragStart?: (info: DragInfo) => void;
+
+  /**
+   * Callback fired during drag with updated position info.
+   */
+  onDrag?: (info: DragInfo) => void;
+
+  /**
+   * Callback fired when drag ends.
+   */
+  onDragEnd?: (info: DragInfo) => void;
+
+  /**
+   * Constraint configuration for drag operations.
+   * Determines how the dragged position is computed.
+   * Defaults to "surface" (drag along the hit surface).
+   */
+  dragConstraint?: DragConstraint;
+
+  /**
    * Optional array of decorations to apply to specific instances.
    * Decorations can override colors, alpha, and scale for individual instances.
    */
   decorations?: Decoration[];
+
+  /**
+   * Properties to apply automatically when an instance is hovered.
+   * This provides declarative hover styling without external state management.
+   *
+   * @example
+   * ```ts
+   * Ellipsoid({
+   *   centers: [[0, 0, 0]],
+   *   color: [1, 0, 0],
+   *   hoverProps: { color: [1, 0.5, 0.5], scale: 1.2 }
+   * })
+   * ```
+   */
+  hoverProps?: HoverProps;
+
+  /**
+   * Scale factor for picking geometry.
+   * Values > 1 make the component easier to click by inflating the picking hit area.
+   * Useful for thin geometry like gizmo axis handles.
+   *
+   * @example
+   * ```ts
+   * LineBeams({
+   *   points: [...],
+   *   size: 0.02,
+   *   pickingScale: 3.0  // 3x larger hit area for easier clicking
+   * })
+   * ```
+   */
+  pickingScale?: number;
+
+  /**
+   * Enable outline effect when this component's instances are hovered.
+   * When undefined, uses scene-level defaultHoverOutline setting.
+   * @default undefined (uses scene default)
+   */
+  hoverOutline?: boolean;
+
+  /**
+   * Outline color when hovered, as RGB [0-1].
+   * When undefined, uses scene-level defaultOutlineColor.
+   * @default undefined (uses scene default)
+   */
+  outlineColor?: [number, number, number];
+
+  /**
+   * Outline width in pixels when hovered.
+   * When undefined, uses scene-level defaultOutlineWidth.
+   * @default undefined (uses scene default)
+   */
+  outlineWidth?: number;
+}
+
+export type PickEventType =
+  | "hover"
+  | "click"
+  | "dragstart"
+  | "drag"
+  | "dragend";
+
+/**
+ * Constraint configuration for drag operations.
+ * Determines how the dragged position is computed from mouse movement.
+ */
+export type DragConstraint =
+  | {
+      type: "plane";
+      normal: [number, number, number];
+      point?: [number, number, number];
+    }
+  | {
+      type: "axis";
+      direction: [number, number, number];
+      point?: [number, number, number];
+    }
+  | { type: "surface" } // Use hit surface as drag plane (default)
+  | { type: "screen" } // Screen-space drag (fixed depth)
+  | { type: "free" }; // Camera-facing plane through start point
+
+/**
+ * Information about a drag operation, extending PickInfo with drag-specific data.
+ */
+export interface DragInfo extends PickInfo {
+  /** Original state at drag start */
+  start: {
+    /** World-space hit position at drag start */
+    position: [number, number, number];
+    /** Center of the dragged instance at drag start */
+    instanceCenter: [number, number, number];
+    /** Screen coordinates at drag start */
+    screen: { x: number; y: number };
+  };
+
+  /** Current drag state */
+  current: {
+    /** Constrained world-space position */
+    position: [number, number, number];
+    /** Screen coordinates */
+    screen: { x: number; y: number };
+  };
+
+  /** Computed deltas from start to current */
+  delta: {
+    /** World-space position delta: current.position - start.position */
+    position: [number, number, number];
+    /** Screen-space delta */
+    screen: { x: number; y: number };
+  };
+}
+
+export interface PickRay {
+  origin: [number, number, number];
+  direction: [number, number, number];
+}
+
+export interface PickHit {
+  position: [number, number, number];
+  normal?: [number, number, number];
+  t?: number;
+  distance?: number;
+}
+
+export interface PickFace {
+  index: number;
+  name: string;
+}
+
+export interface PickSegment {
+  index: number;
+  t: number;
+  lineIndex?: number;
+}
+
+export interface PickCamera {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  fov: number;
+  near: number;
+  far: number;
+}
+
+export interface PickInfo {
+  event: PickEventType;
+  component: { index: number; type: string };
+  instanceIndex: number;
+  screen: {
+    x: number;
+    y: number;
+    dpr: number;
+    rectWidth: number;
+    rectHeight: number;
+  };
+  ray: PickRay;
+  camera: PickCamera;
+  hit?: PickHit;
+  face?: PickFace;
+  segment?: PickSegment;
+  local?: { position: [number, number, number] };
+  /** Path of group names from root to this component (if component is in a group) */
+  groupPath?: string[];
 }
 
 export interface VertexBufferLayout {
@@ -314,6 +560,7 @@ export interface PipelineConfig {
     depthCompare: GPUCompareFunction;
   };
   colorWriteMask?: number; // Use number instead of GPUColorWrite
+  targets?: GPUColorTargetState[];
 }
 
 export interface GeometryData {
@@ -334,7 +581,6 @@ export interface GeometryResources {
   EllipsoidAxes: GeometryResource | null;
   Cuboid: GeometryResource | null;
   LineBeams: GeometryResource | null;
-  BoundingBox: GeometryResource | null;
 }
 
 export interface BufferInfo {
@@ -345,6 +591,8 @@ export interface BufferInfo {
 
 export interface RenderObject {
   pipeline: GPURenderPipeline;
+  /** Pipeline for overlay rendering (depthCompare: "always", no depth write) */
+  overlayPipeline?: GPURenderPipeline;
   geometryBuffer: GPUBuffer;
   instanceBuffer: BufferInfo;
   indexBuffer: GPUBuffer;
@@ -353,6 +601,8 @@ export interface RenderObject {
   vertexCount: number;
 
   pickingPipeline: GPURenderPipeline;
+  /** Pipeline for overlay picking (depthCompare: "always", no depth write) */
+  overlayPickingPipeline?: GPURenderPipeline;
   pickingInstanceBuffer: BufferInfo;
 
   componentIndex: number;
@@ -373,6 +623,9 @@ export interface RenderObject {
 
   /** Reference to the primitive spec that created this render object */
   spec: PrimitiveSpec<any>;
+
+  /** Render layer for this object ("scene" or "overlay") */
+  layer: RenderLayer;
 }
 
 export interface RenderObjectCache {

@@ -40,6 +40,7 @@ import {
   pointCloudSpec,
   buildPickingData,
   buildRenderData,
+  createOverlayPipeline,
 } from "./components";
 import { unpackID } from "./picking";
 import { LIGHTING, outlineVertCode, outlineFragCode } from "./shaders";
@@ -54,7 +55,17 @@ import {
   RenderObjectCache,
   ComponentOffset,
   PickEvent,
+  PickInfo,
+  DragInfo,
 } from "./types";
+import {
+  resolveConstraint,
+  computeConstrainedPosition,
+  hasDragCallbacks,
+  ResolvedConstraint,
+} from "./drag";
+import { buildPickInfo } from "./pick-info";
+import { screenRay } from "./project";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -99,14 +110,14 @@ export interface SceneInnerProps {
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
   onClick?: (event: PickEvent) => void;
 
-  /** Enable outline on hover. Default: false */
-  hoverOutline?: boolean;
+  /** Default outline on hover for components that don't specify hoverOutline. Default: false */
+  defaultHoverOutline?: boolean;
 
-  /** Outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
-  outlineColor?: [number, number, number];
+  /** Default outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
+  defaultOutlineColor?: [number, number, number];
 
-  /** Outline width in pixels. Default: 2 */
-  outlineWidth?: number;
+  /** Default outline width in pixels. Default: 2 */
+  defaultOutlineWidth?: number;
 }
 
 function initGeometryResources(
@@ -428,9 +439,9 @@ export function SceneInner({
   onReady,
   onHover: onSceneHover,
   onClick: onSceneClick,
-  hoverOutline = false,
-  outlineColor = [1, 1, 1],
-  outlineWidth = 2,
+  defaultHoverOutline = false,
+  defaultOutlineColor = [1, 1, 1],
+  defaultOutlineWidth = 2,
 }: SceneInnerProps) {
   const $state = useContext($StateContext);
 
@@ -534,6 +545,26 @@ export function SceneInner({
     componentIdx: number;
     elementIdx: number;
   } | null>(null);
+
+  // Track last pick screen coordinates for building PickInfo
+  const lastPickScreenX = useRef<number>(0);
+  const lastPickScreenY = useRef<number>(0);
+
+  // Element drag state - tracks active drag operations on components
+  const elementDragState = useRef<{
+    componentIdx: number;
+    elementIdx: number;
+    constraint: ResolvedConstraint;
+    startPickInfo: PickInfo;
+    startInstanceCenter: [number, number, number];
+    startScreenPos: { x: number; y: number };
+  } | null>(null);
+
+  // Track which element is hovered for components with hoverProps
+  // Maps componentIdx -> elementIdx for components that need re-render on hover
+  const hoverPropsState = useRef<Map<number, number>>(new Map());
+  // Track if hoverProps-related data needs rebuild
+  const hoverPropsDirty = useRef(false);
 
   const renderObjectCache = useRef<RenderObjectCache>({});
 
@@ -841,6 +872,7 @@ export function SceneInner({
   }, []);
 
   type ComponentType = ComponentConfig["type"];
+  type RenderLayer = "scene" | "overlay";
 
   interface TypeInfo {
     offsets: number[];
@@ -851,13 +883,22 @@ export function SceneInner({
     totalElementCount: number;
     components: ComponentConfig[];
     elementOffsets: number[];
+    layer: RenderLayer;
+  }
+
+  /**
+   * Creates a key for type+layer combination.
+   * This allows us to have separate RenderObjects for scene vs overlay components of the same type.
+   */
+  function typeLayerKey(type: ComponentType, layer: RenderLayer): string {
+    return `${type}_${layer}`;
   }
 
   // Update the collectTypeData function signature
   function collectTypeData(
     components: ComponentConfig[],
-  ): Map<ComponentType, TypeInfo> {
-    const typeArrays = new Map<ComponentType, TypeInfo>();
+  ): Map<string, TypeInfo> {
+    const typeArrays = new Map<string, TypeInfo>();
 
     // Single pass through components
     components.forEach((comp, idx) => {
@@ -876,7 +917,11 @@ export function SceneInner({
       const pickingSize =
         instanceCount * spec.floatsPerPicking * Float32Array.BYTES_PER_ELEMENT;
 
-      let typeInfo = typeArrays.get(comp.type);
+      // Determine layer for this component (default to "scene")
+      const layer: RenderLayer = comp.layer || "scene";
+      const key = typeLayerKey(comp.type, layer);
+
+      let typeInfo = typeArrays.get(key);
       if (!typeInfo) {
         typeInfo = {
           totalElementCount: 0,
@@ -887,8 +932,9 @@ export function SceneInner({
           offsets: [],
           elementCounts: [],
           elementOffsets: [],
+          layer,
         };
-        typeArrays.set(comp.type, typeInfo);
+        typeArrays.set(key, typeInfo);
       }
 
       typeInfo.components.push(comp);
@@ -910,23 +956,26 @@ export function SceneInner({
     const { device, bindGroupLayout, pipelineCache, resources } =
       gpuRef.current;
 
-    // Clear out unused cache entries
-    Object.keys(renderObjectCache.current).forEach((type) => {
-      if (!components.some((c) => c.type === type)) {
-        delete renderObjectCache.current[type];
+    // Collect render data using helper (now keyed by type_layer)
+    const typeArrays = collectTypeData(components);
+
+    // Clear out unused cache entries (now keyed by type_layer)
+    Object.keys(renderObjectCache.current).forEach((key) => {
+      if (!typeArrays.has(key)) {
+        delete renderObjectCache.current[key];
       }
     });
 
     // Track global start index for all components
     let globalStartIndex = 0;
 
-    // Collect render data using helper
-    const typeArrays = collectTypeData(components);
-
     // Calculate total buffer sizes needed
     let totalRenderSize = 0;
     let totalPickingSize = 0;
-    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
+    typeArrays.forEach((info: TypeInfo, key: string) => {
+      // Extract the component type from the key (format: "type_layer")
+      const type = info.components[0]?.type;
+      if (!type) return;
       const spec = primitiveRegistry[type];
       if (!spec) return;
 
@@ -987,17 +1036,24 @@ export function SceneInner({
     const validRenderObjects: RenderObject[] = [];
 
     // Create or update render objects and write buffer data
-    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
+    typeArrays.forEach((info: TypeInfo, key: string) => {
+      // Extract the component type from the first component
+      const type = info.components[0]?.type;
+      if (!type) return;
       const spec = primitiveRegistry[type];
       if (!spec) return;
+
+      // Get the layer for this group of components
+      const layer = info.layer;
+      const isOverlay = layer === "overlay";
 
       try {
         // Ensure 4-byte alignment for all offsets
         const renderOffset = align16(dynamicBuffers.renderOffset);
         const pickingOffset = align16(dynamicBuffers.pickingOffset);
 
-        // Try to get existing render object
-        let renderObject = renderObjectCache.current[type];
+        // Try to get existing render object (keyed by type_layer)
+        let renderObject = renderObjectCache.current[key];
         const needNewRenderObject =
           !renderObject ||
           renderObject.totalElementCount !== info.totalElementCount;
@@ -1018,20 +1074,16 @@ export function SceneInner({
           pickingData = renderObject.pickingData;
         }
 
-        // Get or create pipeline
-        const pipeline = spec.getRenderPipeline(
-          device,
-          bindGroupLayout,
-          pipelineCache,
-        );
+        // Get or create pipeline based on layer
+        const pipeline = isOverlay
+          ? spec.getOverlayPipeline(device, bindGroupLayout, pipelineCache)
+          : spec.getRenderPipeline(device, bindGroupLayout, pipelineCache);
         if (!pipeline) return;
 
-        // Get picking pipeline
-        const pickingPipeline = spec.getPickingPipeline(
-          device,
-          bindGroupLayout,
-          pipelineCache,
-        );
+        // Get picking pipeline based on layer
+        const pickingPipeline = isOverlay
+          ? spec.getOverlayPickingPipeline(device, bindGroupLayout, pipelineCache)
+          : spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
         if (!pickingPipeline) return;
 
         // Build component offsets for this type's components
@@ -1088,9 +1140,10 @@ export function SceneInner({
             totalElementCount: info.totalElementCount,
             componentOffsets: typeComponentOffsets,
             spec: spec,
+            layer: layer,
             ...alphaProperties(hasAlphaComponents, info.totalElementCount),
           };
-          renderObjectCache.current[type] = renderObject;
+          renderObjectCache.current[key] = renderObject;
         } else {
           // Update existing render object with new buffer info and state
           renderObject.instanceBuffer = bufferInfo;
@@ -1099,6 +1152,7 @@ export function SceneInner({
           renderObject.componentIndex = info.indices[0];
           renderObject.componentOffsets = typeComponentOffsets;
           renderObject.spec = spec;
+          renderObject.layer = layer;
           renderObject.pickingDataStale = true;
           if (hasAlphaComponents && !renderObject.hasAlphaComponents) {
             Object.assign(
@@ -1336,10 +1390,17 @@ export function SceneInner({
       );
       gpuRef.current.renderedCamera = camState;
 
+      // Check if hoverProps state changed and needs rebuild
+      const hoverPropsNeedsBuild = hoverPropsDirty.current;
+      if (hoverPropsNeedsBuild) {
+        hoverPropsDirty.current = false;
+      }
+
       // Update data for objects that need it
       renderObjects.forEach(function updateRenderObject(ro) {
         const needsSorting = ro.hasAlphaComponents;
-        const needsBuild = (needsSorting && cameraMoved) || componentsChanged;
+        const needsBuild =
+          (needsSorting && cameraMoved) || componentsChanged || hoverPropsNeedsBuild;
 
         // Skip if no update needed
         if (!needsBuild) return;
@@ -1357,12 +1418,18 @@ export function SceneInner({
           const offset = ro.componentOffsets[i];
           const component = components![offset.componentIdx];
 
+          // Get hovered index if this component has hoverProps and is being hovered
+          const hoveredIndex = component.hoverProps
+            ? hoverPropsState.current.get(offset.componentIdx)
+            : undefined;
+
           buildRenderData(
             component,
             ro.spec,
             renderData,
             offset.elementStart,
             ro.sortedPositions,
+            hoveredIndex,
           );
         }
 
@@ -1385,20 +1452,37 @@ export function SceneInner({
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
       try {
+        // Sort render objects: scene first, then overlay (overlay renders on top)
+        const sortedRenderObjects = [...renderObjects].sort((a, b) => {
+          const aOverlay = a.layer === "overlay" ? 1 : 0;
+          const bOverlay = b.layer === "overlay" ? 1 : 0;
+          return aOverlay - bOverlay;
+        });
+
         // Submit all render passes before waiting
         const renderPromise = renderPass({
           device,
           context,
           depthTexture,
-          renderObjects,
+          renderObjects: sortedRenderObjects,
           uniformBindGroup,
         });
 
         // Render hover outline if enabled and something is hovered
         // Must happen BEFORE awaiting to use the same swap chain texture
-        if (hoverOutline && lastHoverState.current && components) {
-          renderSilhouettePass(lastHoverState.current, components);
-          renderOutlinePostProcess(outlineColor, outlineWidth);
+        if (lastHoverState.current && components) {
+          const hoveredComponent = components[lastHoverState.current.componentIdx];
+          // Resolve hoverOutline: component-level takes precedence over scene-level
+          const shouldOutline = hoveredComponent?.hoverOutline ?? defaultHoverOutline;
+
+          if (shouldOutline) {
+            // Resolve outline styling: component-level takes precedence
+            const effectiveOutlineColor = hoveredComponent?.outlineColor ?? defaultOutlineColor;
+            const effectiveOutlineWidth = hoveredComponent?.outlineWidth ?? defaultOutlineWidth;
+
+            renderSilhouettePass(lastHoverState.current, components);
+            renderOutlinePostProcess(effectiveOutlineColor, effectiveOutlineWidth);
+          }
         }
 
         // Now wait for all GPU work to complete
@@ -1420,9 +1504,9 @@ export function SceneInner({
       containerHeight,
       onFrameRendered,
       components,
-      hoverOutline,
-      outlineColor,
-      outlineWidth,
+      defaultHoverOutline,
+      defaultOutlineColor,
+      defaultOutlineWidth,
     ],
   );
 
@@ -1467,6 +1551,10 @@ export function SceneInner({
         );
       }
 
+      // Store screen coordinates for building PickInfo
+      lastPickScreenX.current = screenX;
+      lastPickScreenY.current = screenY;
+
       // Convert screen coordinates to device pixels
       const dpr = window.devicePixelRatio || 1;
       const pickX = Math.floor(screenX * dpr);
@@ -1483,6 +1571,15 @@ export function SceneInner({
         if (mode === "hover") handleHoverID(0);
         return;
       }
+
+      // Sort render objects for picking: scene first, then overlay
+      // Overlay objects use depthCompare: "always" so they overwrite scene objects,
+      // giving them picking priority even when geometrically behind
+      const sortedForPicking = [...renderObjects].sort((a, b) => {
+        const aOverlay = a.layer === "overlay" ? 1 : 0;
+        const bOverlay = b.layer === "overlay" ? 1 : 0;
+        return aOverlay - bOverlay;
+      });
 
       const cmd = device.createCommandEncoder({ label: "Picking encoder" });
       const passDesc: GPURenderPassDescriptor = {
@@ -1504,7 +1601,7 @@ export function SceneInner({
       const pass = cmd.beginRenderPass(passDesc);
       pass.setBindGroup(0, uniformBindGroup);
 
-      for (const ro of renderObjects) {
+      for (const ro of sortedForPicking) {
         pass.setPipeline(ro.pickingPipeline);
         pass.setBindGroup(0, uniformBindGroup);
         pass.setVertexBuffer(0, ro.geometryBuffer);
@@ -1619,12 +1716,25 @@ export function SceneInner({
       if (lastHoverState.current) {
         const prevComponent = components[lastHoverState.current.componentIdx];
         prevComponent?.onHover?.(null);
+        prevComponent?.onHoverDetail?.(null);
         onSceneHover?.(null);
+
+        // Clear hoverProps state if the previous component had hoverProps
+        if (prevComponent?.hoverProps) {
+          hoverPropsState.current.delete(lastHoverState.current.componentIdx);
+          hoverPropsDirty.current = true;
+        }
+
         const hadHover = lastHoverState.current !== null;
+        // Check if previous component had outline enabled
+        const prevHadOutline = prevComponent?.hoverOutline ?? defaultHoverOutline;
         lastHoverState.current = null;
-        // Re-render to clear outline
-        if (hoverOutline && hadHover) {
+
+        // Re-render to clear outline or hoverProps styling
+        if (prevHadOutline && hadHover) {
           requestRender("hover-clear");
+        } else if (hoverPropsDirty.current) {
+          requestRender("hoverProps-clear");
         }
       }
       return;
@@ -1648,6 +1758,13 @@ export function SceneInner({
     if (lastHoverState.current) {
       const prevComponent = components[lastHoverState.current.componentIdx];
       prevComponent?.onHover?.(null);
+      prevComponent?.onHoverDetail?.(null);
+
+      // Clear hoverProps state for previous component
+      if (prevComponent?.hoverProps) {
+        hoverPropsState.current.delete(lastHoverState.current.componentIdx);
+        hoverPropsDirty.current = true;
+      }
     }
 
     // Set new hover if it exists
@@ -1657,6 +1774,31 @@ export function SceneInner({
         const event = buildPickEvent(componentIdx, elementIdx, spec);
         onSceneHover?.(event);
         components[componentIdx].onHover?.(elementIdx);
+
+        // Call detailed hover callback if defined
+        const component = components[componentIdx];
+        if (component.onHoverDetail) {
+          const pickInfo = buildPickInfo({
+            mode: "hover",
+            componentIndex: componentIdx,
+            elementIndex: elementIdx,
+            screenX: lastPickScreenX.current,
+            screenY: lastPickScreenY.current,
+            rect: { width: containerWidth, height: containerHeight },
+            camera: activeCameraRef.current!,
+            component,
+          });
+          if (pickInfo) {
+            component.onHoverDetail(pickInfo);
+          }
+        }
+
+        // Update hoverProps state for new component
+        const newComponent = components[componentIdx];
+        if (newComponent?.hoverProps) {
+          hoverPropsState.current.set(componentIdx, elementIdx);
+          hoverPropsDirty.current = true;
+        }
       }
     } else {
       onSceneHover?.(null);
@@ -1667,9 +1809,14 @@ export function SceneInner({
       ? { componentIdx: found.componentIdx, elementIdx: found.elementIdx }
       : null;
 
-    // Re-render to update outline
-    if (hoverOutline) {
+    // Re-render to update outline or hoverProps styling
+    // Check if new or previous component has outline enabled
+    const newComponent = found ? components[found.componentIdx] : null;
+    const newHasOutline = newComponent?.hoverOutline ?? defaultHoverOutline;
+    if (newHasOutline) {
       requestRender("hover-change");
+    } else if (hoverPropsDirty.current) {
+      requestRender("hoverProps-change");
     }
   }
 
@@ -1689,11 +1836,70 @@ export function SceneInner({
       const event = buildPickEvent(componentIdx, elementIdx, spec);
       onSceneClick?.(event);
       components[componentIdx].onClick?.(elementIdx);
+
+      // Call detailed click callback if defined
+      const component = components[componentIdx];
+      if (component.onClickDetail) {
+        const pickInfo = buildPickInfo({
+          mode: "click",
+          componentIndex: componentIdx,
+          elementIndex: elementIdx,
+          screenX: lastPickScreenX.current,
+          screenY: lastPickScreenY.current,
+          rect: { width: containerWidth, height: containerHeight },
+          camera: activeCameraRef.current!,
+          component,
+        });
+        if (pickInfo) {
+          component.onClickDetail(pickInfo);
+        }
+      }
     }
   }
 
   /******************************************************
-   * E) Mouse Handling
+   * E) Drag Info Builder
+   ******************************************************/
+  /**
+   * Builds a DragInfo object from pick info and drag state.
+   */
+  function buildDragInfo(
+    pickInfo: PickInfo,
+    startInstanceCenter: [number, number, number],
+    startScreen: { x: number; y: number },
+    currentScreen: { x: number; y: number },
+    currentPosition?: [number, number, number],
+  ): DragInfo {
+    const startPos = pickInfo.hit?.position ?? startInstanceCenter;
+    const curPos = currentPosition ?? startPos;
+
+    return {
+      ...pickInfo,
+      start: {
+        position: startPos,
+        instanceCenter: startInstanceCenter,
+        screen: startScreen,
+      },
+      current: {
+        position: curPos,
+        screen: currentScreen,
+      },
+      delta: {
+        position: [
+          curPos[0] - startPos[0],
+          curPos[1] - startPos[1],
+          curPos[2] - startPos[2],
+        ],
+        screen: {
+          x: currentScreen.x - startScreen.x,
+          y: currentScreen.y - startScreen.y,
+        },
+      },
+    };
+  }
+
+  /******************************************************
+   * F) Mouse Handling
    ******************************************************/
   const draggingState = useRef<DraggingState | null>(null);
 
@@ -1739,10 +1945,48 @@ export function SceneInner({
   // Drag handler - attached/detached directly during drag
   const handleDragMouseMove = useCallback(
     (e: MouseEvent) => {
-      if (!canvasRef.current || !draggingState.current) return;
+      if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+
+      // Handle element drag if active
+      if (elementDragState.current) {
+        const {
+          constraint,
+          componentIdx,
+          startPickInfo,
+          startInstanceCenter,
+          startScreenPos,
+        } = elementDragState.current;
+        const component = components[componentIdx];
+
+        // Compute screen ray for current mouse position
+        const ray = screenRay(
+          x,
+          y,
+          { width: containerWidth, height: containerHeight },
+          activeCameraRef.current!,
+        );
+        if (ray) {
+          // Compute constrained position
+          const constrainedPos = computeConstrainedPosition(ray, constraint);
+          if (constrainedPos) {
+            const dragInfo = buildDragInfo(
+              { ...startPickInfo, event: "drag" },
+              startInstanceCenter,
+              startScreenPos,
+              { x, y },
+              constrainedPos as [number, number, number],
+            );
+            component.onDrag?.(dragInfo);
+          }
+        }
+        return; // Don't do camera drag
+      }
+
+      // Handle camera drag
+      if (!draggingState.current) return;
       const st = draggingState.current;
       st.x = x;
       st.y = y;
@@ -1754,11 +1998,59 @@ export function SceneInner({
         handleCameraUpdate((cam) => orbit(st));
       }
     },
-    [handleCameraUpdate],
+    [handleCameraUpdate, components, containerWidth, containerHeight],
   );
 
   const handleMouseUp = useCallback(
     (e: MouseEvent) => {
+      // Handle element drag end
+      if (elementDragState.current) {
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const {
+          constraint,
+          componentIdx,
+          startPickInfo,
+          startInstanceCenter,
+          startScreenPos,
+        } = elementDragState.current;
+        const component = components[componentIdx];
+
+        // Compute final constrained position
+        const ray = screenRay(
+          x,
+          y,
+          { width: containerWidth, height: containerHeight },
+          activeCameraRef.current!,
+        );
+        let finalPosition: [number, number, number] | undefined;
+        if (ray) {
+          const constrainedPos = computeConstrainedPosition(ray, constraint);
+          if (constrainedPos) {
+            finalPosition = constrainedPos as [number, number, number];
+          }
+        }
+
+        const dragInfo = buildDragInfo(
+          { ...startPickInfo, event: "dragend" },
+          startInstanceCenter,
+          startScreenPos,
+          { x, y },
+          finalPosition,
+        );
+        component.onDragEnd?.(dragInfo);
+
+        elementDragState.current = null;
+        // Remove window listeners
+        window.removeEventListener("mousemove", handleDragMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+        return;
+      }
+
+      // Handle camera drag end
       const st = draggingState.current;
       if (st) {
         if (!canvasRef.current) return;
@@ -1774,7 +2066,7 @@ export function SceneInner({
       }
       draggingState.current = null;
     },
-    [pickAtScreenXY, handleDragMouseMove],
+    [pickAtScreenXY, handleDragMouseMove, components, containerWidth, containerHeight],
   );
 
   const handleScene3dMouseDown = useCallback(
@@ -1790,6 +2082,76 @@ export function SceneInner({
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
+      // Check if we're clicking on a draggable element (use lastHoverState)
+      if (lastHoverState.current && e.button === 0 && modifiers.length === 0) {
+        const { componentIdx, elementIdx } = lastHoverState.current;
+        const component = components[componentIdx];
+
+        if (hasDragCallbacks(component)) {
+          // This is an element drag, not a camera drag
+          const spec = primitiveRegistry[component.type];
+
+          // Build pick info for drag start
+          const pickInfo = buildPickInfo({
+            mode: "hover", // Will be overridden to "dragstart"
+            componentIndex: componentIdx,
+            elementIndex: elementIdx,
+            screenX: x,
+            screenY: y,
+            rect: { width: containerWidth, height: containerHeight },
+            camera: activeCameraRef.current!,
+            component,
+          });
+
+          if (pickInfo) {
+            // Get instance center
+            const centers = spec.getCenters(component);
+            const baseIdx = elementIdx * 3;
+            const instanceCenter: [number, number, number] = [
+              centers[baseIdx],
+              centers[baseIdx + 1],
+              centers[baseIdx + 2],
+            ];
+
+            // Resolve constraint
+            const constraint = resolveConstraint(
+              component.dragConstraint,
+              pickInfo,
+              instanceCenter,
+              activeCameraRef.current!,
+            );
+
+            if (constraint) {
+              elementDragState.current = {
+                componentIdx,
+                elementIdx,
+                constraint,
+                startPickInfo: { ...pickInfo, event: "dragstart" },
+                startInstanceCenter: instanceCenter,
+                startScreenPos: { x, y },
+              };
+
+              // Build DragInfo and call onDragStart
+              const dragInfo = buildDragInfo(
+                { ...pickInfo, event: "dragstart" },
+                instanceCenter,
+                { x, y },
+                { x, y },
+              );
+              component.onDragStart?.(dragInfo);
+
+              // Add window listeners for drag
+              window.addEventListener("mousemove", handleDragMouseMove);
+              window.addEventListener("mouseup", handleMouseUp);
+
+              e.preventDefault();
+              return; // Don't set up camera drag
+            }
+          }
+        }
+      }
+
+      // Set up camera drag
       draggingState.current = {
         button: e.button,
         startX: x,
@@ -1807,7 +2169,7 @@ export function SceneInner({
 
       e.preventDefault();
     },
-    [handleDragMouseMove, handleMouseUp],
+    [handleDragMouseMove, handleMouseUp, components, containerWidth, containerHeight],
   );
 
   // Update canvas event listener references - only for picking and mousedown
@@ -1849,12 +2211,18 @@ export function SceneInner({
     };
   }, [initWebGPU]);
 
+  // Check if any component has hoverOutline enabled, or if scene default is enabled
+  const anyOutlineEnabled = useMemo(() => {
+    if (defaultHoverOutline) return true;
+    return components.some(c => c.hoverOutline === true);
+  }, [components, defaultHoverOutline]);
+
   // Create/recreate depth + pick textures
   useEffect(() => {
     if (isReady) {
       createOrUpdateDepthTexture();
       createOrUpdatePickTextures();
-      if (hoverOutline) {
+      if (anyOutlineEnabled) {
         createOrUpdateOutlineTextures();
       }
     }
@@ -1865,7 +2233,7 @@ export function SceneInner({
     createOrUpdateDepthTexture,
     createOrUpdatePickTextures,
     createOrUpdateOutlineTextures,
-    hoverOutline,
+    anyOutlineEnabled,
   ]);
 
   // Update canvas size effect
@@ -1885,7 +2253,7 @@ export function SceneInner({
       // Update textures after canvas size change
       createOrUpdateDepthTexture();
       createOrUpdatePickTextures();
-      if (hoverOutline) {
+      if (anyOutlineEnabled) {
         createOrUpdateOutlineTextures();
       }
       requestRender("canvas");
@@ -1896,7 +2264,7 @@ export function SceneInner({
     createOrUpdateDepthTexture,
     createOrUpdatePickTextures,
     createOrUpdateOutlineTextures,
-    hoverOutline,
+    anyOutlineEnabled,
     renderFrame,
   ]);
 

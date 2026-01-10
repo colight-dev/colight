@@ -18,6 +18,8 @@ import {
 import {
   createRenderPipeline,
   createTranslucentGeometryPipeline,
+  createOverlayPipeline,
+  createOverlayPickingPipeline,
   createBuffers,
   getOrCreatePipeline,
 } from "../components";
@@ -1202,6 +1204,64 @@ export function definePrimitive<Config extends BaseComponentConfig>(
               primitive: spec.renderConfig,
             },
             "rgba8unorm",
+          ),
+        cache,
+      );
+    },
+
+    getOverlayPipeline(
+      device: GPUDevice,
+      bindGroupLayout: GPUBindGroupLayout,
+      cache: Map<string, PipelineCacheEntry>,
+    ): GPURenderPipeline {
+      const format = navigator.gpu.getPreferredCanvasFormat();
+      const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
+      const instanceLayout = def.renderInstanceLayout ?? schema.renderLayout;
+      const vertexEntryPoint = def.vertexEntryPoint ?? "vs_main";
+      return getOrCreatePipeline(
+        device,
+        `${def.name}Overlay`,
+        () =>
+          createOverlayPipeline(
+            device,
+            bindGroupLayout,
+            {
+              vertexShader: renderVertexShader,
+              fragmentShader: renderFragmentShader,
+              vertexEntryPoint,
+              fragmentEntryPoint: "fs_main",
+              bufferLayouts: [geometryLayout, instanceLayout],
+            },
+            format,
+            spec,
+          ),
+        cache,
+      );
+    },
+
+    getOverlayPickingPipeline(
+      device: GPUDevice,
+      bindGroupLayout: GPUBindGroupLayout,
+      cache: Map<string, PipelineCacheEntry>,
+    ): GPURenderPipeline {
+      const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
+      const instanceLayout = def.pickingInstanceLayout ?? schema.pickingLayout;
+      const vertexEntryPoint = def.pickingVertexEntryPoint ?? "vs_main";
+      return getOrCreatePipeline(
+        device,
+        `${def.name}OverlayPicking`,
+        () =>
+          createOverlayPickingPipeline(
+            device,
+            bindGroupLayout,
+            {
+              vertexShader: pickingVertexShader,
+              fragmentShader: pickingFragmentShader,
+              vertexEntryPoint,
+              fragmentEntryPoint: "fs_pick",
+              bufferLayouts: [geometryLayout, instanceLayout],
+            },
+            spec,
           ),
         cache,
       );

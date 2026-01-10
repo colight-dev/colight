@@ -109,6 +109,7 @@ export function buildRenderData<ConfigType extends BaseComponentConfig>(
   out: Float32Array,
   baseOffset: number,
   sortedPositions?: Uint32Array,
+  hoveredIndex?: number,
 ): boolean {
   // Get element count and instance count
   const elementCount = spec.getElementCount(elem);
@@ -144,6 +145,39 @@ export function buildRenderData<ConfigType extends BaseComponentConfig>(
     sortedPositions,
     instancesPerElement,
   );
+
+  // Apply hoverProps to the hovered instance (after decorations, so it can override)
+  if (hoveredIndex !== undefined && elem.hoverProps) {
+    const hoverProps = elem.hoverProps;
+    // Find the sorted index for the hovered element
+    const sortedIndex = sortedPositions
+      ? sortedPositions[baseOffset + hoveredIndex] - baseOffset
+      : hoveredIndex;
+
+    // Apply hoverProps to all instances of this element
+    for (let instOffset = 0; instOffset < instancesPerElement; instOffset++) {
+      const outIndex =
+        (sortedIndex + baseOffset) * instancesPerElement + instOffset;
+      const outOffset = outIndex * spec.floatsPerInstance;
+
+      // Apply hoverProps color
+      if (hoverProps.color) {
+        out[outOffset + spec.colorOffset + 0] = hoverProps.color[0];
+        out[outOffset + spec.colorOffset + 1] = hoverProps.color[1];
+        out[outOffset + spec.colorOffset + 2] = hoverProps.color[2];
+      }
+
+      // Apply hoverProps alpha
+      if (hoverProps.alpha !== undefined) {
+        out[outOffset + spec.alphaOffset] = hoverProps.alpha;
+      }
+
+      // Apply hoverProps scale
+      if (hoverProps.scale !== undefined) {
+        spec.applyDecorationScale(out, outOffset, hoverProps.scale);
+      }
+    }
+  }
 
   return true;
 }
@@ -198,6 +232,14 @@ export function buildPickingData<ConfigType extends BaseComponentConfig>(
     sortedPositions,
     instancesPerElement,
   );
+
+  // Apply pickingScale to all instances if set
+  if (elem.pickingScale && elem.pickingScale !== 1.0) {
+    const totalInstances = elementCount * instancesPerElement;
+    for (let i = 0; i < totalInstances; i++) {
+      spec.applyDecorationScale(out, i * spec.floatsPerPicking, elem.pickingScale);
+    }
+  }
 }
 
 /** ===================== GPU PIPELINE HELPERS (unchanged) ===================== **/
@@ -309,6 +351,71 @@ export function createTranslucentGeometryPipeline(
   );
 }
 
+/**
+ * Creates an overlay pipeline - renders in front of scene geometry.
+ * Used for gizmos, helpers, and always-visible UI elements.
+ */
+export function createOverlayPipeline(
+  device: GPUDevice,
+  bindGroupLayout: GPUBindGroupLayout,
+  config: PipelineConfig,
+  format: GPUTextureFormat,
+  primitiveSpec: PrimitiveSpec<any>,
+): GPURenderPipeline {
+  return createRenderPipeline(
+    device,
+    bindGroupLayout,
+    {
+      ...config,
+      primitive: primitiveSpec.renderConfig,
+      blend: {
+        color: {
+          srcFactor: "src-alpha",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add",
+        },
+        alpha: {
+          srcFactor: "one",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add",
+        },
+      },
+      depthStencil: {
+        format: "depth24plus",
+        depthWriteEnabled: false, // Don't write to depth buffer
+        depthCompare: "always", // Always pass depth test (render in front)
+      },
+    },
+    format,
+  );
+}
+
+/**
+ * Creates an overlay picking pipeline - picks in front of scene geometry.
+ * Used for picking overlay elements with priority over scene elements.
+ */
+export function createOverlayPickingPipeline(
+  device: GPUDevice,
+  bindGroupLayout: GPUBindGroupLayout,
+  config: PipelineConfig,
+  primitiveSpec: PrimitiveSpec<any>,
+): GPURenderPipeline {
+  return createRenderPipeline(
+    device,
+    bindGroupLayout,
+    {
+      ...config,
+      primitive: primitiveSpec.renderConfig,
+      depthStencil: {
+        format: "depth24plus",
+        depthWriteEnabled: false, // Don't write to depth buffer
+        depthCompare: "always", // Always pass depth test (pick in front)
+      },
+    },
+    "rgba8unorm",
+  );
+}
+
 export const createBuffers = (
   device: GPUDevice,
   { vertexData, indexData }: GeometryData,
@@ -415,6 +522,9 @@ export {
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
 } from "./primitives";
+
+// Re-export utility functions from primitives
+export { getLineBeamsSegmentPointIndex } from "./primitives/lineBeams";
 
 /** ===================== UNION TYPE FOR ALL COMPONENT CONFIGS ===================== **/
 

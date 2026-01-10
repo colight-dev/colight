@@ -27,6 +27,7 @@ import {
   BoundingBoxComponentConfig,
   PickEvent,
 } from "./components";
+import { GroupConfig, flattenGroups, hasGroups } from "./groups";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
@@ -195,6 +196,9 @@ export type EllipsoidProps = Omit<EllipsoidComponentConfig, "type">;
 export type CuboidProps = Omit<CuboidComponentConfig, "type">;
 export type LineBeamsProps = Omit<LineBeamsComponentConfig, "type">;
 export type BoundingBoxProps = Omit<BoundingBoxComponentConfig, "type">;
+export type GroupProps = Omit<GroupConfig, "type" | "children"> & {
+  children?: React.ReactNode;
+};
 
 export type { PickEvent };
 
@@ -238,6 +242,18 @@ export function BoundingBox(
 }
 (BoundingBox as any)[SCENE3D_TYPE] = "BoundingBox";
 
+/** Group - applies a transform to children. */
+export function Group(_props: GroupProps): GroupConfig {
+  // Note: The actual children processing happens in collectComponentsFromChildren.
+  // When called as a function (not JSX), this returns a placeholder config.
+  // The real Group config is built during JSX collection.
+  return {
+    type: "Group",
+    children: [],
+  } as GroupConfig;
+}
+(Group as any)[SCENE3D_TYPE] = "Group";
+
 /**
  * Set of valid primitive type names.
  * Used by SceneWithLayers to identify component configs.
@@ -249,6 +265,7 @@ const PRIMITIVE_TYPES = new Set([
   "Cuboid",
   "LineBeams",
   "BoundingBox",
+  "Group",
 ]);
 
 // =============================================================================
@@ -287,7 +304,7 @@ interface SceneProps {
   /** Primitive components as JSX children */
   children?: React.ReactNode;
   /** Array of 3D component configs (alternative to children, used by Python interop) */
-  components?: ComponentConfig[];
+  components?: (ComponentConfig | GroupConfig)[];
   /** Optional explicit width */
   width?: number;
   /** Optional explicit height */
@@ -304,12 +321,12 @@ interface SceneProps {
   onHover?: (event: PickEvent | null) => void;
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
   onClick?: (event: PickEvent) => void;
-  /** Enable outline on hover. Default: false */
-  hoverOutline?: boolean;
-  /** Outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
-  outlineColor?: [number, number, number];
-  /** Outline width in pixels. Default: 2 */
-  outlineWidth?: number;
+  /** Default outline on hover for components that don't specify hoverOutline. Default: false */
+  defaultHoverOutline?: boolean;
+  /** Default outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
+  defaultOutlineColor?: [number, number, number];
+  /** Default outline width in pixels. Default: 2 */
+  defaultOutlineWidth?: number;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   className?: string;
@@ -372,18 +389,32 @@ function DevMenu({
 
 /**
  * Collects component configs from React children.
- * Recursively processes children to handle fragments and arrays.
+ * Recursively processes children to handle fragments, arrays, and Groups.
  */
 function collectComponentsFromChildren(
   children: React.ReactNode,
-): ComponentConfig[] {
-  const configs: ComponentConfig[] = [];
+): (ComponentConfig | GroupConfig)[] {
+  const configs: (ComponentConfig | GroupConfig)[] = [];
 
   React.Children.forEach(children, (child) => {
     if (!React.isValidElement(child)) return;
 
     const typeName = (child.type as any)?.[SCENE3D_TYPE];
-    if (typeName) {
+    if (typeName === "Group") {
+      // Process group children recursively
+      const props = child.props as Record<string, any>;
+      const groupChildren = props.children
+        ? collectComponentsFromChildren(props.children)
+        : [];
+      configs.push({
+        type: "Group",
+        children: groupChildren,
+        position: props.position,
+        quaternion: props.quaternion,
+        scale: props.scale,
+        name: props.name,
+      } as GroupConfig);
+    } else if (typeName) {
       configs.push(processConfig(typeName, child.props as Record<string, any>));
     }
   });
@@ -398,7 +429,7 @@ function collectComponentsFromChildren(
  * is serialized and evaluated on the JS side.
  */
 export function SceneWithLayers({ layers }: { layers: any[] }) {
-  const components: ComponentConfig[] = [];
+  const components: (ComponentConfig | GroupConfig)[] = [];
   const sceneProps: Record<string, any> = {};
   for (const layer of layers) {
     if (!layer) continue;
@@ -452,9 +483,9 @@ export function Scene({
   onCameraChange,
   onHover,
   onClick,
-  hoverOutline,
-  outlineColor,
-  outlineWidth,
+  defaultHoverOutline,
+  defaultOutlineColor,
+  defaultOutlineWidth,
   className,
   style,
   controls = [],
@@ -472,10 +503,18 @@ export function Scene({
   );
 
   // Collect components from children or use components prop
-  const components = useMemo(() => {
+  const rawComponents = useMemo(() => {
     if (componentsProp) return componentsProp;
     return collectComponentsFromChildren(children);
   }, [children, componentsProp]);
+
+  // Flatten groups into transformed primitives
+  const components = useMemo(() => {
+    if (hasGroups(rawComponents)) {
+      return flattenGroups(rawComponents);
+    }
+    return rawComponents as ComponentConfig[];
+  }, [rawComponents]);
 
   const cameraChangeCallback = useCallback(
     (camera: CameraParams) => {
@@ -555,9 +594,9 @@ export function Scene({
             onReady={onReady}
             onHover={onHover}
             onClick={onClick}
-            hoverOutline={hoverOutline}
-            outlineColor={outlineColor}
-            outlineWidth={outlineWidth}
+            defaultHoverOutline={defaultHoverOutline}
+            defaultOutlineColor={defaultOutlineColor}
+            defaultOutlineWidth={defaultOutlineWidth}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

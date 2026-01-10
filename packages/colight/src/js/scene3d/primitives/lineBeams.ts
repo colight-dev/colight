@@ -76,6 +76,18 @@ function countSegments(elem: LineBeamsComponentConfig): number {
 }
 
 /**
+ * Gets the point index for a given segment index.
+ * Used for detailed pick info to map segment -> original point.
+ */
+export function getLineBeamsSegmentPointIndex(
+  elem: LineBeamsComponentConfig,
+  segmentIndex: number,
+): number | undefined {
+  const segmentMap = prepareLineSegments(elem);
+  return segmentMap[segmentIndex];
+}
+
+/**
  * Computes the center (midpoint) of each segment for transparency sorting.
  */
 function getSegmentCenters(elem: LineBeamsComponentConfig): Float32Array {
