@@ -26,3 +26,8 @@ docs/api/
 **/js-dist/**
 **/api/*.md
 site-build
+*.vsix 
+.vscode-test 
+planning 
+packages/colight-vscode/media/output-panel.js 
+packages/colight-vscode/out
