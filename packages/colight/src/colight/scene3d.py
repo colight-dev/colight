@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, TypedDict, Union
+from typing import Any, Dict, Literal, Optional, TypedDict, Union
 
 import numpy as np
 
@@ -10,8 +10,92 @@ ArrayLike = Union[list, np.ndarray, JSExpr]
 NumberLike = Union[int, float, np.number, JSExpr]
 
 
+# =============================================================================
+# Drag Constraints
+# =============================================================================
+
+
+class DragConstraint(TypedDict, total=False):
+    """Configuration for drag operations on scene components."""
+
+    type: Literal["plane", "axis", "surface", "screen", "free"]
+    direction: ArrayLike  # For axis constraint: [x, y, z]
+    normal: ArrayLike  # For plane constraint: [x, y, z]
+    point: ArrayLike  # Origin point for axis/plane constraints
+
+
+def drag_axis(
+    direction: ArrayLike,
+    point: Optional[ArrayLike] = None,
+) -> DragConstraint:
+    """Create an axis constraint for dragging.
+
+    Constrains drag movement to a single axis line.
+
+    Args:
+        direction: Axis direction vector [x, y, z]
+        point: Optional origin point for the axis. If not provided,
+               uses the instance center at drag start.
+
+    Returns:
+        DragConstraint configuration
+
+    Example:
+        >>> Cuboid(centers=[[0,0,0]], onDrag=handle_drag, dragConstraint=drag_axis([0, 1, 0]))
+    """
+    result: DragConstraint = {"type": "axis", "direction": direction}
+    if point is not None:
+        result["point"] = point
+    return result
+
+
+def drag_plane(
+    normal: ArrayLike,
+    point: Optional[ArrayLike] = None,
+) -> DragConstraint:
+    """Create a plane constraint for dragging.
+
+    Constrains drag movement to a plane.
+
+    Args:
+        normal: Plane normal vector [x, y, z]
+        point: Optional point on the plane. If not provided,
+               uses the instance center at drag start.
+
+    Returns:
+        DragConstraint configuration
+
+    Example:
+        >>> # Drag on the ground plane (XZ plane at y=0)
+        >>> Cuboid(centers=[[0,0,0]], onDrag=handle_drag, dragConstraint=drag_plane([0, 1, 0], [0, 0, 0]))
+    """
+    result: DragConstraint = {"type": "plane", "normal": normal}
+    if point is not None:
+        result["point"] = point
+    return result
+
+
+# Convenience constants for common axis constraints
+DRAG_AXIS_X: DragConstraint = {"type": "axis", "direction": [1, 0, 0]}
+DRAG_AXIS_Y: DragConstraint = {"type": "axis", "direction": [0, 1, 0]}
+DRAG_AXIS_Z: DragConstraint = {"type": "axis", "direction": [0, 0, 1]}
+
+# Convenience constants for common plane constraints
+DRAG_PLANE_XY: DragConstraint = {"type": "plane", "normal": [0, 0, 1]}
+DRAG_PLANE_XZ: DragConstraint = {"type": "plane", "normal": [0, 1, 0]}
+DRAG_PLANE_YZ: DragConstraint = {"type": "plane", "normal": [1, 0, 0]}
+
+
 class Decoration(TypedDict, total=False):
     indexes: ArrayLike
+    color: Optional[ArrayLike]  # [r,g,b]
+    alpha: Optional[NumberLike]  # 0-1
+    scale: Optional[NumberLike]  # scale factor
+
+
+class HoverProps(TypedDict, total=False):
+    """Properties to apply automatically when an instance is hovered."""
+
     color: Optional[ArrayLike]  # [r,g,b]
     alpha: Optional[NumberLike]  # 0-1
     scale: Optional[NumberLike]  # scale factor
@@ -172,7 +256,7 @@ class Scene(Plot.LayoutItem):
         components = [
             e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
         ]
-        return [Plot.JSRef("scene3d.SceneWithLayers"), {"layers": components}]
+        return [Plot.JSRef("scene3d.Scene"), {"layers": components}]
 
 
 def flatten_array(arr: Any, dtype: Any = np.float32) -> Any:
@@ -200,6 +284,9 @@ def PointCloud(
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all points
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    hoverProps: Optional[HoverProps] = None,
+    picking_scale: Optional[NumberLike] = None,
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a point cloud element.
@@ -212,6 +299,9 @@ def PointCloud(
         size: Default size for all points if sizes not provided
         alphas: Array of alpha values per point (optional)
         alpha: Default alpha value for all points if alphas not provided
+        layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
+        hoverProps: Properties to apply on hover (color, alpha, scale)
+        picking_scale: Scale factor for picking hit area (values > 1 make clicking easier)
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -232,6 +322,15 @@ def PointCloud(
     if alpha is not None:
         data["alpha"] = alpha
 
+    if layer is not None:
+        data["layer"] = layer
+
+    if hoverProps is not None:
+        data["hoverProps"] = hoverProps
+
+    if picking_scale is not None:
+        data["pickingScale"] = picking_scale
+
     return SceneComponent("PointCloud", data, **kwargs)
 
 
@@ -239,14 +338,17 @@ def Ellipsoid(
     centers: ArrayLike,
     half_sizes: Optional[ArrayLike] = None,
     half_size: Optional[Union[NumberLike, ArrayLike]] = None,  # Single value or [x,y,z]
-    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
-    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
+    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [x,y,z,w]
+    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
     | None = None,  # How the shape is drawn ("Solid" or "MajorWireframe")
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    hoverProps: Optional[HoverProps] = None,
+    picking_scale: Optional[NumberLike] = None,
     **kwargs: Any,
 ) -> SceneComponent:
     """Create an ellipsoid element.
@@ -255,8 +357,8 @@ def Ellipsoid(
         centers: Nx3 array of ellipsoid centers or flattened array
         half_sizes: Nx3 array of half_sizes (x,y,z) or flattened array (optional)
         half_size: Default half_size (sphere) or [x,y,z] half_sizes (ellipsoid) if half_sizes not provided
-        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
-        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
+        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
+        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
         alphas: Array of alpha values per ellipsoid (optional)
@@ -264,6 +366,9 @@ def Ellipsoid(
         fill_mode: How the shape is drawn. One of:
             - "Solid": Filled surface with solid color
             - "MajorWireframe": Three axis-aligned ellipse cross-sections
+        layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
+        hoverProps: Properties to apply on hover (color, alpha, scale)
+        picking_scale: Scale factor for picking hit area (values > 1 make clicking easier)
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -292,6 +397,15 @@ def Ellipsoid(
     if fill_mode is not None:
         data["fill_mode"] = fill_mode
 
+    if layer is not None:
+        data["layer"] = layer
+
+    if hoverProps is not None:
+        data["hoverProps"] = hoverProps
+
+    if picking_scale is not None:
+        data["pickingScale"] = picking_scale
+
     return SceneComponent("Ellipsoid", data, **kwargs)
 
 
@@ -299,12 +413,15 @@ def Cuboid(
     centers: ArrayLike,
     half_sizes: Optional[ArrayLike] = None,
     half_size: Optional[Union[ArrayLike, NumberLike]] = None,
-    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
-    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
+    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [x,y,z,w]
+    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    hoverProps: Optional[HoverProps] = None,
+    picking_scale: Optional[NumberLike] = None,
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a cuboid element.
@@ -313,12 +430,15 @@ def Cuboid(
         centers: Nx3 array of cuboid centers or flattened array
         half_sizes: Nx3 array of half sizes (width,height,depth) or flattened array (optional)
         half_size: Default half size [w,h,d] for all cuboids if half_sizes not provided
-        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
-        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
+        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
+        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all cuboids if colors not provided
         alphas: Array of alpha values per cuboid (optional)
         alpha: Default alpha value for all cuboids if alphas not provided
+        layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
+        hoverProps: Properties to apply on hover (color, alpha, scale)
+        picking_scale: Scale factor for picking hit area (values > 1 make clicking easier)
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -344,6 +464,15 @@ def Cuboid(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if layer is not None:
+        data["layer"] = layer
+
+    if hoverProps is not None:
+        data["hoverProps"] = hoverProps
+
+    if picking_scale is not None:
+        data["pickingScale"] = picking_scale
+
     return SceneComponent("Cuboid", data, **kwargs)
 
 
@@ -355,6 +484,9 @@ def LineBeams(
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    hoverProps: Optional[HoverProps] = None,
+    picking_scale: Optional[NumberLike] = None,
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a line beams element.
@@ -367,6 +499,9 @@ def LineBeams(
         sizes: Array of sizes per line (optional)
         alpha: Default alpha value for all beams if alphas not provided
         alphas: Array of alpha values per line (optional)
+        layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
+        hoverProps: Properties to apply on hover (color, alpha, scale)
+        picking_scale: Scale factor for picking hit area (values > 1 make clicking easier)
         **kwargs: Additional arguments like onHover, onClick
 
     Returns:
@@ -388,71 +523,269 @@ def LineBeams(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if layer is not None:
+        data["layer"] = layer
+
+    if hoverProps is not None:
+        data["hoverProps"] = hoverProps
+
+    if picking_scale is not None:
+        data["pickingScale"] = picking_scale
+
     return SceneComponent("LineBeams", data, **kwargs)
 
 
-def BoundingBox(
-    centers: ArrayLike,
-    half_sizes: Optional[ArrayLike] = None,
-    half_size: Optional[Union[ArrayLike, NumberLike]] = None,
-    quaternions: Optional[ArrayLike] = None,  # Nx4 array of quaternions [w,x,y,z]
-    quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [w,x,y,z]
-    colors: Optional[ArrayLike] = None,
-    color: Optional[ArrayLike] = None,  # Default RGB color for all boxes
-    sizes: Optional[ArrayLike] = None,  # Per-box edge thickness
-    size: Optional[NumberLike] = None,  # Default edge thickness
-    alphas: Optional[ArrayLike] = None,  # Per-box alpha values
-    alpha: Optional[NumberLike] = None,  # Default alpha for all boxes
-    **kwargs: Any,
+# =============================================================================
+# Groups (Hierarchical Transforms)
+# =============================================================================
+
+
+def Group(
+    children: list,
+    position: Optional[ArrayLike] = None,
+    quaternion: Optional[ArrayLike] = None,
+    scale: Optional[Union[NumberLike, ArrayLike]] = None,
+    name: Optional[str] = None,
 ) -> SceneComponent:
-    """Create a wireframe bounding box element.
+    """Create a group component for hierarchical scene composition.
+
+    Groups apply a transform (position, rotation, scale) to all their children.
+    At render time, groups are flattened into transformed primitives.
 
     Args:
-        centers: Nx3 array of box centers or flattened array
-        half_sizes: Nx3 array of half sizes (width,height,depth) or flattened array (optional)
-        half_size: Default half size [w,h,d] or single value for all boxes if half_sizes not provided
-        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
-        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
-        colors: Nx3 array of RGB colors or flattened array (optional)
-        color: Default RGB color [r,g,b] for all boxes if colors not provided
-        sizes: Array of edge thickness per box (optional)
-        size: Default edge thickness for all boxes if sizes not provided
-        alphas: Array of alpha values per box (optional)
-        alpha: Default alpha value for all boxes if alphas not provided
-        **kwargs: Additional arguments like decorations, onHover, onClick
+        children: List of child components (can include nested groups)
+        position: Position offset [x, y, z] in parent space
+        quaternion: Rotation as quaternion [x, y, z, w]
+        scale: Scale factor (uniform number or [x, y, z] per-axis)
+        name: Optional name for identifying this group in pick info
 
     Returns:
-        A BoundingBox scene component that renders wireframe boxes (12 edges each).
+        A Group scene component
+
+    Example:
+        >>> # Create a group of objects offset by [1, 0, 0]
+        >>> Group(
+        ...     children=[
+        ...         Ellipsoid(centers=[[0, 0, 0]], half_size=0.1),
+        ...         Cuboid(centers=[[0.5, 0, 0]], half_size=0.05),
+        ...     ],
+        ...     position=[1, 0, 0],
+        ... )
     """
-    centers = flatten_array(centers, dtype=np.float32)
-    data: Dict[str, Any] = {"centers": centers}
 
-    if half_sizes is not None:
-        data["half_sizes"] = flatten_array(half_sizes, dtype=np.float32)
-    elif half_size is not None:
-        data["half_size"] = half_size
+    def _coerce_group_value(value: ArrayLike | NumberLike) -> Any:
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, tuple):
+            return list(value)
+        return value
 
-    if quaternions is not None:
-        data["quaternions"] = flatten_array(quaternions, dtype=np.float32)
-    elif quaternion is not None:
-        data["quaternion"] = quaternion
+    data: Dict[str, Any] = {"children": children}
 
-    if colors is not None:
-        data["colors"] = flatten_array(colors, dtype=np.float32)
-    elif color is not None:
-        data["color"] = color
+    if position is not None:
+        data["position"] = _coerce_group_value(position)
+    if quaternion is not None:
+        data["quaternion"] = _coerce_group_value(quaternion)
+    if scale is not None:
+        data["scale"] = _coerce_group_value(scale)
+    if name is not None:
+        data["name"] = name
 
-    if sizes is not None:
-        data["sizes"] = flatten_array(sizes, dtype=np.float32)
-    elif size is not None:
-        data["size"] = size
+    return SceneComponent("Group", data)
 
-    if alphas is not None:
-        data["alphas"] = flatten_array(alphas, dtype=np.float32)
-    elif alpha is not None:
-        data["alpha"] = alpha
 
-    return SceneComponent("BoundingBox", data, **kwargs)
+# =============================================================================
+# Gizmo (Prototype - API may change)
+# =============================================================================
+
+# Type alias for gizmo parts
+GizmoPart = Literal["x", "y", "z", "xy", "xz", "yz", "center"]
+
+# Gizmo colors (matching JS GIZMO_COLORS)
+GIZMO_COLORS: Dict[str, list] = {
+    "x": [1.0, 0.2, 0.2],  # Red
+    "y": [0.2, 1.0, 0.2],  # Green
+    "z": [0.2, 0.4, 1.0],  # Blue
+    "xy": [1.0, 1.0, 0.2],  # Yellow
+    "xz": [0.2, 1.0, 1.0],  # Cyan
+    "yz": [1.0, 0.2, 1.0],  # Magenta
+    "center": [0.9, 0.9, 0.9],  # White
+}
+
+# Axis direction vectors
+_AXIS_DIRECTIONS: Dict[str, list] = {
+    "x": [1, 0, 0],
+    "y": [0, 1, 0],
+    "z": [0, 0, 1],
+}
+
+# Plane normal vectors
+_PLANE_NORMALS: Dict[str, list] = {
+    "xy": [0, 0, 1],
+    "xz": [0, 1, 0],
+    "yz": [1, 0, 0],
+}
+
+
+def _get_hover_props(part: str) -> HoverProps:
+    """Get hoverProps for a gizmo part (brightens color on hover)."""
+    base_color = GIZMO_COLORS[part]
+    brightened = [min(1.0, c * 1.5) for c in base_color]
+    return {"color": brightened}
+
+
+def TranslateGizmo(
+    position: ArrayLike,
+    on_drag: Optional[Any] = None,
+    axes: Optional[tuple[str, ...]] = None,
+    planes: Optional[tuple[str, ...]] = None,
+    show_center: bool = True,
+    scale: float = 1.0,
+) -> Scene:
+    """Create a translate gizmo for interactive object translation.
+
+    The gizmo consists of axis arrows, plane handles, and a center sphere
+    that allow dragging objects along constrained axes or planes.
+
+    Hover highlighting is automatic via hoverProps - no state management needed.
+
+    NOTE: This is a prototype API and may change. Screen-space sizing is not
+    yet implemented - use the `scale` parameter to adjust gizmo size manually.
+
+    Args:
+        position: World position [x, y, z] of the gizmo center
+        on_drag: Callback fired during drag. Receives DragInfo with delta.position.
+            Use info.delta.position to get the world-space translation.
+        axes: Which axis handles to show. Default: ("x", "y", "z")
+        planes: Which plane handles to show. Default: ("xy", "xz", "yz")
+        show_center: Show center sphere for free drag. Default: True
+        scale: Scale factor for gizmo size. Default: 1.0
+
+    Returns:
+        A Scene containing the gizmo components
+
+    Example:
+        >>> def handle_drag(info):
+        ...     # Move object by drag delta
+        ...     new_pos = [p + d for p, d in zip(obj_pos, info.delta.position)]
+        ...     set_obj_pos(new_pos)
+        ...
+        >>> gizmo = TranslateGizmo(position=obj_pos, on_drag=handle_drag)
+        >>> Scene(my_object, gizmo)
+    """
+    if axes is None:
+        axes = ("x", "y", "z")
+    if planes is None:
+        planes = ("xy", "xz", "yz")
+
+    pos = np.asarray(position, dtype=np.float32)
+    components: list = []
+
+    # Geometry dimensions (scaled)
+    axis_length = 1.0 * scale
+    shaft_width = 0.02 * scale
+    cone_length = 0.15 * scale
+    cone_radius = 0.06 * scale
+    plane_size = 0.25 * scale
+    plane_offset = 0.35 * scale
+    center_radius = 0.08 * scale
+
+    # Create axis arrows
+    for axis in axes:
+        direction = np.array(_AXIS_DIRECTIONS[axis], dtype=np.float32)
+        base_color = GIZMO_COLORS[axis]
+        hover_props = _get_hover_props(axis)
+
+        # Axis shaft (LineBeams)
+        shaft_end = pos + direction * (axis_length - cone_length)
+        # LineBeams format: [x, y, z, lineIndex, ...]
+        points = np.array(
+            [pos[0], pos[1], pos[2], 0, shaft_end[0], shaft_end[1], shaft_end[2], 0],
+            dtype=np.float32,
+        )
+
+        components.append(
+            LineBeams(
+                points=points,
+                size=shaft_width,
+                color=base_color,
+                layer="overlay",
+                dragConstraint=drag_axis(direction.tolist(), pos.tolist()),
+                onDrag=on_drag,
+                hoverProps=hover_props,
+                picking_scale=3.0,  # 3x larger hit area for thin axis shafts
+            )
+        )
+
+        # Cone tip (Ellipsoid stretched along axis)
+        cone_center = pos + direction * (axis_length - cone_length / 2)
+
+        # Determine cone half-sizes based on axis
+        if axis == "x":
+            cone_half_size = [cone_length / 2, cone_radius, cone_radius]
+        elif axis == "y":
+            cone_half_size = [cone_radius, cone_length / 2, cone_radius]
+        else:
+            cone_half_size = [cone_radius, cone_radius, cone_length / 2]
+
+        components.append(
+            Ellipsoid(
+                centers=[cone_center.tolist()],
+                half_size=cone_half_size,
+                color=base_color,
+                layer="overlay",
+                dragConstraint=drag_axis(direction.tolist(), pos.tolist()),
+                onDrag=on_drag,
+                hoverProps=hover_props,
+            )
+        )
+
+    # Create plane handles
+    for plane in planes:
+        normal = _PLANE_NORMALS[plane]
+        base_color = GIZMO_COLORS[plane]
+        hover_props = _get_hover_props(plane)
+
+        # Position the plane handle at the intersection of the two axes
+        if plane == "xy":
+            handle_center = pos + np.array([plane_offset, plane_offset, 0])
+            handle_half_size = [plane_size / 2, plane_size / 2, plane_size / 10]
+        elif plane == "xz":
+            handle_center = pos + np.array([plane_offset, 0, plane_offset])
+            handle_half_size = [plane_size / 2, plane_size / 10, plane_size / 2]
+        else:  # yz
+            handle_center = pos + np.array([0, plane_offset, plane_offset])
+            handle_half_size = [plane_size / 10, plane_size / 2, plane_size / 2]
+
+        components.append(
+            Ellipsoid(
+                centers=[handle_center.tolist()],
+                half_size=handle_half_size,
+                color=base_color,
+                layer="overlay",
+                dragConstraint=drag_plane(normal, pos.tolist()),
+                onDrag=on_drag,
+                hoverProps=hover_props,
+            )
+        )
+
+    # Create center sphere
+    if show_center:
+        base_color = GIZMO_COLORS["center"]
+        hover_props = _get_hover_props("center")
+        components.append(
+            Ellipsoid(
+                centers=[pos.tolist()],
+                half_size=[center_radius, center_radius, center_radius],
+                color=base_color,
+                layer="overlay",
+                dragConstraint={"type": "free"},
+                onDrag=on_drag,
+                hoverProps=hover_props,
+            )
+        )
+
+    return Scene(*components)
 
 
 __all__ = [
@@ -461,6 +794,21 @@ __all__ = [
     "Ellipsoid",
     "Cuboid",
     "LineBeams",
-    "BoundingBox",
+    "Group",
     "deco",
+    # Hover props
+    "HoverProps",
+    # Drag constraints
+    "DragConstraint",
+    "drag_axis",
+    "drag_plane",
+    "DRAG_AXIS_X",
+    "DRAG_AXIS_Y",
+    "DRAG_AXIS_Z",
+    "DRAG_PLANE_XY",
+    "DRAG_PLANE_XZ",
+    "DRAG_PLANE_YZ",
+    # Gizmo (prototype)
+    "TranslateGizmo",
+    "GIZMO_COLORS",
 ]

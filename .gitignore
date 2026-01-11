@@ -25,9 +25,10 @@ docs/api/
 .llm_context
 **/js-dist/**
 **/api/*.md
+planning
+**/output-panel.js
 site-build
 *.vsix 
-.vscode-test 
-planning 
+.vscode-test
 packages/colight-vscode/media/output-panel.js 
 packages/colight-vscode/out

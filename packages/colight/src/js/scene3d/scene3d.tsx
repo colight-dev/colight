@@ -15,7 +15,6 @@ import React, {
   useCallback,
   useEffect,
   useRef,
-  useContext,
 } from "react";
 import { SceneInner } from "./impl3d";
 import {
@@ -32,7 +31,7 @@ import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
-import { $StateContext } from "../context";
+import { ReadyState, NOOP_READY_STATE } from "./types";
 
 // =============================================================================
 // Primitive Components (JSX API)
@@ -331,6 +330,8 @@ interface SceneProps {
   controls?: string[];
   className?: string;
   style?: React.CSSProperties;
+  /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
+  readyState?: ReadyState;
 }
 
 interface DevMenuProps {
@@ -489,6 +490,7 @@ export function Scene({
   className,
   style,
   controls = [],
+  readyState = NOOP_READY_STATE,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -496,10 +498,9 @@ export function Scene({
     ...defaultCamera,
     ...camera,
   });
-  const $state: any = useContext($StateContext);
   const onReady = useMemo(
-    () => $state?.beginUpdate?.("scene3d/ready"),
-    [$state],
+    () => readyState.beginUpdate("scene3d/ready"),
+    [readyState],
   );
 
   // Collect components from children or use components prop
@@ -597,6 +598,7 @@ export function Scene({
             defaultHoverOutline={defaultHoverOutline}
             defaultOutlineColor={defaultOutlineColor}
             defaultOutlineWidth={defaultOutlineWidth}
+            readyState={readyState}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

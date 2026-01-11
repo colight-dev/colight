@@ -1,0 +1,28 @@
+name: Package and Release VS Code Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Yarn install
+        run: yarn install
+
+      - name: Package Extension
+        run: yarn vsce package
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./*.vsix

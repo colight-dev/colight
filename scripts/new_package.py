@@ -10,7 +10,7 @@ def create_package(
     name: str,
     description: str,
     author_name: str = "Matthew Huebert",
-    author_email: str = "me@matt.is",
+    author_email: str = "mhuebert@gmail.com",
     python_version: str = ">=3.10",
 ) -> None:
     """Create a new package in the monorepo.
@@ -153,8 +153,8 @@ def main():
     )
     parser.add_argument(
         "--author-email",
-        default="me@matt.is",
-        help="Author email (default: me@matt.is)",
+        default="mhuebert@gmail.com",
+        help="Author email (default: mhuebert@gmail.com)",
     )
     parser.add_argument(
         "--python-version",

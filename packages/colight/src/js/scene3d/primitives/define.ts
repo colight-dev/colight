@@ -24,7 +24,7 @@ import {
   getOrCreatePipeline,
 } from "../components";
 import { packID } from "../picking";
-import { acopy } from "../../utils";
+import { acopy } from "../utils";
 
 // Re-export utilities for use in custom fill functions and shader definitions
 export { packID, acopy };

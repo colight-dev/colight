@@ -8,11 +8,9 @@ import React, {
   useMemo,
   useRef,
   useState,
-  useContext,
 } from "react";
-import { throttle, deepEqualModuloTypedArrays } from "../utils";
-import { $StateContext } from "../context";
-import { useCanvasSnapshot } from "../canvasSnapshot";
+import { throttle, deepEqualModuloTypedArrays } from "./utils";
+import { useCanvasSnapshot } from "./canvasSnapshot";
 import {
   CameraParams,
   CameraState,
@@ -26,8 +24,11 @@ import {
   zoom,
   DraggingState,
   hasCameraMoved,
+  getProjectionMatrix,
+  getViewMatrix,
 } from "./camera3d";
 
+// @ts-ignore - lodash-es types are available via @types/lodash-es
 import isEqual from "lodash-es/isEqual";
 
 import {
@@ -54,7 +55,9 @@ import {
   DynamicBuffers,
   RenderObjectCache,
   ComponentOffset,
-  PickEvent,
+  ReadyState,
+  NOOP_READY_STATE,
+  PickEventType,
   PickInfo,
   DragInfo,
 } from "./types";
@@ -102,13 +105,13 @@ export interface SceneInnerProps {
   onFrameRendered?: (renderTime: number) => void;
 
   /** Callback to fire when scene is initially ready */
-  onReady: () => void;
+  onReady?: () => void;
 
   /** Scene-level hover callback. Called with PickEvent when hovering, null when not. */
-  onHover?: (event: PickEvent | null) => void;
+  onHover?: (event: PickEventType | null) => void;
 
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
-  onClick?: (event: PickEvent) => void;
+  onClick?: (event: PickEventType) => void;
 
   /** Default outline on hover for components that don't specify hoverOutline. Default: false */
   defaultHoverOutline?: boolean;
@@ -118,6 +121,9 @@ export interface SceneInnerProps {
 
   /** Default outline width in pixels. Default: 2 */
   defaultOutlineWidth?: number;
+
+  /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
+  readyState?: ReadyState;
 }
 
 function initGeometryResources(
@@ -442,9 +448,8 @@ export function SceneInner({
   defaultHoverOutline = false,
   defaultOutlineColor = [1, 1, 1],
   defaultOutlineWidth = 2,
+  readyState = NOOP_READY_STATE,
 }: SceneInnerProps) {
-  const $state = useContext($StateContext);
-
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
     device: GPUDevice;
@@ -1082,7 +1087,11 @@ export function SceneInner({
 
         // Get picking pipeline based on layer
         const pickingPipeline = isOverlay
-          ? spec.getOverlayPickingPipeline(device, bindGroupLayout, pipelineCache)
+          ? spec.getOverlayPickingPipeline(
+              device,
+              bindGroupLayout,
+              pipelineCache,
+            )
           : spec.getPickingPipeline(device, bindGroupLayout, pipelineCache);
         if (!pickingPipeline) return;
 
@@ -1249,7 +1258,13 @@ export function SceneInner({
       startOffset,
       startOffset + floatsPerInstance * instancesPerElement,
     );
-    device.queue.writeBuffer(tempBuffer, 0, instanceData);
+    device.queue.writeBuffer(
+      tempBuffer,
+      0,
+      instanceData.buffer,
+      instanceData.byteOffset,
+      instanceData.byteLength,
+    );
 
     // Get or create silhouette pipeline
     // For silhouette, we can reuse the regular render pipeline but with a simple white fragment shader
@@ -1325,7 +1340,13 @@ export function SceneInner({
       0, // padding
       0, // padding
     ]);
-    device.queue.writeBuffer(outlineParamsBuffer, 0, paramsData);
+    device.queue.writeBuffer(
+      outlineParamsBuffer,
+      0,
+      paramsData.buffer,
+      paramsData.byteOffset,
+      paramsData.byteLength,
+    );
 
     const cmd = device.createCommandEncoder({ label: "Outline post-process" });
 
@@ -1363,7 +1384,7 @@ export function SceneInner({
 
       camState = camState || activeCameraRef.current!;
 
-      const onRenderComplete = $state.beginUpdate("impl3d/renderFrame");
+      const onRenderComplete = readyState.beginUpdate("impl3d/renderFrame");
 
       components = components || gpuRef.current.renderedComponents;
       const componentsChanged =
@@ -1400,7 +1421,9 @@ export function SceneInner({
       renderObjects.forEach(function updateRenderObject(ro) {
         const needsSorting = ro.hasAlphaComponents;
         const needsBuild =
-          (needsSorting && cameraMoved) || componentsChanged || hoverPropsNeedsBuild;
+          (needsSorting && cameraMoved) ||
+          componentsChanged ||
+          hoverPropsNeedsBuild;
 
         // Skip if no update needed
         if (!needsBuild) return;
@@ -1449,7 +1472,13 @@ export function SceneInner({
         containerHeight,
         camState,
       );
-      device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+      device.queue.writeBuffer(
+        uniformBuffer,
+        0,
+        uniformData.buffer,
+        uniformData.byteOffset,
+        uniformData.byteLength,
+      );
 
       try {
         // Sort render objects: scene first, then overlay (overlay renders on top)
@@ -1471,17 +1500,24 @@ export function SceneInner({
         // Render hover outline if enabled and something is hovered
         // Must happen BEFORE awaiting to use the same swap chain texture
         if (lastHoverState.current && components) {
-          const hoveredComponent = components[lastHoverState.current.componentIdx];
+          const hoveredComponent =
+            components[lastHoverState.current.componentIdx];
           // Resolve hoverOutline: component-level takes precedence over scene-level
-          const shouldOutline = hoveredComponent?.hoverOutline ?? defaultHoverOutline;
+          const shouldOutline =
+            hoveredComponent?.hoverOutline ?? defaultHoverOutline;
 
           if (shouldOutline) {
             // Resolve outline styling: component-level takes precedence
-            const effectiveOutlineColor = hoveredComponent?.outlineColor ?? defaultOutlineColor;
-            const effectiveOutlineWidth = hoveredComponent?.outlineWidth ?? defaultOutlineWidth;
+            const effectiveOutlineColor =
+              hoveredComponent?.outlineColor ?? defaultOutlineColor;
+            const effectiveOutlineWidth =
+              hoveredComponent?.outlineWidth ?? defaultOutlineWidth;
 
             renderSilhouettePass(lastHoverState.current, components);
-            renderOutlinePostProcess(effectiveOutlineColor, effectiveOutlineWidth);
+            renderOutlinePostProcess(
+              effectiveOutlineColor,
+              effectiveOutlineWidth,
+            );
           }
         }
 
@@ -1497,7 +1533,7 @@ export function SceneInner({
       }
 
       onFrameRendered?.(performance.now());
-      onReady();
+      onReady?.();
     },
     [
       containerWidth,
@@ -1689,7 +1725,7 @@ export function SceneInner({
     componentIdx: number,
     elementIdx: number,
     spec: PrimitiveSpec<any>,
-  ): PickEvent {
+  ): PickEventType {
     const component = components[componentIdx];
     const centers = spec.getCenters(component);
     const baseIdx = elementIdx * 3;
@@ -1727,7 +1763,8 @@ export function SceneInner({
 
         const hadHover = lastHoverState.current !== null;
         // Check if previous component had outline enabled
-        const prevHadOutline = prevComponent?.hoverOutline ?? defaultHoverOutline;
+        const prevHadOutline =
+          prevComponent?.hoverOutline ?? defaultHoverOutline;
         lastHoverState.current = null;
 
         // Re-render to clear outline or hoverProps styling
@@ -2066,7 +2103,13 @@ export function SceneInner({
       }
       draggingState.current = null;
     },
-    [pickAtScreenXY, handleDragMouseMove, components, containerWidth, containerHeight],
+    [
+      pickAtScreenXY,
+      handleDragMouseMove,
+      components,
+      containerWidth,
+      containerHeight,
+    ],
   );
 
   const handleScene3dMouseDown = useCallback(
@@ -2169,7 +2212,13 @@ export function SceneInner({
 
       e.preventDefault();
     },
-    [handleDragMouseMove, handleMouseUp, components, containerWidth, containerHeight],
+    [
+      handleDragMouseMove,
+      handleMouseUp,
+      components,
+      containerWidth,
+      containerHeight,
+    ],
   );
 
   // Update canvas event listener references - only for picking and mousedown
@@ -2214,7 +2263,7 @@ export function SceneInner({
   // Check if any component has hoverOutline enabled, or if scene default is enabled
   const anyOutlineEnabled = useMemo(() => {
     if (defaultHoverOutline) return true;
-    return components.some(c => c.hoverOutline === true);
+    return components.some((c) => c.hoverOutline === true);
   }, [components, defaultHoverOutline]);
 
   // Create/recreate depth + pick textures
@@ -2319,6 +2368,8 @@ export function SceneInner({
     </div>
   );
 }
+
+export { SceneInner as SceneImpl };
 
 function componentHasAlpha(component: ComponentConfig) {
   return (

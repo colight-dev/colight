@@ -8,10 +8,20 @@ version = "2025.7.7"
 description = ""
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [ "anywidget>=0.9.10", "traitlets>=5.14.3", "websockets>=15.0",]
+dependencies = [
+    "anywidget>=0.9.10",
+    "colight-serde>=0.1.0",
+    "traitlets>=5.14.3",
+    "websockets>=15.0",
+    "click>=8.1",
+    "watchfiles>=0.21.0",
+    "libcst>=1.4",
+    "markdown>=3.5",
+    "werkzeug>=3.1.3",
+]
 [[project.authors]]
 name = "Matthew Huebert"
-email = "me@matt.is"
+email = "mhuebert@gmail.com"
 
 [dependency-groups]
 dev = [ "jax>=0.4.33; python_version<'3.13'", "jaxlib>=0.4.33; python_version<'3.13'", "watchfiles>=0.21.0", "jupyter-client>=8.6.2", "nbformat>=5.10.4", "numpy>=1.22,<2.0.0", "pytest>=8.4.0", "anthropic>=0.39.0", "python-dotenv>=1.0.1", "tomli-w>=1.0.0",]
@@ -20,7 +30,7 @@ dev = [ "jax>=0.4.33; python_version<'3.13'", "jaxlib>=0.4.33; python_version<'3
 text = "MIT"
 
 [project.scripts]
-colight = "colight.cli:main"
+colight = "colight_cli:main"
 
 [tool.pyright]
 venvPath = "../.."
@@ -37,4 +47,4 @@ ignore = [ "E402", "F841",]
 ignore-vcs = true
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/colight",]
+packages = [ "src/colight", "src/colight_cli.py",]

@@ -14,7 +14,7 @@ import {
 
 export type { PickEvent };
 
-import { acopy } from "../utils";
+import { acopy } from "./utils";
 
 /** ===================== DECORATIONS + COMMON UTILS ===================== **/
 
@@ -237,7 +237,11 @@ export function buildPickingData<ConfigType extends BaseComponentConfig>(
   if (elem.pickingScale && elem.pickingScale !== 1.0) {
     const totalInstances = elementCount * instancesPerElement;
     for (let i = 0; i < totalInstances; i++) {
-      spec.applyDecorationScale(out, i * spec.floatsPerPicking, elem.pickingScale);
+      spec.applyDecorationScale(
+        out,
+        i * spec.floatsPerPicking,
+        elem.pickingScale,
+      );
     }
   }
 }

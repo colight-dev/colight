@@ -9,8 +9,6 @@ description = "Colight documentation content"
 requires-python = ">=3.9"
 dependencies = [
     "colight",
-    "colight-publish"
-
 ]
 
 [tool.hatch.build.targets.wheel]

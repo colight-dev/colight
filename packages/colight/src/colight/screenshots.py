@@ -31,6 +31,7 @@ class StudioContext(ChromeContext):
         reuse=True,
         keep_alive: float = 1.0,
         window_vars=None,
+        ready_timeout: float | None = None,
         **kwargs,
     ):
         """
@@ -46,6 +47,7 @@ class StudioContext(ChromeContext):
         self._plot = plot
         self._data = data
         self._buffers = buffers
+        self._ready_timeout = ready_timeout
         super().__init__(
             reuse=reuse, keep_alive=keep_alive, window_vars=window_vars, **kwargs
         )
@@ -55,6 +57,35 @@ class StudioContext(ChromeContext):
         if self._plot is not None:
             self.load_plot(self._plot, data=self._data, buffers=self._buffers)
         return context
+
+    def _ready_result_js(self) -> str:
+        if self._ready_timeout is None:
+            return (
+                f"await window.colight.whenReady('{self.id}');"
+                "const readyResult = { ok: true };"
+            )
+        timeout_ms = int(self._ready_timeout * 1000)
+        return (
+            "const readyResult = await Promise.race(["
+            f"window.colight.whenReady('{self.id}').then(() => ({{ ok: true }})), "
+            f"new Promise(resolve => setTimeout(() => resolve({{ ok: false, reason: 'timeout' }}), {timeout_ms}))"
+            "]);"
+        )
+
+    def _ensure_ready(self, result, context: str) -> None:
+        if not isinstance(result, dict):
+            raise RuntimeError(f"Colight {context} did not return readiness status")
+        if result.get("ok") is True:
+            return
+        reason = result.get("reason")
+        error = result.get("error")
+        if reason == "timeout":
+            raise TimeoutError(
+                f"Colight {context} timed out after {self._ready_timeout}s"
+            )
+        if error:
+            raise RuntimeError(f"Colight {context} failed: {error}")
+        raise RuntimeError(f"Colight {context} failed")
 
     def load_studio_html(self):
         # Check if Colight environment is already loaded
@@ -128,19 +159,23 @@ class StudioContext(ChromeContext):
             )
             print(f"[StudioContext] Contains {len(buffers)} buffers")
 
+        ready_wait = self._ready_result_js()
         render_js = f"""
          (async () => {{
            console.log('[StudioContext] Loading .colight file for ID: {self.id}');
            try {{
              const colightData = await window.colight.loadColightFile('{colight_url}');
              await window.colight.render('studio', colightData, '{self.id}');
-             await window.colight.whenReady('{self.id}');
+             {ready_wait}
+             return readyResult;
            }} catch (error) {{
              console.error('[StudioContext] Failed to load .colight file:', error);
+             return {{ ok: false, reason: 'error', error: String(error) }};
            }}
          }})()
          """
-        self.evaluate(render_js, await_promise=True)
+        result = self.evaluate(render_js, await_promise=True)
+        self._ensure_ready(result, "plot load")
 
         if measure:
             self.measure_size()
@@ -179,6 +214,7 @@ class StudioContext(ChromeContext):
             base64.b64encode(buffer).decode("utf-8") for buffer in buffers
         ]
 
+        ready_wait = self._ready_result_js()
         update_js = f"""
         (async function() {{
             try {{
@@ -187,15 +223,68 @@ class StudioContext(ChromeContext):
                     Uint8Array.from(atob(b64), c => c.charCodeAt(0))
                 );
                 const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
-                await window.colight.whenReady('{self.id}');
-                return result;
+                {ready_wait}
+                return {{
+                    ok: readyResult.ok,
+                    reason: readyResult.reason,
+                    error: readyResult.error,
+                    result
+                }};
             }} catch (e) {{
                 console.error('State update failed:', e);
-                return 'error: ' + e.message;
+                return {{ ok: false, reason: 'error', error: String(e) }};
             }}
         }})()
         """
-        return self.evaluate(update_js, await_promise=True)
+        response = self.evaluate(update_js, await_promise=True)
+        self._ensure_ready(response, "state update")
+        if isinstance(response, dict):
+            return response.get("result")
+        return response
+
+    def apply_updates_json(self, updates, buffers):
+        """
+        Apply pre-serialized updates with explicit buffers.
+
+        Args:
+            updates: Updates payload (dict or list) ready for updateWithBuffers
+            buffers: List of raw buffer bytes referenced by updates
+        """
+        if self.debug:
+            print("[StudioContext] Applying pre-serialized updates")
+        normalized_updates = updates
+        if isinstance(normalized_updates, dict):
+            normalized_updates = [normalized_updates]
+        encoded_buffers = [
+            base64.b64encode(buffer).decode("utf-8") for buffer in (buffers or [])
+        ]
+        ready_wait = self._ready_result_js()
+        update_js = f"""
+        (async function() {{
+            try {{
+                const updates = {json.dumps(normalized_updates)}
+                const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
+                    Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+                );
+                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                {ready_wait}
+                return {{
+                    ok: readyResult.ok,
+                    reason: readyResult.reason,
+                    error: readyResult.error,
+                    result
+                }};
+            }} catch (e) {{
+                console.error('Update failed:', e);
+                return {{ ok: false, reason: 'error', error: String(e) }};
+            }}
+        }})()
+        """
+        response = self.evaluate(update_js, await_promise=True)
+        self._ensure_ready(response, "state update")
+        if isinstance(response, dict):
+            return response.get("result")
+        return response
 
     def capture_image_sequence(
         self, state_updates: List[Dict], format: str = "png", quality: int = 90

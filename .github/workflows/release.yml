@@ -1,4 +1,4 @@
-name: Release to PyPI
+name: Release
 
 on:
   workflow_dispatch:
@@ -6,7 +6,9 @@ on:
     branches:
       - main
     tags:
-      - "v*"
+      - "v*" # colight (Python + @colight/core npm)
+      - "scene3d-v*" # @colight/scene3d npm
+      - "serde-v*" # colight-serde (Python) + @colight/serde npm
 
 jobs:
   check:
@@ -27,9 +29,13 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-  build:
+  # Main colight package (PyPI + @colight/core npm)
+  # Runs on: main branch push, v* tags
+  release-colight:
     needs: check
-    if: needs.check.outputs.skip != 'true'
+    if: |
+      needs.check.outputs.skip != 'true' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,17 +102,13 @@ jobs:
           sed -i "s|VERSIONED_CDN_DIST_URL = None|VERSIONED_CDN_DIST_URL = \"${JSDELIVR_JS_URL}\"|" packages/colight/src/colight/env.py
 
           cd packages/colight && uv build --out-dir dist
-          cd ../colight-publish && uv build --out-dir dist
 
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
           ls -la packages/colight/dist/
-          ls -la packages/colight-publish/dist/
           echo "=== Publishing colight to PyPI ==="
           uv publish packages/colight/dist/* --token ${{ secrets.PYPI_TOKEN }}
-          echo "=== Publishing colight-publish to PyPI ==="
-          uv publish packages/colight-publish/dist/* --token ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish to npm
         run: |
@@ -129,4 +131,81 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*,packages/colight/dist/*,packages/colight-publish/dist/*"
+          artifacts: "dist/*,packages/colight/dist/*"
+
+  # @colight/scene3d (npm only)
+  # Runs on: scene3d-v* tags
+  release-scene3d:
+    if: startsWith(github.ref, 'refs/tags/scene3d-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: yarn install --frozen-lockfile --production=false
+
+      - name: Build
+        run: yarn build
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Tag format: scene3d-v0.1.0 -> 0.1.0
+          VERSION=${GITHUB_REF#refs/tags/scene3d-v}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Publish @colight/scene3d to npm
+        run: |
+          cd packages/colight-scene3d
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # colight-serde (PyPI) + @colight/serde (npm)
+  # Runs on: serde-v* tags
+  release-serde:
+    if: startsWith(github.ref, 'refs/tags/serde-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.11.5
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: uv sync --group dev
+      - run: yarn install --frozen-lockfile --production=false
+
+      - name: Build
+        run: yarn build
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Tag format: serde-v0.1.0 -> 0.1.0
+          VERSION=${GITHUB_REF#refs/tags/serde-v}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Build and publish colight-serde to PyPI
+        run: |
+          cd packages/colight-serde
+          uv build --out-dir dist
+          uv publish dist/* --token ${{ secrets.PYPI_TOKEN }}
+
+      - name: Publish @colight/serde to npm
+        run: |
+          cd packages/colight-serde
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
