@@ -124,22 +124,30 @@ export interface SceneInnerProps {
 
   /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
   readyState?: ReadyState;
+
+  /** Optional map of custom primitive specifications */
+  primitiveSpecs?: Record<string, PrimitiveSpec<any>>;
 }
 
 function initGeometryResources(
   device: GPUDevice,
   resources: GeometryResources,
+  registry: Record<string, PrimitiveSpec<any>>,
 ) {
   // Create geometry for each primitive type
-  for (const [primitiveName, spec] of Object.entries(primitiveRegistry)) {
-    const typedName = primitiveName as keyof GeometryResources;
-    if (!resources[typedName]) {
-      resources[typedName] = spec.createGeometryResource(device);
+  for (const [primitiveName, spec] of Object.entries(registry)) {
+    // Only create if not already present
+    // Cast to any since resources is typed with known keys but we might have custom ones
+    if (!(resources as any)[primitiveName]) {
+      (resources as any)[primitiveName] = spec.createGeometryResource(device);
     }
   }
 }
 
-const primitiveRegistry: Record<ComponentConfig["type"], PrimitiveSpec<any>> = {
+const defaultPrimitiveRegistry: Record<
+  ComponentConfig["type"],
+  PrimitiveSpec<any>
+> = {
   PointCloud: pointCloudSpec,
   Ellipsoid: ellipsoidSpec,
   EllipsoidAxes: ellipsoidAxesSpec,
@@ -449,7 +457,14 @@ export function SceneInner({
   defaultOutlineColor = [1, 1, 1],
   defaultOutlineWidth = 2,
   readyState = NOOP_READY_STATE,
+  primitiveSpecs,
 }: SceneInnerProps) {
+  // Merge default registry with custom specs
+  const primitiveRegistry = useMemo(() => {
+    if (!primitiveSpecs) return defaultPrimitiveRegistry;
+    return { ...defaultPrimitiveRegistry, ...primitiveSpecs };
+  }, [primitiveSpecs]);
+
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
     device: GPUDevice;
@@ -665,13 +680,17 @@ export function SceneInner({
       };
 
       // Now initialize geometry resources
-      initGeometryResources(device, gpuRef.current.resources);
+      initGeometryResources(
+        device,
+        gpuRef.current.resources,
+        primitiveRegistry,
+      );
 
       setIsReady(true);
     } catch (err) {
       console.error("[Debug] Error during WebGPU initialization:", err);
     }
-  }, []);
+  }, [primitiveRegistry]);
 
   /******************************************************
    * B) Depth & Pick textures

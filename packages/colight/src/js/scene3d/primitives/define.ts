@@ -146,7 +146,7 @@ export const attr = {
 // Transform Types
 // =============================================================================
 
-export type TransformType = "billboard" | "rigid" | "beam";
+export type TransformType = "billboard" | "rigid" | "beam" | "screenspace_offset";
 
 // =============================================================================
 // Geometry Types
@@ -612,6 +612,25 @@ function generateTransformCode(
 
   // Transform normal
   let worldNormal = normalize(xDir * normal.x + yDir * normal.y + zDir * normal.z);`;
+
+    case "screenspace_offset":
+      return `  // Screenspace offset transform - fixed size in screenspace
+  // Projects anchor to clip space to get w (distance) for scaling
+  let clipAnchor = camera.mvp * vec4<f32>(anchor, 1.0);
+  // Scaling factor to maintain constant size. 0.001 is a baseline adjustment.
+  let screenspaceScale = clipAnchor.w * 0.001 * size;
+
+  let scaledOffset = offset * screenspaceScale;
+  let scaledLocal = localPos * screenspaceScale;
+  
+  ${
+    hasRotation
+      ? `let rotatedPos = quat_rotate(rotation, scaledOffset + scaledLocal);
+  let worldPos = anchor + rotatedPos;
+  let worldNormal = quat_rotate(rotation, normal);`
+      : `let worldPos = anchor + scaledOffset + scaledLocal;
+  let worldNormal = normal;`
+  }`;
 
     default:
       throw new Error(`Unknown transform type: ${transform}`);

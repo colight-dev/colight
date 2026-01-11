@@ -228,6 +228,7 @@ class Scene(Plot.LayoutItem):
     def __init__(
         self,
         *layers: Union[SceneComponent, Dict[str, Any], JSExpr],
+        meshes: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Initialize the scene.
 
@@ -235,28 +236,44 @@ class Scene(Plot.LayoutItem):
             *layers: Scene components and optional properties.
                 Properties can include:
                 - controls: List of controls to show. Currently supports ['fps']
+            meshes: Dictionary of custom mesh definitions.
         """
 
         self.layers = flatten_layers(layers)
+        self.meshes = meshes
         super().__init__()
 
     def __add__(self, other: Union[SceneComponent, "Scene", Dict[str, Any]]) -> "Scene":
         """Allow combining scenes with + operator."""
+        new_meshes = self.meshes.copy() if self.meshes else {}
+        if isinstance(other, Scene) and other.meshes:
+            new_meshes.update(other.meshes)
+
+        kwargs = {}
+        if new_meshes:
+            kwargs["meshes"] = new_meshes
+
         if isinstance(other, Scene):
-            return Scene(*self.layers, *other.layers)
+            return Scene(*self.layers, *other.layers, **kwargs)
         else:
-            return Scene(*self.layers, other)
+            return Scene(*self.layers, other, **kwargs)
 
     def __radd__(self, other: Union[Dict[str, Any], JSExpr]) -> "Scene":
         """Allow combining scenes with + operator when dict or JSExpr is on the left."""
-        return Scene(other, *self.layers)
+        kwargs = {}
+        if self.meshes:
+            kwargs["meshes"] = self.meshes
+        return Scene(other, *self.layers, **kwargs)
 
     def for_json(self) -> Any:
         """Convert to JSON representation for JavaScript."""
         components = [
             e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
         ]
-        return [Plot.JSRef("scene3d.Scene"), {"layers": components}]
+        props = {"layers": components}
+        if self.meshes:
+            props["meshes"] = self.meshes
+        return [Plot.JSRef("scene3d.Scene"), props]
 
 
 def flatten_array(arr: Any, dtype: Any = np.float32) -> Any:
@@ -594,6 +611,64 @@ def Group(
     return SceneComponent("Group", data)
 
 
+def Mesh(
+    name: str,
+    vertex_data: ArrayLike,
+    index_data: ArrayLike,
+    shading: Optional[Literal["lit", "unlit"]] = None,
+    cull_mode: Optional[Literal["none", "front", "back"]] = None,
+) -> Dict[str, Any]:
+    """Define a custom mesh for use with CustomPrimitive.
+
+    Args:
+        name: Unique name for the mesh primitive type
+        vertex_data: Flat array of vertex attributes (position, normal, etc.)
+        index_data: Flat array of indices
+        shading: "lit" (default) or "unlit"
+        cull_mode: "back" (default), "front", or "none"
+
+    Returns:
+        Dictionary mapping name to mesh definition
+    """
+    data = {
+        "vertexData": flatten_array(vertex_data, dtype=np.float32),
+        "indexData": flatten_array(index_data, dtype=np.uint16),
+    }
+    if shading:
+        data["shading"] = shading
+    if cull_mode:
+        data["cullMode"] = cull_mode
+    return {name: data}
+
+
+def CustomPrimitive(
+    type_name: str,
+    centers: ArrayLike,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a custom primitive instance.
+
+    Args:
+        type_name: Name of the mesh type (must match a Mesh definition)
+        centers: Nx3 array of centers
+        layer: "scene" or "overlay"
+        **kwargs: Additional properties (colors, scales, quaternions, etc.)
+
+    Returns:
+        SceneComponent for the custom primitive
+    """
+    centers = flatten_array(centers, dtype=np.float32)
+    data: Dict[str, Any] = {"type": type_name, "centers": centers}
+    if layer:
+        data["layer"] = layer
+    data.update(kwargs)
+
+    # We use "CustomPrimitive" as the JS component type, which acts as a pass-through
+    # factory that returns the config with the correct 'type' field.
+    return SceneComponent("CustomPrimitive", data)
+
+
 # =============================================================================
 # Gizmo (Prototype - API may change)
 # =============================================================================
@@ -795,6 +870,8 @@ __all__ = [
     "Cuboid",
     "LineBeams",
     "Group",
+    "Mesh",
+    "CustomPrimitive",
     "deco",
     # Hover props
     "HoverProps",

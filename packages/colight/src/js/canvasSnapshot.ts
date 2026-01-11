@@ -148,6 +148,9 @@ export async function createCanvasOverlays(): Promise<void> {
     const mappedU32 = new Uint32Array(mappedData.buffer);
     const pixelU32 = new Uint32Array(pixelData.buffer);
 
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    const isBGRA = format === "bgra8unorm";
+
     // Copy rows accounting for alignment
     for (let row = 0; row < height; row++) {
       const sourceRowStart = (row * bytesPerRow) / 4; // Divide by 4 since we're using 32-bit values
@@ -155,14 +158,18 @@ export async function createCanvasOverlays(): Promise<void> {
 
       for (let x = 0; x < width; x++) {
         const pixel = mappedU32[sourceRowStart + x];
-        // Extract BGRA channels
-        const b = pixel & 0x000000ff;
-        const g = pixel & 0x0000ff00;
-        const r = pixel & 0x00ff0000;
-        const a = pixel & 0xff000000;
-
-        // Reassemble as RGBA
-        pixelU32[targetRowStart + x] = a | (b << 16) | g | (r >> 16);
+        
+        if (isBGRA) {
+          // Extract BGRA channels and reassemble as RGBA
+          const b = pixel & 0x000000ff;
+          const g = pixel & 0x0000ff00;
+          const r = pixel & 0x00ff0000;
+          const a = pixel & 0xff000000;
+          pixelU32[targetRowStart + x] = a | (b << 16) | g | (r >> 16);
+        } else {
+          // RGBA (rgba8unorm) - no swizzle needed
+          pixelU32[targetRowStart + x] = pixel;
+        }
       }
     }
 

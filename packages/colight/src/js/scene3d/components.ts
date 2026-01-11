@@ -12,7 +12,7 @@ import {
   PickEvent,
 } from "./types";
 
-export type { PickEvent };
+export type { PickEvent, PrimitiveSpec };
 
 import { acopy } from "./utils";
 
@@ -525,6 +525,8 @@ export {
   type LineBeamsComponentConfig,
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
+  defineMesh,
+  type MeshComponentConfig,
 } from "./primitives";
 
 // Re-export utility functions from primitives

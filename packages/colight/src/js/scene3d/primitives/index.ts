@@ -43,3 +43,6 @@ export {
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
 } from "./boundingBox";
+
+// Generic mesh factory
+export { defineMesh, type MeshComponentConfig } from "./mesh";

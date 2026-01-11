@@ -576,6 +576,7 @@ export interface GeometryResource {
 }
 
 export interface GeometryResources {
+  [key: string]: GeometryResource | null;
   PointCloud: GeometryResource | null;
   Ellipsoid: GeometryResource | null;
   EllipsoidAxes: GeometryResource | null;

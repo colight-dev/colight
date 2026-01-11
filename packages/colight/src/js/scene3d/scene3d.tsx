@@ -25,6 +25,8 @@ import {
   LineBeamsComponentConfig,
   BoundingBoxComponentConfig,
   PickEvent,
+  PrimitiveSpec,
+  defineMesh,
 } from "./components";
 import { GroupConfig, flattenGroups, hasGroups } from "./groups";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
@@ -267,6 +269,16 @@ const PRIMITIVE_TYPES = new Set([
   "Group",
 ]);
 
+/**
+ * Custom primitive factory - allows passing arbitrary props with a custom type.
+ * Used for rendering custom meshes defined via 'meshes' prop.
+ */
+export function CustomPrimitive(props: any): ComponentConfig {
+  // Pass through props. The 'type' field in props determines the primitive type.
+  return props as ComponentConfig;
+}
+(CustomPrimitive as any)[SCENE3D_TYPE] = "CustomPrimitive";
+
 // =============================================================================
 // Scene Components
 // =============================================================================
@@ -293,6 +305,13 @@ export function computeCanvasDimensions(
       height: `${finalHeight}px`,
     },
   };
+}
+
+export interface MeshDefinition {
+  vertexData: Float32Array | number[];
+  indexData: Uint16Array | Uint32Array | number[];
+  shading?: "lit" | "unlit";
+  cullMode?: GPUCullMode;
 }
 
 /**
@@ -332,6 +351,10 @@ interface SceneProps {
   style?: React.CSSProperties;
   /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
   readyState?: ReadyState;
+  /** Optional map of custom primitive specifications */
+  primitiveSpecs?: Record<string, PrimitiveSpec<any>>;
+  /** Optional map of custom mesh definitions */
+  meshes?: Record<string, MeshDefinition>;
 }
 
 interface DevMenuProps {
@@ -429,9 +452,26 @@ function collectComponentsFromChildren(
  * This is called when Python composition like `PointCloud(...) + Ellipsoid(...) + {camera}`
  * is serialized and evaluated on the JS side.
  */
-export function SceneWithLayers({ layers }: { layers: any[] }) {
+export function SceneWithLayers({
+  layers,
+  meshes,
+  primitiveSpecs,
+}: {
+  layers: any[];
+  meshes?: Record<string, MeshDefinition>;
+  primitiveSpecs?: Record<string, PrimitiveSpec<any>>;
+}) {
   const components: (ComponentConfig | GroupConfig)[] = [];
   const sceneProps: Record<string, any> = {};
+
+  const isValidType = (type: string) => {
+    return (
+      PRIMITIVE_TYPES.has(type) ||
+      (meshes && type in meshes) ||
+      (primitiveSpecs && type in primitiveSpecs)
+    );
+  };
+
   for (const layer of layers) {
     if (!layer) continue;
 
@@ -439,20 +479,27 @@ export function SceneWithLayers({ layers }: { layers: any[] }) {
     if (Array.isArray(layer) && layer[0] === SceneWithLayers) {
       const nestedLayers = layer[1].layers;
       for (const nestedLayer of nestedLayers) {
-        if (nestedLayer?.type && PRIMITIVE_TYPES.has(nestedLayer.type)) {
+        if (nestedLayer?.type && isValidType(nestedLayer.type)) {
           components.push(nestedLayer);
         } else if (nestedLayer?.constructor === Object) {
           Object.assign(sceneProps, nestedLayer);
         }
       }
-    } else if (layer.type && PRIMITIVE_TYPES.has(layer.type)) {
+    } else if (layer.type && isValidType(layer.type)) {
       components.push(layer);
     } else if (layer.constructor === Object) {
       Object.assign(sceneProps, layer);
     }
   }
 
-  return <Scene components={components} {...sceneProps} />;
+  return (
+    <Scene
+      components={components}
+      meshes={meshes}
+      primitiveSpecs={primitiveSpecs}
+      {...sceneProps}
+    />
+  );
 }
 
 /**
@@ -491,6 +538,8 @@ export function Scene({
   style,
   controls = [],
   readyState = NOOP_READY_STATE,
+  primitiveSpecs,
+  meshes,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -502,6 +551,39 @@ export function Scene({
     () => readyState.beginUpdate("scene3d/ready"),
     [readyState],
   );
+
+  // Create primitive specs from meshes prop
+  const meshSpecs = useMemo(() => {
+    if (!meshes) return null;
+    const specs: Record<string, PrimitiveSpec<any>> = {};
+    for (const [name, def] of Object.entries(meshes)) {
+      specs[name] = defineMesh(
+        name,
+        {
+          vertexData:
+            def.vertexData instanceof Float32Array
+              ? def.vertexData
+              : new Float32Array(def.vertexData),
+          indexData:
+            def.indexData instanceof Uint16Array ||
+            def.indexData instanceof Uint32Array
+              ? (def.indexData as Uint16Array | Uint32Array)
+              : new Uint16Array(def.indexData),
+        },
+        {
+          shading: def.shading,
+          cullMode: def.cullMode,
+        },
+      );
+    }
+    return specs;
+  }, [meshes]);
+
+  // Merge provided specs with mesh specs
+  const mergedSpecs = useMemo(() => {
+    if (!meshSpecs) return primitiveSpecs;
+    return { ...primitiveSpecs, ...meshSpecs };
+  }, [primitiveSpecs, meshSpecs]);
 
   // Collect components from children or use components prop
   const rawComponents = useMemo(() => {
@@ -599,6 +681,7 @@ export function Scene({
             defaultOutlineColor={defaultOutlineColor}
             defaultOutlineWidth={defaultOutlineWidth}
             readyState={readyState}
+            primitiveSpecs={mergedSpecs}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu
