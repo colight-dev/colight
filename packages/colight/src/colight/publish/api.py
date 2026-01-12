@@ -73,7 +73,7 @@ def evaluate_python(
             print("parse error", e)
 
         document = parse_document(
-            f"""# Error reading file: \n# ```\n# {str(e).replace(chr(10), chr(10) + '# ')}\n# ```"""
+            f"""# Error reading file: \n# ```\n# {str(e).replace(chr(10), chr(10) + "# ")}\n# ```"""
         )
 
     # Parse pragma if provided

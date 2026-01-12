@@ -29,7 +29,7 @@ def test_edge_building_performance():
                         "id": str(i),
                         "interface": {
                             "provides": [f"var_{i}"],
-                            "requires": [f"var_{i-1}"],
+                            "requires": [f"var_{i - 1}"],
                         },
                     }
                 )
@@ -52,7 +52,7 @@ def test_edge_building_performance():
         ratio = times[i] / times[i - 1]
         ratios.append(ratio)
         print(
-            f"Blocks: {block_counts[i-1]} -> {block_counts[i]}, "
+            f"Blocks: {block_counts[i - 1]} -> {block_counts[i]}, "
             f"Time ratio: {ratio:.2f} (expect ~2.0 for O(n), ~4.0 for O(n²))"
         )
 

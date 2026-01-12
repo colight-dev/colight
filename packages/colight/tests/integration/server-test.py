@@ -234,10 +234,10 @@ def main():
         tests_passed, tests_failed = test_navigation(driver, base_url)
 
         # Print results
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"Tests passed: {tests_passed}")
         print(f"Tests failed: {tests_failed}")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
 
         return 0 if tests_failed == 0 else 1
 

@@ -218,7 +218,7 @@ def test_dict_modification_during_iteration():
             # Sometimes delete old keys
             if i > 10 and i % 10 == 0:
                 try:
-                    del store[f"key_{i-10}"]
+                    del store[f"key_{i - 10}"]
                 except KeyError:
                     pass
 

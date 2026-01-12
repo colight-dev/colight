@@ -197,14 +197,14 @@ def _stream_video_from_updates(
         ffmpeg_cmd = (
             f"ffmpeg {'-v error' if not debug else ''} -y "
             f"-f image2pipe -vcodec png -framerate {fps} -i - "
-            f"-vf \"split [a][b];[b]palettegen=stats_mode=diff[p];[a][p]paletteuse=new=1\" "
-            f"-c:v gif -loop 0 \"{filename}\""
+            f'-vf "split [a][b];[b]palettegen=stats_mode=diff[p];[a][p]paletteuse=new=1" '
+            f'-c:v gif -loop 0 "{filename}"'
         )
     else:
         ffmpeg_cmd = (
             f"ffmpeg {'-v error' if not debug else ''} -y "
             f"-f image2pipe -vcodec png -framerate {fps} -i - "
-            f"-an -c:v libx264 -pix_fmt yuv420p -crf 18 -preset slow \"{filename}\""
+            f'-an -c:v libx264 -pix_fmt yuv420p -crf 18 -preset slow "{filename}"'
         )
 
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, shell=True)
