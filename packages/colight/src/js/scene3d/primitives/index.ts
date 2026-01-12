@@ -39,10 +39,17 @@ export {
 } from "./ellipsoidAxes";
 export { cuboidSpec, type CuboidComponentConfig } from "./cuboid";
 export { lineBeamsSpec, type LineBeamsComponentConfig } from "./lineBeams";
+export { lineSegmentsSpec, type LineSegmentsComponentConfig } from "./lineSegments";
 export {
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
 } from "./boundingBox";
+export {
+  imagePlaneSpec,
+  type ImagePlaneComponentConfig,
+  type ImageSource,
+  getImageBindGroupLayout,
+} from "./imagePlane";
 
 // Generic mesh factory
 export { defineMesh, type MeshComponentConfig } from "./mesh";

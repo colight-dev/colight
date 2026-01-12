@@ -205,6 +205,7 @@ function applyTransformToComponent(
   transform: Transform,
   groupPath: string[],
 ): FlattenedComponent {
+  const isImagePlane = component.type === "ImagePlane";
   const result: FlattenedComponent = {
     ...component,
     _groupPath: groupPath.length > 0 ? groupPath : undefined,
@@ -237,6 +238,56 @@ function applyTransformToComponent(
     }
 
     (result as any).centers = newCenters;
+  }
+
+  // Transform segment endpoints for LineSegments (starts/ends)
+  if ("starts" in component && component.starts && "ends" in component && component.ends) {
+    const starts = component.starts as Float32Array;
+    const ends = component.ends as Float32Array;
+    const segCount = Math.min(starts.length, ends.length) / 3;
+    const newStarts = new Float32Array(segCount * 3);
+    const newEnds = new Float32Array(segCount * 3);
+
+    for (let i = 0; i < segCount; i++) {
+      const startLocal: Vec3 = [
+        starts[i * 3],
+        starts[i * 3 + 1],
+        starts[i * 3 + 2],
+      ];
+      const endLocal: Vec3 = [
+        ends[i * 3],
+        ends[i * 3 + 1],
+        ends[i * 3 + 2],
+      ];
+
+      const startScaled: Vec3 = [
+        startLocal[0] * transform.scale[0],
+        startLocal[1] * transform.scale[1],
+        startLocal[2] * transform.scale[2],
+      ];
+      const endScaled: Vec3 = [
+        endLocal[0] * transform.scale[0],
+        endLocal[1] * transform.scale[1],
+        endLocal[2] * transform.scale[2],
+      ];
+
+      const startRotated = quatRotate(transform.quaternion, startScaled);
+      const endRotated = quatRotate(transform.quaternion, endScaled);
+
+      const startTransformed = add(transform.position, startRotated);
+      const endTransformed = add(transform.position, endRotated);
+
+      newStarts[i * 3] = startTransformed[0];
+      newStarts[i * 3 + 1] = startTransformed[1];
+      newStarts[i * 3 + 2] = startTransformed[2];
+
+      newEnds[i * 3] = endTransformed[0];
+      newEnds[i * 3 + 1] = endTransformed[1];
+      newEnds[i * 3 + 2] = endTransformed[2];
+    }
+
+    (result as any).starts = newStarts;
+    (result as any).ends = newEnds;
   }
 
   // Transform points for LineBeams (format: [x,y,z,lineIndex, ...])
@@ -319,21 +370,89 @@ function applyTransformToComponent(
     (result as any).half_sizes = newSizes;
   }
 
-  // Scale size for PointCloud/LineBeams (uniform scale)
-  if ("size" in component && component.size !== undefined) {
-    const avgScale = (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-    (result as any).size = (component.size as number) * avgScale;
-  }
-  if ("sizes" in component && component.sizes) {
-    const sizes = component.sizes as Float32Array;
-    const avgScale = (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-    const newSizes = new Float32Array(sizes.length);
-
-    for (let i = 0; i < sizes.length; i++) {
-      newSizes[i] = sizes[i] * avgScale;
+  if (isImagePlane) {
+    if ("size" in component && component.size !== undefined) {
+      const sizeVal = component.size as number | Vec3;
+      if (Array.isArray(sizeVal)) {
+        (result as any).size = [
+          sizeVal[0] * transform.scale[0],
+          sizeVal[1] * transform.scale[1],
+        ];
+      } else {
+        const avgScale =
+          (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+        (result as any).size = sizeVal * avgScale;
+      }
     }
+    if ("sizes" in component && component.sizes) {
+      const sizes = component.sizes as Float32Array;
+      const newSizes = new Float32Array(sizes.length);
+      if (sizes.length % 2 === 0) {
+        for (let i = 0; i < sizes.length / 2; i++) {
+          newSizes[i * 2] = sizes[i * 2] * transform.scale[0];
+          newSizes[i * 2 + 1] = sizes[i * 2 + 1] * transform.scale[1];
+        }
+      } else {
+        const avgScale =
+          (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+        for (let i = 0; i < sizes.length; i++) {
+          newSizes[i] = sizes[i] * avgScale;
+        }
+      }
+      (result as any).sizes = newSizes;
+    }
+  } else {
+    // Scale size for PointCloud/LineBeams (uniform scale)
+    if ("size" in component && component.size !== undefined) {
+      const avgScale =
+        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+      (result as any).size = (component.size as number) * avgScale;
+    }
+    if ("sizes" in component && component.sizes) {
+      const sizes = component.sizes as Float32Array;
+      const avgScale =
+        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+      const newSizes = new Float32Array(sizes.length);
 
-    (result as any).sizes = newSizes;
+      for (let i = 0; i < sizes.length; i++) {
+        newSizes[i] = sizes[i] * avgScale;
+      }
+
+      (result as any).sizes = newSizes;
+    }
+  }
+
+  // Scale mesh-style scale/scales (vec3)
+  if ("scale" in component && component.scale !== undefined) {
+    const scaleVal = component.scale as number | Vec3;
+    if (Array.isArray(scaleVal)) {
+      (result as any).scale = [
+        scaleVal[0] * transform.scale[0],
+        scaleVal[1] * transform.scale[1],
+        scaleVal[2] * transform.scale[2],
+      ];
+    } else {
+      const avgScale = (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+      (result as any).scale = scaleVal * avgScale;
+    }
+  }
+  if ("scales" in component && component.scales) {
+    const scales = component.scales as Float32Array;
+    const newScales = new Float32Array(scales.length);
+    if (scales.length % 3 === 0) {
+      for (let i = 0; i < scales.length / 3; i++) {
+        newScales[i * 3] = scales[i * 3] * transform.scale[0];
+        newScales[i * 3 + 1] = scales[i * 3 + 1] * transform.scale[1];
+        newScales[i * 3 + 2] = scales[i * 3 + 2] * transform.scale[2];
+      }
+    } else {
+      const avgScale =
+        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
+      for (let i = 0; i < scales.length; i++) {
+        newScales[i] = scales[i] * avgScale;
+      }
+    }
+    (result as any).scales = newScales;
   }
 
   return result;

@@ -228,6 +228,7 @@ class Scene(Plot.LayoutItem):
     def __init__(
         self,
         *layers: Union[SceneComponent, Dict[str, Any], JSExpr],
+        primitive_specs: Optional[Dict[str, Dict[str, Any]]] = None,
         meshes: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Initialize the scene.
@@ -236,22 +237,27 @@ class Scene(Plot.LayoutItem):
             *layers: Scene components and optional properties.
                 Properties can include:
                 - controls: List of controls to show. Currently supports ['fps']
-            meshes: Dictionary of custom mesh definitions.
+            primitive_specs: Dictionary of custom primitive definitions.
+            meshes: Deprecated alias for primitive_specs.
         """
 
         self.layers = flatten_layers(layers)
-        self.meshes = meshes
+        if meshes and primitive_specs:
+            merged_specs = {**meshes, **primitive_specs}
+        else:
+            merged_specs = primitive_specs or meshes
+        self.primitive_specs = merged_specs
         super().__init__()
 
     def __add__(self, other: Union[SceneComponent, "Scene", Dict[str, Any]]) -> "Scene":
         """Allow combining scenes with + operator."""
-        new_meshes = self.meshes.copy() if self.meshes else {}
-        if isinstance(other, Scene) and other.meshes:
-            new_meshes.update(other.meshes)
+        new_specs = self.primitive_specs.copy() if self.primitive_specs else {}
+        if isinstance(other, Scene) and other.primitive_specs:
+            new_specs.update(other.primitive_specs)
 
         kwargs = {}
-        if new_meshes:
-            kwargs["meshes"] = new_meshes
+        if new_specs:
+            kwargs["primitive_specs"] = new_specs
 
         if isinstance(other, Scene):
             return Scene(*self.layers, *other.layers, **kwargs)
@@ -261,8 +267,8 @@ class Scene(Plot.LayoutItem):
     def __radd__(self, other: Union[Dict[str, Any], JSExpr]) -> "Scene":
         """Allow combining scenes with + operator when dict or JSExpr is on the left."""
         kwargs = {}
-        if self.meshes:
-            kwargs["meshes"] = self.meshes
+        if self.primitive_specs:
+            kwargs["primitive_specs"] = self.primitive_specs
         return Scene(other, *self.layers, **kwargs)
 
     def for_json(self) -> Any:
@@ -271,8 +277,8 @@ class Scene(Plot.LayoutItem):
             e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
         ]
         props = {"layers": components}
-        if self.meshes:
-            props["meshes"] = self.meshes
+        if self.primitive_specs:
+            props["primitiveSpecs"] = self.primitive_specs
         return [Plot.JSRef("scene3d.Scene"), props]
 
 
@@ -291,6 +297,62 @@ def flatten_array(arr: Any, dtype: Any = np.float32) -> Any:
         if arr.ndim == 2:
             return arr.flatten()
     return arr
+
+
+def coerce_index_array(arr: Any) -> Any:
+    """Normalize index data to uint16/uint32 based on max index."""
+    if arr is None:
+        return None
+    array = np.asarray(arr)
+    max_val = int(array.max()) if array.size else 0
+    dtype = np.uint32 if max_val > 65535 else np.uint16
+    return flatten_array(array, dtype=dtype)
+
+
+def coerce_image_array(
+    image: Any,
+    image_width: Optional[int] = None,
+    image_height: Optional[int] = None,
+) -> Any:
+    """Normalize image data for ImagePlane/ImageProjection.
+
+    Returns a dict with {data, width, height, channels} or passes through JSExpr.
+    """
+    if isinstance(image, JSExpr):
+        return image
+    if isinstance(image, dict) and "data" in image and "width" in image and "height" in image:
+        return image
+    if isinstance(image, (np.ndarray, list)):
+        arr = np.asarray(image)
+        if arr.ndim == 1:
+            if image_width is None or image_height is None:
+                raise ValueError("Flat image data requires image_width and image_height.")
+            channels = int(arr.size / (image_width * image_height)) if image_width else 0
+            arr = arr.reshape((image_height, image_width, channels))
+        if arr.ndim == 2:
+            arr = np.stack([arr] * 3, axis=-1)
+        if arr.ndim != 3:
+            raise ValueError("Image data must be HxW or HxWxC.")
+
+        height, width = arr.shape[:2]
+        channels = arr.shape[2]
+        if channels not in (1, 3, 4):
+            raise ValueError("Image data must have 1, 3, or 4 channels.")
+        if channels == 1:
+            arr = np.repeat(arr, 3, axis=-1)
+            channels = 3
+
+        if np.issubdtype(arr.dtype, np.floating) and arr.max() <= 1.0:
+            arr = arr * 255.0
+
+        arr = arr.astype(np.uint8)
+        return {
+            "data": arr.flatten(),
+            "width": width,
+            "height": height,
+            "channels": channels,
+        }
+    return image
 
 
 def PointCloud(
@@ -552,6 +614,351 @@ def LineBeams(
     return SceneComponent("LineBeams", data, **kwargs)
 
 
+def LineSegments(
+    starts: ArrayLike,
+    ends: ArrayLike,
+    color: Optional[ArrayLike] = None,
+    size: Optional[NumberLike] = None,
+    colors: Optional[ArrayLike] = None,
+    sizes: Optional[ArrayLike] = None,
+    alpha: Optional[NumberLike] = None,
+    alphas: Optional[ArrayLike] = None,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    hoverProps: Optional[HoverProps] = None,
+    picking_scale: Optional[NumberLike] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a line segments element.
+
+    Args:
+        starts: Nx3 array of segment start positions
+        ends: Nx3 array of segment end positions
+        color: Default RGB color [r,g,b] for all segments if colors not provided
+        size: Default size for all segments if sizes not provided
+        colors: Array of RGB colors per segment (optional)
+        sizes: Array of sizes per segment (optional)
+        alpha: Default alpha value for all segments if alphas not provided
+        alphas: Array of alpha values per segment (optional)
+        layer: Render layer - "scene" (default) or "overlay"
+        hoverProps: Properties to apply on hover (color, alpha, scale)
+        picking_scale: Scale factor for picking hit area (values > 1 make clicking easier)
+        **kwargs: Additional arguments like onHover, onClick
+
+    Returns:
+        A LineSegments scene component that renders independent segments.
+    """
+    data: Dict[str, Any] = {
+        "starts": flatten_array(starts, dtype=np.float32),
+        "ends": flatten_array(ends, dtype=np.float32),
+    }
+
+    if color is not None:
+        data["color"] = color
+    if size is not None:
+        data["size"] = size
+    if colors is not None:
+        data["colors"] = flatten_array(colors, dtype=np.float32)
+    if sizes is not None:
+        data["sizes"] = flatten_array(sizes, dtype=np.float32)
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
+
+    if layer is not None:
+        data["layer"] = layer
+
+    if hoverProps is not None:
+        data["hoverProps"] = hoverProps
+
+    if picking_scale is not None:
+        data["pickingScale"] = picking_scale
+
+    return SceneComponent("LineSegments", data, **kwargs)
+
+
+def GridHelper(
+    size: NumberLike = 10,
+    divisions: int = 10,
+    color: Optional[ArrayLike] = None,
+    center_color: Optional[ArrayLike] = None,
+    line_width: NumberLike = 0.002,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create an XZ grid helper using LineSegments."""
+    half = float(size) / 2.0
+    step = float(size) / float(divisions)
+    line_count = divisions + 1
+    segment_count = line_count * 2
+
+    starts = np.zeros((segment_count, 3), dtype=np.float32)
+    ends = np.zeros((segment_count, 3), dtype=np.float32)
+    colors = np.zeros((segment_count, 3), dtype=np.float32)
+
+    grid_color = color if color is not None else [0.5, 0.5, 0.5]
+    axis_color = center_color if center_color is not None else [0.7, 0.7, 0.7]
+
+    seg_index = 0
+    for i in range(line_count):
+        pos = -half + i * step
+        is_center = abs(pos) < 1e-6
+        line_color = axis_color if is_center else grid_color
+
+        starts[seg_index] = [-half, 0.0, pos]
+        ends[seg_index] = [half, 0.0, pos]
+        colors[seg_index] = line_color
+        seg_index += 1
+
+        starts[seg_index] = [pos, 0.0, -half]
+        ends[seg_index] = [pos, 0.0, half]
+        colors[seg_index] = line_color
+        seg_index += 1
+
+    return LineSegments(
+        starts=starts,
+        ends=ends,
+        colors=colors,
+        size=line_width,
+        layer=layer,
+        **kwargs,
+    )
+
+
+def CameraFrustum(
+    intrinsics: Dict[str, Any],
+    extrinsics: Dict[str, Any],
+    near: NumberLike = 0.1,
+    far: NumberLike = 1.0,
+    color: Optional[ArrayLike] = None,
+    line_width: NumberLike = 0.002,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a camera frustum helper using LineSegments."""
+    fx = intrinsics["fx"]
+    fy = intrinsics["fy"]
+    cx = intrinsics["cx"]
+    cy = intrinsics["cy"]
+    width = intrinsics["width"]
+    height = intrinsics["height"]
+
+    position = list(extrinsics["position"])
+    quaternion = list(extrinsics["quaternion"])
+
+    def _quat_rotate(q: ArrayLike, v: ArrayLike) -> list:
+        qx, qy, qz, qw = q
+        vx, vy, vz = v
+        ix = qw * vx + qy * vz - qz * vy
+        iy = qw * vy + qz * vx - qx * vz
+        iz = qw * vz + qx * vy - qy * vx
+        iw = -qx * vx - qy * vy - qz * vz
+        return [
+            ix * qw + iw * -qx + iy * -qz - iz * -qy,
+            iy * qw + iw * -qy + iz * -qx - ix * -qz,
+            iz * qw + iw * -qz + ix * -qy - iy * -qx,
+        ]
+
+    def _project_corner(u: float, v: float, depth: float) -> list:
+        x = (u - cx) / fx * depth
+        y = (v - cy) / fy * depth
+        return [x, y, depth]
+
+    def _transform(point: list) -> list:
+        rotated = _quat_rotate(quaternion, point)
+        return [
+            rotated[0] + position[0],
+            rotated[1] + position[1],
+            rotated[2] + position[2],
+        ]
+
+    near_corners = [
+        _transform(_project_corner(0, 0, near)),
+        _transform(_project_corner(width, 0, near)),
+        _transform(_project_corner(width, height, near)),
+        _transform(_project_corner(0, height, near)),
+    ]
+    far_corners = [
+        _transform(_project_corner(0, 0, far)),
+        _transform(_project_corner(width, 0, far)),
+        _transform(_project_corner(width, height, far)),
+        _transform(_project_corner(0, height, far)),
+    ]
+
+    segments = []
+    for i in range(4):
+        segments.append(near_corners[i] + near_corners[(i + 1) % 4])
+        segments.append(far_corners[i] + far_corners[(i + 1) % 4])
+        segments.append(near_corners[i] + far_corners[i])
+
+    starts = np.array([seg[:3] for seg in segments], dtype=np.float32)
+    ends = np.array([seg[3:] for seg in segments], dtype=np.float32)
+    colors = np.tile(
+        np.array(color if color is not None else [1.0, 0.8, 0.2], dtype=np.float32),
+        (len(segments), 1),
+    )
+
+    return LineSegments(
+        starts=starts,
+        ends=ends,
+        colors=colors,
+        size=line_width,
+        layer=layer,
+        **kwargs,
+    )
+
+
+def ImagePlane(
+    image: Any,
+    *,
+    centers: Optional[ArrayLike] = None,
+    position: Optional[ArrayLike] = None,
+    quaternions: Optional[ArrayLike] = None,
+    quaternion: Optional[ArrayLike] = None,
+    sizes: Optional[ArrayLike] = None,
+    size: Optional[ArrayLike] = None,
+    width: Optional[NumberLike] = None,
+    height: Optional[NumberLike] = None,
+    colors: Optional[ArrayLike] = None,
+    color: Optional[ArrayLike] = None,
+    alphas: Optional[ArrayLike] = None,
+    alpha: Optional[NumberLike] = None,
+    opacity: Optional[NumberLike] = None,
+    image_key: Optional[Union[str, int]] = None,
+    image_width: Optional[int] = None,
+    image_height: Optional[int] = None,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a textured image plane."""
+    if centers is None:
+        if position is not None:
+            centers = [position]
+        else:
+            centers = [[0, 0, 0]]
+
+    data: Dict[str, Any] = {
+        "image": coerce_image_array(image, image_width, image_height),
+        "centers": flatten_array(centers, dtype=np.float32),
+    }
+
+    if quaternions is not None:
+        data["quaternions"] = flatten_array(quaternions, dtype=np.float32)
+    elif quaternion is not None:
+        data["quaternions"] = flatten_array([quaternion], dtype=np.float32)
+
+    if sizes is not None:
+        data["sizes"] = flatten_array(sizes, dtype=np.float32)
+    else:
+        resolved_size = size
+        if resolved_size is None and (width is not None or height is not None):
+            resolved_size = [width if width is not None else 1, height if height is not None else 1]
+        if resolved_size is not None:
+            data["size"] = resolved_size
+
+    if colors is not None:
+        data["colors"] = flatten_array(colors, dtype=np.float32)
+    if color is not None:
+        data["color"] = color
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
+    elif opacity is not None:
+        data["alpha"] = opacity
+
+    if image_key is not None:
+        data["imageKey"] = image_key
+    if layer is not None:
+        data["layer"] = layer
+
+    return SceneComponent("ImagePlane", data, **kwargs)
+
+
+def ImageProjection(
+    image: Any,
+    intrinsics: Dict[str, Any],
+    extrinsics: Dict[str, Any],
+    depth: NumberLike = 1.0,
+    color: Optional[ArrayLike] = None,
+    opacity: Optional[NumberLike] = None,
+    show_frustum: bool = False,
+    frustum_color: Optional[ArrayLike] = None,
+    line_width: NumberLike = 0.02,
+    image_key: Optional[Union[str, int]] = None,
+    image_width: Optional[int] = None,
+    image_height: Optional[int] = None,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> Scene | SceneComponent:
+    """Create an image projection (plane + optional frustum lines)."""
+    fx = intrinsics["fx"]
+    fy = intrinsics["fy"]
+    cx = intrinsics["cx"]
+    cy = intrinsics["cy"]
+    width = intrinsics["width"]
+    height = intrinsics["height"]
+
+    position = extrinsics["position"]
+    quaternion = extrinsics["quaternion"]
+
+    def _quat_rotate(q: ArrayLike, v: ArrayLike) -> list:
+        qx, qy, qz, qw = q
+        vx, vy, vz = v
+        ix = qw * vx + qy * vz - qz * vy
+        iy = qw * vy + qz * vx - qx * vz
+        iz = qw * vz + qx * vy - qy * vx
+        iw = -qx * vx - qy * vy - qz * vz
+        return [
+            ix * qw + iw * -qx + iy * -qz - iz * -qy,
+            iy * qw + iw * -qy + iz * -qx - ix * -qz,
+            iz * qw + iw * -qz + ix * -qy - iy * -qx,
+        ]
+
+    def _project_corner(u: float, v: float, depth_val: float) -> list:
+        x = (u - cx) / fx * depth_val
+        y = (v - cy) / fy * depth_val
+        return [x, y, depth_val]
+
+    corners_cam = [
+        _project_corner(0, 0, float(depth)),
+        _project_corner(width, 0, float(depth)),
+        _project_corner(width, height, float(depth)),
+        _project_corner(0, height, float(depth)),
+    ]
+    center_cam = np.mean(np.array(corners_cam, dtype=np.float32), axis=0).tolist()
+
+    width_world = float(np.linalg.norm(np.array(corners_cam[1]) - np.array(corners_cam[0])))
+    height_world = float(np.linalg.norm(np.array(corners_cam[3]) - np.array(corners_cam[0])))
+
+    center_world = _quat_rotate(quaternion, center_cam)
+    center_world = [
+        center_world[0] + position[0],
+        center_world[1] + position[1],
+        center_world[2] + position[2],
+    ]
+
+    plane_color = color if color is not None else [1.0, 1.0, 1.0]
+    plane = ImagePlane(
+        image=image,
+        centers=[center_world],
+        quaternions=[quaternion],
+        size=[width_world, height_world],
+        color=plane_color,
+        opacity=opacity,
+        image_key=image_key,
+        image_width=image_width,
+        image_height=image_height,
+        layer=layer,
+        **kwargs,
+    )
+
+    if not show_frustum:
+        return plane 
+    
+    return plane + CameraFrustum(intrinsics, extrinsics)
+
+
 # =============================================================================
 # Groups (Hierarchical Transforms)
 # =============================================================================
@@ -612,33 +1019,80 @@ def Group(
 
 
 def Mesh(
-    name: str,
     vertex_data: ArrayLike,
-    index_data: ArrayLike,
+    index_data: Optional[ArrayLike] = None,
+    *,
+    centers: ArrayLike,
+    colors: Optional[ArrayLike] = None,
+    color: Optional[ArrayLike] = None,
+    scales: Optional[ArrayLike] = None,
+    scale: Optional[Union[NumberLike, ArrayLike]] = None,
+    quaternions: Optional[ArrayLike] = None,
+    quaternion: Optional[ArrayLike] = None,
     shading: Optional[Literal["lit", "unlit"]] = None,
     cull_mode: Optional[Literal["none", "front", "back"]] = None,
-) -> Dict[str, Any]:
-    """Define a custom mesh for use with CustomPrimitive.
+    geometry_key: Optional[Union[str, int]] = None,
+    layer: Optional[Literal["scene", "overlay"]] = None,
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a mesh component with inline geometry.
 
     Args:
-        name: Unique name for the mesh primitive type
         vertex_data: Flat array of vertex attributes (position, normal, etc.)
-        index_data: Flat array of indices
+        index_data: Flat array of indices (optional for non-indexed meshes)
+        centers: Nx3 array of mesh centers
+        colors: Nx3 array of RGB colors (optional)
+        color: Default RGB color [r,g,b] for all instances if colors not provided
+        scales: Nx3 array of per-instance scales (optional)
+        scale: Default scale for all instances if scales not provided
+        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
+        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         shading: "lit" (default) or "unlit"
         cull_mode: "back" (default), "front", or "none"
+        geometry_key: Optional key to force geometry reupload
+        layer: Render layer - "scene" (default) or "overlay"
+        **kwargs: Additional arguments like decorations, onHover, onClick
 
     Returns:
-        Dictionary mapping name to mesh definition
+        A Mesh scene component using inline geometry.
     """
-    data = {
+    geometry: Dict[str, Any] = {
         "vertexData": flatten_array(vertex_data, dtype=np.float32),
-        "indexData": flatten_array(index_data, dtype=np.uint16),
     }
+    index_data = coerce_index_array(index_data)
+    if index_data is not None:
+        geometry["indexData"] = index_data
+
+    data: Dict[str, Any] = {
+        "geometry": geometry,
+        "centers": flatten_array(centers, dtype=np.float32),
+    }
+
+    if colors is not None:
+        data["colors"] = flatten_array(colors, dtype=np.float32)
+    elif color is not None:
+        data["color"] = color
+
+    if scales is not None:
+        data["scales"] = flatten_array(scales, dtype=np.float32)
+    elif scale is not None:
+        data["scale"] = scale
+
+    if quaternions is not None:
+        data["quaternions"] = flatten_array(quaternions, dtype=np.float32)
+    elif quaternion is not None:
+        data["quaternion"] = quaternion
+
     if shading:
         data["shading"] = shading
     if cull_mode:
         data["cullMode"] = cull_mode
-    return {name: data}
+    if geometry_key is not None:
+        data["geometryKey"] = geometry_key
+    if layer is not None:
+        data["layer"] = layer
+
+    return SceneComponent("Mesh", data, **kwargs)
 
 
 def CustomPrimitive(
@@ -869,6 +1323,11 @@ __all__ = [
     "Ellipsoid",
     "Cuboid",
     "LineBeams",
+    "LineSegments",
+    "GridHelper",
+    "CameraFrustum",
+    "ImagePlane",
+    "ImageProjection",
     "Group",
     "Mesh",
     "CustomPrimitive",

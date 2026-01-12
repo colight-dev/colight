@@ -267,12 +267,15 @@ export function getOrCreatePipeline(
 
 export function createRenderPipeline(
   device: GPUDevice,
-  bindGroupLayout: GPUBindGroupLayout,
+  bindGroupLayout: GPUBindGroupLayout | GPUBindGroupLayout[],
   config: PipelineConfig,
   format: GPUTextureFormat,
 ): GPURenderPipeline {
+  const bindGroupLayouts = Array.isArray(bindGroupLayout)
+    ? bindGroupLayout
+    : [bindGroupLayout];
   const pipelineLayout = device.createPipelineLayout({
-    bindGroupLayouts: [bindGroupLayout],
+    bindGroupLayouts,
   });
 
   // Include all values from config.primitive, including stripIndexFormat, if provided.
@@ -322,7 +325,7 @@ export function createRenderPipeline(
 
 export function createTranslucentGeometryPipeline(
   device: GPUDevice,
-  bindGroupLayout: GPUBindGroupLayout,
+  bindGroupLayout: GPUBindGroupLayout | GPUBindGroupLayout[],
   config: PipelineConfig,
   format: GPUTextureFormat,
   primitiveSpec: PrimitiveSpec<any>, // Take the primitive spec instead of just type
@@ -361,7 +364,7 @@ export function createTranslucentGeometryPipeline(
  */
 export function createOverlayPipeline(
   device: GPUDevice,
-  bindGroupLayout: GPUBindGroupLayout,
+  bindGroupLayout: GPUBindGroupLayout | GPUBindGroupLayout[],
   config: PipelineConfig,
   format: GPUTextureFormat,
   primitiveSpec: PrimitiveSpec<any>,
@@ -400,7 +403,7 @@ export function createOverlayPipeline(
  */
 export function createOverlayPickingPipeline(
   device: GPUDevice,
-  bindGroupLayout: GPUBindGroupLayout,
+  bindGroupLayout: GPUBindGroupLayout | GPUBindGroupLayout[],
   config: PipelineConfig,
   primitiveSpec: PrimitiveSpec<any>,
 ): GPURenderPipeline {
@@ -420,30 +423,61 @@ export function createOverlayPickingPipeline(
   );
 }
 
+function align4(size: number): number {
+  return Math.ceil(size / 4) * 4;
+}
+
+function writeBufferPadded(
+  device: GPUDevice,
+  buffer: GPUBuffer,
+  data: ArrayBufferView,
+  size: number,
+) {
+  if (data.byteLength === size) {
+    device.queue.writeBuffer(buffer, 0, data);
+    return;
+  }
+
+  const padded = new Uint8Array(size);
+  padded.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+  device.queue.writeBuffer(buffer, 0, padded);
+}
+
 export const createBuffers = (
   device: GPUDevice,
   { vertexData, indexData }: GeometryData,
+  vertexStrideFloats = 6,
 ): GeometryResource => {
+  const vertexSize = align4(vertexData.byteLength);
   const vb = device.createBuffer({
-    size: vertexData.byteLength,
+    size: vertexSize,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(vb, 0, vertexData);
+  writeBufferPadded(device, vb, vertexData, vertexSize);
 
-  const ib = device.createBuffer({
-    size: indexData.byteLength,
-    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(ib, 0, indexData);
+  let ib: GPUBuffer | null = null;
+  let indexCount = 0;
+  let indexFormat: GPUIndexFormat | undefined;
 
-  // Each vertex has 6 floats (position + normal)
-  const vertexCount = vertexData.length / 6;
+  if (indexData && indexData.length > 0) {
+    const indexSize = align4(indexData.byteLength);
+    ib = device.createBuffer({
+      size: indexSize,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    });
+    writeBufferPadded(device, ib, indexData, indexSize);
+    indexCount = indexData.length;
+    indexFormat = indexData instanceof Uint32Array ? "uint32" : "uint16";
+  }
+
+  const vertexCount = vertexData.length / vertexStrideFloats;
 
   return {
     vb,
     ib,
-    indexCount: indexData.length,
+    indexCount,
     vertexCount,
+    indexFormat,
   };
 };
 
@@ -523,8 +557,14 @@ export {
   type CuboidComponentConfig,
   lineBeamsSpec,
   type LineBeamsComponentConfig,
+  lineSegmentsSpec,
+  type LineSegmentsComponentConfig,
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
+  imagePlaneSpec,
+  type ImagePlaneComponentConfig,
+  type ImageSource,
+  getImageBindGroupLayout,
   defineMesh,
   type MeshComponentConfig,
 } from "./primitives";
@@ -540,4 +580,6 @@ export type ComponentConfig =
   | EllipsoidAxesComponentConfig
   | CuboidComponentConfig
   | LineBeamsComponentConfig
-  | BoundingBoxComponentConfig;
+  | LineSegmentsComponentConfig
+  | BoundingBoxComponentConfig
+  | ImagePlaneComponentConfig;

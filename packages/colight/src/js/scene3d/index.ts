@@ -5,6 +5,12 @@ export {
   Ellipsoid,
   Cuboid,
   LineBeams,
+  LineSegments,
+  ImagePlane,
+  ImageProjection,
+  Mesh,
+  GridHelper,
+  CameraFrustum,
   BoundingBox,
   Group,
   deco,
@@ -56,6 +62,10 @@ export type {
   EllipsoidComponentConfig,
   CuboidComponentConfig,
   LineBeamsComponentConfig,
+  LineSegmentsComponentConfig,
+  ImagePlaneComponentConfig,
+  ImageSource,
+  MeshComponentConfig,
 } from "./components";
 
 // Other types

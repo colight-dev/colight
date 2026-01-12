@@ -300,6 +300,15 @@ export interface PrimitiveDefinition<Config extends BaseComponentConfig> {
    * Default: "vs_main"
    */
   pickingVertexEntryPoint?: string;
+
+  /**
+   * Optional bind group layouts to use for pipeline creation.
+   * If provided, replaces the default single bind group layout.
+   */
+  bindGroupLayouts?: (
+    device: GPUDevice,
+    bindGroupLayout: GPUBindGroupLayout,
+  ) => GPUBindGroupLayout[];
 }
 
 // =============================================================================
@@ -1144,12 +1153,25 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     }
   }
 
+  const arrayFieldSet = new Set<string>();
+  for (const attr of schema.attributes) {
+    arrayFieldSet.add(attr.def.source);
+  }
+
+  const arrayFields =
+    arrayFieldSet.size > 0
+      ? {
+          float32: Array.from(arrayFieldSet) as (keyof Config)[],
+        }
+      : undefined;
+
   const spec: PrimitiveSpec<Config> = {
     type: def.name,
     instancesPerElement: def.instancesPerElement ?? 1,
 
     // Defaults for computeConstants compatibility
     defaults,
+    arrayFields,
 
     getElementCount: def.getElementCount ?? defaultGetElementCount,
     getCenters: def.getCenters ?? defaultGetCenters,
@@ -1178,13 +1200,16 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
       const instanceLayout = def.renderInstanceLayout ?? schema.renderLayout;
       const vertexEntryPoint = def.vertexEntryPoint ?? "vs_main";
+      const pipelineBindGroupLayout = def.bindGroupLayouts
+        ? def.bindGroupLayouts(device, bindGroupLayout)
+        : bindGroupLayout;
       return getOrCreatePipeline(
         device,
         `${def.name}Shading`,
         () =>
           createTranslucentGeometryPipeline(
             device,
-            bindGroupLayout,
+            pipelineBindGroupLayout,
             {
               vertexShader: renderVertexShader,
               fragmentShader: renderFragmentShader,
@@ -1207,13 +1232,16 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
       const instanceLayout = def.pickingInstanceLayout ?? schema.pickingLayout;
       const vertexEntryPoint = def.pickingVertexEntryPoint ?? "vs_main";
+      const pipelineBindGroupLayout = def.bindGroupLayouts
+        ? def.bindGroupLayouts(device, bindGroupLayout)
+        : bindGroupLayout;
       return getOrCreatePipeline(
         device,
         `${def.name}Picking`,
         () =>
           createRenderPipeline(
             device,
-            bindGroupLayout,
+            pipelineBindGroupLayout,
             {
               vertexShader: pickingVertexShader,
               fragmentShader: pickingFragmentShader,
@@ -1237,13 +1265,16 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
       const instanceLayout = def.renderInstanceLayout ?? schema.renderLayout;
       const vertexEntryPoint = def.vertexEntryPoint ?? "vs_main";
+      const pipelineBindGroupLayout = def.bindGroupLayouts
+        ? def.bindGroupLayouts(device, bindGroupLayout)
+        : bindGroupLayout;
       return getOrCreatePipeline(
         device,
         `${def.name}Overlay`,
         () =>
           createOverlayPipeline(
             device,
-            bindGroupLayout,
+            pipelineBindGroupLayout,
             {
               vertexShader: renderVertexShader,
               fragmentShader: renderFragmentShader,
@@ -1266,13 +1297,16 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
       const instanceLayout = def.pickingInstanceLayout ?? schema.pickingLayout;
       const vertexEntryPoint = def.pickingVertexEntryPoint ?? "vs_main";
+      const pipelineBindGroupLayout = def.bindGroupLayouts
+        ? def.bindGroupLayouts(device, bindGroupLayout)
+        : bindGroupLayout;
       return getOrCreatePipeline(
         device,
         `${def.name}OverlayPicking`,
         () =>
           createOverlayPickingPipeline(
             device,
-            bindGroupLayout,
+            pipelineBindGroupLayout,
             {
               vertexShader: pickingVertexShader,
               fragmentShader: pickingFragmentShader,
@@ -1287,7 +1321,9 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     },
 
     createGeometryResource(device: GPUDevice): GeometryResource {
-      return createBuffers(device, createGeometry(def.geometry));
+      const layout = def.geometryLayout ?? GEOMETRY_LAYOUT;
+      const vertexStrideFloats = layout.arrayStride / 4;
+      return createBuffers(device, createGeometry(def.geometry), vertexStrideFloats);
     },
   };
 

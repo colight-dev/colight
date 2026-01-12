@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
 import { render, act } from "@testing-library/react";
 import React from "react";
-import { SceneInner } from "../../../src/js/scene3d/impl3d";
+import { SceneImpl } from "../../../src/js/scene3d/impl3d";
 import { defineMesh } from "../../../src/js/scene3d/primitives/mesh";
 import { definePrimitive, attr } from "../../../src/js/scene3d/primitives/define";
 import { setupWebGPU, cleanupWebGPU } from "../webgpu-setup";
@@ -104,7 +104,7 @@ describe("Scene3D Extensibility", () => {
 
     await act(async () => {
       render(
-        <SceneInner
+        <SceneImpl
           components={components}
           containerWidth={800}
           containerHeight={600}
@@ -147,7 +147,7 @@ describe("Scene3D Extensibility", () => {
 
     await act(async () => {
       render(
-        <SceneInner
+        <SceneImpl
           components={components}
           containerWidth={800}
           containerHeight={600}

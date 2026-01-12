@@ -206,6 +206,12 @@ export interface PrimitiveSpec<ConfigType> {
   ): GPURenderPipeline;
 
   /**
+   * Optional batch key for grouping components into separate render objects.
+   * Useful when instances must not share resources (e.g., textures).
+   */
+  getBatchKey?: (elem: ConfigType) => string | number | undefined;
+
+  /**
    * Creates or retrieves a cached overlay render pipeline for this primitive.
    * Overlay pipelines render in front of scene geometry (depthCompare: "always", no depth write).
    * @param device The WebGPU device
@@ -256,6 +262,15 @@ export interface HoverProps {
   alpha?: number;
   /** Scale multiplier to apply on hover */
   scale?: number;
+  /**
+   * Enable outline effect when hovered.
+   * If undefined, outlineColor/outlineWidth enable the outline.
+   */
+  outline?: boolean;
+  /** Outline color when hovered, as RGB [0-1]. Defaults to [1, 1, 1]. */
+  outlineColor?: [number, number, number];
+  /** Outline width in pixels when hovered. Defaults to 2. */
+  outlineWidth?: number;
 }
 
 export interface ElementConstants {
@@ -398,23 +413,21 @@ export interface BaseComponentConfig {
   pickingScale?: number;
 
   /**
-   * Enable outline effect when this component's instances are hovered.
-   * When undefined, uses scene-level defaultHoverOutline setting.
-   * @default undefined (uses scene default)
+   * Enable outline effect for this component's instances.
+   * If undefined, outlineColor/outlineWidth enable the outline.
+   * @default false
    */
-  hoverOutline?: boolean;
+  outline?: boolean;
 
   /**
-   * Outline color when hovered, as RGB [0-1].
-   * When undefined, uses scene-level defaultOutlineColor.
-   * @default undefined (uses scene default)
+   * Outline color, as RGB [0-1].
+   * @default [1, 1, 1]
    */
   outlineColor?: [number, number, number];
 
   /**
-   * Outline width in pixels when hovered.
-   * When undefined, uses scene-level defaultOutlineWidth.
-   * @default undefined (uses scene default)
+   * Outline width in pixels.
+   * @default 2
    */
   outlineWidth?: number;
 }
@@ -565,14 +578,16 @@ export interface PipelineConfig {
 
 export interface GeometryData {
   vertexData: Float32Array;
-  indexData: Uint16Array | Uint32Array;
+  indexData?: Uint16Array | Uint32Array;
 }
 
 export interface GeometryResource {
   vb: GPUBuffer;
-  ib: GPUBuffer;
+  ib: GPUBuffer | null;
   indexCount: number;
   vertexCount: number;
+  indexFormat?: GPUIndexFormat;
+  geometryKey?: unknown;
 }
 
 export interface GeometryResources {
@@ -582,6 +597,8 @@ export interface GeometryResources {
   EllipsoidAxes: GeometryResource | null;
   Cuboid: GeometryResource | null;
   LineBeams: GeometryResource | null;
+  LineSegments: GeometryResource | null;
+  ImagePlane: GeometryResource | null;
 }
 
 export interface BufferInfo {
@@ -596,10 +613,12 @@ export interface RenderObject {
   overlayPipeline?: GPURenderPipeline;
   geometryBuffer: GPUBuffer;
   instanceBuffer: BufferInfo;
-  indexBuffer: GPUBuffer;
+  indexBuffer: GPUBuffer | null;
   indexCount: number;
+  indexFormat?: GPUIndexFormat;
   instanceCount: number;
   vertexCount: number;
+  textureBindGroup?: GPUBindGroup;
 
   pickingPipeline: GPURenderPipeline;
   /** Pipeline for overlay picking (depthCompare: "always", no depth write) */

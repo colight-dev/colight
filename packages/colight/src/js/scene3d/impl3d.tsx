@@ -38,10 +38,15 @@ import {
   ellipsoidSpec,
   ellipsoidAxesSpec,
   lineBeamsSpec,
+  lineSegmentsSpec,
+  imagePlaneSpec,
   pointCloudSpec,
   buildPickingData,
   buildRenderData,
   createOverlayPipeline,
+  getImageBindGroupLayout,
+  ImagePlaneComponentConfig,
+  ImageSource,
 } from "./components";
 import { unpackID } from "./picking";
 import { LIGHTING, outlineVertCode, outlineFragCode } from "./shaders";
@@ -79,7 +84,273 @@ function align16(value: number): number {
   return Math.ceil(value / 16) * 16;
 }
 
-export interface SceneInnerProps {
+function alignTo(value: number, alignment: number): number {
+  return Math.ceil(value / alignment) * alignment;
+}
+
+interface ImageResource {
+  texture: GPUTexture;
+  view: GPUTextureView;
+  sampler: GPUSampler;
+  bindGroup: GPUBindGroup;
+  width: number;
+  height: number;
+  imageKey?: string | number;
+}
+
+type ImageUpload =
+  | {
+      kind: "external";
+      source: GPUCopyExternalImageSource;
+      width: number;
+      height: number;
+    }
+  | {
+      kind: "raw";
+      data: Uint8Array;
+      width: number;
+      height: number;
+      bytesPerRow: number;
+    };
+
+const imageSamplerCache = new WeakMap<GPUDevice, GPUSampler>();
+
+function getImageSampler(device: GPUDevice): GPUSampler {
+  const cached = imageSamplerCache.get(device);
+  if (cached) return cached;
+  const sampler = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
+  });
+  imageSamplerCache.set(device, sampler);
+  return sampler;
+}
+
+function asUint8Array(data: Uint8Array | Uint8ClampedArray): Uint8Array {
+  return data instanceof Uint8Array
+    ? data
+    : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+
+function expandRgbToRgba(
+  data: Uint8Array,
+  width: number,
+  height: number,
+): Uint8Array {
+  const pixelCount = width * height;
+  const rgba = new Uint8Array(pixelCount * 4);
+  for (let i = 0; i < pixelCount; i++) {
+    rgba[i * 4] = data[i * 3];
+    rgba[i * 4 + 1] = data[i * 3 + 1];
+    rgba[i * 4 + 2] = data[i * 3 + 2];
+    rgba[i * 4 + 3] = 255;
+  }
+  return rgba;
+}
+
+function padImageRows(
+  data: Uint8Array,
+  width: number,
+  height: number,
+): { data: Uint8Array; bytesPerRow: number } {
+  const bytesPerRow = width * 4;
+  const aligned = alignTo(bytesPerRow, 256);
+  if (aligned === bytesPerRow) {
+    return { data, bytesPerRow };
+  }
+  const padded = new Uint8Array(aligned * height);
+  for (let row = 0; row < height; row++) {
+    const srcStart = row * bytesPerRow;
+    const srcEnd = srcStart + bytesPerRow;
+    padded.set(data.subarray(srcStart, srcEnd), row * aligned);
+  }
+  return { data: padded, bytesPerRow: aligned };
+}
+
+function isExternalImageSource(
+  image: unknown,
+): image is GPUCopyExternalImageSource {
+  if (!image || typeof image !== "object") return false;
+  if (typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) {
+    return true;
+  }
+  if (
+    typeof HTMLImageElement !== "undefined" &&
+    image instanceof HTMLImageElement
+  ) {
+    return true;
+  }
+  if (
+    typeof HTMLCanvasElement !== "undefined" &&
+    image instanceof HTMLCanvasElement
+  ) {
+    return true;
+  }
+  if (
+    typeof OffscreenCanvas !== "undefined" &&
+    image instanceof OffscreenCanvas
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function getExternalImageSize(
+  image: GPUCopyExternalImageSource,
+): { width: number; height: number } {
+  const anyImage = image as any;
+  const width =
+    typeof anyImage.naturalWidth === "number" && anyImage.naturalWidth > 0
+      ? anyImage.naturalWidth
+      : anyImage.width ?? 0;
+  const height =
+    typeof anyImage.naturalHeight === "number" && anyImage.naturalHeight > 0
+      ? anyImage.naturalHeight
+      : anyImage.height ?? 0;
+  return { width, height };
+}
+
+function isImageDataLike(
+  image: unknown,
+): image is {
+  data: Uint8Array | Uint8ClampedArray;
+  width: number;
+  height: number;
+  channels?: number;
+} {
+  return (
+    !!image &&
+    typeof image === "object" &&
+    "data" in image &&
+    "width" in image &&
+    "height" in image
+  );
+}
+
+function getImageUpload(image: ImageSource): ImageUpload | null {
+  if (isImageDataLike(image)) {
+    const width = image.width;
+    const height = image.height;
+    if (!width || !height) {
+      console.warn("ImagePlane: invalid image dimensions.", image);
+      return null;
+    }
+    const data = asUint8Array(image.data);
+    const pixelCount = width * height;
+    const channels =
+      image.channels ?? Math.floor(data.length / Math.max(pixelCount, 1));
+    if (channels !== 3 && channels !== 4) {
+      console.warn("ImagePlane: unsupported channel count.", channels);
+      return null;
+    }
+    const rgba = channels === 4 ? data : expandRgbToRgba(data, width, height);
+    const padded = padImageRows(rgba, width, height);
+    return {
+      kind: "raw",
+      data: padded.data,
+      width,
+      height,
+      bytesPerRow: padded.bytesPerRow,
+    };
+  }
+
+  if (isExternalImageSource(image)) {
+    const { width, height } = getExternalImageSize(image);
+    if (!width || !height) {
+      console.warn("ImagePlane: external image has no size.", image);
+      return null;
+    }
+    return {
+      kind: "external",
+      source: image,
+      width,
+      height,
+    };
+  }
+
+  console.warn("ImagePlane: unsupported image type.", image);
+  return null;
+}
+
+function uploadImageToTexture(
+  device: GPUDevice,
+  texture: GPUTexture,
+  upload: ImageUpload,
+): void {
+  if (upload.kind === "external") {
+    device.queue.copyExternalImageToTexture(
+      { source: upload.source },
+      { texture },
+      { width: upload.width, height: upload.height },
+    );
+    return;
+  }
+
+  device.queue.writeTexture(
+    { texture },
+    upload.data,
+    { bytesPerRow: upload.bytesPerRow, rowsPerImage: upload.height },
+    { width: upload.width, height: upload.height },
+  );
+}
+
+function ensureImageResource(
+  device: GPUDevice,
+  resources: Map<string, ImageResource>,
+  key: string,
+  image: ImageSource,
+  imageKey?: string | number,
+): ImageResource | null {
+  const upload = getImageUpload(image);
+  if (!upload) return null;
+
+  const existing = resources.get(key);
+  const needsRecreate =
+    !existing ||
+    existing.width !== upload.width ||
+    existing.height !== upload.height;
+  const needsUpdate =
+    !existing || (imageKey !== undefined && existing.imageKey !== imageKey);
+
+  if (needsRecreate) {
+    existing?.texture.destroy();
+    const texture = device.createTexture({
+      size: [upload.width, upload.height, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    uploadImageToTexture(device, texture, upload);
+    const view = texture.createView();
+    const sampler = getImageSampler(device);
+    const bindGroup = device.createBindGroup({
+      layout: getImageBindGroupLayout(device),
+      entries: [
+        { binding: 0, resource: sampler },
+        { binding: 1, resource: view },
+      ],
+    });
+    const resource: ImageResource = {
+      texture,
+      view,
+      sampler,
+      bindGroup,
+      width: upload.width,
+      height: upload.height,
+      imageKey,
+    };
+    resources.set(key, resource);
+    return resource;
+  }
+
+  if (needsUpdate && existing) {
+    uploadImageToTexture(device, existing.texture, upload);
+    existing.imageKey = imageKey;
+  }
+
+  return existing ?? null;
+}
+
+export interface SceneImplProps {
   /** Array of 3D components to render in the scene */
   components: ComponentConfig[];
 
@@ -113,15 +384,6 @@ export interface SceneInnerProps {
   /** Scene-level click callback. Called with PickEvent when an element is clicked. */
   onClick?: (event: PickEventType) => void;
 
-  /** Default outline on hover for components that don't specify hoverOutline. Default: false */
-  defaultHoverOutline?: boolean;
-
-  /** Default outline color as RGB [0-1]. Default: [1, 1, 1] (white) */
-  defaultOutlineColor?: [number, number, number];
-
-  /** Default outline width in pixels. Default: 2 */
-  defaultOutlineWidth?: number;
-
   /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
   readyState?: ReadyState;
 
@@ -136,10 +398,17 @@ function initGeometryResources(
 ) {
   // Create geometry for each primitive type
   for (const [primitiveName, spec] of Object.entries(registry)) {
-    // Only create if not already present
+    // Only create if not already present or geometryKey changed
     // Cast to any since resources is typed with known keys but we might have custom ones
-    if (!(resources as any)[primitiveName]) {
-      (resources as any)[primitiveName] = spec.createGeometryResource(device);
+    const existing = (resources as any)[primitiveName] as
+      | GeometryResource
+      | null
+      | undefined;
+    const specKey = (spec as any).geometryKey;
+    if (!existing || (specKey !== undefined && existing.geometryKey !== specKey)) {
+      const resource = spec.createGeometryResource(device);
+      (resource as any).geometryKey = specKey;
+      (resources as any)[primitiveName] = resource;
     }
   }
 }
@@ -153,8 +422,169 @@ const defaultPrimitiveRegistry: Record<
   EllipsoidAxes: ellipsoidAxesSpec,
   Cuboid: cuboidSpec,
   LineBeams: lineBeamsSpec,
+  LineSegments: lineSegmentsSpec,
+  ImagePlane: imagePlaneSpec,
   BoundingBox: boundingBoxSpec,
 };
+
+const DEFAULT_OUTLINE_COLOR: [number, number, number] = [1, 1, 1];
+const DEFAULT_OUTLINE_WIDTH = 2;
+
+type OutlineConfig = {
+  outline?: boolean;
+  outlineColor?: [number, number, number];
+  outlineWidth?: number;
+};
+
+type OutlineTarget =
+  | { kind: "component"; componentIdx: number }
+  | { kind: "element"; componentIdx: number; elementIdx: number };
+
+type OutlineStyle = {
+  color: [number, number, number];
+  width: number;
+};
+
+type OutlineGroup = {
+  style: OutlineStyle;
+  targets: OutlineTarget[];
+};
+
+function hasOutlineConfig(config?: OutlineConfig): boolean {
+  return (
+    !!config &&
+    (config.outline !== undefined ||
+      config.outlineColor !== undefined ||
+      config.outlineWidth !== undefined)
+  );
+}
+
+function isOutlineEnabled(config?: OutlineConfig): boolean {
+  if (!config) return false;
+  if (config.outline !== undefined) return config.outline;
+  return config.outlineColor !== undefined || config.outlineWidth !== undefined;
+}
+
+function resolveOutlineStyle(
+  config?: OutlineConfig,
+  fallback?: OutlineConfig,
+): {
+  enabled: boolean;
+  color: [number, number, number];
+  width: number;
+} {
+  const enabled = isOutlineEnabled(config ?? fallback);
+  if (!enabled) {
+    return {
+      enabled: false,
+      color: DEFAULT_OUTLINE_COLOR,
+      width: DEFAULT_OUTLINE_WIDTH,
+    };
+  }
+
+  return {
+    enabled: true,
+    color:
+      config?.outlineColor ?? fallback?.outlineColor ?? DEFAULT_OUTLINE_COLOR,
+    width:
+      config?.outlineWidth ?? fallback?.outlineWidth ?? DEFAULT_OUTLINE_WIDTH,
+  };
+}
+
+function resolveComponentOutline(component?: ComponentConfig) {
+  return resolveOutlineStyle(component);
+}
+
+function resolveHoverOutline(component?: ComponentConfig) {
+  if (!component) {
+    return {
+      enabled: false,
+      color: DEFAULT_OUTLINE_COLOR,
+      width: DEFAULT_OUTLINE_WIDTH,
+    };
+  }
+  if (!hasOutlineConfig(component.hoverProps)) {
+    return {
+      enabled: false,
+      color: DEFAULT_OUTLINE_COLOR,
+      width: DEFAULT_OUTLINE_WIDTH,
+    };
+  }
+  return resolveOutlineStyle(component.hoverProps, component);
+}
+
+function outlineStyleKey(color: [number, number, number], width: number) {
+  return `${color[0]}:${color[1]}:${color[2]}:${width}`;
+}
+
+function sameOutlineStyle(
+  a: { color: [number, number, number]; width: number },
+  b: { color: [number, number, number]; width: number },
+) {
+  return (
+    a.width === b.width &&
+    a.color[0] === b.color[0] &&
+    a.color[1] === b.color[1] &&
+    a.color[2] === b.color[2]
+  );
+}
+
+function collectOutlineGroups(
+  components: ComponentConfig[],
+  hoverState: { componentIdx: number; elementIdx: number } | null,
+): OutlineGroup[] {
+  const groups = new Map<string, OutlineGroup>();
+
+  components.forEach((component, componentIdx) => {
+    const outline = resolveComponentOutline(component);
+    if (!outline.enabled) return;
+
+    const key = outlineStyleKey(outline.color, outline.width);
+    const existing = groups.get(key);
+    const target: OutlineTarget = { kind: "component", componentIdx };
+    if (existing) {
+      existing.targets.push(target);
+    } else {
+      groups.set(key, {
+        style: { color: outline.color, width: outline.width },
+        targets: [target],
+      });
+    }
+  });
+
+  if (hoverState) {
+    const hoveredComponent = components[hoverState.componentIdx];
+    const hoverOutline = resolveHoverOutline(hoveredComponent);
+    if (hoverOutline.enabled) {
+      const baseOutline = resolveComponentOutline(hoveredComponent);
+      const shouldAdd =
+        !baseOutline.enabled ||
+        !sameOutlineStyle(baseOutline, hoverOutline);
+      if (shouldAdd) {
+        const key = outlineStyleKey(hoverOutline.color, hoverOutline.width);
+        const existing = groups.get(key);
+        const target: OutlineTarget = {
+          kind: "element",
+          componentIdx: hoverState.componentIdx,
+          elementIdx: hoverState.elementIdx,
+        };
+        if (existing) {
+          existing.targets.push(target);
+        } else {
+          groups.set(key, {
+            style: {
+              color: hoverOutline.color,
+              width: hoverOutline.width,
+            },
+            targets: [target],
+          });
+        }
+      }
+    }
+  }
+
+  return Array.from(groups.values());
+}
 
 function ensurePickingData(
   device: GPUDevice,
@@ -266,61 +696,56 @@ function computeUniforms(
   return { aspect, view, proj, mvp, forward, right, camUp, lightDir };
 }
 
-async function renderPass({
-  device,
-  context,
+function encodeScenePass({
+  commandEncoder,
+  targetView,
   depthTexture,
   renderObjects,
   uniformBindGroup,
 }: {
-  device: GPUDevice;
-  context: GPUCanvasContext;
+  commandEncoder: GPUCommandEncoder;
+  targetView: GPUTextureView;
   depthTexture: GPUTexture | null;
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
 }) {
-  try {
-    // Begin render pass
-    const cmd = device.createCommandEncoder();
-    const pass = cmd.beginRenderPass({
-      colorAttachments: [
-        {
-          view: context.getCurrentTexture().createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: "clear",
-          storeOp: "store",
-        },
-      ],
-      depthStencilAttachment: depthTexture
-        ? {
-            view: depthTexture.createView(),
-            depthClearValue: 1.0,
-            depthLoadOp: "clear",
-            depthStoreOp: "store",
-          }
-        : undefined,
-    });
+  const pass = commandEncoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: targetView,
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ],
+    depthStencilAttachment: depthTexture
+      ? {
+          view: depthTexture.createView(),
+          depthClearValue: 1.0,
+          depthLoadOp: "clear",
+          depthStoreOp: "store",
+        }
+      : undefined,
+  });
 
-    // Draw each object
-    for (const ro of renderObjects) {
-      pass.setPipeline(ro.pipeline);
-      pass.setBindGroup(0, uniformBindGroup);
-      pass.setVertexBuffer(0, ro.geometryBuffer);
-      pass.setVertexBuffer(
-        1,
-        ro.instanceBuffer.buffer,
-        ro.instanceBuffer.offset,
-      );
-      pass.setIndexBuffer(ro.indexBuffer, "uint16");
-      pass.drawIndexed(ro.indexCount, ro.instanceCount);
+  // Draw each object
+  for (const ro of renderObjects) {
+    pass.setPipeline(ro.pipeline);
+    pass.setBindGroup(0, uniformBindGroup);
+    if (ro.textureBindGroup) {
+      pass.setBindGroup(1, ro.textureBindGroup);
     }
-
-    pass.end();
-    device.queue.submit([cmd.finish()]);
-    return device.queue.onSubmittedWorkDone();
-  } catch (err) {
-    console.error(err);
+    pass.setVertexBuffer(0, ro.geometryBuffer);
+    pass.setVertexBuffer(1, ro.instanceBuffer.buffer, ro.instanceBuffer.offset);
+    if (ro.indexBuffer && ro.indexCount > 0) {
+      pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+      pass.drawIndexed(ro.indexCount, ro.instanceCount);
+    } else if (ro.vertexCount > 0) {
+      pass.draw(ro.vertexCount, ro.instanceCount);
+    }
   }
+
+  pass.end();
 }
 
 function computeUniformData(
@@ -395,7 +820,7 @@ function updateInstanceSorting(
 }
 export function getGeometryResource(
   resources: GeometryResources,
-  type: keyof GeometryResources,
+  type: string,
 ): GeometryResource {
   const resource = resources[type];
   if (!resource) {
@@ -441,7 +866,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
   throw new Error(`Failed to get GPU adapter after ${maxAttempts} attempts`);
 };
 
-export function SceneInner({
+export function SceneImpl({
   components,
   containerWidth,
   containerHeight,
@@ -453,12 +878,9 @@ export function SceneInner({
   onReady,
   onHover: onSceneHover,
   onClick: onSceneClick,
-  defaultHoverOutline = false,
-  defaultOutlineColor = [1, 1, 1],
-  defaultOutlineWidth = 2,
   readyState = NOOP_READY_STATE,
   primitiveSpecs,
-}: SceneInnerProps) {
+}: SceneImplProps) {
   // Merge default registry with custom specs
   const primitiveRegistry = useMemo(() => {
     if (!primitiveSpecs) return defaultPrimitiveRegistry;
@@ -490,6 +912,7 @@ export function SceneInner({
     pipelineCache: Map<string, PipelineCacheEntry>;
     dynamicBuffers: DynamicBuffers | null;
     resources: GeometryResources;
+    imageResources: Map<string, ImageResource>;
 
     renderedCamera?: CameraState;
     renderedComponents?: ComponentConfig[];
@@ -526,29 +949,257 @@ export function SceneInner({
     [controlledCamera, onCameraChange],
   );
 
+    // Check if any component can render outlines
+  const anyOutlineEnabled = useMemo(() => {
+    return components.some(
+      (component) =>
+        isOutlineEnabled(component) || hasOutlineConfig(component.hoverProps),
+    );
+  }, [components]);
+
+  const createOrUpdateOutlineTextures = useCallback(() => {
+    if (!gpuRef.current || !canvasRef.current) return;
+    const { device, outlineTexture, outlineDepthTexture } = gpuRef.current;
+
+    const canvas = canvasRef.current;
+    const displayWidth = canvas.width;
+    const displayHeight = canvas.height;
+
+    if (outlineTexture) outlineTexture.destroy();
+    if (outlineDepthTexture) outlineDepthTexture.destroy();
+
+    // Silhouette mask texture - use same format as canvas for pipeline compatibility
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    const silhouetteTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format,
+      usage:
+        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      label: "Outline silhouette texture",
+    });
+
+    // Depth texture for silhouette pass (object's own depth, not scene depth)
+    const silhouetteDepthTex = device.createTexture({
+      size: [displayWidth, displayHeight],
+      format: "depth24plus",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      label: "Outline depth texture",
+    });
+
+    gpuRef.current.outlineTexture = silhouetteTex;
+    gpuRef.current.outlineDepthTexture = silhouetteDepthTex;
+
+    // Create sampler if not exists
+    if (!gpuRef.current.outlineSampler) {
+      gpuRef.current.outlineSampler = device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+      });
+    }
+
+    // Create or recreate bind group layout for outline post-process
+    if (!gpuRef.current.outlineBindGroupLayout) {
+      gpuRef.current.outlineBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+          {
+            binding: 0,
+            visibility: GPUShaderStage.FRAGMENT,
+            sampler: { type: "filtering" },
+          },
+          {
+            binding: 1,
+            visibility: GPUShaderStage.FRAGMENT,
+            texture: { sampleType: "float" },
+          },
+          {
+            binding: 2,
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: "uniform" },
+          },
+        ],
+        label: "Outline bind group layout",
+      });
+    }
+
+    // Create params buffer if not exists (32 bytes: vec3 color + f32 width + vec2 texelSize + vec2 pad)
+    if (!gpuRef.current.outlineParamsBuffer) {
+      gpuRef.current.outlineParamsBuffer = device.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: "Outline params buffer",
+      });
+    }
+
+    // Recreate bind group with new texture
+    gpuRef.current.outlineBindGroup = device.createBindGroup({
+      layout: gpuRef.current.outlineBindGroupLayout,
+      entries: [
+        { binding: 0, resource: gpuRef.current.outlineSampler },
+        { binding: 1, resource: silhouetteTex.createView() },
+        {
+          binding: 2,
+          resource: { buffer: gpuRef.current.outlineParamsBuffer },
+        },
+      ],
+      label: "Outline bind group",
+    });
+
+    // Create outline post-process pipeline if not exists
+    if (!gpuRef.current.outlinePipeline) {
+      const bindGroupLayout = gpuRef.current.outlineBindGroupLayout;
+      if (!bindGroupLayout) {
+        console.error("Outline bind group layout is null!");
+        return;
+      }
+
+      const format = navigator.gpu.getPreferredCanvasFormat();
+
+      // Create shader modules
+      const vertModule = device.createShaderModule({
+        code: outlineVertCode,
+        label: "Outline vertex shader",
+      });
+      const fragModule = device.createShaderModule({
+        code: outlineFragCode,
+        label: "Outline fragment shader",
+      });
+
+      try {
+        gpuRef.current.outlinePipeline = device.createRenderPipeline({
+          layout: device.createPipelineLayout({
+            bindGroupLayouts: [bindGroupLayout],
+          }),
+          vertex: {
+            module: vertModule,
+            entryPoint: "vs_main",
+          },
+          fragment: {
+            module: fragModule,
+            entryPoint: "fs_outline",
+            targets: [
+              {
+                format,
+                blend: {
+                  color: {
+                    srcFactor: "src-alpha",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                  alpha: {
+                    srcFactor: "one",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                },
+              },
+            ],
+          },
+          primitive: {
+            topology: "triangle-list",
+          },
+          label: "Outline post-process pipeline",
+        });
+      } catch (err) {
+        console.error("Failed to create outline pipeline:", err);
+      }
+    }
+  }, []);
+
   // Create a render callback for the canvas snapshot system
   // This function is called during PDF export to render the 3D scene to a texture
   // that can be captured as a static image
   const renderToTexture = useCallback(
     async (targetTexture: GPUTexture, depthTexture: GPUTexture | null) => {
       if (!gpuRef.current) return;
-      const { device, uniformBindGroup, renderObjects } = gpuRef.current;
-
-      // Reuse the existing renderPass function with a temporary context
-      // that redirects rendering to our snapshot texture
-      const tempContext = {
-        getCurrentTexture: () => targetTexture,
-      } as GPUCanvasContext;
-
-      return renderPass({
+      const {
         device,
-        context: tempContext,
-        depthTexture: depthTexture || null,
+        uniformBindGroup,
         renderObjects,
+        outlineTexture,
+        outlineDepthTexture,
+        outlinePipeline,
+        outlineBindGroup,
+        outlineParamsBuffer,
+      } = gpuRef.current;
+
+      const commandEncoder = device.createCommandEncoder({
+        label: "Scene snapshot encoder",
+      });
+      const targetView = targetTexture.createView();
+
+      const sortedRenderObjects = [...renderObjects].sort((a, b) => {
+        const aOverlay = a.layer === "overlay" ? 1 : 0;
+        const bOverlay = b.layer === "overlay" ? 1 : 0;
+        return aOverlay - bOverlay;
+      });
+
+      encodeScenePass({
+        commandEncoder,
+        targetView,
+        depthTexture: depthTexture || null,
+        renderObjects: sortedRenderObjects,
         uniformBindGroup,
       });
+
+      const outlineGroups = components
+        ? collectOutlineGroups(components, lastHoverState.current)
+        : [];
+
+      let outlineReady = !!(
+        outlineTexture &&
+        outlineDepthTexture &&
+        outlinePipeline &&
+        outlineBindGroup &&
+        outlineParamsBuffer
+      );
+
+      if (!outlineReady && outlineGroups.length > 0 && anyOutlineEnabled) {
+        createOrUpdateOutlineTextures();
+        const refreshed = gpuRef.current;
+        outlineReady = !!(
+          refreshed &&
+          refreshed.outlineTexture &&
+          refreshed.outlineDepthTexture &&
+          refreshed.outlinePipeline &&
+          refreshed.outlineBindGroup &&
+          refreshed.outlineParamsBuffer
+        );
+      }
+
+      const tempOutlineBuffers: GPUBuffer[] = [];
+      if (outlineGroups.length > 0 && outlineReady) {
+        for (const group of outlineGroups) {
+          renderSilhouetteTargets(
+            commandEncoder,
+            group.targets,
+            components,
+            tempOutlineBuffers,
+          );
+          renderOutlinePostProcess(
+            commandEncoder,
+            targetView,
+            group.style.color,
+            group.style.width,
+          );
+        }
+      }
+
+      device.queue.submit([commandEncoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
+
+      for (const buffer of tempOutlineBuffers) {
+        buffer.destroy();
+      }
     },
-    [containerWidth, containerHeight, activeCameraRef.current!],
+    [
+      components,
+      anyOutlineEnabled,
+      createOrUpdateOutlineTextures,
+      containerWidth,
+      containerHeight,
+    ],
   );
 
   const { canvasRef } = useCanvasSnapshot(
@@ -675,8 +1326,11 @@ export function SceneInner({
           EllipsoidAxes: null,
           Cuboid: null,
           LineBeams: null,
+          LineSegments: null,
           BoundingBox: null,
+          ImagePlane: null,
         },
+        imageResources: new Map(),
       };
 
       // Now initialize geometry resources
@@ -739,162 +1393,6 @@ export function SceneInner({
     gpuRef.current.pickDepthTexture = depthTex;
   }, []);
 
-  const createOrUpdateOutlineTextures = useCallback(() => {
-    if (!gpuRef.current || !canvasRef.current) return;
-    const { device, outlineTexture, outlineDepthTexture } = gpuRef.current;
-
-    const canvas = canvasRef.current;
-    const displayWidth = canvas.width;
-    const displayHeight = canvas.height;
-
-    if (outlineTexture) outlineTexture.destroy();
-    if (outlineDepthTexture) outlineDepthTexture.destroy();
-
-    // Silhouette mask texture - use same format as canvas for pipeline compatibility
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    const silhouetteTex = device.createTexture({
-      size: [displayWidth, displayHeight],
-      format,
-      usage:
-        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-      label: "Outline silhouette texture",
-    });
-
-    // Depth texture for silhouette pass (object's own depth, not scene depth)
-    const silhouetteDepthTex = device.createTexture({
-      size: [displayWidth, displayHeight],
-      format: "depth24plus",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
-      label: "Outline depth texture",
-    });
-
-    gpuRef.current.outlineTexture = silhouetteTex;
-    gpuRef.current.outlineDepthTexture = silhouetteDepthTex;
-
-    // Create sampler if not exists
-    if (!gpuRef.current.outlineSampler) {
-      gpuRef.current.outlineSampler = device.createSampler({
-        magFilter: "linear",
-        minFilter: "linear",
-        addressModeU: "clamp-to-edge",
-        addressModeV: "clamp-to-edge",
-      });
-    }
-
-    // Create or recreate bind group layout for outline post-process
-    if (!gpuRef.current.outlineBindGroupLayout) {
-      gpuRef.current.outlineBindGroupLayout = device.createBindGroupLayout({
-        entries: [
-          {
-            binding: 0,
-            visibility: GPUShaderStage.FRAGMENT,
-            sampler: { type: "filtering" },
-          },
-          {
-            binding: 1,
-            visibility: GPUShaderStage.FRAGMENT,
-            texture: { sampleType: "float" },
-          },
-          {
-            binding: 2,
-            visibility: GPUShaderStage.FRAGMENT,
-            buffer: { type: "uniform" },
-          },
-        ],
-        label: "Outline bind group layout",
-      });
-    }
-
-    // Create params buffer if not exists (32 bytes: vec3 color + f32 width + vec2 texelSize + vec2 pad)
-    if (!gpuRef.current.outlineParamsBuffer) {
-      gpuRef.current.outlineParamsBuffer = device.createBuffer({
-        size: 32,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        label: "Outline params buffer",
-      });
-    }
-
-    // Recreate bind group with new texture
-    gpuRef.current.outlineBindGroup = device.createBindGroup({
-      layout: gpuRef.current.outlineBindGroupLayout,
-      entries: [
-        { binding: 0, resource: gpuRef.current.outlineSampler },
-        { binding: 1, resource: silhouetteTex.createView() },
-        {
-          binding: 2,
-          resource: { buffer: gpuRef.current.outlineParamsBuffer },
-        },
-      ],
-      label: "Outline bind group",
-    });
-
-    // Create outline post-process pipeline if not exists
-    if (!gpuRef.current.outlinePipeline) {
-      const bindGroupLayout = gpuRef.current.outlineBindGroupLayout;
-      if (!bindGroupLayout) {
-        console.error("Outline bind group layout is null!");
-        return;
-      }
-
-      const format = navigator.gpu.getPreferredCanvasFormat();
-
-      // Create shader modules
-      const vertModule = device.createShaderModule({
-        code: outlineVertCode,
-        label: "Outline vertex shader",
-      });
-      const fragModule = device.createShaderModule({
-        code: outlineFragCode,
-        label: "Outline fragment shader",
-      });
-
-      // Use async pipeline creation to catch errors properly
-      device
-        .createRenderPipelineAsync({
-          layout: device.createPipelineLayout({
-            bindGroupLayouts: [bindGroupLayout],
-          }),
-          vertex: {
-            module: vertModule,
-            entryPoint: "vs_main",
-          },
-          fragment: {
-            module: fragModule,
-            entryPoint: "fs_outline",
-            targets: [
-              {
-                format,
-                blend: {
-                  color: {
-                    srcFactor: "src-alpha",
-                    dstFactor: "one-minus-src-alpha",
-                    operation: "add",
-                  },
-                  alpha: {
-                    srcFactor: "one",
-                    dstFactor: "one-minus-src-alpha",
-                    operation: "add",
-                  },
-                },
-              },
-            ],
-          },
-          primitive: {
-            topology: "triangle-list",
-          },
-          label: "Outline post-process pipeline",
-        })
-        .then((pipeline) => {
-          if (gpuRef.current) {
-            gpuRef.current.outlinePipeline = pipeline;
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to create outline pipeline:", err);
-        });
-    }
-  }, []);
-
   type ComponentType = ComponentConfig["type"];
   type RenderLayer = "scene" | "overlay";
 
@@ -908,14 +1406,20 @@ export function SceneInner({
     components: ComponentConfig[];
     elementOffsets: number[];
     layer: RenderLayer;
+    type: ComponentType;
+    batchKey?: string;
   }
 
   /**
    * Creates a key for type+layer combination.
    * This allows us to have separate RenderObjects for scene vs overlay components of the same type.
    */
-  function typeLayerKey(type: ComponentType, layer: RenderLayer): string {
-    return `${type}_${layer}`;
+  function typeLayerKey(
+    type: ComponentType,
+    layer: RenderLayer,
+    batchKey?: string,
+  ): string {
+    return batchKey ? `${type}_${layer}_${batchKey}` : `${type}_${layer}`;
   }
 
   // Update the collectTypeData function signature
@@ -943,7 +1447,9 @@ export function SceneInner({
 
       // Determine layer for this component (default to "scene")
       const layer: RenderLayer = comp.layer || "scene";
-      const key = typeLayerKey(comp.type, layer);
+      const rawBatchKey = spec.getBatchKey?.(comp);
+      const batchKey = rawBatchKey !== undefined ? String(rawBatchKey) : undefined;
+      const key = typeLayerKey(comp.type, layer, batchKey);
 
       let typeInfo = typeArrays.get(key);
       if (!typeInfo) {
@@ -957,6 +1463,8 @@ export function SceneInner({
           elementCounts: [],
           elementOffsets: [],
           layer,
+          type: comp.type,
+          batchKey,
         };
         typeArrays.set(key, typeInfo);
       }
@@ -990,6 +1498,20 @@ export function SceneInner({
       }
     });
 
+    // Remove image resources for batches no longer used
+    const activeImageKeys = new Set<string>();
+    typeArrays.forEach((info: TypeInfo) => {
+      if (info.type === "ImagePlane" && info.batchKey) {
+        activeImageKeys.add(info.batchKey);
+      }
+    });
+    gpuRef.current.imageResources.forEach((resource, key) => {
+      if (!activeImageKeys.has(key)) {
+        resource.texture.destroy();
+        gpuRef.current.imageResources.delete(key);
+      }
+    });
+
     // Track global start index for all components
     let globalStartIndex = 0;
 
@@ -997,8 +1519,8 @@ export function SceneInner({
     let totalRenderSize = 0;
     let totalPickingSize = 0;
     typeArrays.forEach((info: TypeInfo, key: string) => {
-      // Extract the component type from the key (format: "type_layer")
-      const type = info.components[0]?.type;
+      // Extract the component type from the group
+      const type = info.type;
       if (!type) return;
       const spec = primitiveRegistry[type];
       if (!spec) return;
@@ -1061,8 +1583,8 @@ export function SceneInner({
 
     // Create or update render objects and write buffer data
     typeArrays.forEach((info: TypeInfo, key: string) => {
-      // Extract the component type from the first component
-      const type = info.components[0]?.type;
+      // Extract the component type from the group
+      const type = info.type;
       if (!type) return;
       const spec = primitiveRegistry[type];
       if (!spec) return;
@@ -1147,10 +1669,27 @@ export function SceneInner({
         };
 
         const hasAlphaComponents = components.some(componentHasAlpha);
+        let textureBindGroup: GPUBindGroup | undefined;
 
+        if (type === "ImagePlane") {
+          const imageComponent = info.components[0] as ImagePlaneComponentConfig;
+          const batchKey = info.batchKey ?? spec.getBatchKey?.(imageComponent);
+          if (batchKey) {
+            const imageResource = ensureImageResource(
+              device,
+              gpuRef.current.imageResources,
+              String(batchKey),
+              imageComponent.image,
+              imageComponent.imageKey,
+            );
+            textureBindGroup = imageResource?.bindGroup;
+          }
+          if (!textureBindGroup) return;
+        }
+
+        const geometryResource = getGeometryResource(resources, type);
         if (needNewRenderObject) {
           // Create new render object with all the required resources
-          const geometryResource = getGeometryResource(resources, type);
           renderObject = {
             pipeline,
             pickingPipeline,
@@ -1158,8 +1697,10 @@ export function SceneInner({
             instanceBuffer: bufferInfo,
             indexBuffer: geometryResource.ib,
             indexCount: geometryResource.indexCount,
+            indexFormat: geometryResource.indexFormat,
             instanceCount: totalInstanceCount,
             vertexCount: geometryResource.vertexCount,
+            textureBindGroup,
             pickingInstanceBuffer: pickingBufferInfo,
             pickingDataStale: true,
             componentIndex: info.indices[0],
@@ -1182,6 +1723,8 @@ export function SceneInner({
           renderObject.spec = spec;
           renderObject.layer = layer;
           renderObject.pickingDataStale = true;
+          renderObject.indexFormat = geometryResource.indexFormat;
+          renderObject.textureBindGroup = textureBindGroup;
           if (hasAlphaComponents && !renderObject.hasAlphaComponents) {
             Object.assign(
               renderObject,
@@ -1215,13 +1758,15 @@ export function SceneInner({
    ******************************************************/
 
   /**
-   * Renders the silhouette of a single hovered element to the outline texture.
+   * Renders silhouette targets into the outline texture.
    */
-  function renderSilhouettePass(
-    hoveredState: { componentIdx: number; elementIdx: number },
+  function renderSilhouetteTargets(
+    commandEncoder: GPUCommandEncoder,
+    targets: OutlineTarget[],
     components: ComponentConfig[],
+    tempBuffers: GPUBuffer[],
   ): void {
-    if (!gpuRef.current) return;
+    if (!gpuRef.current || targets.length === 0) return;
 
     const {
       device,
@@ -1233,66 +1778,58 @@ export function SceneInner({
 
     if (!outlineTexture || !outlineDepthTexture) return;
 
-    const { componentIdx, elementIdx } = hoveredState;
-    const component = components[componentIdx];
-    if (!component) return;
+    const createTempInstanceBuffer = (
+      data: Float32Array,
+      label: string,
+    ): GPUBuffer => {
+      const buffer = device.createBuffer({
+        size: align16(data.byteLength),
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        label,
+      });
+      device.queue.writeBuffer(
+        buffer,
+        0,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+      );
+      tempBuffers.push(buffer);
+      return buffer;
+    };
 
-    // Find the render object for this component type
-    const ro = renderObjects.find((r) =>
-      r.componentOffsets.some((o) => o.componentIdx === componentIdx),
-    );
-    if (!ro) return;
+    const buildComponentInstanceData = (
+      ro: RenderObject,
+      compOffset: ComponentOffset,
+    ) => {
+      const instancesPerElement = ro.spec.instancesPerElement;
+      const floatsPerInstance = ro.spec.floatsPerInstance;
+      const totalInstances = compOffset.elementCount * instancesPerElement;
+      if (totalInstances === 0) return null;
 
-    // Find the component offset
-    const compOffset = ro.componentOffsets.find(
-      (o) => o.componentIdx === componentIdx,
-    );
-    if (!compOffset) return;
+      const data = new Float32Array(totalInstances * floatsPerInstance);
+      for (let elemIndex = 0; elemIndex < compOffset.elementCount; elemIndex++) {
+        const originalIndex = compOffset.elementStart + elemIndex;
+        const sortedIndex = ro.sortedPositions
+          ? ro.sortedPositions[originalIndex]
+          : originalIndex;
+        const sourceOffset =
+          sortedIndex * instancesPerElement * floatsPerInstance;
+        const destOffset =
+          elemIndex * instancesPerElement * floatsPerInstance;
+        data.set(
+          ro.renderData.subarray(
+            sourceOffset,
+            sourceOffset + instancesPerElement * floatsPerInstance,
+          ),
+          destOffset,
+        );
+      }
 
-    // Calculate the instance index within the render object's buffer
-    // Must account for transparency sorting - render data is in sorted order
-    const baseOffset = compOffset.elementStart;
-    const originalIndex = baseOffset + elementIdx;
+      return data;
+    };
 
-    // If sorted, convert original index to sorted position
-    const sortedIndex = ro.sortedPositions
-      ? ro.sortedPositions[originalIndex]
-      : originalIndex;
-
-    const instancesPerElement = ro.spec.instancesPerElement;
-
-    // Create a small buffer with just this one element's instance data
-    const floatsPerInstance = ro.spec.floatsPerInstance;
-    const instanceDataSize =
-      floatsPerInstance * instancesPerElement * Float32Array.BYTES_PER_ELEMENT;
-    const tempBuffer = device.createBuffer({
-      size: align16(instanceDataSize),
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      label: "Silhouette temp instance buffer",
-    });
-
-    // Copy the instance data for this element (using sorted index for correct position)
-    const startOffset = sortedIndex * instancesPerElement * floatsPerInstance;
-    const instanceData = ro.renderData.subarray(
-      startOffset,
-      startOffset + floatsPerInstance * instancesPerElement,
-    );
-    device.queue.writeBuffer(
-      tempBuffer,
-      0,
-      instanceData.buffer,
-      instanceData.byteOffset,
-      instanceData.byteLength,
-    );
-
-    // Get or create silhouette pipeline
-    // For silhouette, we can reuse the regular render pipeline but with a simple white fragment shader
-    // However, the fragment output needs to match - let's use the picking pipeline's vertex shader
-    // since it has the same transforms but simpler attributes
-
-    const cmd = device.createCommandEncoder({ label: "Silhouette encoder" });
-
-    const pass = cmd.beginRenderPass({
+    const pass = commandEncoder.beginRenderPass({
       colorAttachments: [
         {
           view: outlineTexture.createView(),
@@ -1309,26 +1846,97 @@ export function SceneInner({
       },
     });
 
-    // Use the regular render pipeline - the fragment shader will still output lit color,
-    // but we only care about coverage for the silhouette
-    pass.setPipeline(ro.pipeline);
-    pass.setBindGroup(0, uniformBindGroup);
-    pass.setVertexBuffer(0, ro.geometryBuffer);
-    pass.setVertexBuffer(1, tempBuffer, 0);
-    pass.setIndexBuffer(ro.indexBuffer, "uint16");
-    pass.drawIndexed(ro.indexCount, instancesPerElement);
+    for (const target of targets) {
+      if (!components[target.componentIdx]) continue;
+
+      const ro = renderObjects.find((r) =>
+        r.componentOffsets.some((o) => o.componentIdx === target.componentIdx),
+      );
+      if (!ro) continue;
+
+      const compOffset = ro.componentOffsets.find(
+        (o) => o.componentIdx === target.componentIdx,
+      );
+      if (!compOffset) continue;
+
+      const instancesPerElement = ro.spec.instancesPerElement;
+      const floatsPerInstance = ro.spec.floatsPerInstance;
+      let instanceBuffer = ro.instanceBuffer.buffer;
+      let instanceOffset = ro.instanceBuffer.offset;
+      let instanceCount = 0;
+
+      if (target.kind === "component") {
+        instanceCount = compOffset.elementCount * instancesPerElement;
+        if (instanceCount === 0) continue;
+
+        if (ro.sortedPositions) {
+          const instanceData = buildComponentInstanceData(ro, compOffset);
+          if (!instanceData) continue;
+          const tempBuffer = createTempInstanceBuffer(
+            instanceData,
+            "Outline component instance buffer",
+          );
+          instanceBuffer = tempBuffer;
+          instanceOffset = 0;
+        } else {
+          const startInstance = compOffset.elementStart * instancesPerElement;
+          instanceOffset =
+            ro.instanceBuffer.offset +
+            startInstance *
+              floatsPerInstance *
+              Float32Array.BYTES_PER_ELEMENT;
+        }
+      } else {
+        const originalIndex = compOffset.elementStart + target.elementIdx;
+        if (
+          target.elementIdx < 0 ||
+          target.elementIdx >= compOffset.elementCount
+        ) {
+          continue;
+        }
+        const sortedIndex = ro.sortedPositions
+          ? ro.sortedPositions[originalIndex]
+          : originalIndex;
+        const startOffset = sortedIndex * instancesPerElement * floatsPerInstance;
+        const instanceData = ro.renderData.subarray(
+          startOffset,
+          startOffset + instancesPerElement * floatsPerInstance,
+        );
+        const tempBuffer = createTempInstanceBuffer(
+          instanceData,
+          "Outline element instance buffer",
+        );
+        instanceBuffer = tempBuffer;
+        instanceOffset = 0;
+        instanceCount = instancesPerElement;
+      }
+
+      if (instanceCount === 0) continue;
+
+      pass.setPipeline(ro.pipeline);
+      pass.setBindGroup(0, uniformBindGroup);
+      if (ro.textureBindGroup) {
+        pass.setBindGroup(1, ro.textureBindGroup);
+      }
+      pass.setVertexBuffer(0, ro.geometryBuffer);
+      pass.setVertexBuffer(1, instanceBuffer, instanceOffset);
+      if (ro.indexBuffer && ro.indexCount > 0) {
+        pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+        pass.drawIndexed(ro.indexCount, instanceCount);
+      } else if (ro.vertexCount > 0) {
+        pass.draw(ro.vertexCount, instanceCount);
+      }
+    }
 
     pass.end();
-    device.queue.submit([cmd.finish()]);
-
-    // Clean up temp buffer
-    tempBuffer.destroy();
   }
 
   /**
    * Renders the outline post-process pass, compositing the outline over the canvas.
    */
   function renderOutlinePostProcess(
+    commandEncoder: GPUCommandEncoder,
+    targetView: GPUTextureView,
     outlineColorVal: [number, number, number],
     outlineWidthVal: number,
   ): void {
@@ -1336,7 +1944,6 @@ export function SceneInner({
 
     const {
       device,
-      context,
       outlinePipeline,
       outlineBindGroup,
       outlineParamsBuffer,
@@ -1367,12 +1974,10 @@ export function SceneInner({
       paramsData.byteLength,
     );
 
-    const cmd = device.createCommandEncoder({ label: "Outline post-process" });
-
-    const pass = cmd.beginRenderPass({
+    const pass = commandEncoder.beginRenderPass({
       colorAttachments: [
         {
-          view: context.getCurrentTexture().createView(),
+          view: targetView,
           loadOp: "load", // Keep existing content
           storeOp: "store",
         },
@@ -1384,7 +1989,6 @@ export function SceneInner({
     pass.draw(3); // Full-screen triangle
 
     pass.end();
-    device.queue.submit([cmd.finish()]);
   }
 
   const pendingAnimationFrameRef = useRef<number | null>(null);
@@ -1421,6 +2025,11 @@ export function SceneInner({
         uniformBindGroup,
         renderObjects,
         depthTexture,
+        outlineTexture,
+        outlineDepthTexture,
+        outlinePipeline,
+        outlineBindGroup,
+        outlineParamsBuffer,
       } = gpuRef.current;
 
       const cameraMoved = hasCameraMoved(
@@ -1507,45 +2116,63 @@ export function SceneInner({
           return aOverlay - bOverlay;
         });
 
-        // Submit all render passes before waiting
-        const renderPromise = renderPass({
-          device,
-          context,
+        const commandEncoder = device.createCommandEncoder({
+          label: "Scene render encoder",
+        });
+        const targetTexture = context.getCurrentTexture();
+        const targetView = targetTexture.createView();
+
+        encodeScenePass({
+          commandEncoder,
+          targetView,
           depthTexture,
           renderObjects: sortedRenderObjects,
           uniformBindGroup,
         });
 
-        // Render hover outline if enabled and something is hovered
-        // Must happen BEFORE awaiting to use the same swap chain texture
-        if (lastHoverState.current && components) {
-          const hoveredComponent =
-            components[lastHoverState.current.componentIdx];
-          // Resolve hoverOutline: component-level takes precedence over scene-level
-          const shouldOutline =
-            hoveredComponent?.hoverOutline ?? defaultHoverOutline;
+        const outlineReady = !!(
+          outlineTexture &&
+          outlineDepthTexture &&
+          outlinePipeline &&
+          outlineBindGroup &&
+          outlineParamsBuffer
+        );
+        const tempOutlineBuffers: GPUBuffer[] = [];
 
-          if (shouldOutline) {
-            // Resolve outline styling: component-level takes precedence
-            const effectiveOutlineColor =
-              hoveredComponent?.outlineColor ?? defaultOutlineColor;
-            const effectiveOutlineWidth =
-              hoveredComponent?.outlineWidth ?? defaultOutlineWidth;
-
-            renderSilhouettePass(lastHoverState.current, components);
+        // Encode outline passes (hover + always-on) before submitting.
+        if (components && outlineReady) {
+          const outlineGroups = collectOutlineGroups(
+            components,
+            lastHoverState.current,
+          );
+          for (const group of outlineGroups) {
+            renderSilhouetteTargets(
+              commandEncoder,
+              group.targets,
+              components,
+              tempOutlineBuffers,
+            );
             renderOutlinePostProcess(
-              effectiveOutlineColor,
-              effectiveOutlineWidth,
+              commandEncoder,
+              targetView,
+              group.style.color,
+              group.style.width,
             );
           }
         }
 
+        device.queue.submit([commandEncoder.finish()]);
+
         // Now wait for all GPU work to complete
-        await renderPromise;
+        await device.queue.onSubmittedWorkDone();
+
+        for (const buffer of tempOutlineBuffers) {
+          buffer.destroy();
+        }
         onRenderComplete();
       } catch (err) {
         console.error(
-          "[Debug] Error during renderPass:",
+          "[Debug] Error during renderFrame:",
           (err as Error).message,
         );
         onRenderComplete();
@@ -1559,9 +2186,6 @@ export function SceneInner({
       containerHeight,
       onFrameRendered,
       components,
-      defaultHoverOutline,
-      defaultOutlineColor,
-      defaultOutlineWidth,
     ],
   );
 
@@ -1659,6 +2283,9 @@ export function SceneInner({
       for (const ro of sortedForPicking) {
         pass.setPipeline(ro.pickingPipeline);
         pass.setBindGroup(0, uniformBindGroup);
+        if (ro.textureBindGroup) {
+          pass.setBindGroup(1, ro.textureBindGroup);
+        }
         pass.setVertexBuffer(0, ro.geometryBuffer);
         pass.setVertexBuffer(
           1,
@@ -1667,8 +2294,8 @@ export function SceneInner({
         );
 
         // Draw with indices if we have them, otherwise use vertex count
-        if (ro.indexBuffer) {
-          pass.setIndexBuffer(ro.indexBuffer, "uint16");
+        if (ro.indexBuffer && ro.indexCount > 0) {
+          pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
           pass.drawIndexed(ro.indexCount, ro.instanceCount);
         } else if (ro.vertexCount) {
           pass.draw(ro.vertexCount, ro.instanceCount);
@@ -1781,9 +2408,7 @@ export function SceneInner({
         }
 
         const hadHover = lastHoverState.current !== null;
-        // Check if previous component had outline enabled
-        const prevHadOutline =
-          prevComponent?.hoverOutline ?? defaultHoverOutline;
+        const prevHadOutline = resolveHoverOutline(prevComponent).enabled;
         lastHoverState.current = null;
 
         // Re-render to clear outline or hoverProps styling
@@ -1868,7 +2493,9 @@ export function SceneInner({
     // Re-render to update outline or hoverProps styling
     // Check if new or previous component has outline enabled
     const newComponent = found ? components[found.componentIdx] : null;
-    const newHasOutline = newComponent?.hoverOutline ?? defaultHoverOutline;
+    const newHasOutline = resolveHoverOutline(
+      newComponent ?? undefined,
+    ).enabled;
     if (newHasOutline) {
       requestRender("hover-change");
     } else if (hoverPropsDirty.current) {
@@ -2279,19 +2906,17 @@ export function SceneInner({
     };
   }, [initWebGPU]);
 
-  // Check if any component has hoverOutline enabled, or if scene default is enabled
-  const anyOutlineEnabled = useMemo(() => {
-    if (defaultHoverOutline) return true;
-    return components.some((c) => c.hoverOutline === true);
-  }, [components, defaultHoverOutline]);
-
   // Create/recreate depth + pick textures
   useEffect(() => {
-    if (isReady) {
+    if (isReady && gpuRef.current) {
       createOrUpdateDepthTexture();
       createOrUpdatePickTextures();
       if (anyOutlineEnabled) {
+        const hadOutline = !!gpuRef.current.outlineTexture;
         createOrUpdateOutlineTextures();
+        if (!hadOutline) {
+          requestRender("outline-init");
+        }
       }
     }
   }, [
@@ -2387,8 +3012,6 @@ export function SceneInner({
     </div>
   );
 }
-
-export { SceneInner as SceneImpl };
 
 function componentHasAlpha(component: ComponentConfig) {
   return (

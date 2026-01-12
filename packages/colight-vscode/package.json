@@ -108,7 +108,7 @@
           "colight.currentCell.show": {
             "type": "boolean",
             "description": "Decorate the current cell with a border above/below",
-            "default": false
+            "default": true
           }
         }
       }

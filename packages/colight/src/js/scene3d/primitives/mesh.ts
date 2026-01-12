@@ -34,7 +34,7 @@ export interface MeshComponentConfig extends BaseComponentConfig {
  * Defines a new mesh primitive type from geometry data.
  *
  * @param name - Unique name for this primitive type
- * @param geometry - Geometry data (vertices/indices) or a function that creates it
+ * @param geometry - Geometry data (vertices/optional indices) or a function that creates it
  * @param options - Optional rendering configuration
  */
 export function defineMesh(
