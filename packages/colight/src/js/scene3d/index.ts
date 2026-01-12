@@ -123,6 +123,7 @@ export type { PrimitiveSpec, BaseComponentConfig } from "./types";
 export {
   flattenGroups,
   hasGroups,
+  hasAnyGroups,
   isGroup,
   composeTransforms,
   identityTransform,

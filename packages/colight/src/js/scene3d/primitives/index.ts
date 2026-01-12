@@ -52,4 +52,14 @@ export {
 } from "./imagePlane";
 
 // Generic mesh factory
-export { defineMesh, type MeshComponentConfig } from "./mesh";
+export {
+  defineMesh,
+  defineMeshRaw,
+  interleaveVertexData,
+  getFormatKey,
+  type MeshComponentConfig,
+  type StructuredGeometry,
+  type VertexFormat,
+  type ProcessedMeshGeometry,
+  type MeshOptions,
+} from "./mesh";

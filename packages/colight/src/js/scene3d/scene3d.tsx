@@ -29,25 +29,55 @@ import {
   BoundingBoxComponentConfig,
   PickEvent,
   PrimitiveSpec,
-  defineMesh,
   MeshComponentConfig,
-  pointCloudSpec,
-  ellipsoidSpec,
-  ellipsoidAxesSpec,
-  cuboidSpec,
-  lineBeamsSpec,
-  lineSegmentsSpec,
-  imagePlaneSpec,
-  boundingBoxSpec,
   ImageSource,
 } from "./components";
-import { GroupConfig, flattenGroups, hasGroups } from "./groups";
+import { GroupConfig, flattenGroups, hasAnyGroups } from "./groups";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
-import { ReadyState, NOOP_READY_STATE } from "./types";
-import { isNdArray } from "@colight/serde";
+import { ReadyState, NOOP_READY_STATE, PickInfo } from "./types";
+import {
+  coerceComponentArrays,
+  normalizePrimitiveSpecs,
+  PrimitiveSpecMap,
+  MeshGeometry,
+  MeshDefinition,
+} from "./coercion";
+import {
+  resolveInlineMeshes,
+  InlineMeshComponentConfig,
+  MeshProps,
+} from "./inlineMesh";
+import {
+  GridHelper,
+  GridHelperProps,
+  CameraFrustum,
+  CameraFrustumProps,
+  ImageProjection,
+  ImageProjectionProps,
+  ImageProjectionResult,
+  createImageProjectionGroup,
+  CameraIntrinsics,
+  CameraExtrinsics,
+} from "./helpers";
+
+// Re-export helpers for external use
+export {
+  GridHelper,
+  GridHelperProps,
+  CameraFrustum,
+  CameraFrustumProps,
+  ImageProjection,
+  ImageProjectionProps,
+  ImageProjectionResult,
+  CameraIntrinsics,
+  CameraExtrinsics,
+};
+
+// Re-export coercion types
+export { MeshGeometry, MeshDefinition, MeshProps };
 
 // =============================================================================
 // Primitive Components (JSX API)
@@ -59,48 +89,12 @@ import { isNdArray } from "@colight/serde";
  */
 const SCENE3D_TYPE = Symbol.for("scene3d.type");
 
-/**
- * Coerce a value to Float32Array if it's an array-like type.
- * Handles NdArrayView, regular arrays, and other TypedArrays.
- */
-function coerceToFloat32(value: unknown): Float32Array | unknown {
-  if (isNdArray(value)) {
-    const flat = value.flat;
-    return flat instanceof Float32Array
-      ? flat
-      : new Float32Array(flat as ArrayLike<number>);
-  }
-  if (Array.isArray(value)) {
-    const flattened = value.flat ? value.flat() : value;
-    return new Float32Array(flattened as number[]);
-  }
-  if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
-    return new Float32Array(value.buffer);
-  }
-  return value;
-}
-
-/**
- * Coerce array fields on a component based on its spec's arrayFields.
- * Mutates the component in place for efficiency.
- */
-function coerceComponentArrays<T extends { type: string }>(
-  component: T,
-  registry: Record<string, PrimitiveSpec<any>>,
-): T {
-  const spec = registry[component.type];
-  const float32Fields = spec?.arrayFields?.float32;
-  if (!float32Fields) return component;
-
-  for (const field of float32Fields) {
-    const value = (component as any)[field];
-    if (value !== undefined) {
-      (component as any)[field] = coerceToFloat32(value);
-    }
-  }
-
-  return component;
-}
+/** Result of processConfig - can be single config, array, or group */
+type ProcessConfigResult =
+  | ComponentConfig
+  | GroupConfig
+  | InlineMeshComponentConfig
+  | ImageProjectionResult;
 
 /**
  * Processes props into a component config, handling type coercion and defaults.
@@ -108,7 +102,7 @@ function coerceComponentArrays<T extends { type: string }>(
 function processConfig(
   typeName: string,
   props: Record<string, any>,
-): ComponentConfig | GroupConfig | InlineMeshComponentConfig {
+): ProcessConfigResult {
   switch (typeName) {
     case "PointCloud":
       return {
@@ -120,10 +114,10 @@ function processConfig(
       const half_size =
         typeof props.half_size === "number"
           ? ([props.half_size, props.half_size, props.half_size] as [
-              number,
-              number,
-              number,
-            ])
+            number,
+            number,
+            number,
+          ])
           : props.half_size;
       const fillMode = props.fill_mode || "Solid";
       return {
@@ -137,10 +131,10 @@ function processConfig(
       const half_size =
         typeof props.half_size === "number"
           ? ([props.half_size, props.half_size, props.half_size] as [
-              number,
-              number,
-              number,
-            ])
+            number,
+            number,
+            number,
+          ])
           : props.half_size;
       return {
         ...props,
@@ -175,8 +169,7 @@ function processConfig(
         ...rest
       } = props;
       const resolvedCenters =
-        centers ??
-        (position ? [position] : [[0, 0, 0]]);
+        centers ?? (position ? [position] : [[0, 0, 0]]);
       const resolvedQuaternions =
         quaternions ?? (quaternion ? [quaternion] : undefined);
       const resolvedSize =
@@ -184,8 +177,7 @@ function processConfig(
         (width !== undefined || height !== undefined
           ? [width ?? 1, height ?? 1]
           : undefined);
-      const resolvedAlpha =
-        rest.alpha !== undefined ? rest.alpha : opacity;
+      const resolvedAlpha = rest.alpha !== undefined ? rest.alpha : opacity;
 
       return {
         ...rest,
@@ -208,10 +200,10 @@ function processConfig(
       const half_size =
         typeof props.half_size === "number"
           ? ([props.half_size, props.half_size, props.half_size] as [
-              number,
-              number,
-              number,
-            ])
+            number,
+            number,
+            number,
+          ])
           : props.half_size;
       return {
         ...props,
@@ -293,7 +285,7 @@ export type GroupProps = Omit<GroupConfig, "type" | "children"> & {
   children?: React.ReactNode;
 };
 
-export type { PickEvent };
+export type { PickEvent, ImageSource };
 
 // =============================================================================
 // Primitive Components
@@ -347,320 +339,9 @@ export function ImagePlane(props: ImagePlaneProps): ImagePlaneComponentConfig {
 }
 (ImagePlane as any)[SCENE3D_TYPE] = "ImagePlane";
 
-export interface GridHelperProps {
-  size?: number;
-  divisions?: number;
-  color?: [number, number, number];
-  centerColor?: [number, number, number];
-  lineWidth?: number;
-  layer?: "scene" | "overlay";
-}
-
-/** GridHelper - renders a simple XZ grid using LineSegments. */
-export function GridHelper({
-  size = 10,
-  divisions = 10,
-  color = [0.5, 0.5, 0.5],
-  centerColor = [0.7, 0.7, 0.7],
-  lineWidth = 0.02,
-  layer,
-}: GridHelperProps = {}): LineSegmentsComponentConfig {
-  const half = size / 2;
-  const step = size / divisions;
-  const lineCount = divisions + 1;
-  const segmentCount = lineCount * 2;
-
-  const starts = new Float32Array(segmentCount * 3);
-  const ends = new Float32Array(segmentCount * 3);
-  const colors = new Float32Array(segmentCount * 3);
-
-  let segIndex = 0;
-  for (let i = 0; i < lineCount; i++) {
-    const pos = -half + i * step;
-    const isCenter = Math.abs(pos) < 1e-6;
-    const lineColor = isCenter ? centerColor : color;
-
-    // Lines parallel to X (vary Z)
-    starts[segIndex * 3 + 0] = -half;
-    starts[segIndex * 3 + 1] = 0;
-    starts[segIndex * 3 + 2] = pos;
-    ends[segIndex * 3 + 0] = half;
-    ends[segIndex * 3 + 1] = 0;
-    ends[segIndex * 3 + 2] = pos;
-    colors.set(lineColor, segIndex * 3);
-    segIndex++;
-
-    // Lines parallel to Z (vary X)
-    starts[segIndex * 3 + 0] = pos;
-    starts[segIndex * 3 + 1] = 0;
-    starts[segIndex * 3 + 2] = -half;
-    ends[segIndex * 3 + 0] = pos;
-    ends[segIndex * 3 + 1] = 0;
-    ends[segIndex * 3 + 2] = half;
-    colors.set(lineColor, segIndex * 3);
-    segIndex++;
-  }
-
-  const config: LineSegmentsComponentConfig = {
-    type: "LineSegments",
-    starts,
-    ends,
-    colors,
-    size: lineWidth,
-  };
-  if (layer) config.layer = layer;
-
-  return config;
-}
-
-export interface CameraIntrinsics {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
-  width: number;
-  height: number;
-}
-
-export interface CameraExtrinsics {
-  position: [number, number, number];
-  quaternion: [number, number, number, number];
-}
-
-type Vec3 = [number, number, number];
-
-function rotatePoint(q: [number, number, number, number], v: Vec3): Vec3 {
-  const [qx, qy, qz, qw] = q;
-  const [vx, vy, vz] = v;
-  const ix = qw * vx + qy * vz - qz * vy;
-  const iy = qw * vy + qz * vx - qx * vz;
-  const iz = qw * vz + qx * vy - qy * vx;
-  const iw = -qx * vx - qy * vy - qz * vz;
-  return [
-    ix * qw + iw * -qx + iy * -qz - iz * -qy,
-    iy * qw + iw * -qy + iz * -qx - ix * -qz,
-    iz * qw + iw * -qz + ix * -qy - iy * -qx,
-  ];
-}
-
-function projectCorner(
-  intrinsics: CameraIntrinsics,
-  u: number,
-  v: number,
-  depth: number,
-): Vec3 {
-  const { fx, fy, cx, cy } = intrinsics;
-  const x = ((u - cx) / fx) * depth;
-  const y = ((v - cy) / fy) * depth;
-  return [x, y, depth];
-}
-
-export interface CameraFrustumProps {
-  intrinsics: CameraIntrinsics;
-  extrinsics: CameraExtrinsics;
-  near?: number;
-  far?: number;
-  color?: [number, number, number];
-  lineWidth?: number;
-  layer?: "scene" | "overlay";
-}
-
-/** CameraFrustum - renders frustum edges based on intrinsics/extrinsics. */
-export function CameraFrustum({
-  intrinsics,
-  extrinsics,
-  near = 0.1,
-  far = 1.0,
-  color = [1, 0.8, 0.2],
-  lineWidth = 0.02,
-  layer,
-}: CameraFrustumProps): LineSegmentsComponentConfig {
-  const { width, height } = intrinsics;
-  const { position, quaternion } = extrinsics;
-
-  const cornersAtDepth = (depth: number) => [
-    projectCorner(intrinsics, 0, 0, depth),
-    projectCorner(intrinsics, width, 0, depth),
-    projectCorner(intrinsics, width, height, depth),
-    projectCorner(intrinsics, 0, height, depth),
-  ];
-
-  const transform = (point: [number, number, number]) => {
-    const rotated = rotatePoint(quaternion, point);
-    return [
-      rotated[0] + position[0],
-      rotated[1] + position[1],
-      rotated[2] + position[2],
-    ] as [number, number, number];
-  };
-
-  const nearCorners = cornersAtDepth(near).map(transform);
-  const farCorners = cornersAtDepth(far).map(transform);
-
-  const segments: Array<[number, number, number, number, number, number]> = [];
-  const addEdge = (a: [number, number, number], b: [number, number, number]) => {
-    segments.push([a[0], a[1], a[2], b[0], b[1], b[2]]);
-  };
-
-  for (let i = 0; i < 4; i++) {
-    addEdge(nearCorners[i], nearCorners[(i + 1) % 4]);
-    addEdge(farCorners[i], farCorners[(i + 1) % 4]);
-    addEdge(nearCorners[i], farCorners[i]);
-  }
-
-  const starts = new Float32Array(segments.length * 3);
-  const ends = new Float32Array(segments.length * 3);
-  const colors = new Float32Array(segments.length * 3);
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    starts.set(seg.slice(0, 3), i * 3);
-    ends.set(seg.slice(3, 6), i * 3);
-    colors.set(color, i * 3);
-  }
-
-  const config: LineSegmentsComponentConfig = {
-    type: "LineSegments",
-    starts,
-    ends,
-    colors,
-    size: lineWidth,
-  };
-  if (layer) config.layer = layer;
-  return config;
-}
-
-export interface ImageProjectionProps {
-  image: ImageSource;
-  imageKey?: string | number;
-  intrinsics: CameraIntrinsics;
-  extrinsics: CameraExtrinsics;
-  depth?: number;
-  opacity?: number;
-  color?: [number, number, number];
-  showFrustum?: boolean;
-  frustumColor?: [number, number, number];
-  lineWidth?: number;
-  layer?: "scene" | "overlay";
-}
-
-function createImageProjectionGroup(props: ImageProjectionProps): GroupConfig {
-  const {
-    image,
-    imageKey,
-    intrinsics,
-    extrinsics,
-    depth = 1.0,
-    opacity,
-    color = [1, 1, 1],
-    showFrustum = false,
-    frustumColor = [1, 0.8, 0.2],
-    lineWidth = 0.02,
-    layer,
-  } = props;
-
-  const { width, height } = intrinsics;
-  const { position, quaternion } = extrinsics;
-
-  const cornersCam: Vec3[] = [
-    projectCorner(intrinsics, 0, 0, depth),
-    projectCorner(intrinsics, width, 0, depth),
-    projectCorner(intrinsics, width, height, depth),
-    projectCorner(intrinsics, 0, height, depth),
-  ];
-
-  const centerCam: Vec3 = [
-    (cornersCam[0][0] + cornersCam[1][0] + cornersCam[2][0] + cornersCam[3][0]) /
-      4,
-    (cornersCam[0][1] + cornersCam[1][1] + cornersCam[2][1] + cornersCam[3][1]) /
-      4,
-    (cornersCam[0][2] + cornersCam[1][2] + cornersCam[2][2] + cornersCam[3][2]) /
-      4,
-  ];
-
-  const widthWorld = Math.hypot(
-    cornersCam[1][0] - cornersCam[0][0],
-    cornersCam[1][1] - cornersCam[0][1],
-    cornersCam[1][2] - cornersCam[0][2],
-  );
-  const heightWorld = Math.hypot(
-    cornersCam[3][0] - cornersCam[0][0],
-    cornersCam[3][1] - cornersCam[0][1],
-    cornersCam[3][2] - cornersCam[0][2],
-  );
-
-  const centerWorld = rotatePoint(quaternion, centerCam);
-  centerWorld[0] += position[0];
-  centerWorld[1] += position[1];
-  centerWorld[2] += position[2];
-
-  const plane: ImagePlaneComponentConfig = {
-    type: "ImagePlane",
-    image,
-    imageKey,
-    centers: new Float32Array(centerWorld),
-    quaternions: new Float32Array(quaternion),
-    size: [widthWorld, heightWorld],
-    color,
-    alpha: opacity,
-  };
-  if (layer) plane.layer = layer;
-
-  const children: (ComponentConfig | GroupConfig)[] = [plane];
-
-  if (showFrustum) {
-    const cornersWorld = cornersCam.map((corner) => {
-      const rotated = rotatePoint(quaternion, corner);
-      return [
-        rotated[0] + position[0],
-        rotated[1] + position[1],
-        rotated[2] + position[2],
-      ] as Vec3;
-    });
-
-    const segmentCount = 8;
-    const starts = new Float32Array(segmentCount * 3);
-    const ends = new Float32Array(segmentCount * 3);
-    const colors = new Float32Array(segmentCount * 3);
-
-    let segIndex = 0;
-    for (let i = 0; i < 4; i++) {
-      const a = cornersWorld[i];
-      const b = cornersWorld[(i + 1) % 4];
-      starts.set(a, segIndex * 3);
-      ends.set(b, segIndex * 3);
-      colors.set(frustumColor, segIndex * 3);
-      segIndex++;
-    }
-
-    for (let i = 0; i < 4; i++) {
-      starts.set(position, segIndex * 3);
-      ends.set(cornersWorld[i], segIndex * 3);
-      colors.set(frustumColor, segIndex * 3);
-      segIndex++;
-    }
-
-    const frustum: LineSegmentsComponentConfig = {
-      type: "LineSegments",
-      starts,
-      ends,
-      colors,
-      size: lineWidth,
-    };
-    if (layer) frustum.layer = layer;
-    children.push(frustum);
-  }
-
-  return {
-    type: "Group",
-    children,
-  };
-}
-
-/** ImageProjection - composite of ImagePlane and optional frustum edges. */
-export function ImageProjection(props: ImageProjectionProps): GroupConfig {
-  return createImageProjectionGroup(props);
-}
+// Mark helper components with SCENE3D_TYPE for JSX collection
+(GridHelper as any)[SCENE3D_TYPE] = "GridHelper";
+(CameraFrustum as any)[SCENE3D_TYPE] = "CameraFrustum";
 (ImageProjection as any)[SCENE3D_TYPE] = "ImageProjection";
 
 /** BoundingBox - renders wireframe boxes. */
@@ -700,17 +381,6 @@ const PRIMITIVE_TYPES = new Set([
   "Group",
 ]);
 
-const defaultPrimitiveRegistry: Record<string, PrimitiveSpec<any>> = {
-  PointCloud: pointCloudSpec,
-  Ellipsoid: ellipsoidSpec,
-  EllipsoidAxes: ellipsoidAxesSpec,
-  Cuboid: cuboidSpec,
-  LineBeams: lineBeamsSpec,
-  LineSegments: lineSegmentsSpec,
-  ImagePlane: imagePlaneSpec,
-  BoundingBox: boundingBoxSpec,
-};
-
 /**
  * Custom primitive factory - allows passing arbitrary props with a custom type.
  * Used for rendering custom primitives defined via `primitiveSpecs`.
@@ -749,280 +419,6 @@ export function computeCanvasDimensions(
   };
 }
 
-export interface MeshGeometry {
-  vertexData: Float32Array | number[] | ArrayBufferView;
-  indexData?: Uint16Array | Uint32Array | number[] | ArrayBufferView;
-}
-
-export interface MeshDefinition extends MeshGeometry {
-  shading?: "lit" | "unlit";
-  cullMode?: GPUCullMode;
-}
-
-export type MeshProps = Omit<MeshComponentConfig, "type"> & {
-  geometry: MeshGeometry;
-  geometryKey?: string | number;
-  shading?: "lit" | "unlit";
-  cullMode?: GPUCullMode;
-};
-
-type InlineMeshComponentConfig = MeshProps & { type: "Mesh" };
-
-type PrimitiveSpecInput = PrimitiveSpec<any> | MeshDefinition;
-type PrimitiveSpecMap = Record<string, PrimitiveSpecInput>;
-
-function isMeshDefinition(value: PrimitiveSpecInput): value is MeshDefinition {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "vertexData" in value
-  );
-}
-
-function isPrimitiveSpec(value: unknown): value is PrimitiveSpec<any> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as PrimitiveSpec<any>).createGeometryResource === "function"
-  );
-}
-
-function coerceVertexData(
-  value: Float32Array | number[] | ArrayBufferView,
-): Float32Array {
-  if (isNdArray(value)) {
-    const flat = value.flat;
-    return flat instanceof Float32Array
-      ? flat
-      : new Float32Array(flat as ArrayLike<number>);
-  }
-  if (value instanceof Float32Array) return value;
-  if (Array.isArray(value)) return new Float32Array(value);
-  const asArray = Array.from(value as ArrayLike<number>);
-  return new Float32Array(asArray);
-}
-
-function coerceIndexData(
-  value?: Uint16Array | Uint32Array | number[] | ArrayBufferView,
-): Uint16Array | Uint32Array | undefined {
-  if (!value) return undefined;
-  if (isNdArray(value)) {
-    const flat = value.flat;
-    value = Array.from(flat as ArrayLike<number>);
-  }
-  if (value instanceof Uint16Array || value instanceof Uint32Array) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    let max = 0;
-    for (const idx of value) {
-      if (idx > max) max = idx;
-    }
-    return max > 65535 ? new Uint32Array(value) : new Uint16Array(value);
-  }
-  const asArray = Array.from(value as ArrayLike<number>);
-  let max = 0;
-  for (const idx of asArray) {
-    if (idx > max) max = idx;
-  }
-  return max > 65535 ? new Uint32Array(asArray) : new Uint16Array(asArray);
-}
-
-function coerceMeshGeometry(geometry: MeshGeometry): MeshGeometry {
-  return {
-    vertexData: coerceVertexData(geometry.vertexData),
-    indexData: coerceIndexData(geometry.indexData),
-  };
-}
-
-function normalizePrimitiveSpecs(
-  specs?: PrimitiveSpecMap,
-): Record<string, PrimitiveSpec<any>> | undefined {
-  if (!specs) return undefined;
-  const normalized: Record<string, PrimitiveSpec<any>> = {};
-  for (const [name, spec] of Object.entries(specs)) {
-    if (isMeshDefinition(spec)) {
-      const geometry = coerceMeshGeometry(spec);
-      normalized[name] = defineMesh(
-        name,
-        {
-          vertexData: geometry.vertexData as Float32Array,
-          indexData: geometry.indexData as Uint16Array | Uint32Array | undefined,
-        },
-        {
-          shading: spec.shading,
-          cullMode: spec.cullMode,
-        },
-      );
-    } else if (isPrimitiveSpec(spec)) {
-      normalized[name] = spec;
-    } else if (typeof spec === "object" && spec !== null) {
-      const nestedEntries = Object.entries(
-        spec as Record<string, PrimitiveSpecInput>,
-      );
-      const hasNested = nestedEntries.some(
-        ([, nested]) => isMeshDefinition(nested) || isPrimitiveSpec(nested),
-      );
-      if (hasNested) {
-        console.warn(
-          "scene3d: flattening nested primitiveSpecs entry",
-          name,
-        );
-        for (const [nestedName, nestedSpec] of nestedEntries) {
-          if (isMeshDefinition(nestedSpec)) {
-            const geometry = coerceMeshGeometry(nestedSpec);
-            normalized[nestedName] = defineMesh(
-              nestedName,
-              {
-                vertexData: geometry.vertexData as Float32Array,
-                indexData:
-                  geometry.indexData as Uint16Array | Uint32Array | undefined,
-              },
-              {
-                shading: nestedSpec.shading,
-                cullMode: nestedSpec.cullMode,
-              },
-            );
-          } else if (isPrimitiveSpec(nestedSpec)) {
-            normalized[nestedName] = nestedSpec;
-          }
-        }
-      } else {
-        console.warn(
-          "scene3d: ignoring invalid primitiveSpecs entry",
-          name,
-          spec,
-        );
-      }
-    } else {
-      console.warn(
-        "scene3d: ignoring invalid primitiveSpecs entry",
-        name,
-        spec,
-      );
-    }
-  }
-  return normalized;
-}
-
-interface InlineMeshCacheEntry {
-  typeName: string;
-  spec: PrimitiveSpec<any>;
-  geometryRef: MeshGeometry;
-  geometryKey: string | number | MeshGeometry;
-  shading: "lit" | "unlit";
-  cullMode: GPUCullMode;
-}
-
-const inlineMeshCache = new WeakMap<
-  MeshGeometry,
-  Map<string, InlineMeshCacheEntry>
->();
-const inlineMeshKeyCache = new Map<
-  string | number,
-  Map<string, InlineMeshCacheEntry>
->();
-let inlineMeshId = 0;
-
-function getInlineMeshEntry(
-  geometry: MeshGeometry,
-  options: {
-    geometryKey?: string | number;
-    shading?: "lit" | "unlit";
-    cullMode?: GPUCullMode;
-  },
-): InlineMeshCacheEntry {
-  const shading = options.shading ?? "lit";
-  const cullMode = options.cullMode ?? "back";
-  const variantKey = `${shading}|${cullMode}`;
-  const explicitKey = options.geometryKey;
-  const cache =
-    explicitKey !== undefined ? inlineMeshKeyCache : inlineMeshCache;
-  const cacheKey = explicitKey !== undefined ? explicitKey : geometry;
-
-  let variants = cache.get(cacheKey as any);
-  if (!variants) {
-    variants = new Map();
-    cache.set(cacheKey as any, variants);
-  }
-
-  let entry = variants.get(variantKey);
-  const normalizedGeometry = coerceMeshGeometry(geometry);
-  const geometryKey = explicitKey !== undefined ? explicitKey : geometry;
-
-  if (!entry) {
-    const typeName = `__InlineMesh_${inlineMeshId++}`;
-    const spec = defineMesh(
-      typeName,
-      {
-        vertexData: normalizedGeometry.vertexData as Float32Array,
-        indexData:
-          normalizedGeometry.indexData as Uint16Array | Uint32Array | undefined,
-      },
-      { shading, cullMode },
-    );
-    (spec as any).geometryKey = geometryKey;
-    entry = {
-      typeName,
-      spec,
-      geometryRef: geometry,
-      geometryKey,
-      shading,
-      cullMode,
-    };
-    variants.set(variantKey, entry);
-    return entry;
-  }
-
-  if (entry.geometryRef !== geometry || entry.geometryKey !== geometryKey) {
-    entry.spec = defineMesh(
-      entry.typeName,
-      {
-        vertexData: normalizedGeometry.vertexData as Float32Array,
-        indexData:
-          normalizedGeometry.indexData as Uint16Array | Uint32Array | undefined,
-      },
-      { shading, cullMode },
-    );
-    (entry.spec as any).geometryKey = geometryKey;
-    entry.geometryRef = geometry;
-    entry.geometryKey = geometryKey;
-    entry.shading = shading;
-    entry.cullMode = cullMode;
-  }
-
-  return entry;
-}
-
-function resolveInlineMeshes(
-  components: (ComponentConfig | InlineMeshComponentConfig)[],
-): {
-  components: ComponentConfig[];
-  inlineSpecs?: Record<string, PrimitiveSpec<any>>;
-} {
-  let inlineSpecs: Record<string, PrimitiveSpec<any>> | undefined;
-  const resolved = components.map((component) => {
-    if (component.type !== "Mesh") return component;
-    const meshComponent = component as InlineMeshComponentConfig;
-    const entry = getInlineMeshEntry(meshComponent.geometry, {
-      geometryKey: meshComponent.geometryKey,
-      shading: meshComponent.shading,
-      cullMode: meshComponent.cullMode,
-    });
-
-    if (!inlineSpecs) inlineSpecs = {};
-    inlineSpecs[entry.typeName] = entry.spec;
-
-    const { geometry, geometryKey, shading, cullMode, ...rest } = meshComponent;
-    return {
-      ...rest,
-      type: entry.typeName,
-    } as ComponentConfig;
-  });
-
-  return { components: resolved, inlineSpecs };
-}
-
 /**
  * @interface SceneProps
  * @description Props for the Scene component
@@ -1044,10 +440,10 @@ interface SceneProps {
   defaultCamera?: CameraParams;
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
-  /** Scene-level hover callback. Called with PickEvent when hovering, null when not. */
-  onHover?: (event: PickEvent | null) => void;
-  /** Scene-level click callback. Called with PickEvent when an element is clicked. */
-  onClick?: (event: PickEvent) => void;
+  /** Scene-level hover callback. Called with PickInfo when hovering, null when not. */
+  onHover?: (event: PickInfo | null) => void;
+  /** Scene-level click callback. Called with PickInfo when an element is clicked. */
+  onClick?: (event: PickInfo) => void;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   className?: string;
@@ -1147,7 +543,13 @@ function collectComponentsFromChildren(
         name: props.name,
       } as GroupConfig);
     } else if (typeName) {
-      configs.push(processConfig(typeName, child.props as Record<string, any>));
+      const result = processConfig(typeName, child.props as Record<string, any>);
+      // Handle array results (e.g., ImageProjection returns multiple components)
+      if (Array.isArray(result)) {
+        configs.push(...result);
+      } else {
+        configs.push(result);
+      }
     }
   });
 
@@ -1159,8 +561,11 @@ function collectLayers(layers: any[]): {
   sceneProps: Record<string, any>;
   primitiveSpecs?: PrimitiveSpecMap;
 } {
-  const components: (ComponentConfig | GroupConfig | InlineMeshComponentConfig)[] =
-    [];
+  const components: (
+    | ComponentConfig
+    | GroupConfig
+    | InlineMeshComponentConfig
+  )[] = [];
   const sceneProps: Record<string, any> = {};
   let mergedPrimitiveSpecs: PrimitiveSpecMap | undefined;
 
@@ -1176,11 +581,19 @@ function collectLayers(layers: any[]): {
   const addLayer = (layer: any) => {
     if (!layer) return;
 
-    if (Array.isArray(layer) && layer[1]?.layers) {
-      const nestedLayers = layer[1].layers;
-      for (const nestedLayer of nestedLayers) {
-        addLayer(nestedLayer);
+    if (Array.isArray(layer)) {
+
+      if (layer[1]?.layers) {
+        const nestedLayers = layer[1].layers;
+        for (const nestedLayer of nestedLayers) {
+          addLayer(nestedLayer);
+        }
+      } else {
+        for (const nestedLayer of layer) {
+          addLayer(nestedLayer);
+        }
       }
+
       return;
     }
 
@@ -1233,26 +646,30 @@ function SceneFromLayers({
   primitiveSpecs,
   readyState,
 }: SceneLayersProps) {
-  const { components: rawComponents, sceneProps, primitiveSpecs: layerSpecs } =
-    useMemo(() => collectLayers(layers), [layers]);
-  const mergedPrimitiveSpecs = useMemo(() => {
-    if (!layerSpecs) return primitiveSpecs;
-    if (!primitiveSpecs) return layerSpecs;
-    return { ...primitiveSpecs, ...layerSpecs };
-  }, [layerSpecs, primitiveSpecs]);
-  const components = useMemo(() => {
-    if (!mergedPrimitiveSpecs) {
-      return rawComponents.filter((component) =>
-        PRIMITIVE_TYPES.has(component.type),
-      );
+  // Consolidate all layer processing into one memoized computation
+  const { components, mergedPrimitiveSpecs, sceneProps } = useMemo(() => {
+    // 1. Collect layers
+    const {
+      components: rawComponents,
+      sceneProps,
+      primitiveSpecs: layerSpecs,
+    } = collectLayers(layers);
+
+    // 2. Merge primitive specs
+    let mergedPrimitiveSpecs: PrimitiveSpecMap | undefined;
+    if (layerSpecs || primitiveSpecs) {
+      mergedPrimitiveSpecs = { ...primitiveSpecs, ...layerSpecs };
     }
 
-    return rawComponents.filter(
+    // 3. Filter to valid component types
+    const components = rawComponents.filter(
       (component) =>
         PRIMITIVE_TYPES.has(component.type) ||
-        component.type in mergedPrimitiveSpecs,
+        (mergedPrimitiveSpecs && component.type in mergedPrimitiveSpecs),
     );
-  }, [rawComponents, mergedPrimitiveSpecs]);
+
+    return { components, mergedPrimitiveSpecs, sceneProps };
+  }, [layers, primitiveSpecs]);
 
   return (
     <SceneInner
@@ -1314,58 +731,45 @@ function SceneInner({
     ...defaultCamera,
     ...camera,
   });
+
+  // Memoize ready callback
   const onReady = useMemo(
     () => readyState.beginUpdate("scene3d/ready"),
     [readyState],
   );
 
-  const normalizedSpecs = useMemo(
-    () => normalizePrimitiveSpecs(primitiveSpecs),
-    [primitiveSpecs],
-  );
+  // Process components: collect -> flatten groups -> resolve inline meshes
+  // Note: Helper components (GridHelper, etc.) are already expanded during layer
+  // evaluation via JSCall - they arrive as primitive configs, not helper types.
+  const { components, mergedSpecs } = useMemo(() => {
+    // 1. Collect from children or prop
+    const rawComponents = componentsProp ?? collectComponentsFromChildren(children);
 
-  // Collect components from children or use components prop
-  const rawComponents = useMemo(() => {
-    if (componentsProp) return componentsProp;
-    return collectComponentsFromChildren(children);
-  }, [children, componentsProp]);
-
-  const flattenedComponents = useMemo(() => {
-    const flattened = hasGroups(rawComponents)
+    // 2. Flatten groups (optimized internally for composition-only groups)
+    const flattened = hasAnyGroups(rawComponents)
       ? flattenGroups(rawComponents as (ComponentConfig | GroupConfig)[])
       : (rawComponents as (ComponentConfig | InlineMeshComponentConfig)[]);
-    return flattened;
-  }, [rawComponents]);
 
-  const { components: resolvedComponents, inlineSpecs } = useMemo(
-    () => resolveInlineMeshes(flattenedComponents),
-    [flattenedComponents],
-  );
+    // 3. Resolve inline meshes
+    const { components: resolvedComponents, inlineSpecs } =
+      resolveInlineMeshes(flattened);
 
-  const mergedSpecs = useMemo(() => {
-    if (!inlineSpecs) return normalizedSpecs;
-    if (!normalizedSpecs) return inlineSpecs;
-    return { ...normalizedSpecs, ...inlineSpecs };
-  }, [normalizedSpecs, inlineSpecs]);
+    // 4. Normalize user-provided specs
+    const normalizedSpecs = normalizePrimitiveSpecs(primitiveSpecs);
 
-  const primitiveRegistry = useMemo(() => {
-    if (!mergedSpecs) return defaultPrimitiveRegistry;
-    return { ...defaultPrimitiveRegistry, ...mergedSpecs };
-  }, [mergedSpecs]);
+    // 5. Merge specs (inline + user-provided)
+    let mergedSpecs: Record<string, PrimitiveSpec<any>> | undefined;
+    if (inlineSpecs || normalizedSpecs) {
+      mergedSpecs = { ...normalizedSpecs, ...inlineSpecs };
+    }
 
-  // Coerce arrays by spec after inline meshes are resolved
-  const components = useMemo(
-    () =>
-      resolvedComponents.map((component) =>
-        coerceComponentArrays(component, primitiveRegistry),
-      ),
-    [resolvedComponents, primitiveRegistry],
-  );
+    return { components: resolvedComponents, mergedSpecs };
+  }, [children, componentsProp, primitiveSpecs]);
 
   const cameraChangeCallback = useCallback(
-    (camera: CameraParams) => {
-      internalCameraRef.current = camera;
-      onCameraChange?.(camera);
+    (cam: CameraParams) => {
+      internalCameraRef.current = cam;
+      onCameraChange?.(cam);
     },
     [onCameraChange],
   );

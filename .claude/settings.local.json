@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn build:*)",
+      "Bash(yarn test:js:*)",
+      "Bash(yarn pyright:*)",
+      "Bash(yarn tsc:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(uv run pyright:*)",
+      "Bash(yarn vitest run:*)"
+    ]
+  }
+}

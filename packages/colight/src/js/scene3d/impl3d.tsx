@@ -62,7 +62,6 @@ import {
   ComponentOffset,
   ReadyState,
   NOOP_READY_STATE,
-  PickEventType,
   PickInfo,
   DragInfo,
 } from "./types";
@@ -378,11 +377,11 @@ export interface SceneImplProps {
   /** Callback to fire when scene is initially ready */
   onReady?: () => void;
 
-  /** Scene-level hover callback. Called with PickEvent when hovering, null when not. */
-  onHover?: (event: PickEventType | null) => void;
+  /** Scene-level hover callback. Called with PickInfo when hovering, null when not. */
+  onHover?: (event: PickInfo | null) => void;
 
-  /** Scene-level click callback. Called with PickEvent when an element is clicked. */
-  onClick?: (event: PickEventType) => void;
+  /** Scene-level click callback. Called with PickInfo when an element is clicked. */
+  onClick?: (event: PickInfo) => void;
 
   /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
   readyState?: ReadyState;
@@ -1671,16 +1670,30 @@ export function SceneImpl({
         const hasAlphaComponents = components.some(componentHasAlpha);
         let textureBindGroup: GPUBindGroup | undefined;
 
-        if (type === "ImagePlane") {
-          const imageComponent = info.components[0] as ImagePlaneComponentConfig;
-          const batchKey = info.batchKey ?? spec.getBatchKey?.(imageComponent);
-          if (batchKey) {
+        // Handle texture binding for ImagePlane and textured meshes
+        const firstComponent = info.components[0] as any;
+        const hasTexture =
+          type === "ImagePlane" ||
+          (firstComponent.texture !== undefined && spec.getBatchKey);
+
+        if (hasTexture) {
+          // ImagePlane uses 'image', textured meshes use 'texture'
+          const imageSource =
+            type === "ImagePlane"
+              ? (firstComponent as ImagePlaneComponentConfig).image
+              : firstComponent.texture;
+          const imageKey =
+            type === "ImagePlane"
+              ? (firstComponent as ImagePlaneComponentConfig).imageKey
+              : firstComponent.textureKey;
+          const batchKey = info.batchKey ?? spec.getBatchKey?.(firstComponent);
+          if (batchKey && imageSource) {
             const imageResource = ensureImageResource(
               device,
               gpuRef.current.imageResources,
               String(batchKey),
-              imageComponent.image,
-              imageComponent.imageKey,
+              imageSource,
+              imageKey,
             );
             textureBindGroup = imageResource?.bindGroup;
           }
@@ -2364,30 +2377,6 @@ export function SceneImpl({
     return null;
   }
 
-  /**
-   * Builds a PickEvent for the given component and element.
-   */
-  function buildPickEvent(
-    componentIdx: number,
-    elementIdx: number,
-    spec: PrimitiveSpec<any>,
-  ): PickEventType {
-    const component = components[componentIdx];
-    const centers = spec.getCenters(component);
-    const baseIdx = elementIdx * 3;
-
-    return {
-      type: spec.type,
-      id: component.id,
-      index: elementIdx,
-      position: [
-        centers[baseIdx],
-        centers[baseIdx + 1],
-        centers[baseIdx + 2],
-      ] as [number, number, number],
-    };
-  }
-
   function handleHoverID(pickedID: number) {
     if (!gpuRef.current) return;
 
@@ -2398,7 +2387,6 @@ export function SceneImpl({
       if (lastHoverState.current) {
         const prevComponent = components[lastHoverState.current.componentIdx];
         prevComponent?.onHover?.(null);
-        prevComponent?.onHoverDetail?.(null);
         onSceneHover?.(null);
 
         // Clear hoverProps state if the previous component had hoverProps
@@ -2439,7 +2427,6 @@ export function SceneImpl({
     if (lastHoverState.current) {
       const prevComponent = components[lastHoverState.current.componentIdx];
       prevComponent?.onHover?.(null);
-      prevComponent?.onHoverDetail?.(null);
 
       // Clear hoverProps state for previous component
       if (prevComponent?.hoverProps) {
@@ -2450,15 +2437,12 @@ export function SceneImpl({
 
     // Set new hover if it exists
     if (found) {
-      const { componentIdx, elementIdx, spec } = found;
+      const { componentIdx, elementIdx } = found;
       if (componentIdx >= 0 && componentIdx < components.length) {
-        const event = buildPickEvent(componentIdx, elementIdx, spec);
-        onSceneHover?.(event);
-        components[componentIdx].onHover?.(elementIdx);
-
-        // Call detailed hover callback if defined
         const component = components[componentIdx];
-        if (component.onHoverDetail) {
+
+        // Build full pick info for scene callback
+        if (onSceneHover) {
           const pickInfo = buildPickInfo({
             mode: "hover",
             componentIndex: componentIdx,
@@ -2469,14 +2453,14 @@ export function SceneImpl({
             camera: activeCameraRef.current!,
             component,
           });
-          if (pickInfo) {
-            component.onHoverDetail(pickInfo);
-          }
+          onSceneHover(pickInfo);
         }
 
+        // Component-level callback with simple index
+        component.onHover?.(elementIdx);
+
         // Update hoverProps state for new component
-        const newComponent = components[componentIdx];
-        if (newComponent?.hoverProps) {
+        if (component.hoverProps) {
           hoverPropsState.current.set(componentIdx, elementIdx);
           hoverPropsDirty.current = true;
         }
@@ -2514,15 +2498,12 @@ export function SceneImpl({
     const found = findPickedElement(globalIdx);
     if (!found) return;
 
-    const { componentIdx, elementIdx, spec } = found;
+    const { componentIdx, elementIdx } = found;
     if (componentIdx >= 0 && componentIdx < components.length) {
-      const event = buildPickEvent(componentIdx, elementIdx, spec);
-      onSceneClick?.(event);
-      components[componentIdx].onClick?.(elementIdx);
-
-      // Call detailed click callback if defined
       const component = components[componentIdx];
-      if (component.onClickDetail) {
+
+      // Build full pick info for scene callback
+      if (onSceneClick) {
         const pickInfo = buildPickInfo({
           mode: "click",
           componentIndex: componentIdx,
@@ -2534,9 +2515,12 @@ export function SceneImpl({
           component,
         });
         if (pickInfo) {
-          component.onClickDetail(pickInfo);
+          onSceneClick(pickInfo);
         }
       }
+
+      // Component-level callback with simple index
+      component.onClick?.(elementIdx);
     }
   }
 

@@ -9,6 +9,15 @@ from colight.layout import JSExpr
 ArrayLike = Union[list, np.ndarray, JSExpr]
 NumberLike = Union[int, float, np.number, JSExpr]
 
+# Import helpers - these are re-exported below
+from colight.helpers import (
+    CameraFrustum,
+    GridHelper,
+    ImageProjection,
+    coerce_image_array,
+    flatten_array,
+)
+
 
 # =============================================================================
 # Drag Constraints
@@ -276,27 +285,10 @@ class Scene(Plot.LayoutItem):
         components = [
             e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
         ]
-        props = {"layers": components}
+        props: Dict[str, Any] = {"layers": components}
         if self.primitive_specs:
             props["primitiveSpecs"] = self.primitive_specs
         return [Plot.JSRef("scene3d.Scene"), props]
-
-
-def flatten_array(arr: Any, dtype: Any = np.float32) -> Any:
-    """Flatten an array if it is a 2D array, otherwise return as is.
-
-    Args:
-        arr: The array to flatten.
-        dtype: The desired data type of the array.
-
-    Returns:
-        A flattened array if input is 2D, otherwise the original array.
-    """
-    if isinstance(arr, (np.ndarray, list)):
-        arr = np.asarray(arr, dtype=dtype)
-        if arr.ndim == 2:
-            return arr.flatten()
-    return arr
 
 
 def coerce_index_array(arr: Any) -> Any:
@@ -307,52 +299,6 @@ def coerce_index_array(arr: Any) -> Any:
     max_val = int(array.max()) if array.size else 0
     dtype = np.uint32 if max_val > 65535 else np.uint16
     return flatten_array(array, dtype=dtype)
-
-
-def coerce_image_array(
-    image: Any,
-    image_width: Optional[int] = None,
-    image_height: Optional[int] = None,
-) -> Any:
-    """Normalize image data for ImagePlane/ImageProjection.
-
-    Returns a dict with {data, width, height, channels} or passes through JSExpr.
-    """
-    if isinstance(image, JSExpr):
-        return image
-    if isinstance(image, dict) and "data" in image and "width" in image and "height" in image:
-        return image
-    if isinstance(image, (np.ndarray, list)):
-        arr = np.asarray(image)
-        if arr.ndim == 1:
-            if image_width is None or image_height is None:
-                raise ValueError("Flat image data requires image_width and image_height.")
-            channels = int(arr.size / (image_width * image_height)) if image_width else 0
-            arr = arr.reshape((image_height, image_width, channels))
-        if arr.ndim == 2:
-            arr = np.stack([arr] * 3, axis=-1)
-        if arr.ndim != 3:
-            raise ValueError("Image data must be HxW or HxWxC.")
-
-        height, width = arr.shape[:2]
-        channels = arr.shape[2]
-        if channels not in (1, 3, 4):
-            raise ValueError("Image data must have 1, 3, or 4 channels.")
-        if channels == 1:
-            arr = np.repeat(arr, 3, axis=-1)
-            channels = 3
-
-        if np.issubdtype(arr.dtype, np.floating) and arr.max() <= 1.0:
-            arr = arr * 255.0
-
-        arr = arr.astype(np.uint8)
-        return {
-            "data": arr.flatten(),
-            "width": width,
-            "height": height,
-            "channels": channels,
-        }
-    return image
 
 
 def PointCloud(
@@ -677,137 +623,6 @@ def LineSegments(
     return SceneComponent("LineSegments", data, **kwargs)
 
 
-def GridHelper(
-    size: NumberLike = 10,
-    divisions: int = 10,
-    color: Optional[ArrayLike] = None,
-    center_color: Optional[ArrayLike] = None,
-    line_width: NumberLike = 0.002,
-    layer: Optional[Literal["scene", "overlay"]] = None,
-    **kwargs: Any,
-) -> SceneComponent:
-    """Create an XZ grid helper using LineSegments."""
-    half = float(size) / 2.0
-    step = float(size) / float(divisions)
-    line_count = divisions + 1
-    segment_count = line_count * 2
-
-    starts = np.zeros((segment_count, 3), dtype=np.float32)
-    ends = np.zeros((segment_count, 3), dtype=np.float32)
-    colors = np.zeros((segment_count, 3), dtype=np.float32)
-
-    grid_color = color if color is not None else [0.5, 0.5, 0.5]
-    axis_color = center_color if center_color is not None else [0.7, 0.7, 0.7]
-
-    seg_index = 0
-    for i in range(line_count):
-        pos = -half + i * step
-        is_center = abs(pos) < 1e-6
-        line_color = axis_color if is_center else grid_color
-
-        starts[seg_index] = [-half, 0.0, pos]
-        ends[seg_index] = [half, 0.0, pos]
-        colors[seg_index] = line_color
-        seg_index += 1
-
-        starts[seg_index] = [pos, 0.0, -half]
-        ends[seg_index] = [pos, 0.0, half]
-        colors[seg_index] = line_color
-        seg_index += 1
-
-    return LineSegments(
-        starts=starts,
-        ends=ends,
-        colors=colors,
-        size=line_width,
-        layer=layer,
-        **kwargs,
-    )
-
-
-def CameraFrustum(
-    intrinsics: Dict[str, Any],
-    extrinsics: Dict[str, Any],
-    near: NumberLike = 0.1,
-    far: NumberLike = 1.0,
-    color: Optional[ArrayLike] = None,
-    line_width: NumberLike = 0.002,
-    layer: Optional[Literal["scene", "overlay"]] = None,
-    **kwargs: Any,
-) -> SceneComponent:
-    """Create a camera frustum helper using LineSegments."""
-    fx = intrinsics["fx"]
-    fy = intrinsics["fy"]
-    cx = intrinsics["cx"]
-    cy = intrinsics["cy"]
-    width = intrinsics["width"]
-    height = intrinsics["height"]
-
-    position = list(extrinsics["position"])
-    quaternion = list(extrinsics["quaternion"])
-
-    def _quat_rotate(q: ArrayLike, v: ArrayLike) -> list:
-        qx, qy, qz, qw = q
-        vx, vy, vz = v
-        ix = qw * vx + qy * vz - qz * vy
-        iy = qw * vy + qz * vx - qx * vz
-        iz = qw * vz + qx * vy - qy * vx
-        iw = -qx * vx - qy * vy - qz * vz
-        return [
-            ix * qw + iw * -qx + iy * -qz - iz * -qy,
-            iy * qw + iw * -qy + iz * -qx - ix * -qz,
-            iz * qw + iw * -qz + ix * -qy - iy * -qx,
-        ]
-
-    def _project_corner(u: float, v: float, depth: float) -> list:
-        x = (u - cx) / fx * depth
-        y = (v - cy) / fy * depth
-        return [x, y, depth]
-
-    def _transform(point: list) -> list:
-        rotated = _quat_rotate(quaternion, point)
-        return [
-            rotated[0] + position[0],
-            rotated[1] + position[1],
-            rotated[2] + position[2],
-        ]
-
-    near_corners = [
-        _transform(_project_corner(0, 0, near)),
-        _transform(_project_corner(width, 0, near)),
-        _transform(_project_corner(width, height, near)),
-        _transform(_project_corner(0, height, near)),
-    ]
-    far_corners = [
-        _transform(_project_corner(0, 0, far)),
-        _transform(_project_corner(width, 0, far)),
-        _transform(_project_corner(width, height, far)),
-        _transform(_project_corner(0, height, far)),
-    ]
-
-    segments = []
-    for i in range(4):
-        segments.append(near_corners[i] + near_corners[(i + 1) % 4])
-        segments.append(far_corners[i] + far_corners[(i + 1) % 4])
-        segments.append(near_corners[i] + far_corners[i])
-
-    starts = np.array([seg[:3] for seg in segments], dtype=np.float32)
-    ends = np.array([seg[3:] for seg in segments], dtype=np.float32)
-    colors = np.tile(
-        np.array(color if color is not None else [1.0, 0.8, 0.2], dtype=np.float32),
-        (len(segments), 1),
-    )
-
-    return LineSegments(
-        starts=starts,
-        ends=ends,
-        colors=colors,
-        size=line_width,
-        layer=layer,
-        **kwargs,
-    )
-
-
 def ImagePlane(
     image: Any,
     *,
@@ -852,7 +667,10 @@ def ImagePlane(
     else:
         resolved_size = size
         if resolved_size is None and (width is not None or height is not None):
-            resolved_size = [width if width is not None else 1, height if height is not None else 1]
+            resolved_size = [
+                width if width is not None else 1,
+                height if height is not None else 1,
+            ]
         if resolved_size is not None:
             data["size"] = resolved_size
 
@@ -873,90 +691,6 @@ def ImagePlane(
         data["layer"] = layer
 
     return SceneComponent("ImagePlane", data, **kwargs)
-
-
-def ImageProjection(
-    image: Any,
-    intrinsics: Dict[str, Any],
-    extrinsics: Dict[str, Any],
-    depth: NumberLike = 1.0,
-    color: Optional[ArrayLike] = None,
-    opacity: Optional[NumberLike] = None,
-    show_frustum: bool = False,
-    frustum_color: Optional[ArrayLike] = None,
-    line_width: NumberLike = 0.02,
-    image_key: Optional[Union[str, int]] = None,
-    image_width: Optional[int] = None,
-    image_height: Optional[int] = None,
-    layer: Optional[Literal["scene", "overlay"]] = None,
-    **kwargs: Any,
-) -> Scene | SceneComponent:
-    """Create an image projection (plane + optional frustum lines)."""
-    fx = intrinsics["fx"]
-    fy = intrinsics["fy"]
-    cx = intrinsics["cx"]
-    cy = intrinsics["cy"]
-    width = intrinsics["width"]
-    height = intrinsics["height"]
-
-    position = extrinsics["position"]
-    quaternion = extrinsics["quaternion"]
-
-    def _quat_rotate(q: ArrayLike, v: ArrayLike) -> list:
-        qx, qy, qz, qw = q
-        vx, vy, vz = v
-        ix = qw * vx + qy * vz - qz * vy
-        iy = qw * vy + qz * vx - qx * vz
-        iz = qw * vz + qx * vy - qy * vx
-        iw = -qx * vx - qy * vy - qz * vz
-        return [
-            ix * qw + iw * -qx + iy * -qz - iz * -qy,
-            iy * qw + iw * -qy + iz * -qx - ix * -qz,
-            iz * qw + iw * -qz + ix * -qy - iy * -qx,
-        ]
-
-    def _project_corner(u: float, v: float, depth_val: float) -> list:
-        x = (u - cx) / fx * depth_val
-        y = (v - cy) / fy * depth_val
-        return [x, y, depth_val]
-
-    corners_cam = [
-        _project_corner(0, 0, float(depth)),
-        _project_corner(width, 0, float(depth)),
-        _project_corner(width, height, float(depth)),
-        _project_corner(0, height, float(depth)),
-    ]
-    center_cam = np.mean(np.array(corners_cam, dtype=np.float32), axis=0).tolist()
-
-    width_world = float(np.linalg.norm(np.array(corners_cam[1]) - np.array(corners_cam[0])))
-    height_world = float(np.linalg.norm(np.array(corners_cam[3]) - np.array(corners_cam[0])))
-
-    center_world = _quat_rotate(quaternion, center_cam)
-    center_world = [
-        center_world[0] + position[0],
-        center_world[1] + position[1],
-        center_world[2] + position[2],
-    ]
-
-    plane_color = color if color is not None else [1.0, 1.0, 1.0]
-    plane = ImagePlane(
-        image=image,
-        centers=[center_world],
-        quaternions=[quaternion],
-        size=[width_world, height_world],
-        color=plane_color,
-        opacity=opacity,
-        image_key=image_key,
-        image_width=image_width,
-        image_height=image_height,
-        layer=layer,
-        **kwargs,
-    )
-
-    if not show_frustum:
-        return plane 
-    
-    return plane + CameraFrustum(intrinsics, extrinsics)
 
 
 # =============================================================================
@@ -1019,9 +753,14 @@ def Group(
 
 
 def Mesh(
-    vertex_data: ArrayLike,
-    index_data: Optional[ArrayLike] = None,
+    positions: ArrayLike,
     *,
+    normals: Optional[ArrayLike] = None,
+    vertex_colors: Optional[ArrayLike] = None,
+    uvs: Optional[ArrayLike] = None,
+    indices: Optional[ArrayLike] = None,
+    texture: Optional[Any] = None,
+    texture_key: Optional[Union[str, int]] = None,
     centers: ArrayLike,
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,
@@ -1037,16 +776,23 @@ def Mesh(
 ) -> SceneComponent:
     """Create a mesh component with inline geometry.
 
+    Supports flexible vertex formats with optional normals, per-vertex colors, UVs, and textures.
+
     Args:
-        vertex_data: Flat array of vertex attributes (position, normal, etc.)
-        index_data: Flat array of indices (optional for non-indexed meshes)
-        centers: Nx3 array of mesh centers
-        colors: Nx3 array of RGB colors (optional)
+        positions: Nx3 array of vertex positions (required)
+        normals: Nx3 array of vertex normals (optional, auto-computed for lit shading)
+        vertex_colors: Nx3 (RGB) or Nx4 (RGBA) array of per-vertex colors (optional)
+        uvs: Nx2 array of texture coordinates (required for textured meshes)
+        indices: Array of triangle indices (optional for non-indexed meshes)
+        texture: Image for texturing (numpy array, PIL Image, etc). Requires uvs.
+        texture_key: Optional key to force texture reupload when image data changes
+        centers: Nx3 array of mesh instance centers
+        colors: Nx3 array of per-instance RGB colors (optional, multiplied with texture)
         color: Default RGB color [r,g,b] for all instances if colors not provided
         scales: Nx3 array of per-instance scales (optional)
         scale: Default scale for all instances if scales not provided
-        quaternions: Nx4 array of orientation quaternions [x,y,z,w] (optional)
-        quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
+        quaternions: Nx4 array of orientation quaternions [w,x,y,z] (optional)
+        quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
         shading: "lit" (default) or "unlit"
         cull_mode: "back" (default), "front", or "none"
         geometry_key: Optional key to force geometry reupload
@@ -1055,13 +801,46 @@ def Mesh(
 
     Returns:
         A Mesh scene component using inline geometry.
+
+    Example:
+        # Simple triangle with auto-computed normals
+        Mesh(
+            positions=[[0, 0, 0], [1, 0, 0], [0.5, 1, 0]],
+            indices=[0, 1, 2],
+            centers=[[0, 0, 0]],
+        )
+
+        # Mesh with per-vertex colors (e.g., from a 3D scan)
+        Mesh(
+            positions=scan_vertices,
+            vertex_colors=scan_colors,  # RGB from camera
+            indices=scan_faces,
+            centers=[[0, 0, 0]],
+            shading="unlit",
+        )
+
+        # Textured quad
+        Mesh(
+            positions=[[-1, -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]],
+            uvs=[[0, 0], [1, 0], [1, 1], [0, 1]],
+            indices=[0, 1, 2, 0, 2, 3],
+            texture=my_image,
+            centers=[[0, 0, 0]],
+            shading="unlit",
+        )
     """
     geometry: Dict[str, Any] = {
-        "vertexData": flatten_array(vertex_data, dtype=np.float32),
+        "positions": flatten_array(positions, dtype=np.float32),
     }
-    index_data = coerce_index_array(index_data)
-    if index_data is not None:
-        geometry["indexData"] = index_data
+    if normals is not None:
+        geometry["normals"] = flatten_array(normals, dtype=np.float32)
+    if vertex_colors is not None:
+        geometry["colors"] = flatten_array(vertex_colors, dtype=np.float32)
+    if uvs is not None:
+        geometry["uvs"] = flatten_array(uvs, dtype=np.float32)
+    indices_arr = coerce_index_array(indices)
+    if indices_arr is not None:
+        geometry["indices"] = indices_arr
 
     data: Dict[str, Any] = {
         "geometry": geometry,
@@ -1082,6 +861,11 @@ def Mesh(
         data["quaternions"] = flatten_array(quaternions, dtype=np.float32)
     elif quaternion is not None:
         data["quaternion"] = quaternion
+
+    if texture is not None:
+        data["texture"] = coerce_image_array(texture)
+    if texture_key is not None:
+        data["textureKey"] = texture_key
 
     if shading:
         data["shading"] = shading

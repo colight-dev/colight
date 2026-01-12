@@ -174,6 +174,7 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
   const info: PickInfo = {
     event: mode,
     component: { index: componentIndex, type: component.type },
+    groupPath: (component as any)._groupPath,
     instanceIndex: elementIndex,
     screen: {
       x: screenX,

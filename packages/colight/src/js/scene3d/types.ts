@@ -337,21 +337,10 @@ export interface BaseComponentConfig {
   onHover?: (index: number | null) => void;
 
   /**
-   * Callback fired when the mouse hovers with detailed pick info.
-   * Receives null when hover ends.
-   */
-  onHoverDetail?: (info: PickInfo | null) => void;
-
-  /**
    * Callback fired when an instance is clicked.
    * The index parameter is the clicked instance index.
    */
   onClick?: (index: number) => void;
-
-  /**
-   * Callback fired when an instance is clicked with detailed pick info.
-   */
-  onClickDetail?: (info: PickInfo) => void;
 
   /**
    * Callback fired when drag starts on this component.
@@ -438,6 +427,23 @@ export type PickEventType =
   | "dragstart"
   | "drag"
   | "dragend";
+
+/**
+ * Simple pick event for scene-level onHover/onClick callbacks.
+ * Contains the essential pick information without the full detail of PickInfo.
+ */
+export interface PickEvent {
+  /** Type of the picked primitive */
+  type: string;
+  /** Optional id of the picked component */
+  id?: string;
+  /** Index of the picked element within its component */
+  index: number;
+  /** World-space position of the picked element's center */
+  position: [number, number, number];
+  /** Path of group names from root to this component (if in a named group) */
+  groupPath?: string[];
+}
 
 /**
  * Constraint configuration for drag operations.

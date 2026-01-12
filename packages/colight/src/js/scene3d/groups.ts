@@ -6,8 +6,8 @@
  * At render time, groups are flattened into transformed primitives.
  */
 
-import { Vec3, add, scale as scaleVec3 } from "./vec3";
-import { ComponentConfig, BaseComponentConfig } from "./components";
+import { Vec3, add } from "./vec3";
+import { ComponentConfig } from "./components";
 
 // =============================================================================
 // Types
@@ -140,6 +140,25 @@ export function identityTransform(): Transform {
 }
 
 /**
+ * Check if a transform is identity (no translation, rotation, or scale).
+ * Used to short-circuit expensive transform operations.
+ */
+export function isIdentityTransform(t: Transform): boolean {
+  return (
+    t.position[0] === 0 &&
+    t.position[1] === 0 &&
+    t.position[2] === 0 &&
+    t.quaternion[0] === 0 &&
+    t.quaternion[1] === 0 &&
+    t.quaternion[2] === 0 &&
+    t.quaternion[3] === 1 &&
+    t.scale[0] === 1 &&
+    t.scale[1] === 1 &&
+    t.scale[2] === 1
+  );
+}
+
+/**
  * Compose two transforms: result = parent * child
  * The child transform is applied first, then the parent.
  */
@@ -197,6 +216,18 @@ export function isGroup(config: ComponentConfig | GroupConfig): config is GroupC
 }
 
 /**
+ * Check if a Group has any transform properties defined.
+ * Groups without transforms are used purely for composition.
+ */
+function groupHasTransform(group: GroupConfig): boolean {
+  return (
+    group.position !== undefined ||
+    group.quaternion !== undefined ||
+    group.scale !== undefined
+  );
+}
+
+/**
  * Apply a transform to a single component's data.
  * Returns a new component config with transformed positions and composed orientations.
  */
@@ -205,6 +236,18 @@ function applyTransformToComponent(
   transform: Transform,
   groupPath: string[],
 ): FlattenedComponent {
+  // Short-circuit: if transform is identity, avoid cloning arrays and doing math
+  if (isIdentityTransform(transform)) {
+    if (groupPath.length === 0) {
+      return component as FlattenedComponent;
+    }
+    // Only add groupPath metadata, no transform needed
+    return {
+      ...component,
+      _groupPath: groupPath,
+    };
+  }
+
   const isImagePlane = component.type === "ImagePlane";
   const result: FlattenedComponent = {
     ...component,
@@ -479,14 +522,15 @@ export function flattenGroups(
 
   for (const component of components) {
     if (isGroup(component)) {
-      // Compose transforms
-      const groupTransform = getGroupTransform(component);
-      const worldTransform = composeTransforms(parentTransform, groupTransform);
-
-      // Update group path
+      // Update group path if named
       const newPath = component.name
         ? [...groupPath, component.name]
         : groupPath;
+
+      // Skip transform composition if group has no transform (pure composition)
+      const worldTransform = groupHasTransform(component)
+        ? composeTransforms(parentTransform, getGroupTransform(component))
+        : parentTransform;
 
       // Recursively flatten children
       const flattened = flattenGroups(component.children, worldTransform, newPath);
@@ -506,8 +550,45 @@ export function flattenGroups(
 }
 
 /**
- * Check if any components in the array are Groups.
+ * Check if any components in the tree are Groups with transforms.
+ * Returns false for composition-only groups (no position/quaternion/scale).
  */
 export function hasGroups(components: (ComponentConfig | GroupConfig)[]): boolean {
+  for (const component of components) {
+    if (isGroup(component)) {
+      if (groupHasTransform(component)) {
+        return true;
+      }
+      // Recurse into children of composition-only groups
+      if (hasGroups(component.children)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Unwrap composition-only groups, extracting children into a flat array.
+ * Use this when hasGroups returns false but there are still Group configs.
+ */
+export function unwrapGroups(
+  components: (ComponentConfig | GroupConfig)[],
+): ComponentConfig[] {
+  const result: ComponentConfig[] = [];
+  for (const component of components) {
+    if (isGroup(component)) {
+      result.push(...unwrapGroups(component.children));
+    } else {
+      result.push(component);
+    }
+  }
+  return result;
+}
+
+/**
+ * Check if any components are Group configs (regardless of transforms).
+ */
+export function hasAnyGroups(components: (ComponentConfig | GroupConfig)[]): boolean {
   return components.some(isGroup);
 }
