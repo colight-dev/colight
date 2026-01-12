@@ -456,10 +456,12 @@ export function SceneWithLayers({
   layers,
   meshes,
   primitiveSpecs,
+  readyState,
 }: {
   layers: any[];
   meshes?: Record<string, MeshDefinition>;
   primitiveSpecs?: Record<string, PrimitiveSpec<any>>;
+  readyState?: ReadyState;
 }) {
   const components: (ComponentConfig | GroupConfig)[] = [];
   const sceneProps: Record<string, any> = {};
@@ -498,6 +500,7 @@ export function SceneWithLayers({
       meshes={meshes}
       primitiveSpecs={primitiveSpecs}
       {...sceneProps}
+      readyState={readyState}
     />
   );
 }

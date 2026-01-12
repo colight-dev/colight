@@ -26,6 +26,11 @@ colight.afterScreenCapture = removeCanvasOverlays;
 function ColightScene(props) {
   const $state = useContext($StateContext);
   const readyState = $state ?? NOOP_READY_STATE;
+  if (props && Object.prototype.hasOwnProperty.call(props, "layers")) {
+    return (
+      <scene3dModule.SceneWithLayers {...props} readyState={readyState} />
+    );
+  }
   return <scene3dModule.Scene {...props} readyState={readyState} />;
 }
 
