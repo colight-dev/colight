@@ -255,6 +255,15 @@ export interface Decoration {
   color?: [number, number, number];
   alpha?: number;
   scale?: number;
+  /**
+   * Enable outline effect for these specific instances.
+   * If undefined, outlineColor/outlineWidth enable the outline.
+   */
+  outline?: boolean;
+  /** Outline color, as RGB [0-1]. Defaults to [1, 1, 1]. */
+  outlineColor?: [number, number, number];
+  /** Outline width in pixels. Defaults to 2. */
+  outlineWidth?: number;
 }
 
 /**

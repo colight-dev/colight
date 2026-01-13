@@ -168,7 +168,7 @@ interface Decoration {
 /**
  * Creates a decoration configuration for modifying the appearance of specific instances.
  * @param indexes - Single index or array of indices to apply decoration to
- * @param options - Optional visual modifications (color, alpha, scale)
+ * @param options - Optional visual modifications (color, alpha, scale, outline)
  * @returns {Decoration} A decoration configuration object
  */
 export function deco(
@@ -177,6 +177,9 @@ export function deco(
     color?: [number, number, number];
     alpha?: number;
     scale?: number;
+    outline?: boolean;
+    outlineColor?: [number, number, number];
+    outlineWidth?: number;
   } = {},
 ): Decoration {
   const indexArray = typeof indexes === "number" ? [indexes] : indexes;

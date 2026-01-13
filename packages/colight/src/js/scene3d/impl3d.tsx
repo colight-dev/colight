@@ -194,24 +194,23 @@ function isExternalImageSource(
   return false;
 }
 
-function getExternalImageSize(
-  image: GPUCopyExternalImageSource,
-): { width: number; height: number } {
+function getExternalImageSize(image: GPUCopyExternalImageSource): {
+  width: number;
+  height: number;
+} {
   const anyImage = image as any;
   const width =
     typeof anyImage.naturalWidth === "number" && anyImage.naturalWidth > 0
       ? anyImage.naturalWidth
-      : anyImage.width ?? 0;
+      : (anyImage.width ?? 0);
   const height =
     typeof anyImage.naturalHeight === "number" && anyImage.naturalHeight > 0
       ? anyImage.naturalHeight
-      : anyImage.height ?? 0;
+      : (anyImage.height ?? 0);
   return { width, height };
 }
 
-function isImageDataLike(
-  image: unknown,
-): image is {
+function isImageDataLike(image: unknown): image is {
   data: Uint8Array | Uint8ClampedArray;
   width: number;
   height: number;
@@ -404,7 +403,10 @@ function initGeometryResources(
       | null
       | undefined;
     const specKey = (spec as any).geometryKey;
-    if (!existing || (specKey !== undefined && existing.geometryKey !== specKey)) {
+    if (
+      !existing ||
+      (specKey !== undefined && existing.geometryKey !== specKey)
+    ) {
       const resource = spec.createGeometryResource(device);
       (resource as any).geometryKey = specKey;
       (resources as any)[primitiveName] = resource;
@@ -535,19 +537,46 @@ function collectOutlineGroups(
   const groups = new Map<string, OutlineGroup>();
 
   components.forEach((component, componentIdx) => {
+    // Component-level outlines
     const outline = resolveComponentOutline(component);
-    if (!outline.enabled) return;
+    if (outline.enabled) {
+      const key = outlineStyleKey(outline.color, outline.width);
+      const existing = groups.get(key);
+      const target: OutlineTarget = { kind: "component", componentIdx };
+      if (existing) {
+        existing.targets.push(target);
+      } else {
+        groups.set(key, {
+          style: { color: outline.color, width: outline.width },
+          targets: [target],
+        });
+      }
+    }
 
-    const key = outlineStyleKey(outline.color, outline.width);
-    const existing = groups.get(key);
-    const target: OutlineTarget = { kind: "component", componentIdx };
-    if (existing) {
-      existing.targets.push(target);
-    } else {
-      groups.set(key, {
-        style: { color: outline.color, width: outline.width },
-        targets: [target],
-      });
+    // Decoration-level outlines
+    if (component.decorations) {
+      for (const decoration of component.decorations) {
+        const decoOutline = resolveOutlineStyle(decoration, component);
+        if (!decoOutline.enabled) continue;
+
+        const key = outlineStyleKey(decoOutline.color, decoOutline.width);
+        for (const elementIdx of decoration.indexes) {
+          const existing = groups.get(key);
+          const target: OutlineTarget = {
+            kind: "element",
+            componentIdx,
+            elementIdx,
+          };
+          if (existing) {
+            existing.targets.push(target);
+          } else {
+            groups.set(key, {
+              style: { color: decoOutline.color, width: decoOutline.width },
+              targets: [target],
+            });
+          }
+        }
+      }
     }
   });
 
@@ -557,8 +586,7 @@ function collectOutlineGroups(
     if (hoverOutline.enabled) {
       const baseOutline = resolveComponentOutline(hoveredComponent);
       const shouldAdd =
-        !baseOutline.enabled ||
-        !sameOutlineStyle(baseOutline, hoverOutline);
+        !baseOutline.enabled || !sameOutlineStyle(baseOutline, hoverOutline);
       if (shouldAdd) {
         const key = outlineStyleKey(hoverOutline.color, hoverOutline.width);
         const existing = groups.get(key);
@@ -948,11 +976,13 @@ export function SceneImpl({
     [controlledCamera, onCameraChange],
   );
 
-    // Check if any component can render outlines
+  // Check if any component can render outlines
   const anyOutlineEnabled = useMemo(() => {
     return components.some(
       (component) =>
-        isOutlineEnabled(component) || hasOutlineConfig(component.hoverProps),
+        isOutlineEnabled(component) ||
+        hasOutlineConfig(component.hoverProps) ||
+        component.decorations?.some((d: OutlineConfig) => hasOutlineConfig(d)),
     );
   }, [components]);
 
@@ -1447,7 +1477,8 @@ export function SceneImpl({
       // Determine layer for this component (default to "scene")
       const layer: RenderLayer = comp.layer || "scene";
       const rawBatchKey = spec.getBatchKey?.(comp);
-      const batchKey = rawBatchKey !== undefined ? String(rawBatchKey) : undefined;
+      const batchKey =
+        rawBatchKey !== undefined ? String(rawBatchKey) : undefined;
       const key = typeLayerKey(comp.type, layer, batchKey);
 
       let typeInfo = typeArrays.get(key);
@@ -1821,15 +1852,18 @@ export function SceneImpl({
       if (totalInstances === 0) return null;
 
       const data = new Float32Array(totalInstances * floatsPerInstance);
-      for (let elemIndex = 0; elemIndex < compOffset.elementCount; elemIndex++) {
+      for (
+        let elemIndex = 0;
+        elemIndex < compOffset.elementCount;
+        elemIndex++
+      ) {
         const originalIndex = compOffset.elementStart + elemIndex;
         const sortedIndex = ro.sortedPositions
           ? ro.sortedPositions[originalIndex]
           : originalIndex;
         const sourceOffset =
           sortedIndex * instancesPerElement * floatsPerInstance;
-        const destOffset =
-          elemIndex * instancesPerElement * floatsPerInstance;
+        const destOffset = elemIndex * instancesPerElement * floatsPerInstance;
         data.set(
           ro.renderData.subarray(
             sourceOffset,
@@ -1895,9 +1929,7 @@ export function SceneImpl({
           const startInstance = compOffset.elementStart * instancesPerElement;
           instanceOffset =
             ro.instanceBuffer.offset +
-            startInstance *
-              floatsPerInstance *
-              Float32Array.BYTES_PER_ELEMENT;
+            startInstance * floatsPerInstance * Float32Array.BYTES_PER_ELEMENT;
         }
       } else {
         const originalIndex = compOffset.elementStart + target.elementIdx;
@@ -1910,7 +1942,8 @@ export function SceneImpl({
         const sortedIndex = ro.sortedPositions
           ? ro.sortedPositions[originalIndex]
           : originalIndex;
-        const startOffset = sortedIndex * instancesPerElement * floatsPerInstance;
+        const startOffset =
+          sortedIndex * instancesPerElement * floatsPerInstance;
         const instanceData = ro.renderData.subarray(
           startOffset,
           startOffset + instancesPerElement * floatsPerInstance,
@@ -1955,12 +1988,8 @@ export function SceneImpl({
   ): void {
     if (!gpuRef.current) return;
 
-    const {
-      device,
-      outlinePipeline,
-      outlineBindGroup,
-      outlineParamsBuffer,
-    } = gpuRef.current;
+    const { device, outlinePipeline, outlineBindGroup, outlineParamsBuffer } =
+      gpuRef.current;
 
     if (!outlinePipeline || !outlineBindGroup || !outlineParamsBuffer) return;
 
@@ -2194,12 +2223,7 @@ export function SceneImpl({
       onFrameRendered?.(performance.now());
       onReady?.();
     },
-    [
-      containerWidth,
-      containerHeight,
-      onFrameRendered,
-      components,
-    ],
+    [containerWidth, containerHeight, onFrameRendered, components],
   );
 
   function requestRender(label: string) {

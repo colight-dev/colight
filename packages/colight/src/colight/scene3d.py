@@ -100,6 +100,9 @@ class Decoration(TypedDict, total=False):
     color: Optional[ArrayLike]  # [r,g,b]
     alpha: Optional[NumberLike]  # 0-1
     scale: Optional[NumberLike]  # scale factor
+    outline: Optional[bool]  # enable outline effect
+    outlineColor: Optional[ArrayLike]  # [r,g,b]
+    outlineWidth: Optional[NumberLike]  # pixels
 
 
 class HoverProps(TypedDict, total=False):
@@ -108,6 +111,9 @@ class HoverProps(TypedDict, total=False):
     color: Optional[ArrayLike]  # [r,g,b]
     alpha: Optional[NumberLike]  # 0-1
     scale: Optional[NumberLike]  # scale factor
+    outline: Optional[bool]  # enable outline effect
+    outlineColor: Optional[ArrayLike]  # [r,g,b]
+    outlineWidth: Optional[NumberLike]  # pixels
 
 
 def deco(
@@ -116,6 +122,9 @@ def deco(
     color: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     scale: Optional[NumberLike] = None,
+    outline: Optional[bool] = None,
+    outlineColor: Optional[ArrayLike] = None,
+    outlineWidth: Optional[NumberLike] = None,
 ) -> Decoration:
     """Create a decoration for scene components.
 
@@ -124,6 +133,9 @@ def deco(
         color: Optional RGB color override [r,g,b]
         alpha: Optional opacity value (0-1)
         scale: Optional scale factor
+        outline: Optional flag to enable outline effect
+        outlineColor: Optional outline RGB color [r,g,b]
+        outlineWidth: Optional outline width in pixels
 
     Returns:
         Dictionary containing decoration settings
@@ -142,6 +154,12 @@ def deco(
         decoration["alpha"] = alpha
     if scale is not None:
         decoration["scale"] = scale
+    if outline is not None:
+        decoration["outline"] = outline
+    if outlineColor is not None:
+        decoration["outlineColor"] = outlineColor
+    if outlineWidth is not None:
+        decoration["outlineWidth"] = outlineWidth
 
     return decoration  # type: ignore
 
