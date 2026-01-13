@@ -9,31 +9,10 @@
 import { isNdArray } from "@colight/serde";
 import { PrimitiveSpec } from "./components";
 import { defineMesh, StructuredGeometry } from "./primitives/mesh";
+import { coerceToFloat32 } from "./arrayUtils";
 
-// =============================================================================
-// Float32 Coercion
-// =============================================================================
-
-/**
- * Coerce a value to Float32Array if it's an array-like type.
- * Handles NdArrayView, regular arrays, and other TypedArrays.
- */
-export function coerceToFloat32(value: unknown): Float32Array | unknown {
-  if (isNdArray(value)) {
-    const flat = value.flat;
-    return flat instanceof Float32Array
-      ? flat
-      : new Float32Array(flat as ArrayLike<number>);
-  }
-  if (Array.isArray(value)) {
-    const flattened = value.flat ? value.flat() : value;
-    return new Float32Array(flattened as number[]);
-  }
-  if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
-    return new Float32Array(value.buffer);
-  }
-  return value;
-}
+// Re-export for backwards compatibility
+export { coerceToFloat32 };
 
 /**
  * Coerce array fields on a component based on its spec's arrayFields.
@@ -136,12 +115,10 @@ export interface MeshDefinition extends MeshGeometry {
 export type PrimitiveSpecInput = PrimitiveSpec<any> | MeshDefinition;
 export type PrimitiveSpecMap = Record<string, PrimitiveSpecInput>;
 
-export function isMeshDefinition(value: PrimitiveSpecInput): value is MeshDefinition {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "positions" in value
-  );
+export function isMeshDefinition(
+  value: PrimitiveSpecInput,
+): value is MeshDefinition {
+  return typeof value === "object" && value !== null && "positions" in value;
 }
 
 export function isPrimitiveSpec(value: unknown): value is PrimitiveSpec<any> {
@@ -186,7 +163,9 @@ export function normalizePrimitiveSpecs(
     } else if (isPrimitiveSpec(spec)) {
       normalized[name] = spec;
     } else if (typeof spec === "object" && spec !== null) {
-      const nestedEntries = Object.entries(spec as Record<string, PrimitiveSpecInput>);
+      const nestedEntries = Object.entries(
+        spec as Record<string, PrimitiveSpecInput>,
+      );
       const hasNested = nestedEntries.some(
         ([, nested]) => isMeshDefinition(nested) || isPrimitiveSpec(nested),
       );
@@ -204,10 +183,18 @@ export function normalizePrimitiveSpecs(
           }
         }
       } else {
-        console.warn("scene3d: ignoring invalid primitiveSpecs entry", name, spec);
+        console.warn(
+          "scene3d: ignoring invalid primitiveSpecs entry",
+          name,
+          spec,
+        );
       }
     } else {
-      console.warn("scene3d: ignoring invalid primitiveSpecs entry", name, spec);
+      console.warn(
+        "scene3d: ignoring invalid primitiveSpecs entry",
+        name,
+        spec,
+      );
     }
   }
   return normalized;

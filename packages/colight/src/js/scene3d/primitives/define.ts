@@ -45,7 +45,7 @@ export { quaternionShaderFunctions } from "../quaternion";
 // Input Coercion Helpers
 // =============================================================================
 
-import { coerceToFloat32 } from "../coercion";
+import { coerceToFloat32 } from "../arrayUtils";
 
 // Re-export for use in primitive coerce functions
 export { coerceToFloat32 };
