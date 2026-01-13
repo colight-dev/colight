@@ -35,6 +35,8 @@ import {
   cuboidSpec,
   imagePlaneSpec,
   boundingBoxSpec,
+  lineBeamsSpec,
+  lineSegmentsSpec,
   // Props types (user-facing input types)
   PointCloudProps,
   EllipsoidProps,
@@ -85,6 +87,55 @@ export type {
 
 // Re-export coercion types
 export type { MeshGeometry, MeshDefinition, MeshProps };
+
+// =============================================================================
+// Raw Component Coercion
+// =============================================================================
+
+/**
+ * Registry mapping primitive type names to their specs.
+ * Used to apply coercion to raw component data from Python interop.
+ */
+const PRIMITIVE_SPECS: Record<string, PrimitiveSpec<any>> = {
+  PointCloud: pointCloudSpec,
+  Ellipsoid: ellipsoidSpec,
+  Cuboid: cuboidSpec,
+  ImagePlane: imagePlaneSpec,
+  BoundingBox: boundingBoxSpec,
+  LineBeams: lineBeamsSpec,
+  LineSegments: lineSegmentsSpec,
+};
+
+/**
+ * Applies coercion to a raw component config if a spec with coerce is registered.
+ * This ensures that raw data from Python (e.g., {type: "Cuboid", center: [0,0,0], half_size: 0.1})
+ * is processed the same way as JSX component calls.
+ */
+function coerceRawComponent<T extends { type: string }>(component: T): T {
+  const spec = PRIMITIVE_SPECS[component.type];
+  if (spec?.coerce) {
+    return spec.coerce(component) as T;
+  }
+  return component;
+}
+
+/**
+ * Recursively applies coercion to components, including nested Group children.
+ */
+function coerceComponents<T extends { type: string; children?: T[] }>(
+  components: T[],
+): T[] {
+  return components.map((component) => {
+    // Recursively coerce Group children
+    if (component.type === "Group" && component.children) {
+      return {
+        ...coerceRawComponent(component),
+        children: coerceComponents(component.children),
+      };
+    }
+    return coerceRawComponent(component);
+  });
+}
 
 // =============================================================================
 // Primitive Components (JSX API)
@@ -607,13 +658,16 @@ function SceneInner({
     [readyState],
   );
 
-  // Process components: collect -> flatten groups -> resolve inline meshes
+  // Process components: collect -> coerce -> flatten groups -> resolve inline meshes
   // Note: Helper components (GridHelper, etc.) are already expanded during layer
   // evaluation via JSCall - they arrive as primitive configs, not helper types.
   const { components, mergedSpecs } = useMemo(() => {
-    // 1. Collect from children or prop
-    const rawComponents =
-      componentsProp ?? collectComponentsFromChildren(children);
+    // 1. Collect from children or prop (applying coercion to raw data from Python)
+    // JSX children already go through component functions which apply coercion,
+    // but raw data from componentsProp needs explicit coercion.
+    const rawComponents = componentsProp
+      ? coerceComponents(componentsProp as any)
+      : collectComponentsFromChildren(children);
 
     // 2. Flatten groups (optimized internally for composition-only groups)
     const flattened = hasAnyGroups(rawComponents)
