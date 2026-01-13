@@ -42,7 +42,15 @@ struct Camera {
   cameraPos: vec3<f32>,
   _pad4: f32,
 };
-@group(0) @binding(0) var<uniform> camera : Camera;`;
+struct GroupTransform {
+  position: vec3<f32>,
+  _pad0: f32,
+  quaternion: vec4<f32>,
+  scale: vec3<f32>,
+  _pad1: f32,
+};
+@group(0) @binding(0) var<uniform> camera : Camera;
+@group(0) @binding(1) var<storage, read> groupTransforms: array<GroupTransform>;`;
 
 export const lightingConstants = /*wgsl*/ `
 const AMBIENT_INTENSITY = ${LIGHTING.AMBIENT_INTENSITY}f;

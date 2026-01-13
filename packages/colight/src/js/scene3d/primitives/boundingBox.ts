@@ -322,20 +322,29 @@ fn vs_main(
   @location(6) edgeSize: f32,           // Edge thickness
   @location(7) quaternion: vec4<f32>,   // Box rotation (xyzw)
   @location(8) color: vec3<f32>,
-  @location(9) alpha: f32
+  @location(9) alpha: f32,
+  @location(10) groupId: f32
 ) -> VSOut {
+  let group = groupTransforms[u32(groupId)];
+  let uniformScale = (group.scale.x + group.scale.y + group.scale.z) / 3.0;
+  let scaledHalfSize = halfSize * group.scale;
+  let scaledEdgeSize = edgeSize * uniformScale;
+
   // Scale corner by halfSize, offset by edgeSize, apply inset
-  let scaledCorner = cornerPos * halfSize;
-  let scaledOffset = beamOffset * edgeSize;
-  let scaledInset = inset * edgeSize;
+  let scaledCorner = cornerPos * scaledHalfSize;
+  let scaledOffset = beamOffset * scaledEdgeSize;
+  let scaledInset = inset * scaledEdgeSize;
   let localPos = scaledCorner + scaledOffset + scaledInset;
 
   // Rotate by quaternion and translate to center
   let rotatedPos = quat_rotate(quaternion, localPos);
-  let worldPos = center + rotatedPos;
+  let scaledCenter = center * group.scale;
+  let localPosWithCenter = scaledCenter + rotatedPos;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
 
   // Transform normal
-  let worldNormal = quat_rotate(quaternion, localNormal);
+  let combinedRotation = quat_mul(group.quaternion, quaternion);
+  let worldNormal = quat_rotate(combinedRotation, localNormal);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -379,15 +388,22 @@ fn vs_main(
   @location(5) halfSize: vec3<f32>,
   @location(6) edgeSize: f32,
   @location(7) quaternion: vec4<f32>,
-  @location(8) pickID: f32
+  @location(8) groupId: f32,
+  @location(9) pickID: f32
 ) -> VSOut {
-  let scaledCorner = cornerPos * halfSize;
-  let scaledOffset = beamOffset * edgeSize;
-  let scaledInset = inset * edgeSize;
+  let group = groupTransforms[u32(groupId)];
+  let uniformScale = (group.scale.x + group.scale.y + group.scale.z) / 3.0;
+  let scaledHalfSize = halfSize * group.scale;
+  let scaledEdgeSize = edgeSize * uniformScale;
+  let scaledCorner = cornerPos * scaledHalfSize;
+  let scaledOffset = beamOffset * scaledEdgeSize;
+  let scaledInset = inset * scaledEdgeSize;
   let localPos = scaledCorner + scaledOffset + scaledInset;
 
   let rotatedPos = quat_rotate(quaternion, localPos);
-  let worldPos = center + rotatedPos;
+  let scaledCenter = center * group.scale;
+  let localPosWithCenter = scaledCenter + rotatedPos;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -407,6 +423,7 @@ const RENDER_INSTANCE_LAYOUT = createVertexBufferLayout(
     [7, "float32x4"], // quaternion
     [8, "float32x3"], // color
     [9, "float32"], // alpha
+    [10, "float32"], // groupId
   ],
   "instance",
 );
@@ -417,7 +434,8 @@ const PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
     [5, "float32x3"], // halfSize
     [6, "float32"], // edgeSize
     [7, "float32x4"], // quaternion
-    [8, "float32"], // pickID
+    [8, "float32"], // groupId
+    [9, "float32"], // pickID
   ],
   "instance",
 );
@@ -426,10 +444,10 @@ const PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
 // Fill Functions
 // =============================================================================
 
-// Render: center(3) + halfSize(3) + edgeSize(1) + quat(4) + color(3) + alpha(1) = 15 floats
-const FLOATS_PER_RENDER = 15;
-// Picking: center(3) + halfSize(3) + edgeSize(1) + quat(4) + pickID(1) = 12 floats
-const FLOATS_PER_PICKING = 12;
+// Render: center(3) + halfSize(3) + edgeSize(1) + quat(4) + color(3) + alpha(1) + groupId(1) = 16 floats
+const FLOATS_PER_RENDER = 16;
+// Picking: center(3) + halfSize(3) + edgeSize(1) + quat(4) + groupId(1) + pickID(1) = 13 floats
+const FLOATS_PER_PICKING = 13;
 
 function fillRenderGeometry(
   schema: ProcessedSchema,
@@ -509,6 +527,10 @@ function fillRenderGeometry(
 
   // Alpha
   out[o + 14] = (constants.alpha as number) ?? elem.alphas?.[elemIndex] ?? 1.0;
+
+  // Group ID
+  out[o + 15] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
 }
 
 function fillPickingGeometry(
@@ -572,8 +594,12 @@ function fillPickingGeometry(
     out[o + 10] = 1;
   }
 
+  // Group ID
+  out[o + 11] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
+
   // Pick ID
-  out[o + 11] = packID(baseID + elemIndex);
+  out[o + 12] = packID(baseID + elemIndex);
 }
 
 // =============================================================================
@@ -610,6 +636,7 @@ export const boundingBoxSpec = definePrimitive<BoundingBoxComponentConfig>({
     rotation: attr.quat("quaternions"),
     color: attr.vec3("colors", [0.5, 0.5, 0.5]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   geometry: { type: "custom", create: createWireframeBoxGeometry },

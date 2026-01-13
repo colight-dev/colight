@@ -64,6 +64,7 @@ export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
     size: attr.f32("sizes", 0.02),
     color: attr.vec3("colors", [0.5, 0.5, 0.5]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   geometry: { type: "quad" },

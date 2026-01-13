@@ -73,6 +73,7 @@ import {
 } from "./drag";
 import { buildPickInfo } from "./pick-info";
 import { screenRay } from "./project";
+import { Transform, applyTransformToPoint } from "./groups";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -85,6 +86,29 @@ function align16(value: number): number {
 
 function alignTo(value: number, alignment: number): number {
   return Math.ceil(value / alignment) * alignment;
+}
+
+const GROUP_TRANSFORM_FLOATS = 12;
+
+function packGroupTransforms(transforms: Transform[]): Float32Array {
+  const data = new Float32Array(transforms.length * GROUP_TRANSFORM_FLOATS);
+  for (let i = 0; i < transforms.length; i++) {
+    const base = i * GROUP_TRANSFORM_FLOATS;
+    const transform = transforms[i];
+    data[base] = transform.position[0];
+    data[base + 1] = transform.position[1];
+    data[base + 2] = transform.position[2];
+    data[base + 3] = 0;
+    data[base + 4] = transform.quaternion[0];
+    data[base + 5] = transform.quaternion[1];
+    data[base + 6] = transform.quaternion[2];
+    data[base + 7] = transform.quaternion[3];
+    data[base + 8] = transform.scale[0];
+    data[base + 9] = transform.scale[1];
+    data[base + 10] = transform.scale[2];
+    data[base + 11] = 0;
+  }
+  return data;
 }
 
 interface ImageResource {
@@ -351,6 +375,9 @@ function ensureImageResource(
 export interface SceneImplProps {
   /** Array of 3D components to render in the scene */
   components: ComponentConfig[];
+
+  /** World-space group transforms aligned with group IDs */
+  groupTransforms: Transform[];
 
   /** Width of the container in pixels */
   containerWidth: number;
@@ -806,6 +833,17 @@ function computeUniformData(
   ]);
 }
 
+function resolveInstanceCenter(
+  component: ComponentConfig,
+  center: [number, number, number],
+): [number, number, number] {
+  const groupTransform = (component as any)._groupTransform as
+    | Transform
+    | undefined;
+  if (!groupTransform) return center;
+  return applyTransformToPoint(groupTransform, center);
+}
+
 function updateInstanceSorting(
   ro: RenderObject,
   components: ComponentConfig[],
@@ -826,9 +864,15 @@ function updateInstanceSorting(
 
     for (let j = 0; j < elementCount; j++) {
       const baseIdx = j * 3;
-      const dx = centers[baseIdx] - camX;
-      const dy = centers[baseIdx + 1] - camY;
-      const dz = centers[baseIdx + 2] - camZ;
+      const localCenter: [number, number, number] = [
+        centers[baseIdx],
+        centers[baseIdx + 1],
+        centers[baseIdx + 2],
+      ];
+      const [cx, cy, cz] = resolveInstanceCenter(component, localCenter);
+      const dx = cx - camX;
+      const dy = cy - camY;
+      const dz = cz - camZ;
       ro.distances![globalIdx] = dx * dx + dy * dy + dz * dz;
 
       ro.sortedIndices![globalIdx] = globalIdx;
@@ -895,6 +939,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
 
 export function SceneImpl({
   components,
+  groupTransforms,
   containerWidth,
   containerHeight,
   style,
@@ -919,6 +964,8 @@ export function SceneImpl({
     device: GPUDevice;
     context: GPUCanvasContext;
     uniformBuffer: GPUBuffer;
+    groupTransformBuffer: GPUBuffer;
+    groupTransformCount: number;
     uniformBindGroup: GPUBindGroup;
     bindGroupLayout: GPUBindGroupLayout;
     depthTexture: GPUTexture | null;
@@ -943,6 +990,7 @@ export function SceneImpl({
 
     renderedCamera?: CameraState;
     renderedComponents?: ComponentConfig[];
+    renderedGroupTransforms?: Transform[];
   } | null>(null);
 
   const [internalCamera, setInternalCamera] = useState<CameraState>(() => {
@@ -1308,6 +1356,11 @@ export function SceneImpl({
             visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
             buffer: { type: "uniform" },
           },
+          {
+            binding: 1,
+            visibility: GPUShaderStage.VERTEX,
+            buffer: { type: "read-only-storage" },
+          },
         ],
       });
 
@@ -1317,9 +1370,17 @@ export function SceneImpl({
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
+      const groupTransformBuffer = device.createBuffer({
+        size: GROUP_TRANSFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+
       const uniformBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
-        entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: { buffer: groupTransformBuffer } },
+        ],
       });
 
       const readbackBuffer = device.createBuffer({
@@ -1332,6 +1393,8 @@ export function SceneImpl({
         device,
         context,
         uniformBuffer,
+        groupTransformBuffer,
+        groupTransformCount: 1,
         uniformBindGroup,
         bindGroupLayout,
         depthTexture: null,
@@ -1374,6 +1437,37 @@ export function SceneImpl({
       console.error("[Debug] Error during WebGPU initialization:", err);
     }
   }, [primitiveRegistry]);
+
+  const updateGroupTransformBuffer = useCallback((transforms: Transform[]) => {
+    if (!gpuRef.current) return;
+    const { device, uniformBuffer } = gpuRef.current;
+    const data = packGroupTransforms(transforms);
+    const neededSize = data.byteLength;
+
+    if (gpuRef.current.groupTransformBuffer.size < neededSize) {
+      gpuRef.current.groupTransformBuffer.destroy();
+      gpuRef.current.groupTransformBuffer = device.createBuffer({
+        size: neededSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      gpuRef.current.uniformBindGroup = device.createBindGroup({
+        layout: gpuRef.current.bindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: { buffer: gpuRef.current.groupTransformBuffer } },
+        ],
+      });
+    }
+
+    gpuRef.current.groupTransformCount = transforms.length;
+    device.queue.writeBuffer(
+      gpuRef.current.groupTransformBuffer,
+      0,
+      data.buffer,
+      data.byteOffset,
+      data.byteLength,
+    );
+  }, []);
 
   /******************************************************
    * B) Depth & Pick textures
@@ -2040,6 +2134,7 @@ export function SceneImpl({
       source: string,
       camState?: CameraState,
       components?: ComponentConfig[],
+      transforms?: Transform[],
     ) {
       if (pendingAnimationFrameRef.current) {
         cancelAnimationFrame(pendingAnimationFrameRef.current);
@@ -2052,12 +2147,19 @@ export function SceneImpl({
       const onRenderComplete = readyState.beginUpdate("impl3d/renderFrame");
 
       components = components || gpuRef.current.renderedComponents;
+      transforms = transforms ?? gpuRef.current.renderedGroupTransforms;
       const componentsChanged =
         gpuRef.current.renderedComponents !== components;
+      const groupTransformsChanged =
+        gpuRef.current.renderedGroupTransforms !== transforms;
 
       if (componentsChanged) {
         gpuRef.current.renderObjects = buildRenderObjects(components!);
         gpuRef.current.renderedComponents = components;
+      }
+      if (groupTransformsChanged && transforms) {
+        updateGroupTransformBuffer(transforms);
+        gpuRef.current.renderedGroupTransforms = transforms;
       }
 
       const {
@@ -2223,7 +2325,7 @@ export function SceneImpl({
       onFrameRendered?.(performance.now());
       onReady?.();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [containerWidth, containerHeight, onFrameRendered, components, updateGroupTransformBuffer],
   );
 
   function requestRender(label: string) {
@@ -2804,11 +2906,12 @@ export function SceneImpl({
             // Get instance center
             const centers = spec.getCenters(component);
             const baseIdx = elementIdx * 3;
-            const instanceCenter: [number, number, number] = [
+            const localCenter: [number, number, number] = [
               centers[baseIdx],
               centers[baseIdx + 1],
               centers[baseIdx + 2],
             ];
+            const instanceCenter = resolveInstanceCenter(component, localCenter);
 
             // Resolve constraint
             const constraint = resolveConstraint(
@@ -2972,13 +3075,21 @@ export function SceneImpl({
   // Render when camera or components change
   useEffect(() => {
     if (isReady && gpuRef.current) {
+      const groupTransformsChanged =
+        gpuRef.current.renderedGroupTransforms !== groupTransforms;
       if (
         !deepEqualModuloTypedArrays(
           components,
           gpuRef.current.renderedComponents,
         )
+        || groupTransformsChanged
       ) {
-        renderFrame("components changed", activeCameraRef.current!, components);
+        renderFrame(
+          "components changed",
+          activeCameraRef.current!,
+          components,
+          groupTransforms,
+        );
       } else if (
         !deepEqualModuloTypedArrays(
           activeCameraRef.current,
@@ -2988,7 +3099,7 @@ export function SceneImpl({
         requestRender("camera changed");
       }
     }
-  }, [isReady, components, activeCameraRef.current]);
+  }, [isReady, components, groupTransforms, activeCameraRef.current]);
 
   // Wheel handling
   useEffect(() => {

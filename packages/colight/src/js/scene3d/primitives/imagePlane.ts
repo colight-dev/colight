@@ -144,9 +144,19 @@ fn vs_main(
   @location(4) size: vec2<f32>,
   @location(5) color: vec3<f32>,
   @location(6) alpha: f32,
+  @location(7) groupId: f32,
 ) -> VSOut {
-  let scaledLocal = vec3<f32>(localPos.x * size.x, localPos.y * size.y, localPos.z);
-  let worldPos = center + quat_rotate(rotation, scaledLocal);
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = vec2<f32>(size.x * group.scale.x, size.y * group.scale.y);
+  let scaledLocal = vec3<f32>(
+    localPos.x * scaledSize.x,
+    localPos.y * scaledSize.y,
+    localPos.z
+  );
+  let rotatedLocal = quat_rotate(rotation, scaledLocal);
+  let scaledCenter = center * group.scale;
+  let localPosWithCenter = scaledCenter + rotatedLocal;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -182,10 +192,20 @@ fn vs_main(
   @location(2) center: vec3<f32>,
   @location(3) rotation: vec4<f32>,
   @location(4) size: vec2<f32>,
-  @location(5) pickID: f32
+  @location(5) groupId: f32,
+  @location(6) pickID: f32
 ) -> VSOut {
-  let scaledLocal = vec3<f32>(localPos.x * size.x, localPos.y * size.y, localPos.z);
-  let worldPos = center + quat_rotate(rotation, scaledLocal);
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = vec2<f32>(size.x * group.scale.x, size.y * group.scale.y);
+  let scaledLocal = vec3<f32>(
+    localPos.x * scaledSize.x,
+    localPos.y * scaledSize.y,
+    localPos.z
+  );
+  let rotatedLocal = quat_rotate(rotation, scaledLocal);
+  let scaledCenter = center * group.scale;
+  let localPosWithCenter = scaledCenter + rotatedLocal;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -249,6 +269,7 @@ export const imagePlaneSpec = definePrimitive<ImagePlaneComponentConfig>({
     size: attr.vec2("sizes", [1, 1]),
     color: attr.vec3("colors", [1, 1, 1]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   geometry: { type: "quad" },

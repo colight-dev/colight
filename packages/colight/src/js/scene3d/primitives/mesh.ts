@@ -317,12 +317,12 @@ function buildGeometryLayout(format: VertexFormat): VertexBufferLayout {
 
 /**
  * Build instance buffer layout for render pass.
- * Instance attributes: position(vec3), size(vec3), rotation(vec4), color(vec3), alpha(f32)
+ * Instance attributes: position(vec3), size(vec3), rotation(vec4), color(vec3), alpha(f32), groupId(f32)
  */
 function buildRenderInstanceLayout(startLocation: number): VertexBufferLayout {
   let loc = startLocation;
   return {
-    arrayStride: (3 + 3 + 4 + 3 + 1) * 4, // 14 floats * 4 bytes
+    arrayStride: (3 + 3 + 4 + 3 + 1 + 1) * 4, // 15 floats * 4 bytes
     stepMode: "instance",
     attributes: [
       { shaderLocation: loc++, offset: 0, format: "float32x3" },   // position
@@ -330,24 +330,26 @@ function buildRenderInstanceLayout(startLocation: number): VertexBufferLayout {
       { shaderLocation: loc++, offset: 24, format: "float32x4" },  // rotation
       { shaderLocation: loc++, offset: 40, format: "float32x3" },  // color
       { shaderLocation: loc++, offset: 52, format: "float32" },    // alpha
+      { shaderLocation: loc++, offset: 56, format: "float32" },    // groupId
     ],
   };
 }
 
 /**
  * Build instance buffer layout for picking pass.
- * Picking attributes: position(vec3), size(vec3), rotation(vec4), pickID(f32)
+ * Picking attributes: position(vec3), size(vec3), rotation(vec4), groupId(f32), pickID(f32)
  */
 function buildPickingInstanceLayout(startLocation: number): VertexBufferLayout {
   let loc = startLocation;
   return {
-    arrayStride: (3 + 3 + 4 + 1) * 4, // 11 floats * 4 bytes
+    arrayStride: (3 + 3 + 4 + 1 + 1) * 4, // 12 floats * 4 bytes
     stepMode: "instance",
     attributes: [
       { shaderLocation: loc++, offset: 0, format: "float32x3" },   // position
       { shaderLocation: loc++, offset: 12, format: "float32x3" },  // size
       { shaderLocation: loc++, offset: 24, format: "float32x4" },  // rotation
-      { shaderLocation: loc++, offset: 40, format: "float32" },    // pickID
+      { shaderLocation: loc++, offset: 40, format: "float32" },    // groupId
+      { shaderLocation: loc++, offset: 44, format: "float32" },    // pickID
     ],
   };
 }
@@ -374,10 +376,12 @@ function generateMeshVertexShader(format: VertexFormat, forPicking: boolean, has
   ];
 
   if (forPicking) {
-    instInputs.push(`@location(${geoLoc + 3}) pickID: f32`);
+    instInputs.push(`@location(${geoLoc + 3}) groupId: f32`);
+    instInputs.push(`@location(${geoLoc + 4}) pickID: f32`);
   } else {
     instInputs.push(`@location(${geoLoc + 3}) instanceColor: vec3<f32>`);
     instInputs.push(`@location(${geoLoc + 4}) alpha: f32`);
+    instInputs.push(`@location(${geoLoc + 5}) groupId: f32`);
   }
 
   const allInputs = [...geoInputs, ...instInputs].join(",\n  ");
@@ -423,8 +427,10 @@ function generateMeshVertexShader(format: VertexFormat, forPicking: boolean, has
 
   // Normal handling
   const normalComputation = format.hasNormals
-    ? "let invScaledNorm = normalize(normal / size);\n  let worldNormal = quat_rotate(rotation, invScaledNorm);"
-    : "let worldNormal = vec3<f32>(0.0, 1.0, 0.0);"; // Default up normal for unlit
+    ? `let invScaledNorm = normalize(normal / scaledSize);
+  let combinedRotation = quat_mul(group.quaternion, rotation);
+  let worldNormal = quat_rotate(combinedRotation, invScaledNorm);`
+    : "let worldNormal = quat_rotate(group.quaternion, vec3<f32>(0.0, 1.0, 0.0));"; // Default up normal for unlit
 
   // Return statement
   let returnStmt: string;
@@ -461,9 +467,13 @@ fn vs_main(
   ${allInputs}
 ) -> VSOut {
   // Rigid transform with rotation
-  let scaledLocal = localPos * size;
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = size * group.scale;
+  let scaledLocal = localPos * scaledSize;
   let rotatedPos = quat_rotate(rotation, scaledLocal);
-  let worldPos = position + rotatedPos;
+  let scaledPosition = position * group.scale;
+  let localPosWithCenter = scaledPosition + rotatedPos;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
   ${normalComputation}
   ${colorComputation}
   ${returnStmt}
@@ -605,6 +615,7 @@ export function defineMesh(
       rotation: attr.quat("quaternions"),
       color: attr.vec3("colors", [0.5, 0.5, 0.5]),
       alpha: attr.f32("alphas", 1.0),
+      groupId: attr.f32("_groupIds", 0),
     },
 
     geometry: {
@@ -679,6 +690,7 @@ export function defineMeshRaw(
       rotation: attr.quat("quaternions"),
       color: attr.vec3("colors", [0.5, 0.5, 0.5]),
       alpha: attr.f32("alphas", 1.0),
+      groupId: attr.f32("_groupIds", 0),
     },
 
     geometry: {

@@ -726,7 +726,7 @@ def Group(
     """Create a group component for hierarchical scene composition.
 
     Groups apply a transform (position, rotation, scale) to all their children.
-    At render time, groups are flattened into transformed primitives.
+    At render time, groups are flattened into primitives with GPU-applied transforms.
 
     Args:
         children: List of child components (can include nested groups)

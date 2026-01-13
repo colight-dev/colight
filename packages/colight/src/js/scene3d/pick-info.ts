@@ -11,6 +11,12 @@ import { screenRay } from "./project";
 import { getLineBeamsSegmentPointIndex } from "./components";
 import { PickInfo } from "./types";
 import { Vec3, sub, dot, readVec3 } from "./vec3";
+import {
+  Transform,
+  applyInverseTransformToPoint,
+  applyTransformToPoint,
+  quatInvert,
+} from "./groups";
 
 export type PickEventType = "hover" | "click";
 
@@ -121,6 +127,26 @@ export function worldNormalToLocal(
   return rotateVector(worldNormal, qInv);
 }
 
+function getGroupTransform(component: ComponentConfig): Transform | undefined {
+  return (component as any)._groupTransform as Transform | undefined;
+}
+
+function worldPositionToGroupLocal(
+  worldPosition: Vec3,
+  groupTransform?: Transform,
+): Vec3 {
+  if (!groupTransform) return worldPosition;
+  return applyInverseTransformToPoint(groupTransform, worldPosition);
+}
+
+function worldNormalToGroupLocal(
+  worldNormal: Vec3,
+  groupTransform?: Transform,
+): Vec3 {
+  if (!groupTransform) return worldNormal;
+  return rotateVector(worldNormal, quatInvert(groupTransform.quaternion));
+}
+
 /**
  * Transforms a world-space position to local space of a component.
  */
@@ -205,13 +231,16 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
       "centers" in component &&
       component.centers
     ) {
+      const groupTransform = getGroupTransform(component);
       const center = readVec3(component.centers, elementIndex);
       const quat = getQuaternion(component, elementIndex, [0, 0, 0, 1]);
-      const localPos = worldPositionToLocal(position, center, quat);
+      const groupLocalPos = worldPositionToGroupLocal(position, groupTransform);
+      const localPos = worldPositionToLocal(groupLocalPos, center, quat);
       info.local = { position: localPos };
 
       if (component.type === "Cuboid" && normal) {
-        const localNormal = worldNormalToLocal(normal, quat);
+        const groupLocalNormal = worldNormalToGroupLocal(normal, groupTransform);
+        const localNormal = worldNormalToLocal(groupLocalNormal, quat);
         info.face = detectCuboidFace(localNormal);
       }
     }
@@ -222,6 +251,7 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
         elementIndex,
       );
       if (segmentPointIndex !== undefined) {
+        const groupTransform = getGroupTransform(component);
         const start: Vec3 = [
           component.points[segmentPointIndex * 4 + 0],
           component.points[segmentPointIndex * 4 + 1],
@@ -232,13 +262,19 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
           component.points[(segmentPointIndex + 1) * 4 + 1],
           component.points[(segmentPointIndex + 1) * 4 + 2],
         ];
+        const worldStart = groupTransform
+          ? applyTransformToPoint(groupTransform, start)
+          : start;
+        const worldEnd = groupTransform
+          ? applyTransformToPoint(groupTransform, end)
+          : end;
         const lineIndex = Math.floor(
           component.points[segmentPointIndex * 4 + 3],
         );
 
         // Calculate t along the segment
-        const v = sub(end, start);
-        const w = sub(position, start);
+        const v = sub(worldEnd, worldStart);
+        const w = sub(position, worldStart);
         const u = dot(w, v) / dot(v, v);
 
         info.segment = {
@@ -259,7 +295,11 @@ export function buildPickInfo(params: BuildPickInfoParams): PickInfo | null {
     component.centers
   ) {
     const center = readVec3(component.centers, elementIndex);
-    info.hit = { position: center };
+    const groupTransform = getGroupTransform(component);
+    const worldCenter = groupTransform
+      ? applyTransformToPoint(groupTransform, center)
+      : center;
+    info.hit = { position: worldCenter };
     return info;
   }
 

@@ -3,7 +3,7 @@
  * @description Hierarchical transform groups for Scene3D.
  *
  * Groups allow composing multiple components with a shared transform.
- * At render time, groups are flattened into transformed primitives.
+ * At render time, groups are flattened into primitives with GPU-applied transforms.
  */
 
 import { Vec3, add } from "./vec3";
@@ -58,6 +58,10 @@ export type FlattenedComponent = ComponentConfig & {
   _groupPath?: string[];
   /** Original component index before flattening (for debugging) */
   _originalIndex?: number;
+  /** Group transform index for GPU scene graph */
+  _groupId?: number;
+  /** World-space group transform for CPU-side utilities */
+  _groupTransform?: Transform;
 };
 
 // =============================================================================
@@ -97,6 +101,13 @@ export function quatRotate(q: Quat, v: Vec3): Vec3 {
     iy * qw + iw * -qy + iz * -qx - ix * -qz,
     iz * qw + iw * -qz + ix * -qy - iy * -qx,
   ];
+}
+
+/**
+ * Invert a quaternion (assumes unit length).
+ */
+export function quatInvert(q: Quat): Quat {
+  return [-q[0], -q[1], -q[2], q[3]];
 }
 
 /**
@@ -190,6 +201,36 @@ export function composeTransforms(parent: Transform, child: Transform): Transfor
 }
 
 /**
+ * Apply a transform to a point (scale -> rotate -> translate).
+ */
+export function applyTransformToPoint(transform: Transform, point: Vec3): Vec3 {
+  const scaled: Vec3 = [
+    point[0] * transform.scale[0],
+    point[1] * transform.scale[1],
+    point[2] * transform.scale[2],
+  ];
+  const rotated = quatRotate(transform.quaternion, scaled);
+  return add(transform.position, rotated);
+}
+
+/**
+ * Apply the inverse of a transform to a point.
+ */
+export function applyInverseTransformToPoint(transform: Transform, point: Vec3): Vec3 {
+  const translated: Vec3 = [
+    point[0] - transform.position[0],
+    point[1] - transform.position[1],
+    point[2] - transform.position[2],
+  ];
+  const rotated = quatRotate(quatInvert(transform.quaternion), translated);
+  return [
+    rotated[0] / transform.scale[0],
+    rotated[1] / transform.scale[1],
+    rotated[2] / transform.scale[2],
+  ];
+}
+
+/**
  * Extract transform from a GroupConfig.
  */
 function getGroupTransform(group: GroupConfig): Transform {
@@ -231,274 +272,9 @@ function groupHasTransform(group: GroupConfig): boolean {
  * Apply a transform to a single component's data.
  * Returns a new component config with transformed positions and composed orientations.
  */
-function applyTransformToComponent(
-  component: ComponentConfig,
-  transform: Transform,
-  groupPath: string[],
-): FlattenedComponent {
-  // Short-circuit: if transform is identity, avoid cloning arrays and doing math
-  if (isIdentityTransform(transform)) {
-    if (groupPath.length === 0) {
-      return component as FlattenedComponent;
-    }
-    // Only add groupPath metadata, no transform needed
-    return {
-      ...component,
-      _groupPath: groupPath,
-    };
-  }
-
-  const isImagePlane = component.type === "ImagePlane";
-  const result: FlattenedComponent = {
-    ...component,
-    _groupPath: groupPath.length > 0 ? groupPath : undefined,
-  };
-
-  // Transform centers if present
-  if ("centers" in component && component.centers) {
-    const centers = component.centers;
-    const newCenters = new Float32Array(centers.length);
-
-    for (let i = 0; i < centers.length / 3; i++) {
-      const local: Vec3 = [centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2]];
-
-      // Scale
-      const scaled: Vec3 = [
-        local[0] * transform.scale[0],
-        local[1] * transform.scale[1],
-        local[2] * transform.scale[2],
-      ];
-
-      // Rotate
-      const rotated = quatRotate(transform.quaternion, scaled);
-
-      // Translate
-      const transformed = add(transform.position, rotated);
-
-      newCenters[i * 3] = transformed[0];
-      newCenters[i * 3 + 1] = transformed[1];
-      newCenters[i * 3 + 2] = transformed[2];
-    }
-
-    (result as any).centers = newCenters;
-  }
-
-  // Transform segment endpoints for LineSegments (starts/ends)
-  if ("starts" in component && component.starts && "ends" in component && component.ends) {
-    const starts = component.starts as Float32Array;
-    const ends = component.ends as Float32Array;
-    const segCount = Math.min(starts.length, ends.length) / 3;
-    const newStarts = new Float32Array(segCount * 3);
-    const newEnds = new Float32Array(segCount * 3);
-
-    for (let i = 0; i < segCount; i++) {
-      const startLocal: Vec3 = [
-        starts[i * 3],
-        starts[i * 3 + 1],
-        starts[i * 3 + 2],
-      ];
-      const endLocal: Vec3 = [
-        ends[i * 3],
-        ends[i * 3 + 1],
-        ends[i * 3 + 2],
-      ];
-
-      const startScaled: Vec3 = [
-        startLocal[0] * transform.scale[0],
-        startLocal[1] * transform.scale[1],
-        startLocal[2] * transform.scale[2],
-      ];
-      const endScaled: Vec3 = [
-        endLocal[0] * transform.scale[0],
-        endLocal[1] * transform.scale[1],
-        endLocal[2] * transform.scale[2],
-      ];
-
-      const startRotated = quatRotate(transform.quaternion, startScaled);
-      const endRotated = quatRotate(transform.quaternion, endScaled);
-
-      const startTransformed = add(transform.position, startRotated);
-      const endTransformed = add(transform.position, endRotated);
-
-      newStarts[i * 3] = startTransformed[0];
-      newStarts[i * 3 + 1] = startTransformed[1];
-      newStarts[i * 3 + 2] = startTransformed[2];
-
-      newEnds[i * 3] = endTransformed[0];
-      newEnds[i * 3 + 1] = endTransformed[1];
-      newEnds[i * 3 + 2] = endTransformed[2];
-    }
-
-    (result as any).starts = newStarts;
-    (result as any).ends = newEnds;
-  }
-
-  // Transform points for LineBeams (format: [x,y,z,lineIndex, ...])
-  if ("points" in component && component.points) {
-    const points = component.points;
-    const newPoints = new Float32Array(points.length);
-
-    for (let i = 0; i < points.length / 4; i++) {
-      const local: Vec3 = [points[i * 4], points[i * 4 + 1], points[i * 4 + 2]];
-      const lineIndex = points[i * 4 + 3];
-
-      // Scale
-      const scaled: Vec3 = [
-        local[0] * transform.scale[0],
-        local[1] * transform.scale[1],
-        local[2] * transform.scale[2],
-      ];
-
-      // Rotate
-      const rotated = quatRotate(transform.quaternion, scaled);
-
-      // Translate
-      const transformed = add(transform.position, rotated);
-
-      newPoints[i * 4] = transformed[0];
-      newPoints[i * 4 + 1] = transformed[1];
-      newPoints[i * 4 + 2] = transformed[2];
-      newPoints[i * 4 + 3] = lineIndex;
-    }
-
-    (result as any).points = newPoints;
-  }
-
-  // Compose quaternions if component has orientation
-  if ("quaternion" in component && component.quaternion) {
-    const composed = quatMultiply(transform.quaternion, component.quaternion as Quat);
-    (result as any).quaternion = composed;
-  }
-  if ("quaternions" in component && component.quaternions) {
-    const quats = component.quaternions as Float32Array;
-    const newQuats = new Float32Array(quats.length);
-
-    for (let i = 0; i < quats.length / 4; i++) {
-      const local: Quat = [quats[i * 4], quats[i * 4 + 1], quats[i * 4 + 2], quats[i * 4 + 3]];
-      const composed = quatMultiply(transform.quaternion, local);
-      newQuats[i * 4] = composed[0];
-      newQuats[i * 4 + 1] = composed[1];
-      newQuats[i * 4 + 2] = composed[2];
-      newQuats[i * 4 + 3] = composed[3];
-    }
-
-    (result as any).quaternions = newQuats;
-  }
-
-  // Scale half_sizes if component has them
-  if ("half_size" in component && component.half_size) {
-    const hs = component.half_size;
-    if (Array.isArray(hs)) {
-      (result as any).half_size = [
-        hs[0] * transform.scale[0],
-        hs[1] * transform.scale[1],
-        hs[2] * transform.scale[2],
-      ];
-    } else {
-      // Uniform scale - use average
-      const avgScale = (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-      (result as any).half_size = (hs as number) * avgScale;
-    }
-  }
-  if ("half_sizes" in component && component.half_sizes) {
-    const sizes = component.half_sizes as Float32Array;
-    const newSizes = new Float32Array(sizes.length);
-
-    for (let i = 0; i < sizes.length / 3; i++) {
-      newSizes[i * 3] = sizes[i * 3] * transform.scale[0];
-      newSizes[i * 3 + 1] = sizes[i * 3 + 1] * transform.scale[1];
-      newSizes[i * 3 + 2] = sizes[i * 3 + 2] * transform.scale[2];
-    }
-
-    (result as any).half_sizes = newSizes;
-  }
-
-  if (isImagePlane) {
-    if ("size" in component && component.size !== undefined) {
-      const sizeVal = component.size as number | Vec3;
-      if (Array.isArray(sizeVal)) {
-        (result as any).size = [
-          sizeVal[0] * transform.scale[0],
-          sizeVal[1] * transform.scale[1],
-        ];
-      } else {
-        const avgScale =
-          (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-        (result as any).size = sizeVal * avgScale;
-      }
-    }
-    if ("sizes" in component && component.sizes) {
-      const sizes = component.sizes as Float32Array;
-      const newSizes = new Float32Array(sizes.length);
-      if (sizes.length % 2 === 0) {
-        for (let i = 0; i < sizes.length / 2; i++) {
-          newSizes[i * 2] = sizes[i * 2] * transform.scale[0];
-          newSizes[i * 2 + 1] = sizes[i * 2 + 1] * transform.scale[1];
-        }
-      } else {
-        const avgScale =
-          (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-        for (let i = 0; i < sizes.length; i++) {
-          newSizes[i] = sizes[i] * avgScale;
-        }
-      }
-      (result as any).sizes = newSizes;
-    }
-  } else {
-    // Scale size for PointCloud/LineBeams (uniform scale)
-    if ("size" in component && component.size !== undefined) {
-      const avgScale =
-        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-      (result as any).size = (component.size as number) * avgScale;
-    }
-    if ("sizes" in component && component.sizes) {
-      const sizes = component.sizes as Float32Array;
-      const avgScale =
-        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-      const newSizes = new Float32Array(sizes.length);
-
-      for (let i = 0; i < sizes.length; i++) {
-        newSizes[i] = sizes[i] * avgScale;
-      }
-
-      (result as any).sizes = newSizes;
-    }
-  }
-
-  // Scale mesh-style scale/scales (vec3)
-  if ("scale" in component && component.scale !== undefined) {
-    const scaleVal = component.scale as number | Vec3;
-    if (Array.isArray(scaleVal)) {
-      (result as any).scale = [
-        scaleVal[0] * transform.scale[0],
-        scaleVal[1] * transform.scale[1],
-        scaleVal[2] * transform.scale[2],
-      ];
-    } else {
-      const avgScale = (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-      (result as any).scale = scaleVal * avgScale;
-    }
-  }
-  if ("scales" in component && component.scales) {
-    const scales = component.scales as Float32Array;
-    const newScales = new Float32Array(scales.length);
-    if (scales.length % 3 === 0) {
-      for (let i = 0; i < scales.length / 3; i++) {
-        newScales[i * 3] = scales[i * 3] * transform.scale[0];
-        newScales[i * 3 + 1] = scales[i * 3 + 1] * transform.scale[1];
-        newScales[i * 3 + 2] = scales[i * 3 + 2] * transform.scale[2];
-      }
-    } else {
-      const avgScale =
-        (transform.scale[0] + transform.scale[1] + transform.scale[2]) / 3;
-      for (let i = 0; i < scales.length; i++) {
-        newScales[i] = scales[i] * avgScale;
-      }
-    }
-    (result as any).scales = newScales;
-  }
-
-  return result;
+export interface FlattenGroupsResult {
+  components: FlattenedComponent[];
+  groupTransforms: Transform[];
 }
 
 // =============================================================================
@@ -506,42 +282,72 @@ function applyTransformToComponent(
 // =============================================================================
 
 /**
- * Flatten a component tree, resolving all groups into transformed primitives.
+ * Flatten a component tree, resolving all groups into primitives with group transforms.
  *
  * @param components - Array of components (may include Groups)
  * @param parentTransform - Transform to apply from parent (default: identity)
  * @param groupPath - Path of group names from root (default: [])
- * @returns Flattened array of primitive components with transforms applied
+ * @returns Flattened primitives and group transforms for GPU application
  */
 export function flattenGroups(
   components: (ComponentConfig | GroupConfig)[],
-  parentTransform: Transform = identityTransform(),
-  groupPath: string[] = [],
+): FlattenGroupsResult {
+  const groupTransforms: Transform[] = [identityTransform()];
+  const result = flattenGroupsRecursive(
+    components,
+    identityTransform(),
+    [],
+    0,
+    groupTransforms,
+  );
+  return { components: result, groupTransforms };
+}
+
+function flattenGroupsRecursive(
+  components: (ComponentConfig | GroupConfig)[],
+  parentTransform: Transform,
+  groupPath: string[],
+  parentGroupId: number,
+  groupTransforms: Transform[],
 ): FlattenedComponent[] {
   const result: FlattenedComponent[] = [];
 
   for (const component of components) {
     if (isGroup(component)) {
-      // Update group path if named
       const newPath = component.name
         ? [...groupPath, component.name]
         : groupPath;
 
-      // Skip transform composition if group has no transform (pure composition)
-      const worldTransform = groupHasTransform(component)
-        ? composeTransforms(parentTransform, getGroupTransform(component))
-        : parentTransform;
+      let nextGroupId = parentGroupId;
+      let worldTransform = parentTransform;
 
-      // Recursively flatten children
-      const flattened = flattenGroups(component.children, worldTransform, newPath);
+      if (groupHasTransform(component)) {
+        worldTransform = composeTransforms(parentTransform, getGroupTransform(component));
+        nextGroupId = groupTransforms.length;
+        groupTransforms.push(worldTransform);
+      }
+
+      const flattened = flattenGroupsRecursive(
+        component.children,
+        worldTransform,
+        newPath,
+        nextGroupId,
+        groupTransforms,
+      );
       result.push(...flattened);
     } else {
-      // Apply parent transform to this primitive
-      const transformed = applyTransformToComponent(
-        component,
-        parentTransform,
-        groupPath,
-      );
+      if (groupPath.length === 0 && parentGroupId === 0) {
+        result.push(component as FlattenedComponent);
+        continue;
+      }
+
+      const transformed: FlattenedComponent = {
+        ...component,
+        _groupPath: groupPath.length > 0 ? groupPath : undefined,
+        _groupId: parentGroupId > 0 ? parentGroupId : undefined,
+        _groupTransform:
+          parentGroupId > 0 ? groupTransforms[parentGroupId] : undefined,
+      };
       result.push(transformed);
     }
   }

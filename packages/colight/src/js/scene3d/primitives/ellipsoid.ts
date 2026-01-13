@@ -84,6 +84,7 @@ export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
     rotation: attr.quat("quaternions"), // default: identity [1,0,0,0] in wxyz
     color: attr.vec3("colors", [0.5, 0.5, 0.5]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   geometry: { type: "sphere", stacks: 32, slices: 48 },

@@ -295,6 +295,7 @@ export interface ElementConstants {
   color?: [number, number, number] | Float32Array;
   alpha?: number;
   scale?: number;
+  _groupId?: number;
 }
 
 /**
@@ -434,6 +435,16 @@ export interface BaseComponentConfig {
    * @default 2
    */
   outlineWidth?: number;
+
+  /**
+   * Internal group transform index for GPU scene graph.
+   */
+  _groupId?: number;
+
+  /**
+   * Optional per-instance group transform indices.
+   */
+  _groupIds?: Float32Array;
 }
 
 export type PickEventType =

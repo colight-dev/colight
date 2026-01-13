@@ -44,7 +44,7 @@ import {
   BoundingBoxProps,
   ImagePlaneProps,
 } from "./components";
-import { GroupConfig, flattenGroups, hasAnyGroups } from "./groups";
+import { GroupConfig, flattenGroups, hasAnyGroups, identityTransform } from "./groups";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
@@ -667,7 +667,7 @@ function SceneInner({
   // Process components: collect -> coerce -> flatten groups -> resolve inline meshes
   // Note: Helper components (GridHelper, etc.) are already expanded during layer
   // evaluation via JSCall - they arrive as primitive configs, not helper types.
-  const { components, mergedSpecs } = useMemo(() => {
+  const { components, mergedSpecs, groupTransforms } = useMemo(() => {
     // 1. Collect from children or prop (applying coercion to raw data from Python)
     // JSX children already go through component functions which apply coercion,
     // but raw data from componentsProp needs explicit coercion.
@@ -676,8 +676,13 @@ function SceneInner({
       : collectComponentsFromChildren(children);
 
     // 2. Flatten groups (optimized internally for composition-only groups)
+    let groupTransforms = [identityTransform()];
     const flattened = hasAnyGroups(rawComponents)
-      ? flattenGroups(rawComponents as (ComponentConfig | GroupConfig)[])
+      ? (() => {
+          const result = flattenGroups(rawComponents as (ComponentConfig | GroupConfig)[]);
+          groupTransforms = result.groupTransforms;
+          return result.components;
+        })()
       : (rawComponents as (ComponentConfig | InlineMeshComponentConfig)[]);
 
     // 3. Resolve inline meshes
@@ -693,7 +698,7 @@ function SceneInner({
       mergedSpecs = { ...normalizedSpecs, ...inlineSpecs };
     }
 
-    return { components: resolvedComponents, mergedSpecs };
+    return { components: resolvedComponents, mergedSpecs, groupTransforms };
   }, [children, componentsProp, primitiveSpecs]);
 
   const cameraChangeCallback = useCallback(
@@ -764,6 +769,7 @@ function SceneInner({
         <>
           <SceneImpl
             components={components}
+            groupTransforms={groupTransforms}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}

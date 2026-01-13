@@ -152,6 +152,13 @@ export interface AttributeDef<T = unknown> {
   quaternionOrder?: QuaternionOrder;
 }
 
+/**
+ * Group transform support:
+ * - Include a `groupId` attribute in every primitive schema:
+ *   `groupId: attr.f32("_groupIds", 0)`
+ * - Use `groupTransforms[u32(groupId)]` in custom shaders to apply group transforms.
+ */
+
 /** Attribute definition helpers */
 export const attr = {
   f32: (source: string, defaultValue?: number): AttributeDef<number> => ({
@@ -626,7 +633,9 @@ function generateVertexShader(
 
   // Include quaternion functions if needed
   const needsQuaternion =
-    def.transform === "rigid" || attrs.some((a) => a.def.type === "quat");
+    def.transform === "rigid" ||
+    attrs.some((a) => a.def.type === "quat") ||
+    attrs.some((a) => a.name === "groupId");
   const quaternionCode = needsQuaternion ? quaternionShaderFunctions : "";
 
   return `${cameraStruct}
@@ -647,9 +656,24 @@ function generateTransformCode(
   attrs: Array<{ name: string; def: AttributeDef }>,
 ): string {
   const hasRotation = attrs.some((a) => a.name === "rotation");
+  const hasGroupId = attrs.some((a) => a.name === "groupId");
 
   switch (transform) {
     case "billboard":
+      if (hasGroupId) {
+        return `  // Billboard transform - always face camera (with group transform)
+  let group = groupTransforms[u32(groupId)];
+  let right = camera.cameraRight;
+  let up = camera.cameraUp;
+  let uniformScale = (group.scale.x + group.scale.y + group.scale.z) / 3.0;
+  let scaledRight = right * (localPos.x * size * uniformScale);
+  let scaledUp = up * (localPos.y * size * uniformScale);
+  let scaledPosition = position * group.scale;
+  let rotatedPosition = quat_rotate(group.quaternion, scaledPosition);
+  let worldOrigin = group.position + rotatedPosition;
+  let worldPos = worldOrigin + scaledRight + scaledUp;
+  let worldNormal = normalize(camera.cameraPos - worldPos);`;
+      }
       return `  // Billboard transform - always face camera
   let right = camera.cameraRight;
   let up = camera.cameraUp;
@@ -660,6 +684,19 @@ function generateTransformCode(
 
     case "rigid":
       if (hasRotation) {
+        if (hasGroupId) {
+          return `  // Rigid transform with rotation (with group transform)
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = size * group.scale;
+  let scaledLocal = localPos * scaledSize;
+  let rotatedPos = quat_rotate(rotation, scaledLocal);
+  let scaledPosition = position * group.scale;
+  let localPosWithCenter = scaledPosition + rotatedPos;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
+  let invScaledNorm = normalize(normal / scaledSize);
+  let combinedRotation = quat_mul(group.quaternion, rotation);
+  let worldNormal = quat_rotate(combinedRotation, invScaledNorm);`;
+        }
         return `  // Rigid transform with rotation
   let scaledLocal = localPos * size;
   let rotatedPos = quat_rotate(rotation, scaledLocal);
@@ -667,6 +704,16 @@ function generateTransformCode(
   let invScaledNorm = normalize(normal / size);
   let worldNormal = quat_rotate(rotation, invScaledNorm);`;
       } else {
+        if (hasGroupId) {
+          return `  // Rigid transform without rotation (with group transform)
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = size * group.scale;
+  let scaledLocal = localPos * scaledSize;
+  let scaledPosition = position * group.scale;
+  let localPosWithCenter = scaledPosition + scaledLocal;
+  let worldPos = group.position + quat_rotate(group.quaternion, localPosWithCenter);
+  let worldNormal = quat_rotate(group.quaternion, normalize(normal / scaledSize));`;
+        }
         return `  // Rigid transform without rotation
   let scaledLocal = localPos * size;
   let worldPos = position + scaledLocal;
@@ -674,6 +721,35 @@ function generateTransformCode(
       }
 
     case "beam":
+      if (hasGroupId) {
+        return `  // Beam transform - orient along start->end (with group transform)
+  let group = groupTransforms[u32(groupId)];
+  let scaledStart = start * group.scale;
+  let scaledEnd = end * group.scale;
+  let worldStart = group.position + quat_rotate(group.quaternion, scaledStart);
+  let worldEnd = group.position + quat_rotate(group.quaternion, scaledEnd);
+  let segDir = worldEnd - worldStart;
+  let segLength = max(length(segDir), 0.000001);
+  let zDir = normalize(segDir);
+
+  // Build orthonormal basis
+  var tempUp = vec3<f32>(0.0, 0.0, 1.0);
+  if (abs(dot(zDir, tempUp)) > 0.99) {
+    tempUp = vec3<f32>(0.0, 1.0, 0.0);
+  }
+  let xDir = normalize(cross(zDir, tempUp));
+  let yDir = cross(zDir, xDir);
+
+  // Transform to world space
+  let uniformScale = (group.scale.x + group.scale.y + group.scale.z) / 3.0;
+  let localX = localPos.x * size * uniformScale;
+  let localY = localPos.y * size * uniformScale;
+  let localZ = localPos.z * segLength;
+  let worldPos = worldStart + xDir * localX + yDir * localY + zDir * localZ;
+
+  // Transform normal
+  let worldNormal = normalize(xDir * normal.x + yDir * normal.y + zDir * normal.z);`;
+      }
       return `  // Beam transform - orient along start->end
   let segDir = end - start;
   let segLength = max(length(segDir), 0.000001);
@@ -697,6 +773,29 @@ function generateTransformCode(
   let worldNormal = normalize(xDir * normal.x + yDir * normal.y + zDir * normal.z);`;
 
     case "screenspace_offset":
+      if (hasGroupId) {
+        return `  // Screenspace offset transform - fixed size in screenspace (with group transform)
+  let group = groupTransforms[u32(groupId)];
+  let scaledAnchor = anchor * group.scale;
+  let worldAnchor = group.position + quat_rotate(group.quaternion, scaledAnchor);
+  // Projects anchor to clip space to get w (distance) for scaling
+  let clipAnchor = camera.mvp * vec4<f32>(worldAnchor, 1.0);
+  // Scaling factor to maintain constant size. 0.001 is a baseline adjustment.
+  let screenspaceScale = clipAnchor.w * 0.001 * size;
+
+  let scaledOffset = offset * screenspaceScale;
+  let scaledLocal = localPos * screenspaceScale;
+  
+  ${
+    hasRotation
+      ? `let combinedRotation = quat_mul(group.quaternion, rotation);
+  let rotatedPos = quat_rotate(combinedRotation, scaledOffset + scaledLocal);
+  let worldPos = worldAnchor + rotatedPos;
+  let worldNormal = quat_rotate(combinedRotation, normal);`
+      : `let worldPos = worldAnchor + scaledOffset + scaledLocal;
+  let worldNormal = quat_rotate(group.quaternion, normal);`
+  }`;
+      }
       return `  // Screenspace offset transform - fixed size in screenspace
   // Projects anchor to clip space to get w (distance) for scaling
   let clipAnchor = camera.mvp * vec4<f32>(anchor, 1.0);

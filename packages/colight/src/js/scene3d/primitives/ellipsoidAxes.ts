@@ -90,12 +90,18 @@ fn vs_main(
   @location(4) size: vec3<f32>,      // Instance non-uniform scaling
   @location(5) quaternion: vec4<f32>,// Instance rotation
   @location(6) color: vec3<f32>,     // Color attribute
-  @location(7) alpha: f32            // Alpha attribute
+  @location(7) alpha: f32,           // Alpha attribute
+  @location(8) groupId: f32
 ) -> VSOut {
-  let worldPos = computeRingPosition(center, offset, position, size, quaternion);
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = size * group.scale;
+  let scaledPosition = position * group.scale;
+  let localPos = computeRingPosition(center, offset, scaledPosition, scaledSize, quaternion);
+  let worldPos = group.position + quat_rotate(group.quaternion, localPos);
 
   // For normals, we want the tube's offset direction unperturbed by nonuniform scaling.
-  let worldNormal = quat_rotate(quaternion, normalize(offset));
+  let combinedRotation = quat_mul(group.quaternion, quaternion);
+  let worldNormal = quat_rotate(combinedRotation, normalize(offset));
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -132,9 +138,14 @@ fn vs_main(
   @location(3) position: vec3<f32>,
   @location(4) size: vec3<f32>,
   @location(5) quaternion: vec4<f32>,
-  @location(6) pickID: f32
+  @location(6) groupId: f32,
+  @location(7) pickID: f32
 ) -> VSOut {
-  let worldPos = computeRingPosition(center, offset, position, size, quaternion);
+  let group = groupTransforms[u32(groupId)];
+  let scaledSize = size * group.scale;
+  let scaledPosition = position * group.scale;
+  let localPos = computeRingPosition(center, offset, scaledPosition, scaledSize, quaternion);
+  let worldPos = group.position + quat_rotate(group.quaternion, localPos);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -172,7 +183,7 @@ const RING_GEOMETRY_LAYOUT = createVertexBufferLayout(
   "vertex",
 );
 
-/** Ring instance layout: position(3) + size(3) + quat(4) + color(3) + alpha(1) = 14 */
+/** Ring instance layout: position(3) + size(3) + quat(4) + color(3) + alpha(1) + groupId(1) = 15 */
 const RING_INSTANCE_LAYOUT = createVertexBufferLayout(
   [
     [3, "float32x3"], // instance center position
@@ -180,17 +191,19 @@ const RING_INSTANCE_LAYOUT = createVertexBufferLayout(
     [5, "float32x4"], // instance quaternion
     [6, "float32x3"], // instance color
     [7, "float32"], // instance alpha
+    [8, "float32"], // groupId
   ],
   "instance",
 );
 
-/** Ring picking instance layout: position(3) + size(3) + quat(4) + pickID(1) = 11 */
+/** Ring picking instance layout: position(3) + size(3) + quat(4) + groupId(1) + pickID(1) = 12 */
 const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
   [
     [3, "float32x3"], // position
     [4, "float32x3"], // size
     [5, "float32x4"], // quaternion
-    [6, "float32"], // pickID
+    [6, "float32"], // groupId
+    [7, "float32"], // pickID
   ],
   "instance",
 );
@@ -207,7 +220,7 @@ function fillRenderGeometry(
   out: Float32Array,
   outIndex: number,
 ): void {
-  const floatsPerInstance = 14;
+  const floatsPerInstance = 15;
   const outOffset = outIndex * floatsPerInstance;
 
   // Position
@@ -262,6 +275,10 @@ function fillRenderGeometry(
   // Alpha
   out[outOffset + 13] =
     (constants.alpha as number) ?? elem.alphas?.[elemIndex] ?? 1.0;
+
+  // Group ID
+  out[outOffset + 14] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
 }
 
 function fillPickingGeometry(
@@ -273,7 +290,7 @@ function fillPickingGeometry(
   outIndex: number,
   baseID: number,
 ): void {
-  const floatsPerPicking = 11;
+  const floatsPerPicking = 12;
   const outOffset = outIndex * floatsPerPicking;
 
   // Position
@@ -311,8 +328,12 @@ function fillPickingGeometry(
     out[outOffset + 9] = 1;
   }
 
+  // Group ID
+  out[outOffset + 10] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
+
   // Pick ID - same for all 3 rings of this ellipsoid
-  out[outOffset + 10] = packID(baseID + elemIndex);
+  out[outOffset + 11] = packID(baseID + elemIndex);
 }
 
 // =============================================================================
@@ -329,6 +350,7 @@ export const ellipsoidAxesSpec = definePrimitive<EllipsoidAxesComponentConfig>({
     rotation: attr.quat("quaternions"), // default: identity [1,0,0,0] in wxyz
     color: attr.vec3("colors", [0.5, 0.5, 0.5]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   // 3 rings per ellipsoid

@@ -171,16 +171,17 @@ describe("scene3d groups", () => {
         },
       ];
 
-      const flattened = flattenGroups(components);
+      const { components: flattened, groupTransforms } = flattenGroups(components);
 
       expect(flattened.length).toBe(1);
+      expect(groupTransforms.length).toBe(1);
       expect(flattened[0].type).toBe("PointCloud");
       expect((flattened[0] as PointCloudComponentConfig).centers).toEqual(
         new Float32Array([0, 0, 0]),
       );
     });
 
-    it("should transform child centers by group position", () => {
+    it("should assign group transforms by group position", () => {
       const group: GroupConfig = {
         type: "Group",
         position: [10, 0, 0],
@@ -192,18 +193,17 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened, groupTransforms } = flattenGroups([group]);
 
       expect(flattened.length).toBe(1);
       const pc = flattened[0] as PointCloudComponentConfig;
-      // Points should be offset by [10, 0, 0]
-      expect(pc.centers[0]).toBeCloseTo(10); // First point x
-      expect(pc.centers[1]).toBeCloseTo(0);
-      expect(pc.centers[2]).toBeCloseTo(0);
-      expect(pc.centers[3]).toBeCloseTo(11); // Second point x
+      expect(groupTransforms.length).toBe(2);
+      expect(groupTransforms[1].position).toEqual([10, 0, 0]);
+      expect(pc.centers[0]).toBeCloseTo(0);
+      expect((pc as any)._groupId).toBe(1);
     });
 
-    it("should transform child centers by group rotation", () => {
+    it("should assign group transforms by group rotation", () => {
       const group: GroupConfig = {
         type: "Group",
         quaternion: quatFromAxisAngle([0, 1, 0], Math.PI / 2), // 90 deg Y
@@ -215,16 +215,19 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened, groupTransforms } = flattenGroups([group]);
       const pc = flattened[0] as PointCloudComponentConfig;
 
-      // [1,0,0] rotated 90 degrees around Y becomes [0,0,-1]
-      expect(pc.centers[0]).toBeCloseTo(0);
-      expect(pc.centers[1]).toBeCloseTo(0);
-      expect(pc.centers[2]).toBeCloseTo(-1);
+      expect(groupTransforms.length).toBe(2);
+      const groupQuat = groupTransforms[1].quaternion;
+      const v = quatRotate(groupQuat, [1, 0, 0]);
+      expect(v[0]).toBeCloseTo(0);
+      expect(v[1]).toBeCloseTo(0);
+      expect(v[2]).toBeCloseTo(-1);
+      expect((pc as any)._groupId).toBe(1);
     });
 
-    it("should transform child centers by group scale", () => {
+    it("should assign group transforms by group scale", () => {
       const group: GroupConfig = {
         type: "Group",
         scale: 2,
@@ -236,15 +239,14 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened, groupTransforms } = flattenGroups([group]);
       const pc = flattened[0] as PointCloudComponentConfig;
 
-      expect(pc.centers[0]).toBeCloseTo(2);
-      expect(pc.centers[1]).toBeCloseTo(4);
-      expect(pc.centers[2]).toBeCloseTo(6);
+      expect(groupTransforms[1].scale).toEqual([2, 2, 2]);
+      expect(pc.centers[0]).toBeCloseTo(1);
     });
 
-    it("should scale half_sizes by group scale", () => {
+    it("should preserve primitive sizes for GPU group scaling", () => {
       const group: GroupConfig = {
         type: "Group",
         scale: [2, 3, 4],
@@ -257,10 +259,11 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened, groupTransforms } = flattenGroups([group]);
       const ellipsoid = flattened[0] as EllipsoidComponentConfig;
 
-      expect(ellipsoid.half_size).toEqual([2, 3, 4]);
+      expect(ellipsoid.half_size).toEqual([1, 1, 1]);
+      expect(groupTransforms[1].scale).toEqual([2, 3, 4]);
     });
 
     it("should add groupPath for named groups", () => {
@@ -275,7 +278,7 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened } = flattenGroups([group]);
 
       expect((flattened[0] as any)._groupPath).toEqual(["myGroup"]);
     });
@@ -300,21 +303,20 @@ describe("scene3d groups", () => {
         children: [innerGroup],
       };
 
-      const flattened = flattenGroups([outerGroup]);
+      const { components: flattened, groupTransforms } = flattenGroups([outerGroup]);
 
       expect(flattened.length).toBe(1);
       const pc = flattened[0] as PointCloudComponentConfig;
 
-      // Position should be outer [0,1,0] + inner [1,0,0] = [1,1,0]
-      expect(pc.centers[0]).toBeCloseTo(1);
-      expect(pc.centers[1]).toBeCloseTo(1);
-      expect(pc.centers[2]).toBeCloseTo(0);
+      expect(groupTransforms.length).toBe(3);
+      expect(groupTransforms[2].position).toEqual([1, 1, 0]);
+      expect((pc as any)._groupId).toBe(2);
 
       // Group path should include both names
       expect((pc as any)._groupPath).toEqual(["outer", "inner"]);
     });
 
-    it("should compose quaternions from child components", () => {
+    it("should preserve child quaternions for GPU composition", () => {
       const childQuat = quatFromAxisAngle([1, 0, 0], Math.PI / 2); // 90 deg X
 
       const group: GroupConfig = {
@@ -329,25 +331,11 @@ describe("scene3d groups", () => {
         ],
       };
 
-      const flattened = flattenGroups([group]);
+      const { components: flattened, groupTransforms } = flattenGroups([group]);
       const ellipsoid = flattened[0] as EllipsoidComponentConfig;
 
-      // The composed quaternion should rotate vectors by both rotations
-      // First child's X rotation, then parent's Y rotation
-      const resultQuat = ellipsoid.quaternion as [
-        number,
-        number,
-        number,
-        number,
-      ];
-
-      // Apply to [0, 0, 1]:
-      // Child (90 X): [0, 0, 1] -> [0, -1, 0]
-      // Parent (90 Y): [0, -1, 0] -> [0, -1, 0] (Y rotation doesn't affect Y-aligned)
-      const v = quatRotate(resultQuat, [0, 0, 1]);
-      expect(v[0]).toBeCloseTo(0);
-      expect(v[1]).toBeCloseTo(-1);
-      expect(v[2]).toBeCloseTo(0);
+      expect(ellipsoid.quaternion).toEqual(childQuat);
+      expect(groupTransforms[1].quaternion).toEqual(group.quaternion);
     });
   });
 });

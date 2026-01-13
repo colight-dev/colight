@@ -161,6 +161,10 @@ function fillRenderGeometry(
   // Alpha (f32) - uses segmentIndex for per-segment alphas
   out[outOffset + 10] =
     (constants.alpha as number) ?? elem.alphas?.[segmentIndex] ?? 1.0;
+
+  // Group ID (f32)
+  out[outOffset + 11] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
 }
 
 /**
@@ -190,8 +194,12 @@ function fillPickingGeometry(
   out[outOffset + 6] =
     (constants.size as number) ?? elem.sizes?.[lineIndex] ?? 0.02;
 
+  // Group ID (f32)
+  out[outOffset + 7] =
+    (constants._groupId as number) ?? (elem as any)._groupId ?? 0;
+
   // Pick ID (f32)
-  out[outOffset + 7] = packID(baseID + segmentIndex);
+  out[outOffset + 8] = packID(baseID + segmentIndex);
 }
 
 // =============================================================================
@@ -202,13 +210,14 @@ export const lineBeamsSpec = definePrimitive<LineBeamsComponentConfig>({
   name: "LineBeams",
 
   // Attribute schema defines buffer layout and shader inputs
-  // Order: start, end, size, color, alpha
+  // Order: start, end, size, color, alpha, groupId
   attributes: {
     start: attr.vec3("points"), // Will be filled custom
     end: attr.vec3("points"), // Will be filled custom
     size: attr.f32("sizes", 0.02),
     color: attr.vec3("colors", [0.5, 0.5, 0.5]),
     alpha: attr.f32("alphas", 1.0),
+    groupId: attr.f32("_groupIds", 0),
   },
 
   geometry: { type: "beam" },
