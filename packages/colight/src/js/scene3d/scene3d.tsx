@@ -467,6 +467,7 @@ function collectComponentsFromChildren(
         quaternion: props.quaternion,
         scale: props.scale,
         name: props.name,
+        childProps: props.childProps,
       } as GroupConfig);
     } else {
       // Call the component function directly - it returns config(s)

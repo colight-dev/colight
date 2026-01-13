@@ -149,6 +149,14 @@ describe("scene3d groups", () => {
         { type: "Group", children: [] },
         { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
       ];
+      const groupWithChildProps = [
+        {
+          type: "Group",
+          childProps: { outline: true },
+          children: [],
+        },
+        { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
+      ];
       const groupWithTransform = [
         { type: "Group", children: [], position: [1, 0, 0] },
         { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
@@ -157,6 +165,7 @@ describe("scene3d groups", () => {
       expect(hasGroups(noGroups as any)).toBe(false);
       // Composition-only groups (no transform) return false for perf optimization
       expect(hasGroups(compositionOnlyGroup as any)).toBe(false);
+      expect(hasGroups(groupWithChildProps as any)).toBe(true);
       expect(hasGroups(groupWithTransform as any)).toBe(true);
     });
   });
@@ -278,6 +287,54 @@ describe("scene3d groups", () => {
       const flattened = flattenGroups([group]);
 
       expect((flattened[0] as any)._groupPath).toEqual(["myGroup"]);
+    });
+
+    it("should apply childProps defaults to children", () => {
+      const group: GroupConfig = {
+        type: "Group",
+        childProps: {
+          color: [0.1, 0.2, 0.3],
+          outline: true,
+          outlineWidth: 4,
+        },
+        children: [
+          {
+            type: "PointCloud",
+            centers: new Float32Array([0, 0, 0]),
+          } as PointCloudComponentConfig,
+        ],
+      };
+
+      const flattened = flattenGroups([group]);
+      const pc = flattened[0] as PointCloudComponentConfig;
+
+      expect(pc.color).toEqual([0.1, 0.2, 0.3]);
+      expect(pc.outline).toBe(true);
+      expect(pc.outlineWidth).toBe(4);
+    });
+
+    it("should not override child props when provided", () => {
+      const group: GroupConfig = {
+        type: "Group",
+        childProps: {
+          color: [1, 0, 0],
+          outlineColor: [0, 1, 0],
+        },
+        children: [
+          {
+            type: "PointCloud",
+            centers: new Float32Array([0, 0, 0]),
+            color: [0, 0, 1],
+            outlineColor: [1, 1, 0],
+          } as PointCloudComponentConfig,
+        ],
+      };
+
+      const flattened = flattenGroups([group]);
+      const pc = flattened[0] as PointCloudComponentConfig;
+
+      expect(pc.color).toEqual([0, 0, 1]);
+      expect(pc.outlineColor).toEqual([1, 1, 0]);
     });
 
     it("should handle nested groups", () => {

@@ -722,6 +722,7 @@ def Group(
     quaternion: Optional[ArrayLike] = None,
     scale: Optional[Union[NumberLike, ArrayLike]] = None,
     name: Optional[str] = None,
+    child_props: Optional[Dict[str, Any]] = None,
 ) -> SceneComponent:
     """Create a group component for hierarchical scene composition.
 
@@ -734,6 +735,7 @@ def Group(
         quaternion: Rotation as quaternion [x, y, z, w]
         scale: Scale factor (uniform number or [x, y, z] per-axis)
         name: Optional name for identifying this group in pick info
+        child_props: Optional props to apply to child components
 
     Returns:
         A Group scene component
@@ -766,6 +768,8 @@ def Group(
         data["scale"] = _coerce_group_value(scale)
     if name is not None:
         data["name"] = name
+    if child_props is not None:
+        data["childProps"] = child_props
 
     return SceneComponent("Group", data)
 

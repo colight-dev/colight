@@ -8,6 +8,7 @@
 
 import { Vec3, add } from "./vec3";
 import { ComponentConfig } from "./components";
+import { BaseComponentConfig } from "./types";
 
 // =============================================================================
 // Types
@@ -30,6 +31,8 @@ export interface GroupConfig {
   type: "Group";
   /** Child components (can include nested groups) */
   children: (ComponentConfig | GroupConfig)[];
+  /** Props to apply to child components (without copying arrays) */
+  childProps?: GroupStyleProps;
   /** Position offset in parent space */
   position?: Vec3;
   /** Rotation as quaternion [x, y, z, w] */
@@ -48,6 +51,21 @@ export interface Transform {
   quaternion: Quat;
   scale: Vec3;
 }
+
+/**
+ * Props that can be inherited from Groups onto child components.
+ * Uses only scalar/object props to avoid copying large arrays.
+ */
+export type GroupStyleProps = Pick<
+  BaseComponentConfig,
+  | "color"
+  | "alpha"
+  | "outline"
+  | "outlineColor"
+  | "outlineWidth"
+  | "layer"
+  | "pickingScale"
+>;
 
 /**
  * A flattened component with group ancestry information.
@@ -225,6 +243,45 @@ function groupHasTransform(group: GroupConfig): boolean {
     group.quaternion !== undefined ||
     group.scale !== undefined
   );
+}
+
+function groupHasChildProps(group: GroupConfig): boolean {
+  return !!group.childProps && Object.keys(group.childProps).length > 0;
+}
+
+function mergeGroupProps(
+  parentProps: GroupStyleProps | undefined,
+  childProps: GroupStyleProps | undefined,
+): GroupStyleProps | undefined {
+  if (!parentProps) return childProps;
+  if (!childProps) return parentProps;
+  return { ...parentProps, ...childProps };
+}
+
+function applyGroupPropsToComponent(
+  component: ComponentConfig,
+  groupProps?: GroupStyleProps,
+): ComponentConfig {
+  if (!groupProps) return component;
+
+  let updated: ComponentConfig | null = null;
+  const maybeSet = <Key extends keyof GroupStyleProps>(key: Key) => {
+    const groupValue = groupProps[key];
+    if (groupValue === undefined) return;
+    if ((component as GroupStyleProps)[key] !== undefined) return;
+    if (!updated) updated = { ...component };
+    (updated as GroupStyleProps)[key] = groupValue;
+  };
+
+  maybeSet("color");
+  maybeSet("alpha");
+  maybeSet("outline");
+  maybeSet("outlineColor");
+  maybeSet("outlineWidth");
+  maybeSet("layer");
+  maybeSet("pickingScale");
+
+  return updated ?? component;
 }
 
 /**
@@ -517,6 +574,7 @@ export function flattenGroups(
   components: (ComponentConfig | GroupConfig)[],
   parentTransform: Transform = identityTransform(),
   groupPath: string[] = [],
+  parentProps?: GroupStyleProps,
 ): FlattenedComponent[] {
   const result: FlattenedComponent[] = [];
 
@@ -532,13 +590,21 @@ export function flattenGroups(
         ? composeTransforms(parentTransform, getGroupTransform(component))
         : parentTransform;
 
+      const mergedProps = mergeGroupProps(parentProps, component.childProps);
+
       // Recursively flatten children
-      const flattened = flattenGroups(component.children, worldTransform, newPath);
+      const flattened = flattenGroups(
+        component.children,
+        worldTransform,
+        newPath,
+        mergedProps,
+      );
       result.push(...flattened);
     } else {
+      const styledComponent = applyGroupPropsToComponent(component, parentProps);
       // Apply parent transform to this primitive
       const transformed = applyTransformToComponent(
-        component,
+        styledComponent,
         parentTransform,
         groupPath,
       );
@@ -550,13 +616,13 @@ export function flattenGroups(
 }
 
 /**
- * Check if any components in the tree are Groups with transforms.
- * Returns false for composition-only groups (no position/quaternion/scale).
+ * Check if any components in the tree are Groups with transforms or child props.
+ * Returns false for composition-only groups (no position/quaternion/scale/childProps).
  */
 export function hasGroups(components: (ComponentConfig | GroupConfig)[]): boolean {
   for (const component of components) {
     if (isGroup(component)) {
-      if (groupHasTransform(component)) {
+      if (groupHasTransform(component) || groupHasChildProps(component)) {
         return true;
       }
       // Recurse into children of composition-only groups

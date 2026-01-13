@@ -142,4 +142,5 @@ export type {
   Transform,
   Quat,
   FlattenedComponent,
+  GroupStyleProps,
 } from "./groups";
