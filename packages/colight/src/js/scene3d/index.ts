@@ -17,6 +17,9 @@ export {
   computeCanvasDimensions,
 } from "./scene3d";
 
+// Helper types (for ImageProjection, CameraFrustum)
+export type { CameraIntrinsics, CameraExtrinsics } from "./helpers";
+
 // Camera
 export { DEFAULT_CAMERA } from "./camera3d";
 export type { CameraParams, CameraState } from "./camera3d";
