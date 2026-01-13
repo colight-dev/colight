@@ -84,7 +84,7 @@ export type {
 };
 
 // Re-export coercion types
-export { MeshGeometry, MeshDefinition, MeshProps };
+export type { MeshGeometry, MeshDefinition, MeshProps };
 
 // =============================================================================
 // Primitive Components (JSX API)
