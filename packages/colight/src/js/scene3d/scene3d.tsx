@@ -73,12 +73,10 @@ import {
 } from "./helpers";
 
 // Re-export helpers for external use
-export {
-  GridHelper,
+export { GridHelper, CameraFrustum, ImageProjection };
+export type {
   GridHelperProps,
-  CameraFrustum,
   CameraFrustumProps,
-  ImageProjection,
   ImageProjectionProps,
   ImageProjectionResult,
   CameraIntrinsics,
