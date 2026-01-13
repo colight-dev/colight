@@ -13,6 +13,7 @@ import {
   pickingVSOut,
   pickingFragCode,
   quaternionShaderFunctions,
+  coerceFloat32Fields,
 } from "./define";
 
 // =============================================================================
@@ -107,7 +108,7 @@ export function coerceImagePlane(
   // Resolve alpha: alpha > opacity
   const resolvedAlpha = alpha !== undefined ? alpha : opacity;
 
-  return {
+  const result = {
     ...rest,
     centers: resolvedCenters,
     quaternions: resolvedQuaternions,
@@ -116,6 +117,7 @@ export function coerceImagePlane(
     alpha: resolvedAlpha,
     type: "ImagePlane",
   };
+  return coerceFloat32Fields(result, ["centers", "quaternions", "sizes"]);
 }
 
 // =============================================================================

@@ -9,7 +9,11 @@
       "Bash(uv run pytest:*)",
       "Bash(pre-commit run:*)",
       "Bash(uv run pyright:*)",
-      "Bash(yarn vitest run:*)"
+      "Bash(yarn vitest run:*)",
+      "Bash(grep:*)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(node node_modules/typescript/bin/tsc:*)"
     ]
   }
 }

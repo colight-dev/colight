@@ -51,7 +51,6 @@ import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
 import { ReadyState, NOOP_READY_STATE, PickInfo } from "./types";
 import {
-  coerceComponentArrays,
   normalizePrimitiveSpecs,
   PrimitiveSpecMap,
   MeshGeometry,
@@ -107,7 +106,11 @@ const PRIMITIVE_SPECS: Record<string, PrimitiveSpec<any>> = {
 };
 
 /**
- * Applies coercion to a raw component config if a spec with coerce is registered.
+ * Applies coercion to a raw component config via spec.coerce.
+ * Each primitive's coerce function handles:
+ * - Input coercion (singular → plural, scalar expansion)
+ * - Array coercion (NdArray/arrays → Float32Array)
+ *
  * This ensures that raw data from Python (e.g., {type: "Cuboid", center: [0,0,0], half_size: 0.1})
  * is processed the same way as JSX component calls.
  */

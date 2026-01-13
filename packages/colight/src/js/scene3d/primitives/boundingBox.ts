@@ -21,6 +21,7 @@ import {
   quaternionShaderFunctions,
   resolveSingular,
   expandScalar,
+  coerceFloat32Fields,
 } from "./define";
 import { GeometryData } from "../types";
 
@@ -67,6 +68,14 @@ export function coerceBoundingBox(
 ): Record<string, any> {
   let coerced = resolveSingular(props, "center", "centers");
   coerced = expandScalar(coerced, "half_size");
+  coerced = coerceFloat32Fields(coerced, [
+    "centers",
+    "half_sizes",
+    "quaternions",
+    "colors",
+    "sizes",
+    "alphas",
+  ]);
   return { ...coerced, type: "BoundingBox" };
 }
 

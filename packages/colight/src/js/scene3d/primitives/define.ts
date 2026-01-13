@@ -45,6 +45,29 @@ export { quaternionShaderFunctions } from "../quaternion";
 // Input Coercion Helpers
 // =============================================================================
 
+import { coerceToFloat32 } from "../coercion";
+
+// Re-export for use in primitive coerce functions
+export { coerceToFloat32 };
+
+/**
+ * Coerce specified fields to Float32Array if they exist.
+ * Handles NdArrayView, regular arrays, and TypedArrays.
+ */
+export function coerceFloat32Fields<T extends object>(
+  obj: T,
+  fields: (keyof T)[],
+): T {
+  const result = { ...obj };
+  for (const field of fields) {
+    const value = obj[field];
+    if (value !== undefined) {
+      (result[field] as any) = coerceToFloat32(value);
+    }
+  }
+  return result;
+}
+
 /**
  * Resolve a singular prop to its plural form by wrapping in an array.
  * e.g., `center: [0,0,0]` → `centers: [[0,0,0]]`

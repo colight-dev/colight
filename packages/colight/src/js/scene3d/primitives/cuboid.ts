@@ -6,7 +6,13 @@
  */
 
 import { BaseComponentConfig } from "../types";
-import { definePrimitive, attr, resolveSingular, expandScalar } from "./define";
+import {
+  definePrimitive,
+  attr,
+  resolveSingular,
+  expandScalar,
+  coerceFloat32Fields,
+} from "./define";
 
 // =============================================================================
 // Configuration Interface (internal format after coercion)
@@ -45,6 +51,13 @@ export const cuboidSpec = definePrimitive<CuboidComponentConfig>({
   coerce(props) {
     let coerced = resolveSingular(props, "center", "centers");
     coerced = expandScalar(coerced, "half_size");
+    coerced = coerceFloat32Fields(coerced, [
+      "centers",
+      "half_sizes",
+      "quaternions",
+      "colors",
+      "alphas",
+    ]);
     return { ...coerced, type: "Cuboid" };
   },
 

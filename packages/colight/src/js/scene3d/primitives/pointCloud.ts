@@ -6,7 +6,12 @@
  */
 
 import { BaseComponentConfig } from "../types";
-import { definePrimitive, attr, resolveSingular } from "./define";
+import {
+  definePrimitive,
+  attr,
+  resolveSingular,
+  coerceFloat32Fields,
+} from "./define";
 
 // =============================================================================
 // Configuration Interface (internal format after coercion)
@@ -42,8 +47,14 @@ export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   name: "PointCloud",
 
   coerce(props) {
+    const resolved = resolveSingular(props, "center", "centers");
     return {
-      ...resolveSingular(props, "center", "centers"),
+      ...coerceFloat32Fields(resolved, [
+        "centers",
+        "colors",
+        "sizes",
+        "alphas",
+      ]),
       type: "PointCloud",
     };
   },
