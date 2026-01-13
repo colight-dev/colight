@@ -28,25 +28,46 @@ export {
   pickingVSOut,
   pickingFragCode,
   quaternionShaderFunctions,
+  // Coercion helpers
+  resolveSingular,
+  expandScalar,
 } from "./define";
 
-// Primitive definitions
-export { pointCloudSpec, type PointCloudComponentConfig } from "./pointCloud";
-export { ellipsoidSpec, type EllipsoidComponentConfig } from "./ellipsoid";
+// Primitive definitions and Props types
+export {
+  pointCloudSpec,
+  type PointCloudComponentConfig,
+  type PointCloudProps,
+} from "./pointCloud";
+export {
+  ellipsoidSpec,
+  type EllipsoidComponentConfig,
+  type EllipsoidProps,
+  coerceEllipsoid,
+} from "./ellipsoid";
 export {
   ellipsoidAxesSpec,
   type EllipsoidAxesComponentConfig,
 } from "./ellipsoidAxes";
-export { cuboidSpec, type CuboidComponentConfig } from "./cuboid";
+export {
+  cuboidSpec,
+  type CuboidComponentConfig,
+  type CuboidProps,
+} from "./cuboid";
 export { lineBeamsSpec, type LineBeamsComponentConfig } from "./lineBeams";
-export { lineSegmentsSpec, type LineSegmentsComponentConfig } from "./lineSegments";
+export {
+  lineSegmentsSpec,
+  type LineSegmentsComponentConfig,
+} from "./lineSegments";
 export {
   boundingBoxSpec,
   type BoundingBoxComponentConfig,
+  type BoundingBoxProps,
 } from "./boundingBox";
 export {
   imagePlaneSpec,
   type ImagePlaneComponentConfig,
+  type ImagePlaneProps,
   type ImageSource,
   getImageBindGroupLayout,
 } from "./imagePlane";

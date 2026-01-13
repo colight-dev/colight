@@ -42,11 +42,13 @@ export interface MeshDefinition extends MeshGeometry {
   cullMode?: GPUCullMode;
 }
 
-export type MeshProps = Omit<MeshComponentConfig, "type"> & {
+export type MeshProps = Omit<MeshComponentConfig, "type" | "centers"> & {
   geometry: MeshGeometry;
   geometryKey?: string | number;
   shading?: "lit" | "unlit";
   cullMode?: GPUCullMode;
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
 };
 
 export type InlineMeshComponentConfig = MeshProps & { type: "Mesh" };
@@ -73,13 +75,21 @@ function coerceIndexData(
   let arr: number[];
   if (Array.isArray(value)) {
     arr = value;
-  } else if (value instanceof Int8Array || value instanceof Int16Array || value instanceof Int32Array ||
-             value instanceof Uint8Array || value instanceof Uint8ClampedArray ||
-             value instanceof Float32Array || value instanceof Float64Array) {
+  } else if (
+    value instanceof Int8Array ||
+    value instanceof Int16Array ||
+    value instanceof Int32Array ||
+    value instanceof Uint8Array ||
+    value instanceof Uint8ClampedArray ||
+    value instanceof Float32Array ||
+    value instanceof Float64Array
+  ) {
     arr = Array.from(value);
   } else {
     // Generic ArrayBufferView - try to interpret as Uint32
-    arr = Array.from(new Uint32Array(value.buffer, value.byteOffset, value.byteLength / 4));
+    arr = Array.from(
+      new Uint32Array(value.buffer, value.byteOffset, value.byteLength / 4),
+    );
   }
   const max = Math.max(...arr);
   return max > 65535 ? new Uint32Array(arr) : new Uint16Array(arr);
@@ -88,9 +98,15 @@ function coerceIndexData(
 function coerceMeshGeometry(geometry: MeshGeometry): StructuredGeometry {
   return {
     positions: coerceToFloat32(geometry.positions) as Float32Array,
-    normals: geometry.normals ? coerceToFloat32(geometry.normals) as Float32Array : undefined,
-    colors: geometry.colors ? coerceToFloat32(geometry.colors) as Float32Array : undefined,
-    uvs: geometry.uvs ? coerceToFloat32(geometry.uvs) as Float32Array : undefined,
+    normals: geometry.normals
+      ? (coerceToFloat32(geometry.normals) as Float32Array)
+      : undefined,
+    colors: geometry.colors
+      ? (coerceToFloat32(geometry.colors) as Float32Array)
+      : undefined,
+    uvs: geometry.uvs
+      ? (coerceToFloat32(geometry.uvs) as Float32Array)
+      : undefined,
     indices: coerceIndexData(geometry.indices),
   };
 }
@@ -98,8 +114,12 @@ function coerceMeshGeometry(geometry: MeshGeometry): StructuredGeometry {
 /**
  * Detect vertex format from geometry for cache key generation.
  */
-function detectFormat(geometry: MeshGeometry, shading: "lit" | "unlit"): VertexFormat {
-  const hasColors = geometry.colors !== undefined && getLength(geometry.colors) > 0;
+function detectFormat(
+  geometry: MeshGeometry,
+  shading: "lit" | "unlit",
+): VertexFormat {
+  const hasColors =
+    geometry.colors !== undefined && getLength(geometry.colors) > 0;
 
   let colorComponents: 3 | 4 = 3;
   if (hasColors) {
@@ -108,7 +128,8 @@ function detectFormat(geometry: MeshGeometry, shading: "lit" | "unlit"): VertexF
     colorComponents = colorLen / (posLen / 3) === 4 ? 4 : 3;
   }
 
-  const hasExplicitNormals = geometry.normals !== undefined && getLength(geometry.normals) > 0;
+  const hasExplicitNormals =
+    geometry.normals !== undefined && getLength(geometry.normals) > 0;
 
   return {
     // Lit shading will auto-compute normals, so hasNormals is true for lit
@@ -132,7 +153,10 @@ interface InlineMeshCacheEntry {
 }
 
 // Use WeakMap keyed by geometry object - entries are garbage collected when geometry is no longer referenced
-const inlineMeshCache = new WeakMap<MeshGeometry, Map<string, InlineMeshCacheEntry>>();
+const inlineMeshCache = new WeakMap<
+  MeshGeometry,
+  Map<string, InlineMeshCacheEntry>
+>();
 let inlineMeshId = 0;
 
 function getInlineMeshEntry(
@@ -166,7 +190,11 @@ function getInlineMeshEntry(
   // Create new entry with structured geometry
   const normalizedGeometry = coerceMeshGeometry(geometry);
   const typeName = `__InlineMesh_${inlineMeshId++}`;
-  const spec = defineMesh(typeName, normalizedGeometry, { shading, cullMode, hasTexture });
+  const spec = defineMesh(typeName, normalizedGeometry, {
+    shading,
+    cullMode,
+    hasTexture,
+  });
 
   // Store the explicit key if provided, for impl3d to detect data changes
   if (options.geometryKey !== undefined) {

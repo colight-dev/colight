@@ -16,7 +16,7 @@ import {
 } from "./define";
 
 // =============================================================================
-// Configuration Interface
+// Configuration Interface (internal format after coercion)
 // =============================================================================
 
 export type ImageSource =
@@ -45,6 +45,77 @@ export interface ImagePlaneComponentConfig extends BaseComponentConfig {
   sizes?: Float32Array;
   /** Default size (width,height) */
   size?: number | [number, number];
+}
+
+// =============================================================================
+// Props Type (user-facing input)
+// =============================================================================
+
+export type ImagePlaneProps = Omit<
+  ImagePlaneComponentConfig,
+  "type" | "centers" | "quaternions" | "sizes"
+> & {
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
+  position?: [number, number, number];
+  quaternions?: ArrayLike<number> | ArrayBufferView;
+  quaternion?: [number, number, number, number];
+  sizes?: ArrayLike<number> | ArrayBufferView;
+  size?: number | [number, number];
+  width?: number;
+  height?: number;
+  opacity?: number;
+};
+
+// =============================================================================
+// Coerce Function
+// =============================================================================
+
+export function coerceImagePlane(
+  props: Record<string, any>,
+): Record<string, any> {
+  const {
+    position,
+    center,
+    quaternion,
+    width,
+    height,
+    opacity,
+    centers,
+    quaternions,
+    sizes,
+    size,
+    alpha,
+    ...rest
+  } = props;
+
+  // Resolve centers: centers > center > position > default
+  const resolvedCenters =
+    centers ?? (center ? [center] : position ? [position] : [[0, 0, 0]]);
+
+  // Resolve quaternions: quaternions > quaternion
+  const resolvedQuaternions =
+    quaternions ?? (quaternion ? [quaternion] : undefined);
+
+  // Resolve size: size > width/height combo
+  const resolvedSize =
+    size ??
+    (width !== undefined || height !== undefined
+      ? [width ?? 1, height ?? 1]
+      : undefined);
+
+  // Resolve alpha: alpha > opacity
+  const resolvedAlpha = alpha !== undefined ? alpha : opacity;
+
+  return {
+    ...rest,
+    centers: resolvedCenters,
+    quaternions: resolvedQuaternions,
+    sizes,
+    size: resolvedSize,
+    alpha: resolvedAlpha,
+    type: "ImagePlane",
+  };
 }
 
 // =============================================================================
@@ -124,14 +195,9 @@ fn vs_main(
 // Bind group layout (sampler + texture)
 // =============================================================================
 
-const imageBindGroupLayoutCache = new WeakMap<
-  GPUDevice,
-  GPUBindGroupLayout
->();
+const imageBindGroupLayoutCache = new WeakMap<GPUDevice, GPUBindGroupLayout>();
 
-export function getImageBindGroupLayout(
-  device: GPUDevice,
-): GPUBindGroupLayout {
+export function getImageBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
   const cached = imageBindGroupLayoutCache.get(device);
   if (cached) return cached;
 
@@ -172,6 +238,8 @@ function getImageObjectId(image: object): string {
 
 export const imagePlaneSpec = definePrimitive<ImagePlaneComponentConfig>({
   name: "ImagePlane",
+
+  coerce: coerceImagePlane,
 
   attributes: {
     position: attr.vec3("centers"),

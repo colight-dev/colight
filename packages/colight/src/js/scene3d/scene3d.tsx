@@ -29,8 +29,18 @@ import {
   BoundingBoxComponentConfig,
   PickEvent,
   PrimitiveSpec,
-  MeshComponentConfig,
   ImageSource,
+  pointCloudSpec,
+  ellipsoidSpec,
+  cuboidSpec,
+  imagePlaneSpec,
+  boundingBoxSpec,
+  // Props types (user-facing input types)
+  PointCloudProps,
+  EllipsoidProps,
+  CuboidProps,
+  BoundingBoxProps,
+  ImagePlaneProps,
 } from "./components";
 import { GroupConfig, flattenGroups, hasAnyGroups } from "./groups";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
@@ -58,7 +68,6 @@ import {
   ImageProjection,
   ImageProjectionProps,
   ImageProjectionResult,
-  createImageProjectionGroup,
   CameraIntrinsics,
   CameraExtrinsics,
 } from "./helpers";
@@ -88,141 +97,6 @@ export { MeshGeometry, MeshDefinition, MeshProps };
  * Components with this symbol are collected by Scene for rendering.
  */
 const SCENE3D_TYPE = Symbol.for("scene3d.type");
-
-/** Result of processConfig - can be single config, array, or group */
-type ProcessConfigResult =
-  | ComponentConfig
-  | GroupConfig
-  | InlineMeshComponentConfig
-  | ImageProjectionResult;
-
-/**
- * Processes props into a component config, handling type coercion and defaults.
- */
-function processConfig(
-  typeName: string,
-  props: Record<string, any>,
-): ProcessConfigResult {
-  switch (typeName) {
-    case "PointCloud":
-      return {
-        ...props,
-        type: "PointCloud",
-      } as PointCloudComponentConfig;
-
-    case "Ellipsoid": {
-      const half_size =
-        typeof props.half_size === "number"
-          ? ([props.half_size, props.half_size, props.half_size] as [
-            number,
-            number,
-            number,
-          ])
-          : props.half_size;
-      const fillMode = props.fill_mode || "Solid";
-      return {
-        ...props,
-        half_size,
-        type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
-      } as EllipsoidComponentConfig;
-    }
-
-    case "Cuboid": {
-      const half_size =
-        typeof props.half_size === "number"
-          ? ([props.half_size, props.half_size, props.half_size] as [
-            number,
-            number,
-            number,
-          ])
-          : props.half_size;
-      return {
-        ...props,
-        half_size,
-        type: "Cuboid",
-      } as CuboidComponentConfig;
-    }
-
-    case "LineBeams":
-      return {
-        ...props,
-        type: "LineBeams",
-      } as LineBeamsComponentConfig;
-
-    case "LineSegments":
-      return {
-        ...props,
-        type: "LineSegments",
-      } as LineSegmentsComponentConfig;
-
-    case "ImagePlane": {
-      const {
-        position,
-        quaternion,
-        width,
-        height,
-        opacity,
-        centers,
-        quaternions,
-        sizes,
-        size,
-        ...rest
-      } = props;
-      const resolvedCenters =
-        centers ?? (position ? [position] : [[0, 0, 0]]);
-      const resolvedQuaternions =
-        quaternions ?? (quaternion ? [quaternion] : undefined);
-      const resolvedSize =
-        size ??
-        (width !== undefined || height !== undefined
-          ? [width ?? 1, height ?? 1]
-          : undefined);
-      const resolvedAlpha = rest.alpha !== undefined ? rest.alpha : opacity;
-
-      return {
-        ...rest,
-        centers: resolvedCenters,
-        quaternions: resolvedQuaternions,
-        sizes,
-        size: resolvedSize,
-        alpha: resolvedAlpha,
-        type: "ImagePlane",
-      } as ImagePlaneComponentConfig;
-    }
-
-    case "Mesh":
-      return {
-        ...props,
-        type: "Mesh",
-      } as InlineMeshComponentConfig;
-
-    case "BoundingBox": {
-      const half_size =
-        typeof props.half_size === "number"
-          ? ([props.half_size, props.half_size, props.half_size] as [
-            number,
-            number,
-            number,
-          ])
-          : props.half_size;
-      return {
-        ...props,
-        half_size,
-        type: "BoundingBox",
-      } as BoundingBoxComponentConfig;
-    }
-
-    case "ImageProjection":
-      return createImageProjectionGroup(props);
-
-    case "CustomPrimitive":
-      return props as ComponentConfig;
-
-    default:
-      // For unknown types, pass through with type field
-      return { ...props, type: typeName } as ComponentConfig;
-  }
-}
 
 /**
  * @interface Decoration
@@ -258,29 +132,19 @@ export function deco(
 }
 
 // =============================================================================
-// Props types for JSX usage (omit 'type' which is added automatically)
+// Props types for JSX usage
+// Most Props types are imported from ./components (defined in primitive files)
 // =============================================================================
 
-export type PointCloudProps = Omit<PointCloudComponentConfig, "type">;
-export type EllipsoidProps = Omit<EllipsoidComponentConfig, "type">;
-export type CuboidProps = Omit<CuboidComponentConfig, "type">;
+export type {
+  PointCloudProps,
+  EllipsoidProps,
+  CuboidProps,
+  BoundingBoxProps,
+  ImagePlaneProps,
+};
 export type LineBeamsProps = Omit<LineBeamsComponentConfig, "type">;
 export type LineSegmentsProps = Omit<LineSegmentsComponentConfig, "type">;
-export type ImagePlaneProps = Omit<
-  ImagePlaneComponentConfig,
-  "type" | "centers" | "quaternions" | "sizes"
-> & {
-  centers?: ArrayLike<number> | ArrayBufferView;
-  position?: [number, number, number];
-  quaternions?: ArrayLike<number> | ArrayBufferView;
-  quaternion?: [number, number, number, number];
-  sizes?: ArrayLike<number> | ArrayBufferView;
-  size?: number | [number, number];
-  width?: number;
-  height?: number;
-  opacity?: number;
-};
-export type BoundingBoxProps = Omit<BoundingBoxComponentConfig, "type">;
 export type GroupProps = Omit<GroupConfig, "type" | "children"> & {
   children?: React.ReactNode;
 };
@@ -297,60 +161,65 @@ export type { PickEvent, ImageSource };
 
 /** PointCloud - renders points as camera-facing billboards. */
 export function PointCloud(props: PointCloudProps): PointCloudComponentConfig {
-  return processConfig("PointCloud", props) as PointCloudComponentConfig;
+  return pointCloudSpec.coerce!(props) as PointCloudComponentConfig;
 }
-(PointCloud as any)[SCENE3D_TYPE] = "PointCloud";
+(PointCloud as any)[SCENE3D_TYPE] = true;
 
 /** Ellipsoid - renders spheres or ellipsoids. */
 export function Ellipsoid(props: EllipsoidProps): EllipsoidComponentConfig {
-  return processConfig("Ellipsoid", props) as EllipsoidComponentConfig;
+  return ellipsoidSpec.coerce!(props) as EllipsoidComponentConfig;
 }
-(Ellipsoid as any)[SCENE3D_TYPE] = "Ellipsoid";
+(Ellipsoid as any)[SCENE3D_TYPE] = true;
 
 /** Cuboid - renders axis-aligned or rotated boxes. */
 export function Cuboid(props: CuboidProps): CuboidComponentConfig {
-  return processConfig("Cuboid", props) as CuboidComponentConfig;
+  return cuboidSpec.coerce!(props) as CuboidComponentConfig;
 }
-(Cuboid as any)[SCENE3D_TYPE] = "Cuboid";
+(Cuboid as any)[SCENE3D_TYPE] = true;
 
 /** LineBeams - renders connected line segments as 3D beams. */
 export function LineBeams(props: LineBeamsProps): LineBeamsComponentConfig {
-  return processConfig("LineBeams", props) as LineBeamsComponentConfig;
+  return { ...props, type: "LineBeams" } as LineBeamsComponentConfig;
 }
-(LineBeams as any)[SCENE3D_TYPE] = "LineBeams";
+(LineBeams as any)[SCENE3D_TYPE] = true;
 
 /** LineSegments - renders independent line segments as 3D beams. */
 export function LineSegments(
   props: LineSegmentsProps,
 ): LineSegmentsComponentConfig {
-  return processConfig("LineSegments", props) as LineSegmentsComponentConfig;
+  return { ...props, type: "LineSegments" } as LineSegmentsComponentConfig;
 }
-(LineSegments as any)[SCENE3D_TYPE] = "LineSegments";
+(LineSegments as any)[SCENE3D_TYPE] = true;
 
 /** Mesh - renders custom geometry using inline vertex/index data. */
 export function Mesh(props: MeshProps): InlineMeshComponentConfig {
-  return processConfig("Mesh", props) as InlineMeshComponentConfig;
+  const { center, centers, ...rest } = props;
+  return {
+    ...rest,
+    centers: centers ?? (center ? [center] : undefined),
+    type: "Mesh",
+  } as InlineMeshComponentConfig;
 }
-(Mesh as any)[SCENE3D_TYPE] = "Mesh";
+(Mesh as any)[SCENE3D_TYPE] = true;
 
 /** ImagePlane - renders a textured quad in 3D. */
 export function ImagePlane(props: ImagePlaneProps): ImagePlaneComponentConfig {
-  return processConfig("ImagePlane", props) as ImagePlaneComponentConfig;
+  return imagePlaneSpec.coerce!(props) as ImagePlaneComponentConfig;
 }
-(ImagePlane as any)[SCENE3D_TYPE] = "ImagePlane";
+(ImagePlane as any)[SCENE3D_TYPE] = true;
 
 // Mark helper components with SCENE3D_TYPE for JSX collection
-(GridHelper as any)[SCENE3D_TYPE] = "GridHelper";
-(CameraFrustum as any)[SCENE3D_TYPE] = "CameraFrustum";
-(ImageProjection as any)[SCENE3D_TYPE] = "ImageProjection";
+(GridHelper as any)[SCENE3D_TYPE] = true;
+(CameraFrustum as any)[SCENE3D_TYPE] = true;
+(ImageProjection as any)[SCENE3D_TYPE] = true;
 
 /** BoundingBox - renders wireframe boxes. */
 export function BoundingBox(
   props: BoundingBoxProps,
 ): BoundingBoxComponentConfig {
-  return processConfig("BoundingBox", props) as BoundingBoxComponentConfig;
+  return boundingBoxSpec.coerce!(props) as BoundingBoxComponentConfig;
 }
-(BoundingBox as any)[SCENE3D_TYPE] = "BoundingBox";
+(BoundingBox as any)[SCENE3D_TYPE] = true;
 
 /** Group - applies a transform to children. */
 export function Group(_props: GroupProps): GroupConfig {
@@ -362,7 +231,7 @@ export function Group(_props: GroupProps): GroupConfig {
     children: [],
   } as GroupConfig;
 }
-(Group as any)[SCENE3D_TYPE] = "Group";
+(Group as any)[SCENE3D_TYPE] = true;
 
 /**
  * Set of valid primitive type names.
@@ -389,7 +258,7 @@ export function CustomPrimitive(props: any): ComponentConfig {
   // Pass through props. The 'type' field in props determines the primitive type.
   return props as ComponentConfig;
 }
-(CustomPrimitive as any)[SCENE3D_TYPE] = "CustomPrimitive";
+(CustomPrimitive as any)[SCENE3D_TYPE] = true;
 
 // =============================================================================
 // Scene Components
@@ -527,9 +396,11 @@ function collectComponentsFromChildren(
   React.Children.forEach(children, (child) => {
     if (!React.isValidElement(child)) return;
 
-    const typeName = (child.type as any)?.[SCENE3D_TYPE];
-    if (typeName === "Group") {
-      // Process group children recursively
+    const isScene3dComponent = (child.type as any)?.[SCENE3D_TYPE];
+    if (!isScene3dComponent) return;
+
+    // Group needs special handling to recursively collect children
+    if ((child.type as unknown) === Group) {
       const props = child.props as Record<string, any>;
       const groupChildren = props.children
         ? collectComponentsFromChildren(props.children)
@@ -542,9 +413,10 @@ function collectComponentsFromChildren(
         scale: props.scale,
         name: props.name,
       } as GroupConfig);
-    } else if (typeName) {
-      const result = processConfig(typeName, child.props as Record<string, any>);
-      // Handle array results (e.g., ImageProjection returns multiple components)
+    } else {
+      // Call the component function directly - it returns config(s)
+      const componentFn = child.type as (props: any) => any;
+      const result = componentFn(child.props);
       if (Array.isArray(result)) {
         configs.push(...result);
       } else {
@@ -582,7 +454,6 @@ function collectLayers(layers: any[]): {
     if (!layer) return;
 
     if (Array.isArray(layer)) {
-
       if (layer[1]?.layers) {
         const nestedLayers = layer[1].layers;
         for (const nestedLayer of nestedLayers) {
@@ -743,7 +614,8 @@ function SceneInner({
   // evaluation via JSCall - they arrive as primitive configs, not helper types.
   const { components, mergedSpecs } = useMemo(() => {
     // 1. Collect from children or prop
-    const rawComponents = componentsProp ?? collectComponentsFromChildren(children);
+    const rawComponents =
+      componentsProp ?? collectComponentsFromChildren(children);
 
     // 2. Flatten groups (optimized internally for composition-only groups)
     const flattened = hasAnyGroups(rawComponents)

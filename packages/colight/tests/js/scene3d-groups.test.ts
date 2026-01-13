@@ -18,7 +18,10 @@ import {
   Transform,
   Quat,
 } from "../../src/js/scene3d/groups";
-import { PointCloudComponentConfig, EllipsoidComponentConfig } from "../../src/js/scene3d/components";
+import {
+  PointCloudComponentConfig,
+  EllipsoidComponentConfig,
+} from "../../src/js/scene3d/components";
 
 describe("scene3d groups", () => {
   describe("quaternion math", () => {
@@ -138,17 +141,23 @@ describe("scene3d groups", () => {
       expect(isGroup(pointCloud)).toBe(false);
     });
 
-    it("should detect groups in component array", () => {
-      const components1 = [
+    it("should detect groups with transforms in component array", () => {
+      const noGroups = [
         { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
       ];
-      const components2 = [
+      const compositionOnlyGroup = [
         { type: "Group", children: [] },
         { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
       ];
+      const groupWithTransform = [
+        { type: "Group", children: [], position: [1, 0, 0] },
+        { type: "PointCloud", centers: new Float32Array([0, 0, 0]) },
+      ];
 
-      expect(hasGroups(components1 as any)).toBe(false);
-      expect(hasGroups(components2 as any)).toBe(true);
+      expect(hasGroups(noGroups as any)).toBe(false);
+      // Composition-only groups (no transform) return false for perf optimization
+      expect(hasGroups(compositionOnlyGroup as any)).toBe(false);
+      expect(hasGroups(groupWithTransform as any)).toBe(true);
     });
   });
 
@@ -167,7 +176,7 @@ describe("scene3d groups", () => {
       expect(flattened.length).toBe(1);
       expect(flattened[0].type).toBe("PointCloud");
       expect((flattened[0] as PointCloudComponentConfig).centers).toEqual(
-        new Float32Array([0, 0, 0])
+        new Float32Array([0, 0, 0]),
       );
     });
 
@@ -325,7 +334,12 @@ describe("scene3d groups", () => {
 
       // The composed quaternion should rotate vectors by both rotations
       // First child's X rotation, then parent's Y rotation
-      const resultQuat = ellipsoid.quaternion as [number, number, number, number];
+      const resultQuat = ellipsoid.quaternion as [
+        number,
+        number,
+        number,
+        number,
+      ];
 
       // Apply to [0, 0, 1]:
       // Child (90 X): [0, 0, 1] -> [0, -1, 0]

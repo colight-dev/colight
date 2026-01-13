@@ -6,10 +6,10 @@
  */
 
 import { BaseComponentConfig } from "../types";
-import { definePrimitive, attr } from "./define";
+import { definePrimitive, attr, resolveSingular, expandScalar } from "./define";
 
 // =============================================================================
-// Configuration Interface
+// Configuration Interface (internal format after coercion)
 // =============================================================================
 
 export interface CuboidComponentConfig extends BaseComponentConfig {
@@ -27,11 +27,26 @@ export interface CuboidComponentConfig extends BaseComponentConfig {
 }
 
 // =============================================================================
-// Primitive Definition (fill functions are auto-generated via code generation)
+// Props Type (user-facing input)
+// =============================================================================
+
+export type CuboidProps = Omit<CuboidComponentConfig, "type" | "centers"> & {
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
+};
+
+// =============================================================================
+// Primitive Definition
 // =============================================================================
 
 export const cuboidSpec = definePrimitive<CuboidComponentConfig>({
   name: "Cuboid",
+
+  coerce(props) {
+    let coerced = resolveSingular(props, "center", "centers");
+    coerced = expandScalar(coerced, "half_size");
+    return { ...coerced, type: "Cuboid" };
+  },
 
   attributes: {
     position: attr.vec3("centers"),

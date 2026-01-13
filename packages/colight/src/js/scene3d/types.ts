@@ -18,6 +18,12 @@ export interface PrimitiveSpec<ConfigType> {
   type: string;
 
   /**
+   * Input coercion function. Transforms user props to internal config format.
+   * Handles aliases (center → centers), scalar expansion, etc.
+   */
+  coerce?: (props: Record<string, any>) => Record<string, any>;
+
+  /**
    * Fields that should be coerced to typed arrays.
    * Used by Scene to normalize NdArrayView and regular arrays.
    */

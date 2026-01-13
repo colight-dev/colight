@@ -6,10 +6,10 @@
  */
 
 import { BaseComponentConfig } from "../types";
-import { definePrimitive, attr } from "./define";
+import { definePrimitive, attr, resolveSingular } from "./define";
 
 // =============================================================================
-// Configuration Interface
+// Configuration Interface (internal format after coercion)
 // =============================================================================
 
 export interface PointCloudComponentConfig extends BaseComponentConfig {
@@ -23,11 +23,30 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
 }
 
 // =============================================================================
-// Primitive Definition (fill functions are auto-generated via code generation)
+// Props Type (user-facing input)
+// =============================================================================
+
+export type PointCloudProps = Omit<
+  PointCloudComponentConfig,
+  "type" | "centers"
+> & {
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
+};
+
+// =============================================================================
+// Primitive Definition
 // =============================================================================
 
 export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   name: "PointCloud",
+
+  coerce(props) {
+    return {
+      ...resolveSingular(props, "center", "centers"),
+      type: "PointCloud",
+    };
+  },
 
   attributes: {
     position: attr.vec3("centers"),

@@ -19,11 +19,13 @@ import {
   pickingVSOut,
   pickingFragCode,
   quaternionShaderFunctions,
+  resolveSingular,
+  expandScalar,
 } from "./define";
 import { GeometryData } from "../types";
 
 // =============================================================================
-// Configuration Interface
+// Configuration Interface (internal format after coercion)
 // =============================================================================
 
 export interface BoundingBoxComponentConfig extends BaseComponentConfig {
@@ -42,6 +44,30 @@ export interface BoundingBoxComponentConfig extends BaseComponentConfig {
   sizes?: Float32Array | number[];
   /** Default edge thickness for all boxes */
   size?: number;
+}
+
+// =============================================================================
+// Props Type (user-facing input)
+// =============================================================================
+
+export type BoundingBoxProps = Omit<
+  BoundingBoxComponentConfig,
+  "type" | "centers"
+> & {
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
+};
+
+// =============================================================================
+// Coerce Function
+// =============================================================================
+
+export function coerceBoundingBox(
+  props: Record<string, any>,
+): Record<string, any> {
+  let coerced = resolveSingular(props, "center", "centers");
+  coerced = expandScalar(coerced, "half_size");
+  return { ...coerced, type: "BoundingBox" };
 }
 
 // =============================================================================
@@ -565,6 +591,8 @@ function getCenters(elem: BoundingBoxComponentConfig): Float32Array {
 
 export const boundingBoxSpec = definePrimitive<BoundingBoxComponentConfig>({
   name: "BoundingBox",
+
+  coerce: coerceBoundingBox,
 
   attributes: {
     center: attr.vec3("centers"),

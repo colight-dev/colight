@@ -6,10 +6,10 @@
  */
 
 import { BaseComponentConfig } from "../types";
-import { definePrimitive, attr } from "./define";
+import { definePrimitive, attr, resolveSingular, expandScalar } from "./define";
 
 // =============================================================================
-// Configuration Interface
+// Configuration Interface (internal format after coercion)
 // =============================================================================
 
 export interface EllipsoidComponentConfig extends BaseComponentConfig {
@@ -29,11 +29,41 @@ export interface EllipsoidComponentConfig extends BaseComponentConfig {
 }
 
 // =============================================================================
-// Primitive Definition (fill functions are auto-generated via code generation)
+// Props Type (user-facing input)
+// =============================================================================
+
+export type EllipsoidProps = Omit<
+  EllipsoidComponentConfig,
+  "type" | "centers"
+> & {
+  centers?: ArrayLike<number> | ArrayBufferView;
+  center?: [number, number, number];
+};
+
+// =============================================================================
+// Coerce function (shared by Ellipsoid and EllipsoidAxes)
+// =============================================================================
+
+export function coerceEllipsoid(
+  props: Record<string, any>,
+): Record<string, any> {
+  let coerced = resolveSingular(props, "center", "centers");
+  coerced = expandScalar(coerced, "half_size");
+  const fillMode = coerced.fill_mode || "Solid";
+  return {
+    ...coerced,
+    type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
+  };
+}
+
+// =============================================================================
+// Primitive Definition
 // =============================================================================
 
 export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
   name: "Ellipsoid",
+
+  coerce: coerceEllipsoid,
 
   attributes: {
     position: attr.vec3("centers"),

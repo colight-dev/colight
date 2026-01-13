@@ -42,6 +42,46 @@ export {
 export { quaternionShaderFunctions } from "../quaternion";
 
 // =============================================================================
+// Input Coercion Helpers
+// =============================================================================
+
+/**
+ * Resolve a singular prop to its plural form by wrapping in an array.
+ * e.g., `center: [0,0,0]` → `centers: [[0,0,0]]`
+ */
+export function resolveSingular<T extends Record<string, any>>(
+  props: T,
+  singular: string,
+  plural: string,
+): T {
+  if (props[singular] !== undefined && props[plural] === undefined) {
+    const { [singular]: value, ...rest } = props;
+    return { ...rest, [plural]: [value] } as T;
+  }
+  // Remove singular if plural is already set
+  if (props[singular] !== undefined && props[plural] !== undefined) {
+    const { [singular]: _, ...rest } = props;
+    return rest as T;
+  }
+  return props;
+}
+
+/**
+ * Expand a scalar value to a vec3 array.
+ * e.g., `half_size: 0.5` → `half_size: [0.5, 0.5, 0.5]`
+ */
+export function expandScalar<T extends Record<string, any>>(
+  props: T,
+  field: string,
+): T {
+  const val = props[field];
+  if (typeof val === "number") {
+    return { ...props, [field]: [val, val, val] } as T;
+  }
+  return props;
+}
+
+// =============================================================================
 // Attribute Schema Types
 // =============================================================================
 
@@ -146,7 +186,11 @@ export const attr = {
 // Transform Types
 // =============================================================================
 
-export type TransformType = "billboard" | "rigid" | "beam" | "screenspace_offset";
+export type TransformType =
+  | "billboard"
+  | "rigid"
+  | "beam"
+  | "screenspace_offset";
 
 // =============================================================================
 // Geometry Types
@@ -167,6 +211,13 @@ export type GeometrySource =
 export interface PrimitiveDefinition<Config extends BaseComponentConfig> {
   /** Unique name for this primitive type */
   name: string;
+
+  /**
+   * Input coercion function. Transforms user props to internal config format.
+   * Handles aliases (center → centers), scalar expansion (half_size: 0.5 → [0.5, 0.5, 0.5]), etc.
+   * Should return props with `type` field set.
+   */
+  coerce?: (props: Record<string, any>) => Record<string, any>;
 
   /**
    * Attribute schema defining instance data.
@@ -1167,6 +1218,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
 
   const spec: PrimitiveSpec<Config> = {
     type: def.name,
+    coerce: def.coerce,
     instancesPerElement: def.instancesPerElement ?? 1,
 
     // Defaults for computeConstants compatibility
@@ -1323,7 +1375,11 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     createGeometryResource(device: GPUDevice): GeometryResource {
       const layout = def.geometryLayout ?? GEOMETRY_LAYOUT;
       const vertexStrideFloats = layout.arrayStride / 4;
-      return createBuffers(device, createGeometry(def.geometry), vertexStrideFloats);
+      return createBuffers(
+        device,
+        createGeometry(def.geometry),
+        vertexStrideFloats,
+      );
     },
   };
 
