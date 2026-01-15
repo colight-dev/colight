@@ -5,6 +5,8 @@
  * buffers as an array indexed by the existing buffer index system.
  */
 
+import { decodeBase64ToUint8Array } from "./base64.js";
+
 // File format constants
 const MAGIC_BYTES = new TextEncoder().encode("COLIGHT\0");
 const HEADER_SIZE = 96;
@@ -231,7 +233,7 @@ export function parseColightScript(scriptElement) {
   const base64Data = scriptElement.textContent.trim();
 
   // Decode base64 to get the raw binary data
-  const binaryData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+  const binaryData = decodeBase64ToUint8Array(base64Data);
 
   // Parse the .colight format
   return parseColightData(binaryData);

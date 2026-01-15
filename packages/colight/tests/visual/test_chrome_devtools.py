@@ -141,11 +141,11 @@ def test_chrome_devtools():
     print("\n4. Testing multiple contexts and tab cleanup...")
     contexts = []
     for i in range(3):
-        print(f"   Creating context {i+1}/3...")
+        print(f"   Creating context {i + 1}/3...")
         ctx = ChromeContext(width=300, height=200, debug=False, keep_alive=0)
         ctx.start()
         ctx.load_html(
-            f"<html><body style='background: #{0xff0000 + i*0x111111:06x};'>Context {i+1}</body></html>"
+            f"<html><body style='background: #{0xFF0000 + i * 0x111111:06x};'>Context {i + 1}</body></html>"
         )
         contexts.append(ctx)
 
@@ -156,7 +156,7 @@ def test_chrome_devtools():
 
     print("   All contexts created, now closing them...")
     for i, ctx in enumerate(contexts):
-        print(f"   Closing context {i+1}/3...")
+        print(f"   Closing context {i + 1}/3...")
         ctx.stop()
 
     # Verify all tabs are closed
@@ -209,7 +209,7 @@ def test_tab_cleanup_stress():
     for i in range(num_contexts):
         ctx = ChromeContext(width=200, height=150, debug=False, keep_alive=0)
         ctx.start()
-        ctx.load_html(f"<html><body>Stress Test Context {i+1}</body></html>")
+        ctx.load_html(f"<html><body>Stress Test Context {i + 1}</body></html>")
         contexts.append(ctx)
 
     # Verify all tabs are open

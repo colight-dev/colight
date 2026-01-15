@@ -18,6 +18,35 @@ Key features:
 
 For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
 
+## CLI
+
+Use the CLI to turn a `.py` file into a document or run a live-updating view.
+
+Install:
+
+```bash
+pip install colight
+# or
+uv tool install colight
+```
+
+Examples:
+
+```bash
+# Live incremental execution + live reload
+colight live path/to/notebook.py
+
+# Publish a file once
+colight publish path/to/notebook.py --format html --output build/
+
+# Publish + watch + serve
+colight publish path/to/notebook.py --serve
+
+# Render a .colight file to an image or video
+colight render path/to/plot.colight --out plot.png
+colight render path/to/plot.colight updates.colight --out plot.mp4
+```
+
 ## Development
 
 Run `yarn watch` to compile the JavaScript bundle.

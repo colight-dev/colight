@@ -1,5 +1,6 @@
 # %%
 import colight.plot as Plot
+from colight import extras
 
 # %% [markdown]
 # 1. Intro
@@ -111,7 +112,7 @@ plot1 & plot2 | plot3 + {"height": 200} | "Hello, world!"
         ],
         [
             "span.bg-green-100.p-5.font-mono",
-            Plot.bylight(
+            extras.bylight(
                 """["button.bg-blue-100.p-3", {"disabled": true}, "Click me"]""",
                 ['"button...3"', "{...}"],
             ),
