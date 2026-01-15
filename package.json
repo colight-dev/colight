@@ -6,9 +6,10 @@
     "type": "git",
     "url": "git+ssh://git@github.com/colight-dev/colight.git"
   },
-  "author": "Matthew Huebert <me@matt.is>",
+  "author": "Matthew Huebert <mhuebert@gmail.com>",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
     "@webgpu/types": "^0.1.53",
@@ -19,12 +20,15 @@
     "mock-socket": "^9.3.1",
     "npm-run-all": "^4.1.5",
     "pyright": "^1.1.402",
+    "typescript": "^5.9.3",
     "vitest": "^2.0.5"
   },
   "dependencies": {
     "@anywidget/react": "^0.0.7",
     "@mui/base": "5.0.0-beta.61",
     "@observablehq/plot": "^0.6.16",
+    "@react-three/drei": "^9.117.3",
+    "@react-three/fiber": "^8.17.10",
     "@tailwindcss/typography": "^0.5.15",
     "@tanstack/react-query": "^5.82.0",
     "@tanstack/react-router": "^1.125.6",
@@ -36,6 +40,7 @@
     "@twind/preset-typography": "^1.0.7",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
+    "@types/three": "^0.170.0",
     "bylight": "^1.0.5",
     "concurrently": "^9.2.0",
     "d3": "^7.9.0",
@@ -52,12 +57,13 @@
     "react-dom": "18.3.1",
     "react-router-dom": "^7.6.3",
     "tailwindcss": "^3.4.14",
+    "three": "^0.170.0",
     "websocket-ts": "^2.2.1"
   },
   "scripts": {
     "release": "uv run python scripts/release.py $*",
     "alpha": "uv run python scripts/release.py --alpha",
-    "build": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs && tsc -p packages/colight-serde/tsconfig.json",
     "dev": "node esbuild.config.mjs --watch",
     "docs:watch": "yarn build && uv run python -m mkdocs serve",
     "docs:build": "yarn build && uv run python -m mkdocs build",
@@ -66,12 +72,13 @@
     "test:py": "uv run python -m pytest packages --ignore=packages/colight/tests/visual -x",
     "test:visual": "uv run python -m pytest packages/colight/tests/visual",
     "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
-    "test:site": "uv run python -m pytest packages/colight-prose/tests",
+    "test:site": "uv run python -m pytest packages/colight/tests",
     "test": "npm-run-all test:py test:js",
+    "test:e2e": "npx playwright test",
+    "test:e2e:picking": "npx playwright test packages/colight/tests/e2e/picking.spec.ts",
     "pyright": "uv run pyright",
-    "watch-examples": "uv run python -m colight_cli watch packages/colight-prose/tests/examples",
-    "cli": "uv run python -m colight_cli ",
-    "live": "yarn cli live .",
+    "watch-examples": "uv run python -m colight_cli publish packages/colight/tests/examples --serve",
+    "colight": "uv run python -m colight_cli --",
     "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },
   "files": [

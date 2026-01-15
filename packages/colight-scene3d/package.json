@@ -1,0 +1,30 @@
+{
+  "name": "@colight/scene3d",
+  "version": "0.1.1",
+  "description": "Standalone Scene3D WebGPU renderer from Colight.",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/colight-dev/colight.git"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/scene3d.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/scene3d.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

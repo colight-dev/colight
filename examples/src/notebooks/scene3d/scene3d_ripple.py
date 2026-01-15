@@ -164,7 +164,7 @@ def create_ripple_and_morph_scene():
         centers=js("$state.grid_xyz[$state.frame]"),
         colors=js("$state.grid_rgb"),
         size=0.01,  # each point scale
-        onHover=js("(i) => $state.update({hover_point: i})"),
+        on_hover=js("(i) => $state.update({hover_point: i})"),
         decorations=[
             deco(
                 js("$state.hover_point ? [$state.hover_point] : []"),

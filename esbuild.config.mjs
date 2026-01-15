@@ -5,6 +5,7 @@ const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 
 const DIST_DIR = 'packages/colight/src/colight/js-dist'
+const NPM_DIST_DIR = 'packages/colight-scene3d/dist'
 
 // Common options for all builds
 const commonOptions = {
@@ -55,7 +56,7 @@ const embedConfigESM = {
 const liveConfig = {
   ...commonOptions,
   format: 'iife',
-  entryPoints: ['packages/colight-prose/src/js/live.jsx'],
+  entryPoints: ['packages/colight/src/js/live/live.jsx'],
   outfile: DIST_DIR+'/live.js',
   plugins: [],
   define: {
@@ -63,7 +64,45 @@ const liveConfig = {
   }
 };
 
-const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig]
+const scene3dESM = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['packages/colight/src/js/scene3d/index.ts'],
+  outfile: NPM_DIST_DIR + '/scene3d.mjs',
+  external: ['react'],
+  plugins: [],
+};
+
+const serdeESM = {
+  ...commonOptions,
+  format: 'esm',
+  entryPoints: ['packages/colight-serde/src/js/index.ts'],
+  outfile: 'packages/colight-serde/dist/index.mjs',
+  plugins: [],
+};
+
+// VSCode Output Panel (IIFE for webview)
+const vscodePanelConfig = {
+  ...commonOptions,
+  format: 'iife',
+  entryPoints: ['packages/colight/src/js/vscode-panel/index.jsx'],
+  outfile: 'packages/colight-vscode/media/output-panel.js',
+  plugins: [],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production')
+  }
+};
+
+const configs = [
+  widgetESM,
+  anywidgetESM,
+  embedConfigJS,
+  embedConfigESM,
+  liveConfig,
+  scene3dESM,
+  serdeESM,
+  vscodePanelConfig,
+]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch

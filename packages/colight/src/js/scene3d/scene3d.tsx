@@ -4,6 +4,10 @@
  * This module provides a declarative interface for 3D visualization, handling camera controls,
  * picking, and efficient rendering of various 3D primitives.
  *
+ * Supports three composition styles:
+ * 1. JSX children: <Scene><PointCloud ... /><Ellipsoid ... /></Scene>
+ * 2. Components array: <Scene components={[...]} /> (used by Python interop)
+ * 3. Layers array: <Scene layers={[...]} /> (serialized from Python)
  */
 
 import React, {
@@ -12,37 +16,83 @@ import React, {
   useCallback,
   useEffect,
   useRef,
-  useContext,
 } from "react";
-import { SceneInner } from "./impl3d";
+import { SceneImpl } from "./impl3d";
 import {
   ComponentConfig,
   PointCloudComponentConfig,
   CuboidComponentConfig,
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
+  LineSegmentsComponentConfig,
+  ImagePlaneComponentConfig,
+  BoundingBoxComponentConfig,
+  PickEvent,
+  PrimitiveSpec,
+  ImageSource,
+  pointCloudSpec,
+  ellipsoidSpec,
+  cuboidSpec,
+  imagePlaneSpec,
+  boundingBoxSpec,
+  lineBeamsSpec,
+  lineSegmentsSpec,
+  // Props types (user-facing input types)
+  PointCloudProps,
+  EllipsoidProps,
+  CuboidProps,
+  BoundingBoxProps,
+  ImagePlaneProps,
 } from "./components";
+import { GroupConfig, GroupRegistry } from "./groups";
+import { GPUTransform } from "./gpu-transforms";
+import { compileScene, RawComponent } from "./compiler";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
-import { $StateContext } from "../context";
+import { ReadyState, NOOP_READY_STATE, PickInfo } from "./types";
+import { PrimitiveSpecMap, MeshGeometry, MeshDefinition } from "./coercion";
+import { InlineMeshComponentConfig, MeshProps } from "./inlineMesh";
+import {
+  GridHelper,
+  GridHelperProps,
+  CameraFrustum,
+  CameraFrustumProps,
+  ImageProjection,
+  ImageProjectionProps,
+  ImageProjectionResult,
+  CameraIntrinsics,
+  CameraExtrinsics,
+} from "./helpers";
+
+// Re-export helpers for external use
+export { GridHelper, CameraFrustum, ImageProjection };
+export type {
+  GridHelperProps,
+  CameraFrustumProps,
+  ImageProjectionProps,
+  ImageProjectionResult,
+  CameraIntrinsics,
+  CameraExtrinsics,
+};
+
+// Re-export coercion types
+export type { MeshGeometry, MeshDefinition, MeshProps };
+
+// =============================================================================
+// Raw Component Coercion
+// =============================================================================
+
+// =============================================================================
+// Primitive Components (JSX API)
+// =============================================================================
 
 /**
- * Helper function to coerce specified fields to Float32Array if they exist and are arrays
+ * Symbol used to identify scene3d primitive components.
+ * Components with this symbol are collected by Scene for rendering.
  */
-function coerceFloat32Fields<T extends object>(obj: T, fields: (keyof T)[]): T {
-  const result = obj;
-  for (const field of fields) {
-    const value = obj[field];
-    if (Array.isArray(value)) {
-      (result[field] as any) = new Float32Array(value);
-    } else if (ArrayBuffer.isView(value) && !(value instanceof Float32Array)) {
-      (result[field] as any) = new Float32Array(value.buffer);
-    }
-  }
-  return result;
-}
+const SCENE3D_TYPE = Symbol.for("scene3d.type");
 
 /**
  * @interface Decoration
@@ -62,7 +112,7 @@ interface Decoration {
 /**
  * Creates a decoration configuration for modifying the appearance of specific instances.
  * @param indexes - Single index or array of indices to apply decoration to
- * @param options - Optional visual modifications (color, alpha, scale)
+ * @param options - Optional visual modifications (color, alpha, scale, outline)
  * @returns {Decoration} A decoration configuration object
  */
 export function deco(
@@ -71,107 +121,147 @@ export function deco(
     color?: [number, number, number];
     alpha?: number;
     scale?: number;
+    outline?: boolean;
+    outlineColor?: [number, number, number];
+    outlineWidth?: number;
   } = {},
 ): Decoration {
   const indexArray = typeof indexes === "number" ? [indexes] : indexes;
   return { indexes: indexArray, ...options };
 }
 
-/**
- * Creates a point cloud component configuration.
- * @param props - Point cloud configuration properties
- * @returns {PointCloudComponentConfig} Configuration for rendering points in 3D space
- */
-export function PointCloud(
-  props: PointCloudComponentConfig,
-): PointCloudComponentConfig {
+// =============================================================================
+// Props types for JSX usage
+// Most Props types are imported from ./components (defined in primitive files)
+// =============================================================================
+
+export type {
+  PointCloudProps,
+  EllipsoidProps,
+  CuboidProps,
+  BoundingBoxProps,
+  ImagePlaneProps,
+};
+export type LineBeamsProps = Omit<LineBeamsComponentConfig, "type">;
+export type LineSegmentsProps = Omit<LineSegmentsComponentConfig, "type">;
+export type GroupProps = Omit<GroupConfig, "type" | "children"> & {
+  children?: React.ReactNode;
+};
+
+export type { PickEvent, ImageSource };
+
+// =============================================================================
+// Primitive Components
+//
+// Each primitive can be used in two ways:
+// 1. As a function: `PointCloud({centers, color})` returns a config object
+// 2. As a JSX component: `<PointCloud centers={...} />` (collected by Scene)
+// =============================================================================
+
+/** PointCloud - renders points as camera-facing billboards. */
+export function PointCloud(props: PointCloudProps): PointCloudComponentConfig {
+  return pointCloudSpec.coerce!(props) as PointCloudComponentConfig;
+}
+(PointCloud as any)[SCENE3D_TYPE] = true;
+
+/** Ellipsoid - renders spheres or ellipsoids. */
+export function Ellipsoid(props: EllipsoidProps): EllipsoidComponentConfig {
+  return ellipsoidSpec.coerce!(props) as EllipsoidComponentConfig;
+}
+(Ellipsoid as any)[SCENE3D_TYPE] = true;
+
+/** Cuboid - renders axis-aligned or rotated boxes. */
+export function Cuboid(props: CuboidProps): CuboidComponentConfig {
+  return cuboidSpec.coerce!(props) as CuboidComponentConfig;
+}
+(Cuboid as any)[SCENE3D_TYPE] = true;
+
+/** LineBeams - renders connected line segments as 3D beams. */
+export function LineBeams(props: LineBeamsProps): LineBeamsComponentConfig {
+  return { ...props, type: "LineBeams" } as LineBeamsComponentConfig;
+}
+(LineBeams as any)[SCENE3D_TYPE] = true;
+
+/** LineSegments - renders independent line segments as 3D beams. */
+export function LineSegments(
+  props: LineSegmentsProps,
+): LineSegmentsComponentConfig {
+  return { ...props, type: "LineSegments" } as LineSegmentsComponentConfig;
+}
+(LineSegments as any)[SCENE3D_TYPE] = true;
+
+/** Mesh - renders custom geometry using inline vertex/index data. */
+export function Mesh(props: MeshProps): InlineMeshComponentConfig {
+  const { center, centers, ...rest } = props;
   return {
-    ...coerceFloat32Fields(props, ["centers", "colors", "sizes"]),
-    type: "PointCloud",
+    ...rest,
+    centers: centers ?? (center ? [center] : undefined),
+    type: "Mesh",
+  } as InlineMeshComponentConfig;
+}
+(Mesh as any)[SCENE3D_TYPE] = true;
+
+/** ImagePlane - renders a textured quad in 3D. */
+export function ImagePlane(props: ImagePlaneProps): ImagePlaneComponentConfig {
+  return imagePlaneSpec.coerce!(props) as ImagePlaneComponentConfig;
+}
+(ImagePlane as any)[SCENE3D_TYPE] = true;
+
+// Mark helper components with SCENE3D_TYPE for JSX collection
+(GridHelper as any)[SCENE3D_TYPE] = true;
+(CameraFrustum as any)[SCENE3D_TYPE] = true;
+(ImageProjection as any)[SCENE3D_TYPE] = true;
+
+/** BoundingBox - renders wireframe boxes. */
+export function BoundingBox(
+  props: BoundingBoxProps,
+): BoundingBoxComponentConfig {
+  return boundingBoxSpec.coerce!(props) as BoundingBoxComponentConfig;
+}
+(BoundingBox as any)[SCENE3D_TYPE] = true;
+
+/** Group - applies a transform to children. */
+export function Group(props: GroupProps): GroupConfig {
+  // When called from Python (via JSCall), props contains the full config.
+  // When used as JSX, collectComponentsFromChildren builds the config from React children.
+  // Note: children here is React.ReactNode, but GroupConfig expects an array.
+  // The actual children array is built by collectComponentsFromChildren.
+  return {
+    type: "Group",
+    children: (props.children || []) as unknown as GroupConfig["children"],
+    position: props.position,
+    quaternion: props.quaternion,
+    scale: props.scale,
+    name: props.name,
+    childDefaults: props.childDefaults,
+    childOverrides: props.childOverrides,
+    hoverProps: props.hoverProps,
+    onHover: props.onHover,
+    onClick: props.onClick,
+    onDragStart: props.onDragStart,
+    onDrag: props.onDrag,
+    onDragEnd: props.onDragEnd,
+    dragConstraint: props.dragConstraint,
   };
 }
+(Group as any)[SCENE3D_TYPE] = true;
 
 /**
- * Creates an ellipsoid component configuration.
- * @param props - Ellipsoid configuration properties
- * @returns {EllipsoidComponentConfig} Configuration for rendering ellipsoids in 3D space
+ * Custom primitive factory - allows passing arbitrary props with a custom type.
+ * Used for rendering custom primitives defined via `primitiveSpecs`.
  */
-export function Ellipsoid(
-  props: Omit<EllipsoidComponentConfig, "type">,
-): EllipsoidComponentConfig {
-  const half_size =
-    typeof props.half_size === "number"
-      ? ([props.half_size, props.half_size, props.half_size] as [
-          number,
-          number,
-          number,
-        ])
-      : props.half_size;
-
-  const fillMode = props.fill_mode || "Solid";
-
-  return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
-    half_size,
-    type: fillMode === "Solid" ? "Ellipsoid" : "EllipsoidAxes",
-  };
+export function CustomPrimitive(props: any): ComponentConfig {
+  // Pass through props. The 'type' field in props determines the primitive type.
+  return props as ComponentConfig;
 }
+(CustomPrimitive as any)[SCENE3D_TYPE] = true;
 
-/**
- * Creates a cuboid component configuration.
- * @param props - Cuboid configuration properties
- * @returns {CuboidComponentConfig} Configuration for rendering cuboids in 3D space
- */
-export function Cuboid(props: CuboidComponentConfig): CuboidComponentConfig {
-  const half_size =
-    typeof props.half_size === "number"
-      ? ([props.half_size, props.half_size, props.half_size] as [
-          number,
-          number,
-          number,
-        ])
-      : props.half_size;
-
-  return {
-    ...coerceFloat32Fields(props, [
-      "centers",
-      "half_sizes",
-      "quaternions",
-      "colors",
-      "alphas",
-    ]),
-    half_size,
-    type: "Cuboid",
-  };
-}
-
-/**
- * Creates a line beams component configuration.
- * @param props - Line beams configuration properties
- * @returns {LineBeamsComponentConfig} Configuration for rendering line beams in 3D space
- */
-export function LineBeams(
-  props: LineBeamsComponentConfig,
-): LineBeamsComponentConfig {
-  return {
-    ...coerceFloat32Fields(props, ["points", "colors"]),
-    type: "LineBeams",
-  };
-}
+// =============================================================================
+// Scene Components
+// =============================================================================
 
 /**
  * Computes canvas dimensions based on container width and desired aspect ratio.
- * @param containerWidth - Width of the container element
- * @param width - Optional explicit width override
- * @param height - Optional explicit height override
- * @param aspectRatio - Desired aspect ratio (width/height), defaults to 1
- * @returns Canvas dimensions and style configuration
  */
 export function computeCanvasDimensions(
   containerWidth: number,
@@ -199,8 +289,10 @@ export function computeCanvasDimensions(
  * @description Props for the Scene component
  */
 interface SceneProps {
-  /** Array of 3D components to render */
-  components: ComponentConfig[];
+  /** Primitive components as JSX children */
+  children?: React.ReactNode;
+  /** Array of 3D component configs (alternative to children, used by Python interop) */
+  components?: (ComponentConfig | GroupConfig | InlineMeshComponentConfig)[];
   /** Optional explicit width */
   width?: number;
   /** Optional explicit height */
@@ -213,10 +305,18 @@ interface SceneProps {
   defaultCamera?: CameraParams;
   /** Callback fired when camera parameters change */
   onCameraChange?: (camera: CameraParams) => void;
+  /** Scene-level hover callback. Called with PickInfo when hovering, null when not. */
+  onHover?: (event: PickInfo | null) => void;
+  /** Scene-level click callback. Called with PickInfo when an element is clicked. */
+  onClick?: (event: PickInfo) => void;
   /** Optional array of controls to show. Currently supports: ['fps'] */
   controls?: string[];
   className?: string;
   style?: React.CSSProperties;
+  /** Optional ready state for coordinating updates. Defaults to NOOP_READY_STATE. */
+  readyState?: ReadyState;
+  /** Optional map of custom primitive specifications or mesh definitions */
+  primitiveSpecs?: PrimitiveSpecMap;
 }
 
 interface DevMenuProps {
@@ -273,60 +373,227 @@ function DevMenu({
   );
 }
 
+interface SceneLayersProps {
+  layers: any[];
+  primitiveSpecs?: PrimitiveSpecMap;
+  readyState?: ReadyState;
+}
+
+/**
+ * Collects component configs from React children.
+ * Recursively processes children to handle fragments, arrays, and Groups.
+ */
+function collectComponentsFromChildren(
+  children: React.ReactNode,
+): (ComponentConfig | GroupConfig | InlineMeshComponentConfig)[] {
+  const configs: (ComponentConfig | GroupConfig | InlineMeshComponentConfig)[] =
+    [];
+
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return;
+
+    const isScene3dComponent = (child.type as any)?.[SCENE3D_TYPE];
+    if (!isScene3dComponent) return;
+
+    // Group needs special handling to recursively collect children
+    if ((child.type as unknown) === Group) {
+      const props = child.props as Record<string, any>;
+      const groupChildren = props.children
+        ? collectComponentsFromChildren(props.children)
+        : [];
+      configs.push({
+        type: "Group",
+        children: groupChildren,
+        position: props.position,
+        quaternion: props.quaternion,
+        scale: props.scale,
+        name: props.name,
+        childDefaults: props.childDefaults,
+        childOverrides: props.childOverrides,
+        hoverProps: props.hoverProps,
+        onHover: props.onHover,
+        onClick: props.onClick,
+        onDragStart: props.onDragStart,
+        onDrag: props.onDrag,
+        onDragEnd: props.onDragEnd,
+        dragConstraint: props.dragConstraint,
+      } as GroupConfig);
+    } else {
+      // Call the component function directly - it returns config(s)
+      const componentFn = child.type as (props: any) => any;
+      const result = componentFn(child.props);
+      if (Array.isArray(result)) {
+        configs.push(...result);
+      } else {
+        configs.push(result);
+      }
+    }
+  });
+
+  return configs;
+}
+
+function collectLayers(layers: any[]): {
+  components: (ComponentConfig | GroupConfig | InlineMeshComponentConfig)[];
+  sceneProps: Record<string, any>;
+  primitiveSpecs?: PrimitiveSpecMap;
+} {
+  const components: (
+    | ComponentConfig
+    | GroupConfig
+    | InlineMeshComponentConfig
+  )[] = [];
+  const sceneProps: Record<string, any> = {};
+  let mergedPrimitiveSpecs: PrimitiveSpecMap | undefined;
+
+  const mergePrimitiveSpecs = (specs?: PrimitiveSpecMap) => {
+    if (!specs) return;
+    if (!mergedPrimitiveSpecs) {
+      mergedPrimitiveSpecs = { ...specs };
+      return;
+    }
+    Object.assign(mergedPrimitiveSpecs, specs);
+  };
+
+  const addLayer = (layer: any) => {
+    if (!layer) return;
+
+    if (Array.isArray(layer)) {
+      if (layer[1]?.layers) {
+        const nestedLayers = layer[1].layers;
+        for (const nestedLayer of nestedLayers) {
+          addLayer(nestedLayer);
+        }
+      } else {
+        for (const nestedLayer of layer) {
+          addLayer(nestedLayer);
+        }
+      }
+
+      return;
+    }
+
+    if (layer.type) {
+      components.push(layer);
+      return;
+    }
+
+    if (layer.constructor === Object) {
+      if ("primitiveSpecs" in layer) {
+        mergePrimitiveSpecs(layer.primitiveSpecs as PrimitiveSpecMap);
+      }
+      const { primitiveSpecs: _primitiveSpecs, ...rest } = layer;
+      Object.assign(sceneProps, rest);
+    }
+  };
+
+  for (const layer of layers) {
+    addLayer(layer);
+  }
+
+  return { components, sceneProps, primitiveSpecs: mergedPrimitiveSpecs };
+}
+
+/**
+ * Dispatches between layers-based and component-based scene composition.
+ */
+export function Scene(props: SceneLayersProps | SceneProps) {
+  if ("layers" in props) {
+    return (
+      <SceneFromLayers
+        layers={props.layers}
+        primitiveSpecs={props.primitiveSpecs}
+        readyState={props.readyState}
+      />
+    );
+  }
+
+  return <SceneInner {...props} />;
+}
+
+/**
+ * Python interop entry point - converts layers array to Scene with components.
+ *
+ * This is called when Python composition like `PointCloud(...) + Ellipsoid(...) + {camera}`
+ * is serialized and evaluated on the JS side.
+ */
+function SceneFromLayers({
+  layers,
+  primitiveSpecs,
+  readyState,
+}: SceneLayersProps) {
+  // Collect layers and extract scene props
+  // Note: No filtering here - the compiler in SceneInner handles helper expansion
+  // and filtering, ensuring helpers like ImageProjection are processed correctly.
+  const { components, mergedPrimitiveSpecs, sceneProps } = useMemo(() => {
+    const {
+      components,
+      sceneProps,
+      primitiveSpecs: layerSpecs,
+    } = collectLayers(layers);
+
+    // Merge primitive specs from layers and props
+    let mergedPrimitiveSpecs: PrimitiveSpecMap | undefined;
+    if (layerSpecs || primitiveSpecs) {
+      mergedPrimitiveSpecs = { ...primitiveSpecs, ...layerSpecs };
+    }
+
+    return { components, mergedPrimitiveSpecs, sceneProps };
+  }, [layers, primitiveSpecs]);
+
+  return (
+    <SceneInner
+      components={components}
+      primitiveSpecs={mergedPrimitiveSpecs}
+      {...sceneProps}
+      readyState={readyState}
+    />
+  );
+}
+
+export function SceneWithLayers(props: SceneLayersProps) {
+  return <SceneFromLayers {...props} />;
+}
+
 /**
  * A React component for rendering 3D scenes.
  *
- * This component provides a high-level interface for 3D visualization, handling:
- * - WebGPU initialization and management
- * - Camera controls (orbit, pan, zoom)
- * - Mouse interaction and picking
- * - Efficient rendering of multiple primitive types
+ * Supports three composition styles:
  *
- * @component
- * @example
+ * **JSX Children (preferred for TSX):**
  * ```tsx
- * <Scene
- *   components={[
- *     PointCloud({ centers: points, color: [1,0,0] }),
- *     Ellipsoid({ centers: centers, half_size: 0.1 })
- *   ]}
- *   width={800}
- *   height={600}
- *   onCameraChange={handleCameraChange}
- *   controls={['fps']}  // Show FPS counter
- * />
+ * <Scene defaultCamera={{...}}>
+ *   <PointCloud centers={points} color={[1,0,0]} />
+ *   <Ellipsoid centers={centers} half_size={0.1} />
+ * </Scene>
+ * ```
+ *
+ * **Components Array (used by Python interop):**
+ * ```tsx
+ * <Scene components={[...configs]} />
+ * ```
+ *
+ * **Layers Array (serialized from Python):**
+ * ```tsx
+ * <Scene layers={[...layers]} />
  * ```
  */
-export function SceneWithLayers({ layers }: { layers: any[] }) {
-  const components: any[] = [];
-  const props: any = {};
-
-  for (const layer of layers) {
-    if (!layer) continue;
-
-    if (Array.isArray(layer) && layer[0] === SceneWithLayers) {
-      components.push(...layer[1].layers);
-    } else if (layer.type) {
-      components.push(layer);
-    } else if (layer.constructor === Object) {
-      Object.assign(props, layer);
-    }
-  }
-
-  return <Scene components={components} {...props} />;
-}
-
-export function Scene({
-  components,
+function SceneInner({
+  children,
+  components: componentsProp,
   width,
   height,
   aspectRatio = 1,
   camera,
   defaultCamera,
   onCameraChange,
+  onHover,
+  onClick,
   className,
   style,
   controls = [],
+  readyState = NOOP_READY_STATE,
+  primitiveSpecs,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -334,13 +601,34 @@ export function Scene({
     ...defaultCamera,
     ...camera,
   });
-  const $state: any = useContext($StateContext);
-  const onReady = useMemo(() => $state.beginUpdate("scene3d/ready"), []);
+
+  // Memoize ready callback
+  const onReady = useMemo(
+    () => readyState.beginUpdate("scene3d/ready"),
+    [readyState],
+  );
+
+  // Compile scene: expand helpers, coerce, flatten groups, resolve meshes
+  // Uses unified compiler for consistent processing across all entry paths.
+  const {
+    components,
+    primitiveSpecs: mergedSpecs,
+    groupRegistry,
+    transforms,
+  } = useMemo(() => {
+    // Collect raw components from children or prop
+    const rawComponents = componentsProp
+      ? (componentsProp as RawComponent[])
+      : (collectComponentsFromChildren(children) as RawComponent[]);
+
+    // Run through unified compilation pipeline
+    return compileScene(rawComponents, primitiveSpecs);
+  }, [children, componentsProp, primitiveSpecs]);
 
   const cameraChangeCallback = useCallback(
-    (camera) => {
-      internalCameraRef.current = camera;
-      onCameraChange?.(camera);
+    (cam: CameraParams) => {
+      internalCameraRef.current = cam;
+      onCameraChange?.(cam);
     },
     [onCameraChange],
   );
@@ -403,8 +691,9 @@ export function Scene({
     >
       {dimensions && (
         <>
-          <SceneInner
+          <SceneImpl
             components={components}
+            transforms={transforms}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}
@@ -413,6 +702,11 @@ export function Scene({
             onCameraChange={cameraChangeCallback}
             onFrameRendered={updateDisplay}
             onReady={onReady}
+            onHover={onHover}
+            onClick={onClick}
+            readyState={readyState}
+            primitiveSpecs={mergedSpecs}
+            groupRegistry={groupRegistry}
           />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu

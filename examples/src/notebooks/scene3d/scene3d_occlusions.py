@@ -33,7 +33,7 @@ def create_demo_scene():
             centers,
             colors,
             scales,
-            onHover=Plot.js(
+            on_hover=Plot.js(
                 "(i) => $state.update({hover_point: typeof i === 'number' ? [i] : null})"
             ),
             decorations=[
@@ -89,7 +89,7 @@ def create_demo_scene():
                 dtype=np.float32,
             ),
             size=0.02,
-            onHover=Plot.js("(i) => $state.update({hover_line: i})"),
+            on_hover=Plot.js("(i) => $state.update({hover_line: i})"),
             decorations=[
                 deco([0], alpha=0.5),
                 deco(

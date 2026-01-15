@@ -9,38 +9,9 @@ import warnings
 
 from colight.env import CONFIG, ANYWIDGET_PATH
 from colight.protocols import Collector
-from colight.binary_serialization import serialize_binary_data, replace_buffers
+from colight_serde import serialize_binary_data, replace_buffers, to_numpy
+from colight_serde.serialization import Buffer
 from colight.state_operations import entry_id, normalize_updates, apply_updates
-
-# Type alias for buffer types
-Buffer = bytes | bytearray | memoryview
-
-
-def to_numpy(data: Any) -> np.ndarray | None:
-    """Convert array-like to numpy, or return None if not array-like.
-
-    Handles numpy arrays, JAX arrays, and objects with __array__ protocol.
-    """
-    if isinstance(data, np.ndarray):
-        return data
-
-    # Check for JAX/PyTorch/TensorFlow arrays by type name
-    type_name = type(data).__name__
-    if type_name in ("DeviceArray", "Array", "ArrayImpl", "Tensor", "EagerTensor"):
-        # Try to convert via numpy() method or __array__
-        if hasattr(data, "numpy"):
-            return data.numpy()
-        if hasattr(data, "__array__"):
-            return np.asarray(data)
-
-    # Check for __array__ protocol
-    if hasattr(data, "__array__"):
-        try:
-            return np.asarray(data)
-        except Exception:
-            pass
-
-    return None
 
 
 # Serialization registry

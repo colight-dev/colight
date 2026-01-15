@@ -1,5 +1,5 @@
 import * as glMatrix from "gl-matrix";
-import type { TypedArray } from "../binary";
+import type { TypedArray } from "@colight/serde";
 
 export interface CameraParams {
   position: [number, number, number] | TypedArray;
@@ -463,7 +463,7 @@ export function getProjectionMatrix(
   camera: CameraState,
   aspect: number,
 ): Float32Array {
-  return glMatrix.mat4.perspective(
+  return glMatrix.mat4.perspectiveZO(
     glMatrix.mat4.create(),
     degreesToRadians(camera.fov), // Convert FOV to radians
     aspect,

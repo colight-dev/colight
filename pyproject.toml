@@ -5,12 +5,14 @@
 members = [
     "packages/colight",
     "packages/colight-mkdocs",
+    "packages/colight-serde",
     "examples",
 ]
 
 [tool.uv.sources]
 colight = { workspace = true }
 colight-mkdocs = { workspace = true }
+colight-serde = { workspace = true }
 examples = { workspace = true }
 
 # Shared development dependencies
@@ -64,4 +66,5 @@ reportCallIssue = false
 lint.ignore = [ "E402", "F841", "E712"]
 
 [tool.pytest.ini_options]
+addopts = [ "--ignore=packages/colight-serde/scripts/test_arrays_standalone.py",]
 markers = [ "asyncio: mark test as asyncio",]

@@ -221,7 +221,7 @@ def create_animated_clusters_scene(
                     colors=js(f"$state.clusters[{i}].colors[$state.frame]"),
                     alpha=0.5,
                     half_sizes=js(f"$state.clusters[{i}].half_sizes[$state.frame]"),
-                    onHover=js(
+                    on_hover=js(
                         f"(idx) => $state.update({{hovered: idx !== undefined ? [{i}, idx] : undefined}})"
                     ),
                     decorations=[

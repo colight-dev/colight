@@ -9,11 +9,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["@webgpu/types"]
+    "types": ["@webgpu/types", "@react-three/fiber"],
+    "baseUrl": ".",
+    "paths": {
+      "@colight/serde": ["packages/colight-serde/src/js/index.ts"]
+    }
   },
-  "include": [
-    "packages/colight/src/js",
-    "packages/colight-prose/src/colight_prose/live/js"
-  ],
+  "include": ["packages/colight/src/js", "packages/colight-serde/src/js"],
   "exclude": ["node_modules"]
 }

@@ -3,9 +3,9 @@ import {
   inferDtype,
   evaluateNdarray,
   estimateJSONSize,
-} from "../../src/js/binary";
+} from "../../src/js/serde";
 
-describe("binary.js", () => {
+describe("serde", () => {
   describe("inferDtype", () => {
     it("should infer dtype from TypedArray", () => {
       expect(inferDtype(new Float32Array([1, 2, 3]))).toBe("float32");

@@ -3,10 +3,8 @@ import base64
 import logging
 from typing import Any, Callable, Dict, List, Optional, cast
 
-from colight.binary_serialization import replace_buffers
-
-# Type alias for buffer types
-Buffer = bytes | bytearray | memoryview
+from colight_serde import replace_buffers
+from colight_serde.serialization import Buffer
 from colight.widget import SubscriptableNamespace, WidgetState
 
 logger = logging.getLogger(__name__)
