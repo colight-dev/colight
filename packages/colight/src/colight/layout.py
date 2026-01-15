@@ -119,9 +119,9 @@ class LayoutItem:
         data, buffers = to_json_with_state(self, buffers=[])
         return format.create_file(data, buffers, path)
 
-    def to_bytes(self) -> bytes:
+    def to_bytes(self, widget: Widget | None = None) -> bytes:
         """Get the bytes representation of this visualization without saving to disk."""
-        data, buffers = to_json_with_state(self, buffers=[])
+        data, buffers = to_json_with_state(self, widget=widget, buffers=[])
         return format.create_bytes(data, buffers)
 
     def save_image(

@@ -2,11 +2,14 @@
 # This file provides shared tooling configuration but is not a buildable package
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = [
+    "packages/colight",
+    "packages/colight-mkdocs",
+    "examples",
+]
 
 [tool.uv.sources]
 colight = { workspace = true }
-colight-prose = { workspace = true }
 colight-mkdocs = { workspace = true }
 examples = { workspace = true }
 
@@ -36,17 +39,21 @@ dev = [
     "ipykernel>=6.29.5",
     "werkzeug>=3.1.3",
     "livereload>=2.7.1",
+    "questionary>=2.1.1",
 ]
 
 # Workspace-wide tool configuration
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = [ "packages/*/src", "packages/*/tests"]
+include = ["packages/*/src"]
 exclude = [
-    "packages/colight-prose/tests/examples/pep723_*.py",
-    "packages/colight-prose/tests/import-test-fixtures/",
-    "packages/colight-prose/tests/integration/server-test.py"
+    "examples/",
+    "packages/*/tests/",
+    "packages/*/scripts/",
+    "packages/colight/tests/examples/pep723_*.py",
+    "packages/colight/tests/import-test-fixtures/",
+    "packages/colight/tests/integration/server-test.py",
 ]
 typeCheckingMode = "standard"
 reportUnusedExpression = false
@@ -55,3 +62,6 @@ reportCallIssue = false
 
 [tool.ruff]
 lint.ignore = [ "E402", "F841", "E712"]
+
+[tool.pytest.ini_options]
+markers = [ "asyncio: mark test as asyncio",]

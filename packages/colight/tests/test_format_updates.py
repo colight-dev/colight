@@ -3,7 +3,12 @@ import tempfile
 
 import colight.plot as Plot
 import numpy as np
-from colight.format import parse_file, save_updates, append_update
+from colight.format import (
+    parse_file,
+    parse_file_with_updates,
+    save_updates,
+    append_update,
+)
 
 
 def test_case_1_single_plot():
@@ -119,9 +124,29 @@ def test_append_multiple_updates_at_once():
         # Verify
         _, _, updates_list = parse_file(output_path)
         assert len(updates_list) == 3
-        for i, update_item in enumerate(updates_list):
-            assert isinstance(update_item, dict)
-            assert update_item.get("state", {}).get("iteration") == i + 1
+    for i, update_item in enumerate(updates_list):
+        assert isinstance(update_item, dict)
+        assert update_item.get("state", {}).get("iteration") == i + 1
+
+
+def test_parse_file_with_updates_buffers():
+    """Ensure update entries preserve buffers for rendering."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.array([[1, 2], [3, 4]], dtype=np.float32)
+        plot = Plot.raster(data)
+        output_path = os.path.join(tmpdir, "plot_updates_buffers.colight")
+        plot.save_file(output_path)
+
+        update_plot = Plot.raster(np.array([[5, 6], [7, 8]], dtype=np.float32))
+        append_update(output_path, update_plot)
+
+        initial_data, initial_buffers, update_entries = parse_file_with_updates(
+            output_path
+        )
+        assert initial_data is not None
+        assert len(initial_buffers) > 0
+        assert len(update_entries) == 1
+        assert len(update_entries[0]["buffers"]) > 0
 
 
 if __name__ == "__main__":

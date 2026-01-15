@@ -46,6 +46,12 @@ nav:
       - Python Event Loops: learn-more/python-event-loop.py
       - Compare with Observable Plot: learn-more/vs-observable.py
       - Plot Options: learn-more/plot-options.py
+  - CLI: learn-more/cli.py
+  - API:
+      - Core: api/core.md
+      - Plot: api/plot.md
+      - Plot Extras: api/plot-extras.md
+      - Scene3D: api/scene3d.md
   - Examples:
       - Draw Density: examples/draw-density.py
       - Live Editing Source Code: examples/live-edit-source.py
@@ -56,12 +62,7 @@ nav:
       - Highlighting Code: examples/bylight.py
       - Rendering LaTeX: examples/katex.py
       - Render Pixel Data: examples/pixels.py
-  - API Docs:
-      - Core: api/core.md
-      - Plot: api/plot.md
-      - Plot Extras: api/plot-extras.md
-      - Scene3D: api/scene3d.md
-  - How Do I...: learn-more/how-do-i.py
+  - Cookbook: learn-more/cookbook.py
 
   - Changelog: CHANGELOG.md
 markdown_extensions:

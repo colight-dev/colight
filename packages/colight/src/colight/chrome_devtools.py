@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Union
 
 # Import ColightHTTPServer
-from colight.server import ColightHTTPServer
+from colight.http_server import ColightHTTPServer
 
 DEBUG_WINDOW = False
 
@@ -65,8 +65,8 @@ atexit.register(_cleanup_on_exit)
 
 def format_bytes(bytes):
     if bytes >= 1024 * 1024:
-        return f"{bytes/(1024*1024):.2f}MB"
-    return f"{bytes/1024:.2f}KB"
+        return f"{bytes / (1024 * 1024):.2f}MB"
+    return f"{bytes / 1024:.2f}KB"
 
 
 def find_chrome():
