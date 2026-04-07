@@ -34,13 +34,17 @@ export const cameraStruct = /*wgsl*/ `
 struct Camera {
   mvp: mat4x4<f32>,
   cameraRight: vec3<f32>,
-  _pad1: f32,
+  tanHalfFov: f32,
   cameraUp: vec3<f32>,
-  _pad2: f32,
+  aspect: f32,
   lightDir: vec3<f32>,
   _pad3: f32,
   cameraPos: vec3<f32>,
   _pad4: f32,
+  cameraForward: vec3<f32>,
+  _pad5: f32,
+  viewportSize: vec2<f32>,
+  _pad6: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> camera : Camera;`;
 
@@ -183,14 +187,17 @@ struct VSOut {
 };`;
 }
 
-export const pickingEncoding = /*wgsl*/ `
+export const pickIDEncoding = /*wgsl*/ `
 fn encodePickID(pickID: f32) -> vec4<f32> {
   let iID = u32(pickID);
   let r = f32(iID & 255u) / 255.0;
   let g = f32((iID >> 8u) & 255u) / 255.0;
   let b = f32((iID >> 16u) & 255u) / 255.0;
   return vec4<f32>(r, g, b, 1.0);
-}
+}`;
+
+export const pickingEncoding = /*wgsl*/ `
+${pickIDEncoding}
 
 struct FSOut {
   @location(0) color: vec4<f32>,
@@ -497,6 +504,160 @@ export const lineBeamShaderProgram = generatePrimitiveShaderProgram({
   },
   shading: "lit",
 });
+
+const ellipsoidImpostorVertCode = /*wgsl*/ `
+${cameraStruct}
+
+struct VSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec3<f32>,
+  @location(1) @interpolate(flat) alpha: f32,
+  @location(2) @interpolate(flat) center: vec3<f32>,
+  @location(3) @interpolate(flat) halfSize: vec3<f32>,
+  @location(4) @interpolate(flat) quaternion: vec4<f32>,
+  @location(5) @interpolate(flat) pickID: f32
+};
+
+@vertex
+fn vs_main(
+  @location(0) localPos: vec3<f32>,
+  @location(1) _normal: vec3<f32>,
+  @location(2) center: vec3<f32>,
+  @location(3) halfSize: vec3<f32>,
+  @location(4) quaternion: vec4<f32>,
+  @location(5) color: vec3<f32>,
+  @location(6) alpha: f32,
+  @location(7) pickID: f32
+) -> VSOut {
+  let radius = max(max(halfSize.x, halfSize.y), halfSize.z);
+  let worldPos = center
+    + camera.cameraRight * (localPos.x * radius * 2.0)
+    + camera.cameraUp * (localPos.y * radius * 2.0);
+
+  var out: VSOut;
+  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
+  out.color = color;
+  out.alpha = alpha;
+  out.center = center;
+  out.halfSize = halfSize;
+  out.quaternion = quaternion;
+  out.pickID = pickID;
+  return out;
+}`;
+
+const ellipsoidImpostorFragCode = /*wgsl*/ `
+${cameraStruct}
+${lightingConstants}
+${lightingCalc}
+${pickIDEncoding}
+${quaternionShaderFunctions}
+
+struct ImpostorFSOut {
+  @location(0) color: vec4<f32>,
+  @location(1) pick: vec4<f32>,
+  @builtin(frag_depth) depth: f32
+};
+
+fn quat_conjugate(q: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(-q.x, -q.y, -q.z, q.w);
+}
+
+fn cameraRayDirection(fragCoord: vec4<f32>) -> vec3<f32> {
+  let clipX =
+    ((fragCoord.x + 0.5) / camera.viewportSize.x) * 2.0 - 1.0;
+  let clipY =
+    1.0 - ((fragCoord.y + 0.5) / camera.viewportSize.y) * 2.0;
+  let viewX = clipX * camera.aspect * camera.tanHalfFov;
+  let viewY = clipY * camera.tanHalfFov;
+  return normalize(
+    camera.cameraForward + camera.cameraRight * viewX + camera.cameraUp * viewY
+  );
+}
+
+fn intersectEllipsoid(
+  rayOrigin: vec3<f32>,
+  rayDir: vec3<f32>,
+  center: vec3<f32>,
+  halfSize: vec3<f32>,
+  quaternion: vec4<f32>
+) -> vec4<f32> {
+  let safeHalfSize = max(halfSize, vec3<f32>(0.000001));
+  let inverseQuaternion = quat_conjugate(quaternion);
+  let localOrigin = quat_rotate(inverseQuaternion, rayOrigin - center);
+  let localDir = quat_rotate(inverseQuaternion, rayDir);
+  let scaledOrigin = localOrigin / safeHalfSize;
+  let scaledDir = localDir / safeHalfSize;
+
+  let a = dot(scaledDir, scaledDir);
+  if (a <= 0.0000001) {
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+  }
+
+  let b = 2.0 * dot(scaledOrigin, scaledDir);
+  let c = dot(scaledOrigin, scaledOrigin) - 1.0;
+  let discriminant = b * b - 4.0 * a * c;
+  if (discriminant < 0.0) {
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+  }
+
+  let sqrtDiscriminant = sqrt(discriminant);
+  var t = (-b - sqrtDiscriminant) / (2.0 * a);
+  if (t <= 0.0) {
+    t = (-b + sqrtDiscriminant) / (2.0 * a);
+  }
+
+  if (t <= 0.0) {
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+  }
+
+  let hitLocal = localOrigin + localDir * t;
+  return vec4<f32>(hitLocal, t);
+}
+
+@fragment
+fn fs_main(
+  @builtin(position) fragCoord: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec3<f32>,
+  @location(1) @interpolate(flat) alpha: f32,
+  @location(2) @interpolate(flat) center: vec3<f32>,
+  @location(3) @interpolate(flat) halfSize: vec3<f32>,
+  @location(4) @interpolate(flat) quaternion: vec4<f32>,
+  @location(5) @interpolate(flat) pickID: f32
+) -> ImpostorFSOut {
+  let rayOrigin = camera.cameraPos;
+  let rayDir = cameraRayDirection(fragCoord);
+  let hit = intersectEllipsoid(rayOrigin, rayDir, center, halfSize, quaternion);
+  if (hit.w <= 0.0) {
+    discard;
+  }
+
+  let safeHalfSize = max(halfSize, vec3<f32>(0.000001));
+  let hitLocal = hit.xyz;
+  let hitWorld = center + quat_rotate(quaternion, hitLocal);
+  let worldNormal = normalize(
+    quat_rotate(quaternion, hitLocal / (safeHalfSize * safeHalfSize))
+  );
+  let clipPos = camera.mvp * vec4<f32>(hitWorld, 1.0);
+  let depth = clamp((clipPos.z / clipPos.w) * 0.5 + 0.5, 0.0, 1.0);
+
+  var out: ImpostorFSOut;
+  out.color = vec4<f32>(calculateLighting(color, worldNormal, hitWorld), alpha);
+  out.pick = encodePickID(pickID);
+  out.depth = depth;
+  return out;
+}`;
+
+export const ellipsoidImpostorShaderProgram: GeneratedPrimitiveShaderProgram = {
+  geometryLayout: POINT_CLOUD_GEOMETRY_LAYOUT,
+  renderLayout: rigidLitShaderProgram.renderLayout,
+  pickIDLayout: rigidLitShaderProgram.pickIDLayout,
+  renderVertex: ellipsoidImpostorVertCode,
+  fragment: ellipsoidImpostorFragCode,
+  renderFloatsPerInstance: rigidLitShaderProgram.renderFloatsPerInstance,
+  pickIDFloatsPerInstance: rigidLitShaderProgram.pickIDFloatsPerInstance,
+  colorOffset: rigidLitShaderProgram.colorOffset,
+  alphaOffset: rigidLitShaderProgram.alphaOffset,
+};
 
 export const billboardVertCode = billboardShaderProgram.renderVertex;
 export const billboardFragCode = billboardShaderProgram.fragment;

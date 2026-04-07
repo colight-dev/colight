@@ -39,6 +39,8 @@ import {
   pointCloudSpec,
   buildPickingData,
   buildRenderData,
+  createPrimitiveResourceKey,
+  resolvePrimitiveSpec,
 } from "./components";
 import { unpackID } from "./picking";
 import { LIGHTING } from "./shaders";
@@ -46,6 +48,7 @@ import {
   BufferInfo,
   GeometryResources,
   GeometryResource,
+  PrimitiveDefinition,
   PrimitiveSpec,
   RenderObject,
   PipelineCacheEntry,
@@ -118,11 +121,23 @@ function initGeometryResources(
   resources: GeometryResources,
   geometryOptions: Scene3DGeometryOptions,
 ) {
-  // Create geometry for each primitive type
-  for (const [primitiveName, spec] of Object.entries(primitiveRegistry)) {
-    const typedName = primitiveName as keyof GeometryResources;
-    if (!resources[typedName]) {
-      resources[typedName] = spec.createGeometryResource(
+  for (const entry of Object.values(primitiveRegistry)) {
+    if ("resolveSpec" in entry) {
+      for (const implementation of Object.values(entry.implementations)) {
+        if (!implementation) continue;
+        const resourceKey = createPrimitiveResourceKey(
+          entry.type,
+          implementation.mode,
+        );
+        if (!resources[resourceKey]) {
+          resources[resourceKey] = implementation.createGeometryResource(
+            device,
+            geometryOptions,
+          );
+        }
+      }
+    } else if (!resources[entry.resourceKey]) {
+      resources[entry.resourceKey] = entry.createGeometryResource(
         device,
         geometryOptions,
       );
@@ -130,7 +145,12 @@ function initGeometryResources(
   }
 }
 
-const primitiveRegistry: Record<ComponentConfig["type"], PrimitiveSpec<any>> = {
+type PrimitiveRegistryEntry = PrimitiveDefinition<any> | PrimitiveSpec<any>;
+
+const primitiveRegistry: Record<
+  ComponentConfig["type"],
+  PrimitiveRegistryEntry
+> = {
   PointCloud: pointCloudSpec,
   Ellipsoid: ellipsoidSpec,
   EllipsoidAxes: ellipsoidAxesSpec,
@@ -182,12 +202,14 @@ function computeUniforms(
   view: glMatrix.mat4;
   proj: glMatrix.mat4;
   mvp: glMatrix.mat4;
+  tanHalfFov: number;
   forward: glMatrix.vec3;
   right: glMatrix.vec3;
   camUp: glMatrix.vec3;
   lightDir: glMatrix.vec3;
 } {
   const aspect = containerWidth / containerHeight;
+  const tanHalfFov = Math.tan(glMatrix.glMatrix.toRadian(camState.fov) * 0.5);
   const view = glMatrix.mat4.lookAt(
     glMatrix.mat4.create(),
     camState.position,
@@ -239,7 +261,17 @@ function computeUniforms(
   );
   glMatrix.vec3.normalize(lightDir, lightDir);
 
-  return { aspect, view, proj, mvp, forward, right, camUp, lightDir };
+  return {
+    aspect,
+    view,
+    proj,
+    mvp,
+    tanHalfFov,
+    forward,
+    right,
+    camUp,
+    lightDir,
+  };
 }
 
 async function renderPass({
@@ -364,25 +396,22 @@ async function renderPass({
 }
 
 function computeUniformData(
-  containerWidth: number,
-  containerHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
   camState: CameraState,
 ): Float32Array {
-  const { mvp, right, camUp, lightDir } = computeUniforms(
-    containerWidth,
-    containerHeight,
-    camState,
-  );
+  const { mvp, tanHalfFov, aspect, forward, right, camUp, lightDir } =
+    computeUniforms(viewportWidth, viewportHeight, camState);
   return new Float32Array([
     ...Array.from(mvp),
     right[0],
     right[1],
     right[2],
-    0, // pad to vec4
+    tanHalfFov,
     camUp[0],
     camUp[1],
     camUp[2],
-    0, // pad to vec4
+    aspect,
     lightDir[0],
     lightDir[1],
     lightDir[2],
@@ -390,7 +419,15 @@ function computeUniformData(
     camState.position[0],
     camState.position[1],
     camState.position[2],
-    0, // Add camera position
+    0,
+    forward[0],
+    forward[1],
+    forward[2],
+    0,
+    viewportWidth,
+    viewportHeight,
+    0,
+    0,
   ]);
 }
 
@@ -435,11 +472,13 @@ function updateInstanceSorting(
 }
 export function getGeometryResource(
   resources: GeometryResources,
-  type: keyof GeometryResources,
+  resourceKey: string,
 ): GeometryResource {
-  const resource = resources[type];
+  const resource = resources[resourceKey];
   if (!resource) {
-    throw new Error(`No geometry resource found for type ${type}`);
+    throw new Error(
+      `No geometry resource found for primitive resource key ${resourceKey}`,
+    );
   }
   return resource;
 }
@@ -693,7 +732,7 @@ export function SceneInner({
         ],
       });
 
-      const uniformBufferSize = 128;
+      const uniformBufferSize = 160;
       const uniformBuffer = device.createBuffer({
         size: uniformBufferSize,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -722,13 +761,7 @@ export function SceneInner({
         renderObjects: [],
         pipelineCache: new Map(),
         dynamicBuffers: null,
-        resources: {
-          PointCloud: null,
-          Ellipsoid: null,
-          EllipsoidAxes: null,
-          Cuboid: null,
-          LineBeams: null,
-        },
+        resources: {},
       };
 
       // Now initialize geometry resources
@@ -793,9 +826,10 @@ export function SceneInner({
     gpuRef.current.pickTexture = colorTex;
   }, []);
 
-  type ComponentType = ComponentConfig["type"];
+  type RenderGroupKey = string;
 
   interface TypeInfo {
+    spec: PrimitiveSpec<any>;
     offsets: number[];
     elementCounts: number[];
     indices: number[];
@@ -809,13 +843,15 @@ export function SceneInner({
   // Update the collectTypeData function signature
   function collectTypeData(
     components: ComponentConfig[],
-  ): Map<ComponentType, TypeInfo> {
-    const typeArrays = new Map<ComponentType, TypeInfo>();
+  ): Map<RenderGroupKey, TypeInfo> {
+    const typeArrays = new Map<RenderGroupKey, TypeInfo>();
 
     // Single pass through components
     components.forEach((comp, idx) => {
-      const spec = primitiveRegistry[comp.type];
-      if (!spec) return;
+      const entry = primitiveRegistry[comp.type];
+      if (!entry) return;
+      const spec = resolvePrimitiveSpec(entry as any, comp as any);
+      const groupKey = spec.resourceKey;
 
       // Get the element count and instance count
       const elementCount = spec.getElementCount(comp);
@@ -829,9 +865,10 @@ export function SceneInner({
       const pickingSize =
         instanceCount * spec.floatsPerPicking * Float32Array.BYTES_PER_ELEMENT;
 
-      let typeInfo = typeArrays.get(comp.type);
+      let typeInfo = typeArrays.get(groupKey);
       if (!typeInfo) {
         typeInfo = {
+          spec,
           totalElementCount: 0,
           totalRenderSize: 0,
           totalPickingSize: 0,
@@ -841,7 +878,7 @@ export function SceneInner({
           elementCounts: [],
           elementOffsets: [],
         };
-        typeArrays.set(comp.type, typeInfo);
+        typeArrays.set(groupKey, typeInfo);
       }
 
       typeInfo.components.push(comp);
@@ -863,9 +900,12 @@ export function SceneInner({
     const { device, bindGroupLayout, pipelineCache, resources } =
       gpuRef.current;
 
+    const typeArrays = collectTypeData(components);
+    const activeGroupKeys = new Set(typeArrays.keys());
+
     // Clear out unused cache entries
     Object.keys(renderObjectCache.current).forEach((type) => {
-      if (!components.some((c) => c.type === type)) {
+      if (!activeGroupKeys.has(type)) {
         delete renderObjectCache.current[type];
       }
     });
@@ -873,15 +913,11 @@ export function SceneInner({
     // Track global start index for all components
     let globalStartIndex = 0;
 
-    // Collect render data using helper
-    const typeArrays = collectTypeData(components);
-
     // Calculate total buffer sizes needed
     let totalRenderSize = 0;
     let totalPickingSize = 0;
-    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
-      const spec = primitiveRegistry[type];
-      if (!spec) return;
+    typeArrays.forEach((info: TypeInfo) => {
+      const spec = info.spec;
 
       // Calculate total instance count for this type
       const totalElementCount = info.elementCounts.reduce(
@@ -961,9 +997,8 @@ export function SceneInner({
     const validRenderObjects: RenderObject[] = [];
 
     // Create or update render objects and write buffer data
-    typeArrays.forEach((info: TypeInfo, type: ComponentType) => {
-      const spec = primitiveRegistry[type];
-      if (!spec) return;
+    typeArrays.forEach((info: TypeInfo, groupKey: RenderGroupKey) => {
+      const spec = info.spec;
 
       try {
         // Ensure 4-byte alignment for all offsets
@@ -971,7 +1006,7 @@ export function SceneInner({
         const pickingOffset = align16(dynamicBuffers.pickingOffset);
 
         // Try to get existing render object
-        let renderObject = renderObjectCache.current[type];
+        let renderObject = renderObjectCache.current[groupKey];
         const needNewRenderObject =
           !renderObject ||
           renderObject.totalElementCount !== info.totalElementCount;
@@ -999,7 +1034,10 @@ export function SceneInner({
           pipelineCache,
         );
         if (!pipeline) return;
-        const geometryResource = getGeometryResource(resources, type);
+        const geometryResource = getGeometryResource(
+          resources,
+          spec.resourceKey,
+        );
 
         // Build component offsets for this type's components
         const typeComponentOffsets: ComponentOffset[] = [];
@@ -1033,7 +1071,7 @@ export function SceneInner({
           stride: spec.floatsPerPicking * Float32Array.BYTES_PER_ELEMENT,
         };
 
-        const hasAlphaComponents = components.some(componentHasAlpha);
+        const hasAlphaComponents = info.components.some(componentHasAlpha);
 
         if (needNewRenderObject) {
           // Create new render object with all the required resources
@@ -1056,7 +1094,7 @@ export function SceneInner({
             spec: spec,
             ...alphaProperties(hasAlphaComponents, info.totalElementCount),
           };
-          renderObjectCache.current[type] = renderObject;
+          renderObjectCache.current[groupKey] = renderObject;
         } else {
           // Update existing render object with new buffer info and state
           renderObject.geometryBuffer = geometryResource.vb;
@@ -1092,9 +1130,12 @@ export function SceneInner({
               Float32Array.BYTES_PER_ELEMENT,
           );
       } catch (error) {
-        console.error(`Error creating render object for type ${type}:`, error);
+        console.error(
+          `Error creating render object for type ${groupKey}:`,
+          error,
+        );
         sceneDebugRef.current.error("scene3d/build-render-object", error, {
-          type,
+          type: groupKey,
         });
       }
     });
@@ -1103,6 +1144,7 @@ export function SceneInner({
       "renderObjects",
       validRenderObjects.map((renderObject) => ({
         type: renderObject.spec.type,
+        implementationMode: renderObject.spec.implementationMode,
         instanceCount: renderObject.instanceCount,
         indexCount: renderObject.indexCount,
         vertexCount: renderObject.vertexCount,
@@ -1218,9 +1260,11 @@ export function SceneInner({
         ensurePickingData(device, components!, ro);
       });
 
+      const viewportWidth = canvasRef.current?.width ?? containerWidth;
+      const viewportHeight = canvasRef.current?.height ?? containerHeight;
       const uniformData = computeUniformData(
-        containerWidth,
-        containerHeight,
+        viewportWidth,
+        viewportHeight,
         camState,
       );
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);

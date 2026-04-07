@@ -19,6 +19,7 @@ import { Ellipsoid, deco } from "../scene3d/scene3d";
 import type { ComponentConfig } from "../scene3d/components";
 import {
   DEFAULT_SCENE3D_GEOMETRY_OPTIONS,
+  type PrimitiveImplementationMode,
   type Scene3DGeometryOptions,
 } from "../scene3d/types";
 import { createStateStore } from "../widget";
@@ -32,6 +33,7 @@ type RunStatus =
   | "error";
 
 interface BenchResult {
+  renderMode: PrimitiveImplementationMode;
   count: number;
   sampleCount: number;
   precomputeMs: number;
@@ -48,6 +50,7 @@ interface BenchRunState {
   status: RunStatus;
   counts: number[];
   frameCount: number;
+  renderMode: PrimitiveImplementationMode;
   currentCountIndex: number;
   currentCount: number | null;
   progressLabel: string;
@@ -78,6 +81,7 @@ interface BenchOptions {
   width: number;
   height: number;
   autorun: boolean;
+  renderMode: PrimitiveImplementationMode;
   ellipsoidStacks: number;
   ellipsoidSlices: number;
 }
@@ -103,6 +107,7 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 const DEFAULT_HALF_SIZE: [number, number, number] = [0.018, 0.03, 0.018];
 const HOVER_ELLIPSOID_COLOR: [number, number, number] = [1, 0.24, 0.08];
+const PROXY_TRIANGLES_PER_IMPOSTOR = 2;
 
 function parseInteger(value: string | null, fallback: number) {
   if (!value) return fallback;
@@ -130,12 +135,14 @@ function parseCounts(value: string | null) {
 
 function getInitialOptions(): BenchOptions {
   const params = new URLSearchParams(window.location.search);
+  const renderMode = params.get("render_mode");
   return {
     counts: parseCounts(params.get("counts")),
     frameCount: parseInteger(params.get("frames"), DEFAULT_FRAME_COUNT),
     width: parseInteger(params.get("width"), DEFAULT_WIDTH),
     height: parseInteger(params.get("height"), DEFAULT_HEIGHT),
     autorun: params.get("autorun") === "1",
+    renderMode: renderMode === "impostor" ? "impostor" : "mesh",
     ellipsoidStacks: parseSegmentCount(
       params.get("ellipsoid_stacks"),
       DEFAULT_SCENE3D_GEOMETRY_OPTIONS.ellipsoidStacks,
@@ -381,6 +388,7 @@ function SceneBench({
   frameIndex,
   width,
   height,
+  renderMode,
   geometryOptions,
   hoveredIndex,
   onHoverChange,
@@ -390,6 +398,7 @@ function SceneBench({
   frameIndex: number;
   width: number;
   height: number;
+  renderMode: PrimitiveImplementationMode;
   geometryOptions: Pick<
     Scene3DGeometryOptions,
     "ellipsoidStacks" | "ellipsoidSlices"
@@ -406,6 +415,7 @@ function SceneBench({
         centers: dataset.centersByFrame[frameIndex],
         colors: dataset.colors,
         alpha: 1,
+        render_mode: renderMode,
         half_size: dataset.halfSize,
         quaternion: [0, 0, 0, 1],
         decorations:
@@ -419,7 +429,7 @@ function SceneBench({
         onHover: onHoverChange,
       }),
     ];
-  }, [dataset, frameIndex, hoveredIndex, onHoverChange]);
+  }, [dataset, frameIndex, hoveredIndex, onHoverChange, renderMode]);
 
   if (!dataset) {
     return (
@@ -431,7 +441,7 @@ function SceneBench({
 
   return (
     <SceneInner
-      key={`ellipsoid-mesh-${geometryOptions.ellipsoidStacks}x${geometryOptions.ellipsoidSlices}`}
+      key={`ellipsoid-${renderMode}-${geometryOptions.ellipsoidStacks}x${geometryOptions.ellipsoidSlices}`}
       components={components}
       geometryOptions={geometryOptions}
       containerWidth={width}
@@ -453,6 +463,9 @@ function App() {
   );
   const [width, setWidth] = useState(initialOptionsRef.current.width);
   const [height, setHeight] = useState(initialOptionsRef.current.height);
+  const [renderMode, setRenderMode] = useState<PrimitiveImplementationMode>(
+    initialOptionsRef.current.renderMode,
+  );
   const [ellipsoidStacks, setEllipsoidStacks] = useState(
     initialOptionsRef.current.ellipsoidStacks,
   );
@@ -474,6 +487,7 @@ function App() {
     status: "idle",
     counts: initialOptionsRef.current.counts,
     frameCount: initialOptionsRef.current.frameCount,
+    renderMode: initialOptionsRef.current.renderMode,
     currentCountIndex: -1,
     currentCount: null,
     progressLabel: "Waiting to start",
@@ -536,7 +550,8 @@ function App() {
           setPreviewStatus("preparing");
           setRunState((current) => ({
             ...current,
-            progressLabel: `Preview: ${label}`,
+            renderMode,
+            progressLabel: `Preview (${renderMode}): ${label}`,
           }));
         });
 
@@ -549,7 +564,8 @@ function App() {
         setPreviewStatus("ready");
         setRunState((current) => ({
           ...current,
-          progressLabel: `Preview ready for ${formatCount(count)}`,
+          renderMode,
+          progressLabel: `Preview ready for ${formatCount(count)} (${renderMode})`,
         }));
         if (autoplay) {
           setIsPlaying(true);
@@ -562,7 +578,7 @@ function App() {
         setPreviewError(error instanceof Error ? error.message : String(error));
       }
     },
-    [countsText, frameCount],
+    [countsText, frameCount, renderMode],
   );
 
   const queueMeasuredFrame = useCallback(
@@ -585,7 +601,7 @@ function App() {
         setRunState((current) => ({
           ...current,
           status: "running",
-          progressLabel: `Running ${formatCount(session.count)}: ${session.orderIndex}/${session.order.length} frames`,
+          progressLabel: `Running ${formatCount(session.count)} (${runStateRef.current.renderMode}): ${session.orderIndex}/${session.order.length} frames`,
         }));
       });
     },
@@ -621,6 +637,7 @@ function App() {
           results: [
             ...current.results,
             {
+              renderMode: current.renderMode,
               count: session.count,
               sampleCount: session.samples.length,
               precomputeMs: round(session.precomputeMs),
@@ -655,6 +672,7 @@ function App() {
         width: partialOptions?.width || width,
         height: partialOptions?.height || height,
         autorun: partialOptions?.autorun ?? false,
+        renderMode: partialOptions?.renderMode || renderMode,
         ellipsoidStacks: partialOptions?.ellipsoidStacks || ellipsoidStacks,
         ellipsoidSlices: partialOptions?.ellipsoidSlices || ellipsoidSlices,
       };
@@ -674,6 +692,7 @@ function App() {
         status: "precomputing",
         counts: options.counts,
         frameCount: options.frameCount,
+        renderMode: options.renderMode,
         currentCountIndex: -1,
         currentCount: null,
         progressLabel: "Preparing benchmark",
@@ -691,9 +710,10 @@ function App() {
           setRunState((current) => ({
             ...current,
             status: "precomputing",
+            renderMode: options.renderMode,
             currentCountIndex: index,
             currentCount: count,
-            progressLabel: `Preparing ${formatCount(count)} ellipsoids`,
+            progressLabel: `Preparing ${formatCount(count)} ellipsoids (${options.renderMode})`,
           }));
 
           const precomputeStartedAt = performance.now();
@@ -730,9 +750,10 @@ function App() {
             setRunState((current) => ({
               ...current,
               status: "warming",
+              renderMode: options.renderMode,
               currentCountIndex: index,
               currentCount: count,
-              progressLabel: `Warmup render for ${formatCount(count)}`,
+              progressLabel: `Warmup render for ${formatCount(count)} (${options.renderMode})`,
             }));
 
             const poll = () => {
@@ -775,6 +796,7 @@ function App() {
       finishRun,
       frameCount,
       height,
+      renderMode,
       setProgress,
       width,
     ],
@@ -880,6 +902,7 @@ function App() {
           frameIndex={frameIndex}
           width={width}
           height={height}
+          renderMode={renderMode}
           geometryOptions={{
             ellipsoidStacks,
             ellipsoidSlices,
@@ -900,6 +923,7 @@ function App() {
     handleFrameRendered,
     height,
     hoveredIndex,
+    renderMode,
     width,
   ]);
 
@@ -910,8 +934,14 @@ function App() {
   );
   const activeTriangleCount = useMemo(() => {
     const activeCount = previewCount ?? runState.currentCount;
-    return activeCount != null ? activeCount * trianglesPerEllipsoid : null;
-  }, [previewCount, runState.currentCount, trianglesPerEllipsoid]);
+    if (activeCount == null) return null;
+    return (
+      activeCount *
+      (renderMode === "mesh"
+        ? trianglesPerEllipsoid
+        : PROXY_TRIANGLES_PER_IMPOSTOR)
+    );
+  }, [previewCount, renderMode, runState.currentCount, trianglesPerEllipsoid]);
   const sceneDebugReport = useMemo(() => {
     if (!sceneDebugState) return null;
     return {
@@ -934,6 +964,20 @@ function App() {
         </div>
 
         <div className="control-cluster">
+          <label>
+            Renderer
+            <select
+              value={renderMode}
+              onChange={(event) =>
+                setRenderMode(
+                  event.target.value === "impostor" ? "impostor" : "mesh",
+                )
+              }
+            >
+              <option value="mesh">Mesh</option>
+              <option value="impostor">Impostor</option>
+            </select>
+          </label>
           <label>
             Counts
             <input
@@ -1071,6 +1115,7 @@ function App() {
               frameCount,
               width,
               height,
+              renderMode,
               ellipsoidStacks,
               ellipsoidSlices,
             })
@@ -1091,9 +1136,11 @@ function App() {
             Max instances per draw:{" "}
             {formatInstanceLimit(debugOptions.maxInstancesPerDraw)}
           </div>
+          <div>Renderer: {renderMode}</div>
           <div>
-            Mesh detail: {ellipsoidStacks} x {ellipsoidSlices} (
-            {formatCount(trianglesPerEllipsoid)} tris / ellipsoid)
+            {renderMode === "mesh"
+              ? `Mesh detail: ${ellipsoidStacks} x ${ellipsoidSlices} (${formatCount(trianglesPerEllipsoid)} tris / ellipsoid)`
+              : `Impostor proxy: ${PROXY_TRIANGLES_PER_IMPOSTOR} tris / ellipsoid`}
           </div>
           {previewCount != null && (
             <div>Preview count: {previewCount.toLocaleString()}</div>
@@ -1127,6 +1174,7 @@ function App() {
           <table className="results-table">
             <thead>
               <tr>
+                <th>Renderer</th>
                 <th>Count</th>
                 <th>Avg FPS</th>
                 <th>Median FPS</th>
@@ -1141,7 +1189,8 @@ function App() {
             </thead>
             <tbody>
               {runState.results.map((result) => (
-                <tr key={result.count}>
+                <tr key={`${result.renderMode}-${result.count}`}>
+                  <td>{result.renderMode}</td>
                   <td>{result.count.toLocaleString()}</td>
                   <td>{result.averageFps}</td>
                   <td>{result.medianFps}</td>

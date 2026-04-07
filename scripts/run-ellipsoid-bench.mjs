@@ -25,6 +25,7 @@ function parseArgs(argv) {
     frames: null,
     width: null,
     height: null,
+    renderMode: null,
     debug: false,
   };
 
@@ -82,6 +83,10 @@ function parseArgs(argv) {
       options.height = Number.parseInt(nextValue(), 10);
       continue;
     }
+    if (arg === "--render-mode") {
+      options.renderMode = nextValue();
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${arg}`);
   }
@@ -100,6 +105,13 @@ function parseArgs(argv) {
   }
   if (options.height != null && (!Number.isFinite(options.height) || options.height < 1)) {
     throw new Error(`Invalid --height value: ${options.height}`);
+  }
+  if (
+    options.renderMode != null &&
+    options.renderMode !== "mesh" &&
+    options.renderMode !== "impostor"
+  ) {
+    throw new Error(`Invalid --render-mode value: ${options.renderMode}`);
   }
 
   return options;
@@ -275,6 +287,9 @@ function buildBenchUrl(origin, options) {
   if (options.height != null) {
     url.searchParams.set("height", String(options.height));
   }
+  if (options.renderMode) {
+    url.searchParams.set("render_mode", options.renderMode);
+  }
   if (options.debug) {
     url.searchParams.set("scene3d_debug", "1");
   }
@@ -284,6 +299,7 @@ function buildBenchUrl(origin, options) {
 
 function formatResultRows(results) {
   return results.map((result) => ({
+    renderer: result.renderMode,
     count: result.count.toLocaleString(),
     avgFps: result.averageFps,
     medianFps: result.medianFps,

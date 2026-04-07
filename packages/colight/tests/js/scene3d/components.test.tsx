@@ -291,6 +291,33 @@ describe("Scene3D Components", () => {
         true,
       );
     });
+
+    it("should render an ellipsoid impostor when requested", async () => {
+      const components: ComponentConfig[] = [
+        {
+          type: "Ellipsoid",
+          centers: new Float32Array([0, 0, 0]),
+          half_sizes: new Float32Array([1, 2, 1]),
+          render_mode: "impostor",
+        },
+      ];
+
+      await act(async () => {
+        render(
+          <WrappedSceneInner
+            components={components}
+            containerWidth={800}
+            containerHeight={600}
+            onReady={vi.fn()}
+          />,
+        );
+      });
+
+      const createRenderPipeline = mockDevice.createRenderPipeline as Mock;
+      await waitFor(() => {
+        expect(createRenderPipeline).toHaveBeenCalled();
+      });
+    });
   });
 
   describe("Cuboid", () => {

@@ -130,6 +130,8 @@ export const ringFragCode = /*wgsl*/ `
 
 export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
   type: "EllipsoidAxes",
+  implementationMode: "mesh",
+  resourceKey: "EllipsoidAxes:mesh",
 
   defaults: {
     half_size: [0.5, 0.5, 0.5],
@@ -219,11 +221,10 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
               RING_INSTANCE_LAYOUT,
               RING_PICKING_INSTANCE_LAYOUT,
             ],
-            primitive: this.renderConfig,
             pickFormat: "rgba8unorm",
           },
           format,
-          ellipsoidAxesSpec,
+          this.renderConfig,
         );
       },
       cache,

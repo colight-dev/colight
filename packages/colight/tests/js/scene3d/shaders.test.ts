@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   billboardShaderProgram,
+  ellipsoidImpostorShaderProgram,
   lineBeamShaderProgram,
   rigidLitShaderProgram,
 } from "../../../src/js/scene3d/shaders";
@@ -69,15 +70,43 @@ describe("scene3d shader generation", () => {
   });
 
   it("propagates generated buffer metadata into primitive specs", () => {
-    expect(pointCloudSpec.floatsPerInstance).toBe(
+    const pointCloudMeshSpec = pointCloudSpec.resolveSpec({
+      type: "PointCloud",
+      centers: new Float32Array(),
+    });
+    const ellipsoidMeshSpec = ellipsoidSpec.resolveSpec({
+      type: "Ellipsoid",
+      centers: new Float32Array(),
+    });
+    const ellipsoidImpostorSpec = ellipsoidSpec.resolveSpec({
+      type: "Ellipsoid",
+      centers: new Float32Array(),
+      render_mode: "impostor",
+    });
+    const cuboidMeshSpec = cuboidSpec.resolveSpec({
+      type: "Cuboid",
+      centers: new Float32Array(),
+    });
+    const lineBeamsMeshSpec = lineBeamsSpec.resolveSpec({
+      type: "LineBeams",
+      points: new Float32Array(),
+    });
+
+    expect(pointCloudMeshSpec.floatsPerInstance).toBe(
       billboardShaderProgram.renderFloatsPerInstance,
     );
-    expect(pointCloudSpec.colorOffset).toBe(billboardShaderProgram.colorOffset);
-    expect(ellipsoidSpec.floatsPerInstance).toBe(
+    expect(pointCloudMeshSpec.colorOffset).toBe(
+      billboardShaderProgram.colorOffset,
+    );
+    expect(ellipsoidMeshSpec.floatsPerInstance).toBe(
       rigidLitShaderProgram.renderFloatsPerInstance,
     );
-    expect(cuboidSpec.alphaOffset).toBe(rigidLitShaderProgram.alphaOffset);
-    expect(lineBeamsSpec.floatsPerPicking).toBe(
+    expect(ellipsoidImpostorSpec.floatsPerInstance).toBe(
+      ellipsoidImpostorShaderProgram.renderFloatsPerInstance,
+    );
+    expect(ellipsoidImpostorSpec.resourceKey).toBe("Ellipsoid:impostor");
+    expect(cuboidMeshSpec.alphaOffset).toBe(rigidLitShaderProgram.alphaOffset);
+    expect(lineBeamsMeshSpec.floatsPerPicking).toBe(
       lineBeamShaderProgram.pickIDFloatsPerInstance,
     );
   });

@@ -2,6 +2,7 @@
 
 import {
   billboardShaderProgram,
+  ellipsoidImpostorShaderProgram,
   rigidLitShaderProgram,
   lineBeamShaderProgram,
   GeneratedPrimitiveShaderProgram,
@@ -25,6 +26,9 @@ import {
   GeometryData,
   ElementConstants,
   Scene3DGeometryOptions,
+  PrimitiveDefinition,
+  PrimitiveImplementation,
+  PrimitiveImplementationMode,
 } from "./types";
 
 import { acopy } from "../utils";
@@ -277,14 +281,14 @@ export function createTranslucentGeometryPipeline(
   bindGroupLayout: GPUBindGroupLayout,
   config: PipelineConfig,
   format: GPUTextureFormat,
-  primitiveSpec: PrimitiveSpec<any>, // Take the primitive spec instead of just type
+  renderConfig: PrimitiveSpec<any>["renderConfig"],
 ): GPURenderPipeline {
   return createRenderPipeline(
     device,
     bindGroupLayout,
     {
       ...config,
-      primitive: primitiveSpec.renderConfig,
+      primitive: renderConfig,
       blend: {
         color: {
           srcFactor: "src-alpha",
@@ -337,19 +341,15 @@ export const createBuffers = (
   };
 };
 
-type PrimitiveDefinition<ConfigType extends BaseComponentConfig> = ThisType<
-  PrimitiveSpec<ConfigType>
-> & {
-  type: string;
-  defaults?: ElementConstants;
-  instancesPerElement?: number;
+type ShaderPrimitiveImplementationDefinition<
+  ConfigType extends BaseComponentConfig,
+> = {
+  mode: PrimitiveImplementationMode;
   shaderProgram: GeneratedPrimitiveShaderProgram;
   pipelineKey: string;
   renderConfig: PrimitiveSpec<ConfigType>["renderConfig"];
-  getElementCount: PrimitiveSpec<ConfigType>["getElementCount"];
-  getCenters: PrimitiveSpec<ConfigType>["getCenters"];
-  fillRenderGeometry: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
-  applyDecorationScale: PrimitiveSpec<ConfigType>["applyDecorationScale"];
+  fillRenderGeometry?: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
+  applyDecorationScale?: PrimitiveSpec<ConfigType>["applyDecorationScale"];
   getColorIndexForInstance?: PrimitiveSpec<ConfigType>["getColorIndexForInstance"];
   applyDecoration?: PrimitiveSpec<ConfigType>["applyDecoration"];
   fillColor?: PrimitiveSpec<ConfigType>["fillColor"];
@@ -357,27 +357,29 @@ type PrimitiveDefinition<ConfigType extends BaseComponentConfig> = ThisType<
   createGeometryResource: PrimitiveSpec<ConfigType>["createGeometryResource"];
 };
 
-function definePrimitive<ConfigType extends BaseComponentConfig>(
-  definition: PrimitiveDefinition<ConfigType>,
-): PrimitiveSpec<ConfigType> {
+export function createPrimitiveResourceKey(
+  type: string,
+  mode: PrimitiveImplementationMode,
+) {
+  return `${type}:${mode}`;
+}
+
+function defineShaderImplementation<ConfigType extends BaseComponentConfig>(
+  definition: ShaderPrimitiveImplementationDefinition<ConfigType>,
+): PrimitiveImplementation<ConfigType> {
   return {
-    type: definition.type,
-    defaults: definition.defaults,
-    instancesPerElement: definition.instancesPerElement ?? 1,
+    mode: definition.mode,
     floatsPerInstance: definition.shaderProgram.renderFloatsPerInstance,
     floatsPerPicking: definition.shaderProgram.pickIDFloatsPerInstance,
-    getElementCount: definition.getElementCount,
-    getCenters: definition.getCenters,
     colorOffset: definition.shaderProgram.colorOffset,
     alphaOffset: definition.shaderProgram.alphaOffset,
+    renderConfig: definition.renderConfig,
     fillRenderGeometry: definition.fillRenderGeometry,
     applyDecorationScale: definition.applyDecorationScale,
     getColorIndexForInstance: definition.getColorIndexForInstance,
     applyDecoration: definition.applyDecoration,
     fillColor: definition.fillColor,
     fillAlpha: definition.fillAlpha,
-    renderConfig: definition.renderConfig,
-
     getRenderPipeline(device, bindGroupLayout, cache) {
       const format = navigator.gpu.getPreferredCanvasFormat();
       return getOrCreatePipeline(
@@ -400,14 +402,127 @@ function definePrimitive<ConfigType extends BaseComponentConfig>(
               pickFormat: "rgba8unorm",
             },
             format,
-            this,
+            definition.renderConfig,
           ),
         cache,
       );
     },
-
     createGeometryResource: definition.createGeometryResource,
   };
+}
+
+type DefinePrimitiveConfig<ConfigType extends BaseComponentConfig> = {
+  type: string;
+  defaults?: ElementConstants;
+  instancesPerElement?: number;
+  getElementCount: PrimitiveSpec<ConfigType>["getElementCount"];
+  getCenters: PrimitiveSpec<ConfigType>["getCenters"];
+  fillRenderGeometry?: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
+  applyDecorationScale?: PrimitiveSpec<ConfigType>["applyDecorationScale"];
+  getColorIndexForInstance?: PrimitiveSpec<ConfigType>["getColorIndexForInstance"];
+  applyDecoration?: PrimitiveSpec<ConfigType>["applyDecoration"];
+  fillColor?: PrimitiveSpec<ConfigType>["fillColor"];
+  fillAlpha?: PrimitiveSpec<ConfigType>["fillAlpha"];
+  implementations: Partial<
+    Record<PrimitiveImplementationMode, PrimitiveImplementation<ConfigType>>
+  >;
+  resolveImplementation?: (elem: ConfigType) => PrimitiveImplementationMode;
+};
+
+function definePrimitive<ConfigType extends BaseComponentConfig>(
+  definition: DefinePrimitiveConfig<ConfigType>,
+): PrimitiveDefinition<ConfigType> {
+  const instancesPerElement = definition.instancesPerElement ?? 1;
+  const resolveImplementation =
+    definition.resolveImplementation ?? (() => "mesh");
+  const resolvedSpecs = new Map<
+    PrimitiveImplementationMode,
+    PrimitiveSpec<ConfigType>
+  >();
+
+  (
+    Object.entries(definition.implementations) as Array<
+      [
+        PrimitiveImplementationMode,
+        PrimitiveImplementation<ConfigType> | undefined,
+      ]
+    >
+  ).forEach(([mode, implementation]) => {
+    if (!implementation) return;
+
+    const fillRenderGeometry =
+      implementation.fillRenderGeometry ?? definition.fillRenderGeometry;
+    const applyDecorationScale =
+      implementation.applyDecorationScale ?? definition.applyDecorationScale;
+
+    if (!fillRenderGeometry || !applyDecorationScale) {
+      throw new Error(
+        `scene3d: primitive "${definition.type}" implementation "${mode}" is missing required instance packing hooks`,
+      );
+    }
+
+    resolvedSpecs.set(mode, {
+      type: definition.type,
+      implementationMode: implementation.mode,
+      resourceKey: createPrimitiveResourceKey(
+        definition.type,
+        implementation.mode,
+      ),
+      defaults: definition.defaults,
+      getElementCount: definition.getElementCount,
+      instancesPerElement,
+      floatsPerInstance: implementation.floatsPerInstance,
+      floatsPerPicking: implementation.floatsPerPicking,
+      getCenters: definition.getCenters,
+      colorOffset: implementation.colorOffset,
+      alphaOffset: implementation.alphaOffset,
+      fillRenderGeometry,
+      applyDecorationScale,
+      getColorIndexForInstance:
+        implementation.getColorIndexForInstance ??
+        definition.getColorIndexForInstance,
+      applyDecoration:
+        implementation.applyDecoration ?? definition.applyDecoration,
+      fillColor: implementation.fillColor ?? definition.fillColor,
+      fillAlpha: implementation.fillAlpha ?? definition.fillAlpha,
+      renderConfig: implementation.renderConfig,
+      getRenderPipeline: implementation.getRenderPipeline,
+      createGeometryResource: implementation.createGeometryResource,
+    });
+  });
+
+  return {
+    type: definition.type,
+    defaults: definition.defaults,
+    instancesPerElement,
+    getElementCount: definition.getElementCount,
+    getCenters: definition.getCenters,
+    fillRenderGeometry: definition.fillRenderGeometry,
+    applyDecorationScale: definition.applyDecorationScale,
+    getColorIndexForInstance: definition.getColorIndexForInstance,
+    applyDecoration: definition.applyDecoration,
+    fillColor: definition.fillColor,
+    fillAlpha: definition.fillAlpha,
+    implementations: definition.implementations,
+    resolveImplementation,
+    resolveSpec(elem) {
+      const mode = resolveImplementation(elem);
+      const spec = resolvedSpecs.get(mode);
+      if (!spec) {
+        throw new Error(
+          `scene3d: primitive "${definition.type}" does not support implementation "${mode}"`,
+        );
+      }
+      return spec;
+    },
+  };
+}
+
+export function resolvePrimitiveSpec<ConfigType extends BaseComponentConfig>(
+  entry: PrimitiveDefinition<ConfigType> | PrimitiveSpec<ConfigType>,
+  elem: ConfigType,
+): PrimitiveSpec<ConfigType> {
+  return "resolveSpec" in entry ? entry.resolveSpec(elem) : entry;
 }
 
 const computeConstants = (spec: any, elem: any) => {
@@ -480,10 +595,28 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
   size?: number; // Default size, defaults to 0.02
 }
 
+const pointCloudMeshImplementation =
+  defineShaderImplementation<PointCloudComponentConfig>({
+    mode: "mesh",
+    shaderProgram: billboardShaderProgram,
+    pipelineKey: "PointCloud:mesh",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
+      return createBuffers(device, {
+        vertexData: new Float32Array([
+          -0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.5, -0.5, 0.0, 0.0, 0.0, 1.0, -0.5,
+          0.5, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0,
+        ]),
+        indexData: new Uint16Array([0, 1, 2, 2, 1, 3]),
+      });
+    },
+  });
+
 export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   type: "PointCloud",
-  shaderProgram: billboardShaderProgram,
-  pipelineKey: "PointCloud",
   defaults: {
     size: 0.02,
   },
@@ -512,42 +645,8 @@ export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   applyDecorationScale(out, offset, scaleFactor) {
     out[offset + 3] *= scaleFactor;
   },
-  renderConfig: {
-    cullMode: "none",
-    topology: "triangle-list",
-  },
-
-  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
-    return createBuffers(device, {
-      vertexData: new Float32Array([
-        // Position (x,y,z) and Normal (nx,ny,nz) for each vertex
-        -0.5,
-        -0.5,
-        0.0,
-        0.0,
-        0.0,
-        1.0, // Bottom-left
-        0.5,
-        -0.5,
-        0.0,
-        0.0,
-        0.0,
-        1.0, // Bottom-right
-        -0.5,
-        0.5,
-        0.0,
-        0.0,
-        0.0,
-        1.0, // Top-left
-        0.5,
-        0.5,
-        0.0,
-        0.0,
-        0.0,
-        1.0, // Top-right
-      ]),
-      indexData: new Uint16Array([0, 1, 2, 2, 1, 3]),
-    });
+  implementations: {
+    mesh: pointCloudMeshImplementation,
   },
 });
 
@@ -561,12 +660,43 @@ export interface EllipsoidComponentConfig extends BaseComponentConfig {
   quaternions?: Float32Array | number[];
   quaternion?: [number, number, number, number];
   fill_mode?: "Solid" | "MajorWireframe";
+  render_mode?: PrimitiveImplementationMode;
 }
+
+const ellipsoidMeshImplementation =
+  defineShaderImplementation<EllipsoidComponentConfig>({
+    mode: "mesh",
+    shaderProgram: rigidLitShaderProgram,
+    pipelineKey: "Ellipsoid:mesh",
+    renderConfig: {
+      cullMode: "back",
+      topology: "triangle-list",
+    },
+    createGeometryResource(device, geometryOptions: Scene3DGeometryOptions) {
+      return createBuffers(
+        device,
+        createSphereGeometry(
+          geometryOptions.ellipsoidStacks,
+          geometryOptions.ellipsoidSlices,
+        ),
+      );
+    },
+  });
+
+const ellipsoidImpostorImplementation =
+  defineShaderImplementation<EllipsoidComponentConfig>({
+    mode: "impostor",
+    shaderProgram: ellipsoidImpostorShaderProgram,
+    pipelineKey: "Ellipsoid:impostor",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    createGeometryResource: pointCloudMeshImplementation.createGeometryResource,
+  });
 
 export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
   type: "Ellipsoid",
-  shaderProgram: rigidLitShaderProgram,
-  pipelineKey: "Ellipsoid",
   defaults: {
     half_size: [0.5, 0.5, 0.5],
     quaternion: [0, 0, 0, 1],
@@ -616,19 +746,12 @@ export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
     out[offset + 4] *= scaleFactor;
     out[offset + 5] *= scaleFactor;
   },
-  renderConfig: {
-    cullMode: "back",
-    topology: "triangle-list",
+  implementations: {
+    mesh: ellipsoidMeshImplementation,
+    impostor: ellipsoidImpostorImplementation,
   },
-
-  createGeometryResource(device, geometryOptions: Scene3DGeometryOptions) {
-    return createBuffers(
-      device,
-      createSphereGeometry(
-        geometryOptions.ellipsoidStacks,
-        geometryOptions.ellipsoidSlices,
-      ),
-    );
+  resolveImplementation(elem) {
+    return elem.render_mode ?? "mesh";
   },
 });
 
@@ -643,10 +766,22 @@ export interface CuboidComponentConfig extends BaseComponentConfig {
   quaternion?: [number, number, number, number];
 }
 
+const cuboidMeshImplementation =
+  defineShaderImplementation<CuboidComponentConfig>({
+    mode: "mesh",
+    shaderProgram: rigidLitShaderProgram,
+    pipelineKey: "Cuboid:mesh",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
+      return createBuffers(device, createCubeGeometry());
+    },
+  });
+
 export const cuboidSpec = definePrimitive<CuboidComponentConfig>({
   type: "Cuboid",
-  shaderProgram: rigidLitShaderProgram,
-  pipelineKey: "Cuboid",
   defaults: {
     half_size: [0.1, 0.1, 0.1],
     quaternion: [0, 0, 0, 1],
@@ -690,13 +825,8 @@ export const cuboidSpec = definePrimitive<CuboidComponentConfig>({
     out[offset + 4] *= scaleFactor;
     out[offset + 5] *= scaleFactor;
   },
-  renderConfig: {
-    cullMode: "none",
-    topology: "triangle-list",
-  },
-
-  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
-    return createBuffers(device, createCubeGeometry());
+  implementations: {
+    mesh: cuboidMeshImplementation,
   },
 });
 
@@ -740,10 +870,22 @@ function countSegments(elem: LineBeamsComponentConfig): number {
   return prepareLineSegments(elem).length;
 }
 
+const lineBeamsMeshImplementation =
+  defineShaderImplementation<LineBeamsComponentConfig>({
+    mode: "mesh",
+    shaderProgram: lineBeamShaderProgram,
+    pipelineKey: "LineBeams:mesh",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
+      return createBuffers(device, createBeamGeometry());
+    },
+  });
+
 export const lineBeamsSpec = definePrimitive<LineBeamsComponentConfig>({
   type: "LineBeams",
-  shaderProgram: lineBeamShaderProgram,
-  pipelineKey: "LineBeams",
   defaults: {
     size: 0.02,
   },
@@ -806,13 +948,8 @@ export const lineBeamsSpec = definePrimitive<LineBeamsComponentConfig>({
     // only the size is at offset+6
     out[offset + 6] *= scaleFactor;
   },
-  renderConfig: {
-    cullMode: "none",
-    topology: "triangle-list",
-  },
-
-  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
-    return createBuffers(device, createBeamGeometry());
+  implementations: {
+    mesh: lineBeamsMeshImplementation,
   },
 });
 

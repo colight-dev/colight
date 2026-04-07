@@ -247,6 +247,7 @@ def Ellipsoid(
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
     | None = None,  # How the shape is drawn ("Solid" or "MajorWireframe")
+    render_mode: str | None = None,  # Which renderer to use ("mesh" or "impostor")
     **kwargs: Any,
 ) -> SceneComponent:
     """Create an ellipsoid element.
@@ -264,6 +265,9 @@ def Ellipsoid(
         fill_mode: How the shape is drawn. One of:
             - "Solid": Filled surface with solid color
             - "MajorWireframe": Three axis-aligned ellipse cross-sections
+        render_mode: Which renderer to use for solid ellipsoids. One of:
+            - "mesh": Tessellated sphere mesh scaled into an ellipsoid
+            - "impostor": Analytic screen-space ellipsoid impostor
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -291,6 +295,8 @@ def Ellipsoid(
 
     if fill_mode is not None:
         data["fill_mode"] = fill_mode
+    if render_mode is not None:
+        data["render_mode"] = render_mode
 
     return SceneComponent("Ellipsoid", data, **kwargs)
 

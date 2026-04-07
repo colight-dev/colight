@@ -45,11 +45,23 @@ export function resolveScene3DGeometryOptions(
   };
 }
 
+export type PrimitiveImplementationMode = "mesh" | "impostor";
+
 export interface PrimitiveSpec<ConfigType> {
   /**
    * The type/name of this primitive spec
    */
   type: string;
+
+  /**
+   * The concrete implementation mode selected for this spec.
+   */
+  implementationMode: PrimitiveImplementationMode;
+
+  /**
+   * Stable key used for caching render objects and geometry resources.
+   */
+  resourceKey: string;
 
   /**
    * Default values for the primitive's properties
@@ -211,6 +223,42 @@ export interface PrimitiveSpec<ConfigType> {
   ): GeometryResource;
 }
 
+export interface PrimitiveImplementation<ConfigType> {
+  mode: PrimitiveImplementationMode;
+  floatsPerInstance: number;
+  floatsPerPicking: number;
+  colorOffset: number;
+  alphaOffset: number;
+  renderConfig: PrimitiveSpec<ConfigType>["renderConfig"];
+  fillRenderGeometry?: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
+  applyDecorationScale?: PrimitiveSpec<ConfigType>["applyDecorationScale"];
+  getColorIndexForInstance?: PrimitiveSpec<ConfigType>["getColorIndexForInstance"];
+  applyDecoration?: PrimitiveSpec<ConfigType>["applyDecoration"];
+  fillColor?: PrimitiveSpec<ConfigType>["fillColor"];
+  fillAlpha?: PrimitiveSpec<ConfigType>["fillAlpha"];
+  getRenderPipeline: PrimitiveSpec<ConfigType>["getRenderPipeline"];
+  createGeometryResource: PrimitiveSpec<ConfigType>["createGeometryResource"];
+}
+
+export interface PrimitiveDefinition<ConfigType> {
+  type: string;
+  defaults?: ElementConstants;
+  instancesPerElement: number;
+  getElementCount: PrimitiveSpec<ConfigType>["getElementCount"];
+  getCenters: PrimitiveSpec<ConfigType>["getCenters"];
+  fillRenderGeometry?: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
+  applyDecorationScale?: PrimitiveSpec<ConfigType>["applyDecorationScale"];
+  getColorIndexForInstance?: PrimitiveSpec<ConfigType>["getColorIndexForInstance"];
+  applyDecoration?: PrimitiveSpec<ConfigType>["applyDecoration"];
+  fillColor?: PrimitiveSpec<ConfigType>["fillColor"];
+  fillAlpha?: PrimitiveSpec<ConfigType>["fillAlpha"];
+  implementations: Partial<
+    Record<PrimitiveImplementationMode, PrimitiveImplementation<ConfigType>>
+  >;
+  resolveImplementation(elem: ConfigType): PrimitiveImplementationMode;
+  resolveSpec(elem: ConfigType): PrimitiveSpec<ConfigType>;
+}
+
 export interface Decoration {
   indexes: number[];
   color?: [number, number, number];
@@ -326,11 +374,7 @@ export interface GeometryResource {
 }
 
 export interface GeometryResources {
-  PointCloud: GeometryResource | null;
-  Ellipsoid: GeometryResource | null;
-  EllipsoidAxes: GeometryResource | null;
-  Cuboid: GeometryResource | null;
-  LineBeams: GeometryResource | null;
+  [key: string]: GeometryResource | null;
 }
 
 export interface BufferInfo {
