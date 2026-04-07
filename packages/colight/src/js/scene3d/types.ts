@@ -46,6 +46,7 @@ export function resolveScene3DGeometryOptions(
 }
 
 export type PrimitiveImplementationMode = "mesh" | "impostor";
+export type PickIDSource = "attribute" | "derived";
 
 export interface PrimitiveSpec<ConfigType> {
   /**
@@ -211,6 +212,7 @@ export interface PrimitiveSpec<ConfigType> {
     device: GPUDevice,
     bindGroupLayout: GPUBindGroupLayout,
     cache: Map<string, PipelineCacheEntry>,
+    pickIDSource?: PickIDSource,
   ): GPURenderPipeline;
 
   /**
@@ -393,16 +395,22 @@ export interface RenderObject {
   instanceCount: number;
   vertexCount: number;
 
-  pickingInstanceBuffer: BufferInfo;
+  pickingInstanceBuffer?: BufferInfo;
+  pickIDSource: PickIDSource;
+  objectUniformOffset: number;
+  pickBase: number;
 
   componentIndex: number;
   pickingDataStale: boolean;
 
-  // Arrays owned by this RenderObject, reallocated only when count changes
-  renderData: Float32Array; // Make non-optional since all components must have render data
-  pickingData: Float32Array; // Make non-optional since all components must have picking data
+  // Arrays owned by this RenderObject, reallocated only when capacity must grow
+  renderData: Float32Array;
+  renderDataByteLength: number;
+  pickingData: Float32Array;
+  pickingDataByteLength: number;
 
   totalElementCount: number;
+  elementCapacity: number;
 
   hasAlphaComponents: boolean;
   sortedIndices?: Uint32Array;
@@ -422,8 +430,11 @@ export interface RenderObjectCache {
 export interface DynamicBuffers {
   renderBuffer: GPUBuffer;
   pickingBuffer: GPUBuffer;
-  renderOffset: number; // Current offset into render buffer
-  pickingOffset: number; // Current offset into picking buffer
+  objectBuffer: GPUBuffer;
+  objectStride: number;
+  renderOffset: number;
+  pickingOffset: number;
+  objectOffset: number;
 }
 
 export interface ComponentOffset {

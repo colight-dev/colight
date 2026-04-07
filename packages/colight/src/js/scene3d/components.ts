@@ -380,24 +380,31 @@ function defineShaderImplementation<ConfigType extends BaseComponentConfig>(
     applyDecoration: definition.applyDecoration,
     fillColor: definition.fillColor,
     fillAlpha: definition.fillAlpha,
-    getRenderPipeline(device, bindGroupLayout, cache) {
+    getRenderPipeline(device, bindGroupLayout, cache, pickIDSource) {
+      const useDerivedPick =
+        pickIDSource === "derived" &&
+        !!definition.shaderProgram.renderVertexDerivedPick;
       const format = navigator.gpu.getPreferredCanvasFormat();
       return getOrCreatePipeline(
         device,
-        `${definition.pipelineKey}:render`,
+        `${definition.pipelineKey}:render:${useDerivedPick ? "derived" : "attribute"}`,
         () =>
           createTranslucentGeometryPipeline(
             device,
             bindGroupLayout,
             {
-              vertexShader: definition.shaderProgram.renderVertex,
+              vertexShader: useDerivedPick
+                ? definition.shaderProgram.renderVertexDerivedPick
+                : definition.shaderProgram.renderVertex,
               fragmentShader: definition.shaderProgram.fragment,
               vertexEntryPoint: "vs_main",
               fragmentEntryPoint: "fs_main",
               bufferLayouts: [
                 definition.shaderProgram.geometryLayout,
                 definition.shaderProgram.renderLayout,
-                definition.shaderProgram.pickIDLayout,
+                ...(useDerivedPick
+                  ? []
+                  : [definition.shaderProgram.pickIDLayout]),
               ],
               pickFormat: "rgba8unorm",
             },

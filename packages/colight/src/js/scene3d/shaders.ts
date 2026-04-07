@@ -48,6 +48,14 @@ struct Camera {
 };
 @group(0) @binding(0) var<uniform> camera : Camera;`;
 
+export const objectPickStruct = /*wgsl*/ `
+struct ObjectPick {
+  pickBase: u32,
+  instancesPerElement: u32,
+  _pad0: vec2<u32>,
+};
+@group(0) @binding(1) var<uniform> objectPick : ObjectPick;`;
+
 export const lightingConstants = /*wgsl*/ `
 const AMBIENT_INTENSITY = ${LIGHTING.AMBIENT_INTENSITY}f;
 const DIFFUSE_INTENSITY = ${LIGHTING.DIFFUSE_INTENSITY}f;
@@ -148,6 +156,7 @@ export interface GeneratedPrimitiveShaderProgram {
   renderLayout: VertexBufferLayout;
   pickIDLayout: VertexBufferLayout;
   renderVertex: string;
+  renderVertexDerivedPick: string;
   fragment: string;
   renderFloatsPerInstance: number;
   pickIDFloatsPerInstance: number;
@@ -372,6 +381,7 @@ ${
 
 function buildRenderVertexShader(
   definition: PrimitiveShaderDefinition,
+  pickIDSource: "attribute" | "derived" = "attribute",
 ): string {
   const geometryPosition = definition.transform.geometryPosition ?? "localPos";
   const geometryNormal = definition.transform.geometryNormal ?? "normal";
@@ -381,7 +391,9 @@ function buildRenderVertexShader(
     `@location(0) ${geometryPosition}: vec3<f32>`,
     `@location(1) ${geometryNormal}: vec3<f32>`,
     ...buildFieldParameters(definition.renderFields, instanceLocationStart),
-    `@location(${pickIDLocation}) pickID: f32`,
+    ...(pickIDSource === "attribute"
+      ? [`@location(${pickIDLocation}) pickID: f32`]
+      : [`@builtin(instance_index) instanceIndex: u32`]),
   ].join(",\n  ");
   const transform = buildTransformCode(
     definition.transform,
@@ -395,9 +407,14 @@ function buildRenderVertexShader(
   out.worldPos = worldPos;
   out.normal = worldNormal;`
       : "";
+  const pickIDAssignment =
+    pickIDSource === "attribute"
+      ? "pickID"
+      : "f32(objectPick.pickBase + (instanceIndex / objectPick.instancesPerElement))";
 
   return /*wgsl*/ `
 ${cameraStruct}
+${pickIDSource === "derived" ? objectPickStruct : ""}
 ${createRenderVSOut(definition.shading)}
 ${transform.helpers}
 
@@ -411,7 +428,7 @@ ${transform.code}
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.color = ${colorField.name};
   out.alpha = ${alphaField.name};
-  out.pickID = pickID;${lightingAssignments}
+  out.pickID = ${pickIDAssignment};${lightingAssignments}
   return out;
 }`;
 }
@@ -433,7 +450,8 @@ export function generatePrimitiveShaderProgram(
     geometryLayout: definition.geometryLayout,
     renderLayout,
     pickIDLayout,
-    renderVertex: buildRenderVertexShader(definition),
+    renderVertex: buildRenderVertexShader(definition, "attribute"),
+    renderVertexDerivedPick: buildRenderVertexShader(definition, "derived"),
     fragment: createFragmentShader(definition.shading),
     renderFloatsPerInstance: countFloats(definition.renderFields),
     pickIDFloatsPerInstance: 1,
@@ -545,6 +563,49 @@ fn vs_main(
   return out;
 }`;
 
+const ellipsoidImpostorVertCodeDerivedPick = /*wgsl*/ `
+${cameraStruct}
+${objectPickStruct}
+
+struct VSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec3<f32>,
+  @location(1) @interpolate(flat) alpha: f32,
+  @location(2) @interpolate(flat) center: vec3<f32>,
+  @location(3) @interpolate(flat) halfSize: vec3<f32>,
+  @location(4) @interpolate(flat) quaternion: vec4<f32>,
+  @location(5) @interpolate(flat) pickID: f32
+};
+
+@vertex
+fn vs_main(
+  @location(0) localPos: vec3<f32>,
+  @location(1) _normal: vec3<f32>,
+  @location(2) center: vec3<f32>,
+  @location(3) halfSize: vec3<f32>,
+  @location(4) quaternion: vec4<f32>,
+  @location(5) color: vec3<f32>,
+  @location(6) alpha: f32,
+  @builtin(instance_index) instanceIndex: u32
+) -> VSOut {
+  let radius = max(max(halfSize.x, halfSize.y), halfSize.z);
+  let worldPos = center
+    + camera.cameraRight * (localPos.x * radius * 2.0)
+    + camera.cameraUp * (localPos.y * radius * 2.0);
+
+  var out: VSOut;
+  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
+  out.color = color;
+  out.alpha = alpha;
+  out.center = center;
+  out.halfSize = halfSize;
+  out.quaternion = quaternion;
+  out.pickID = f32(
+    objectPick.pickBase + (instanceIndex / objectPick.instancesPerElement)
+  );
+  return out;
+}`;
+
 const ellipsoidImpostorFragCode = /*wgsl*/ `
 ${cameraStruct}
 ${lightingConstants}
@@ -652,6 +713,7 @@ export const ellipsoidImpostorShaderProgram: GeneratedPrimitiveShaderProgram = {
   renderLayout: rigidLitShaderProgram.renderLayout,
   pickIDLayout: rigidLitShaderProgram.pickIDLayout,
   renderVertex: ellipsoidImpostorVertCode,
+  renderVertexDerivedPick: ellipsoidImpostorVertCodeDerivedPick,
   fragment: ellipsoidImpostorFragCode,
   renderFloatsPerInstance: rigidLitShaderProgram.renderFloatsPerInstance,
   pickIDFloatsPerInstance: rigidLitShaderProgram.pickIDFloatsPerInstance,
