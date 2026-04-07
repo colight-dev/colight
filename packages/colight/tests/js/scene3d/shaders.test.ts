@@ -69,21 +69,6 @@ describe("scene3d shader generation", () => {
     );
   });
 
-  it("builds derived-pick shader variants for opaque render objects", () => {
-    expect(billboardShaderProgram.renderVertexDerivedPick).toContain(
-      "@builtin(instance_index) instanceIndex: u32",
-    );
-    expect(billboardShaderProgram.renderVertexDerivedPick).toContain(
-      "objectPick.pickBase",
-    );
-    expect(rigidLitShaderProgram.renderVertexDerivedPick).toContain(
-      "objectPick.instancesPerElement",
-    );
-    expect(ellipsoidImpostorShaderProgram.renderVertexDerivedPick).toContain(
-      "objectPick.pickBase",
-    );
-  });
-
   it("propagates generated buffer metadata into primitive specs", () => {
     const pointCloudMeshSpec = pointCloudSpec.resolveSpec({
       type: "PointCloud",

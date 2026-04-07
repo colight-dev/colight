@@ -42,13 +42,12 @@ import {
   createPrimitiveResourceKey,
   resolvePrimitiveSpec,
 } from "./components";
-import { packID, unpackID } from "./picking";
+import { unpackID } from "./picking";
 import { LIGHTING } from "./shaders";
 import {
   BufferInfo,
   GeometryResources,
   GeometryResource,
-  PickIDSource,
   PrimitiveDefinition,
   PrimitiveSpec,
   RenderObject,
@@ -77,13 +76,6 @@ import {
 function align16(value: number): number {
   return Math.ceil(value / 16) * 16;
 }
-
-function alignTo(value: number, alignment: number): number {
-  return Math.ceil(value / alignment) * alignment;
-}
-
-const OBJECT_PICK_UNIFORM_SIZE = 16;
-const MIN_DYNAMIC_BUFFER_SIZE = 16;
 
 let scene3DDebugIdCounter = 0;
 
@@ -171,15 +163,7 @@ function ensurePickingData(
   components: ComponentConfig[],
   ro: RenderObject,
 ) {
-  if (
-    ro.pickIDSource === "derived" ||
-    !ro.pickingInstanceBuffer ||
-    !ro.pickingDataStale ||
-    ro.pickingDataByteLength === 0
-  ) {
-    ro.pickingDataStale = false;
-    return;
-  }
+  if (!ro.pickingDataStale) return;
 
   const { pickingData, componentOffsets, spec, sortedPositions } = ro;
 
@@ -203,7 +187,7 @@ function ensurePickingData(
     ro.pickingInstanceBuffer.offset,
     pickingData.buffer,
     pickingData.byteOffset,
-    ro.pickingDataByteLength,
+    pickingData.byteLength,
   );
 
   ro.pickingDataStale = false;
@@ -363,20 +347,18 @@ async function renderPass({
           }
 
           pass.setPipeline(ro.pipeline);
-          pass.setBindGroup(0, uniformBindGroup, [ro.objectUniformOffset]);
+          pass.setBindGroup(0, uniformBindGroup);
           pass.setVertexBuffer(0, ro.geometryBuffer);
           pass.setVertexBuffer(
             1,
             ro.instanceBuffer.buffer,
             ro.instanceBuffer.offset,
           );
-          if (ro.pickIDSource === "attribute" && ro.pickingInstanceBuffer) {
-            pass.setVertexBuffer(
-              2,
-              ro.pickingInstanceBuffer.buffer,
-              ro.pickingInstanceBuffer.offset,
-            );
-          }
+          pass.setVertexBuffer(
+            2,
+            ro.pickingInstanceBuffer.buffer,
+            ro.pickingInstanceBuffer.offset,
+          );
 
           if (ro.indexBuffer) {
             pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat);
@@ -580,7 +562,6 @@ export function SceneInner({
     device: GPUDevice;
     context: GPUCanvasContext;
     uniformBuffer: GPUBuffer;
-    objectUniformStride: number;
     uniformBindGroup: GPUBindGroup;
     bindGroupLayout: GPUBindGroupLayout;
     depthTexture: GPUTexture | null;
@@ -748,11 +729,6 @@ export function SceneInner({
             visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
             buffer: { type: "uniform" },
           },
-          {
-            binding: 1,
-            visibility: GPUShaderStage.VERTEX,
-            buffer: { type: "uniform", hasDynamicOffset: true },
-          },
         ],
       });
 
@@ -762,42 +738,9 @@ export function SceneInner({
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
-      const objectUniformStride = Math.max(
-        OBJECT_PICK_UNIFORM_SIZE,
-        device.limits?.minUniformBufferOffsetAlignment ??
-          OBJECT_PICK_UNIFORM_SIZE,
-      );
-      const dynamicBuffers: DynamicBuffers = {
-        renderBuffer: device.createBuffer({
-          size: MIN_DYNAMIC_BUFFER_SIZE,
-          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        }),
-        pickingBuffer: device.createBuffer({
-          size: MIN_DYNAMIC_BUFFER_SIZE,
-          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        }),
-        objectBuffer: device.createBuffer({
-          size: objectUniformStride,
-          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        }),
-        objectStride: objectUniformStride,
-        renderOffset: 0,
-        pickingOffset: 0,
-        objectOffset: 0,
-      };
-
       const uniformBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
-        entries: [
-          { binding: 0, resource: { buffer: uniformBuffer } },
-          {
-            binding: 1,
-            resource: {
-              buffer: dynamicBuffers.objectBuffer,
-              size: OBJECT_PICK_UNIFORM_SIZE,
-            },
-          },
-        ],
+        entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
       });
 
       const readbackBuffer = device.createBuffer({
@@ -810,7 +753,6 @@ export function SceneInner({
         device,
         context,
         uniformBuffer,
-        objectUniformStride,
         uniformBindGroup,
         bindGroupLayout,
         depthTexture: null,
@@ -818,7 +760,7 @@ export function SceneInner({
         readbackBuffer,
         renderObjects: [],
         pipelineCache: new Map(),
-        dynamicBuffers,
+        dynamicBuffers: null,
         resources: {},
       };
 
@@ -885,19 +827,6 @@ export function SceneInner({
   }, []);
 
   type RenderGroupKey = string;
-
-  function getRenderObjectCacheKey(spec: PrimitiveSpec<any>) {
-    return [
-      spec.resourceKey,
-      spec.instancesPerElement,
-      spec.floatsPerInstance,
-      spec.floatsPerPicking,
-    ].join(":");
-  }
-
-  function getPickIDSource(hasAlphaComponents: boolean): PickIDSource {
-    return hasAlphaComponents ? "attribute" : "derived";
-  }
 
   interface TypeInfo {
     spec: PrimitiveSpec<any>;
@@ -968,16 +897,18 @@ export function SceneInner({
   // Update buildRenderObjects to include caching
   function buildRenderObjects(components: ComponentConfig[]): RenderObject[] {
     if (!gpuRef.current) return [];
-    const {
-      device,
-      uniformBuffer,
-      objectUniformStride,
-      bindGroupLayout,
-      pipelineCache,
-      resources,
-    } = gpuRef.current;
+    const { device, bindGroupLayout, pipelineCache, resources } =
+      gpuRef.current;
 
     const typeArrays = collectTypeData(components);
+    const activeGroupKeys = new Set(typeArrays.keys());
+
+    // Clear out unused cache entries
+    Object.keys(renderObjectCache.current).forEach((type) => {
+      if (!activeGroupKeys.has(type)) {
+        delete renderObjectCache.current[type];
+      }
+    });
 
     // Track global start index for all components
     let globalStartIndex = 0;
@@ -985,14 +916,8 @@ export function SceneInner({
     // Calculate total buffer sizes needed
     let totalRenderSize = 0;
     let totalPickingSize = 0;
-    let totalObjectSize = Math.max(
-      objectUniformStride,
-      typeArrays.size * objectUniformStride,
-    );
     typeArrays.forEach((info: TypeInfo) => {
       const spec = info.spec;
-      const hasAlphaComponents = info.components.some(componentHasAlpha);
-      const pickIDSource = getPickIDSource(hasAlphaComponents);
 
       // Calculate total instance count for this type
       const totalElementCount = info.elementCounts.reduce(
@@ -1007,16 +932,12 @@ export function SceneInner({
           spec.floatsPerInstance *
           Float32Array.BYTES_PER_ELEMENT,
       );
-      if (pickIDSource === "attribute") {
-        totalPickingSize += align16(
-          totalInstanceCount *
-            spec.floatsPerPicking *
-            Float32Array.BYTES_PER_ELEMENT,
-        );
-      }
+      totalPickingSize += align16(
+        totalInstanceCount *
+          spec.floatsPerPicking *
+          Float32Array.BYTES_PER_ELEMENT,
+      );
     });
-    totalRenderSize = Math.max(totalRenderSize, MIN_DYNAMIC_BUFFER_SIZE);
-    totalPickingSize = Math.max(totalPickingSize, MIN_DYNAMIC_BUFFER_SIZE);
     const maxBufferSize =
       device.limits?.maxBufferSize ?? Number.POSITIVE_INFINITY;
 
@@ -1024,22 +945,16 @@ export function SceneInner({
       componentCount: components.length,
       totalRenderSize,
       totalPickingSize,
-      totalObjectSize,
       maxBufferSize: Number.isFinite(maxBufferSize) ? maxBufferSize : null,
     });
 
-    if (
-      totalRenderSize > maxBufferSize ||
-      totalPickingSize > maxBufferSize ||
-      totalObjectSize > maxBufferSize
-    ) {
+    if (totalRenderSize > maxBufferSize || totalPickingSize > maxBufferSize) {
       const error = new Error(
-        `scene3d dynamic buffers exceed device maxBufferSize (render=${totalRenderSize}, picking=${totalPickingSize}, object=${totalObjectSize}, limit=${maxBufferSize})`,
+        `scene3d dynamic buffers exceed device maxBufferSize (render=${totalRenderSize}, picking=${totalPickingSize}, limit=${maxBufferSize})`,
       );
       sceneDebugRef.current.error("scene3d/buffer-limit", error, {
         totalRenderSize,
         totalPickingSize,
-        totalObjectSize,
         maxBufferSize,
       });
       throw error;
@@ -1049,12 +964,10 @@ export function SceneInner({
     if (
       !gpuRef.current.dynamicBuffers ||
       gpuRef.current.dynamicBuffers.renderBuffer.size < totalRenderSize ||
-      gpuRef.current.dynamicBuffers.pickingBuffer.size < totalPickingSize ||
-      gpuRef.current.dynamicBuffers.objectBuffer.size < totalObjectSize
+      gpuRef.current.dynamicBuffers.pickingBuffer.size < totalPickingSize
     ) {
       gpuRef.current.dynamicBuffers?.renderBuffer.destroy();
       gpuRef.current.dynamicBuffers?.pickingBuffer.destroy();
-      gpuRef.current.dynamicBuffers?.objectBuffer.destroy();
 
       const renderBuffer = device.createBuffer({
         size: totalRenderSize,
@@ -1068,102 +981,50 @@ export function SceneInner({
         mappedAtCreation: false,
       });
 
-      const objectBuffer = device.createBuffer({
-        size: totalObjectSize,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: false,
-      });
-
       gpuRef.current.dynamicBuffers = {
         renderBuffer,
         pickingBuffer,
-        objectBuffer,
-        objectStride: objectUniformStride,
         renderOffset: 0,
         pickingOffset: 0,
-        objectOffset: 0,
       };
-      gpuRef.current.uniformBindGroup = device.createBindGroup({
-        layout: bindGroupLayout,
-        entries: [
-          { binding: 0, resource: { buffer: uniformBuffer } },
-          {
-            binding: 1,
-            resource: {
-              buffer: objectBuffer,
-              size: OBJECT_PICK_UNIFORM_SIZE,
-            },
-          },
-        ],
-      });
     }
     const dynamicBuffers = gpuRef.current.dynamicBuffers!;
 
     // Reset buffer offsets
     dynamicBuffers.renderOffset = 0;
     dynamicBuffers.pickingOffset = 0;
-    dynamicBuffers.objectOffset = 0;
 
     const validRenderObjects: RenderObject[] = [];
-    const objectUniformData = new Uint32Array(
-      totalObjectSize / Uint32Array.BYTES_PER_ELEMENT,
-    );
 
     // Create or update render objects and write buffer data
     typeArrays.forEach((info: TypeInfo, groupKey: RenderGroupKey) => {
       const spec = info.spec;
-      const hasAlphaComponents = info.components.some(componentHasAlpha);
-      const pickIDSource = getPickIDSource(hasAlphaComponents);
 
       try {
         // Ensure 4-byte alignment for all offsets
         const renderOffset = align16(dynamicBuffers.renderOffset);
-        const totalInstanceCount =
-          info.totalElementCount * spec.instancesPerElement;
-        const activeRenderByteLength =
-          totalInstanceCount *
-          spec.floatsPerInstance *
-          Float32Array.BYTES_PER_ELEMENT;
-        const activePickingByteLength =
-          pickIDSource === "attribute"
-            ? totalInstanceCount *
-              spec.floatsPerPicking *
-              Float32Array.BYTES_PER_ELEMENT
-            : 0;
-        const pickingOffset =
-          activePickingByteLength > 0
-            ? align16(dynamicBuffers.pickingOffset)
-            : dynamicBuffers.pickingOffset;
-        const objectUniformOffset = dynamicBuffers.objectOffset;
+        const pickingOffset = align16(dynamicBuffers.pickingOffset);
 
         // Try to get existing render object
-        const cacheKey = getRenderObjectCacheKey(spec);
-        let renderObject = renderObjectCache.current[cacheKey];
-        const elementCapacity = Math.max(
-          renderObject?.elementCapacity ?? 0,
-          info.totalElementCount,
-        );
-        const instanceCapacity = elementCapacity * spec.instancesPerElement;
+        let renderObject = renderObjectCache.current[groupKey];
+        const needNewRenderObject =
+          !renderObject ||
+          renderObject.totalElementCount !== info.totalElementCount;
 
         // Create or reuse render data arrays
-        let renderData = renderObject?.renderData;
-        if (
-          !renderData ||
-          renderData.length < instanceCapacity * spec.floatsPerInstance
-        ) {
-          renderData = new Float32Array(
-            instanceCapacity * spec.floatsPerInstance,
-          );
-        }
+        let renderData: Float32Array;
+        let pickingData: Float32Array;
 
-        let pickingData = renderObject?.pickingData ?? new Float32Array(0);
-        if (
-          pickIDSource === "attribute" &&
-          pickingData.length < instanceCapacity * spec.floatsPerPicking
-        ) {
-          pickingData = new Float32Array(
-            instanceCapacity * spec.floatsPerPicking,
+        if (needNewRenderObject) {
+          renderData = new Float32Array(
+            info.totalRenderSize / Float32Array.BYTES_PER_ELEMENT,
           );
+          pickingData = new Float32Array(
+            info.totalPickingSize / Float32Array.BYTES_PER_ELEMENT,
+          );
+        } else {
+          renderData = renderObject.renderData;
+          pickingData = renderObject.pickingData;
         }
 
         // Get or create pipeline
@@ -1171,7 +1032,6 @@ export function SceneInner({
           device,
           bindGroupLayout,
           pipelineCache,
-          pickIDSource,
         );
         if (!pipeline) return;
         const geometryResource = getGeometryResource(
@@ -1195,24 +1055,25 @@ export function SceneInner({
           elementStartIndex += componentElementCount;
         });
         globalStartIndex = typeStartIndex;
-        const pickBase = packID(typeComponentOffsets[0]?.pickingStart ?? 0);
+
+        const totalInstanceCount =
+          info.totalElementCount * spec.instancesPerElement;
 
         // Create or update buffer info
-        const bufferInfo: BufferInfo = {
+        const bufferInfo = {
           buffer: dynamicBuffers.renderBuffer,
           offset: renderOffset,
           stride: spec.floatsPerInstance * Float32Array.BYTES_PER_ELEMENT,
         };
-        const pickingBufferInfo =
-          pickIDSource === "attribute"
-            ? {
-                buffer: dynamicBuffers.pickingBuffer,
-                offset: pickingOffset,
-                stride: spec.floatsPerPicking * Float32Array.BYTES_PER_ELEMENT,
-              }
-            : undefined;
+        const pickingBufferInfo = {
+          buffer: dynamicBuffers.pickingBuffer,
+          offset: pickingOffset,
+          stride: spec.floatsPerPicking * Float32Array.BYTES_PER_ELEMENT,
+        };
 
-        if (!renderObject) {
+        const hasAlphaComponents = info.components.some(componentHasAlpha);
+
+        if (needNewRenderObject) {
           // Create new render object with all the required resources
           renderObject = {
             pipeline,
@@ -1224,32 +1085,22 @@ export function SceneInner({
             instanceCount: totalInstanceCount,
             vertexCount: geometryResource.vertexCount,
             pickingInstanceBuffer: pickingBufferInfo,
-            pickIDSource,
-            objectUniformOffset,
-            pickBase,
-            pickingDataStale: pickIDSource === "attribute",
+            pickingDataStale: true,
             componentIndex: info.indices[0],
-            renderData,
-            renderDataByteLength: activeRenderByteLength,
-            pickingData,
-            pickingDataByteLength: activePickingByteLength,
+            renderData: renderData,
+            pickingData: pickingData,
             totalElementCount: info.totalElementCount,
-            elementCapacity,
             componentOffsets: typeComponentOffsets,
             spec: spec,
             ...alphaProperties(hasAlphaComponents, info.totalElementCount),
           };
-          renderObjectCache.current[cacheKey] = renderObject;
+          renderObjectCache.current[groupKey] = renderObject;
         } else {
           // Update existing render object with new buffer info and state
-          renderObject.pipeline = pipeline;
           renderObject.geometryBuffer = geometryResource.vb;
           renderObject.indexBuffer = geometryResource.ib;
           renderObject.instanceBuffer = bufferInfo;
           renderObject.pickingInstanceBuffer = pickingBufferInfo;
-          renderObject.pickIDSource = pickIDSource;
-          renderObject.objectUniformOffset = objectUniformOffset;
-          renderObject.pickBase = pickBase;
           renderObject.indexFormat = geometryResource.indexFormat;
           renderObject.indexCount = geometryResource.indexCount;
           renderObject.vertexCount = geometryResource.vertexCount;
@@ -1257,44 +1108,27 @@ export function SceneInner({
           renderObject.componentIndex = info.indices[0];
           renderObject.componentOffsets = typeComponentOffsets;
           renderObject.spec = spec;
-          renderObject.renderData = renderData;
-          renderObject.renderDataByteLength = activeRenderByteLength;
-          renderObject.pickingData = pickingData;
-          renderObject.pickingDataByteLength = activePickingByteLength;
-          renderObject.totalElementCount = info.totalElementCount;
-          renderObject.elementCapacity = elementCapacity;
-          renderObject.pickingDataStale = pickIDSource === "attribute";
-          renderObject.hasAlphaComponents = hasAlphaComponents;
-          if (hasAlphaComponents) {
-            if (
-              !renderObject.sortedIndices ||
-              renderObject.sortedIndices.length < elementCapacity
-            ) {
-              Object.assign(
-                renderObject,
-                alphaProperties(true, elementCapacity),
-              );
-            }
-          } else {
-            renderObject.hasAlphaComponents = false;
+          renderObject.pickingDataStale = true;
+          if (hasAlphaComponents && !renderObject.hasAlphaComponents) {
+            Object.assign(
+              renderObject,
+              alphaProperties(hasAlphaComponents, info.totalElementCount),
+            );
           }
         }
-
-        const objectUniformIndex =
-          objectUniformOffset / Uint32Array.BYTES_PER_ELEMENT;
-        objectUniformData[objectUniformIndex] = pickBase;
-        objectUniformData[objectUniformIndex + 1] = spec.instancesPerElement;
 
         validRenderObjects.push(renderObject);
 
         // Update buffer offsets ensuring alignment
         dynamicBuffers.renderOffset =
-          renderOffset + align16(activeRenderByteLength);
-        if (activePickingByteLength > 0) {
-          dynamicBuffers.pickingOffset =
-            pickingOffset + align16(activePickingByteLength);
-        }
-        dynamicBuffers.objectOffset += dynamicBuffers.objectStride;
+          renderOffset + align16(renderData.byteLength);
+        dynamicBuffers.pickingOffset =
+          pickingOffset +
+          align16(
+            totalInstanceCount *
+              spec.floatsPerPicking *
+              Float32Array.BYTES_PER_ELEMENT,
+          );
       } catch (error) {
         console.error(
           `Error creating render object for type ${groupKey}:`,
@@ -1306,17 +1140,6 @@ export function SceneInner({
       }
     });
 
-    device.queue.writeBuffer(
-      dynamicBuffers.objectBuffer,
-      0,
-      objectUniformData.buffer,
-      objectUniformData.byteOffset,
-      Math.max(
-        dynamicBuffers.objectStride * validRenderObjects.length,
-        dynamicBuffers.objectStride,
-      ),
-    );
-
     sceneDebugRef.current.snapshot(
       "renderObjects",
       validRenderObjects.map((renderObject) => ({
@@ -1326,10 +1149,9 @@ export function SceneInner({
         indexCount: renderObject.indexCount,
         vertexCount: renderObject.vertexCount,
         renderOffset: renderObject.instanceBuffer.offset,
-        renderBytes: renderObject.renderDataByteLength,
-        pickingSource: renderObject.pickIDSource,
-        pickingOffset: renderObject.pickingInstanceBuffer?.offset ?? null,
-        pickingBytes: renderObject.pickingDataByteLength,
+        renderBytes: renderObject.renderData.byteLength,
+        pickingOffset: renderObject.pickingInstanceBuffer.offset,
+        pickingBytes: renderObject.pickingData.byteLength,
         drawCalls: buildDrawSlices(
           renderObject.instanceCount,
           maxInstancesPerDraw,
@@ -1432,7 +1254,7 @@ export function SceneInner({
           ro.instanceBuffer.offset,
           renderData.buffer,
           renderData.byteOffset,
-          ro.renderDataByteLength,
+          renderData.byteLength,
         );
 
         ensurePickingData(device, components!, ro);
@@ -1877,7 +1699,6 @@ export function SceneInner({
       if (gpuRef.current) {
         const {
           device,
-          uniformBuffer,
           resources,
           pipelineCache,
           dynamicBuffers,
@@ -1890,10 +1711,8 @@ export function SceneInner({
           depthTexture?.destroy();
           pickTexture?.destroy();
           readbackBuffer.destroy();
-          uniformBuffer.destroy();
           dynamicBuffers?.renderBuffer.destroy();
           dynamicBuffers?.pickingBuffer.destroy();
-          dynamicBuffers?.objectBuffer.destroy();
           for (const resource of Object.values(resources)) {
             if (resource) {
               resource.vb.destroy();
