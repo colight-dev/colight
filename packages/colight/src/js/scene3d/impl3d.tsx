@@ -613,6 +613,9 @@ export function SceneInner({
   const [isReady, setIsReady] = useState(false);
 
   const pickingLockRef = useRef(false);
+  const lastHoverScreenPositionRef = useRef<{ x: number; y: number } | null>(
+    null,
+  );
 
   const lastHoverState = useRef<{
     componentIdx: number;
@@ -996,6 +999,7 @@ export function SceneInner({
           pipelineCache,
         );
         if (!pipeline) return;
+        const geometryResource = getGeometryResource(resources, type);
 
         // Build component offsets for this type's components
         const typeComponentOffsets: ComponentOffset[] = [];
@@ -1033,7 +1037,6 @@ export function SceneInner({
 
         if (needNewRenderObject) {
           // Create new render object with all the required resources
-          const geometryResource = getGeometryResource(resources, type);
           renderObject = {
             pipeline,
             geometryBuffer: geometryResource.vb,
@@ -1056,6 +1059,8 @@ export function SceneInner({
           renderObjectCache.current[type] = renderObject;
         } else {
           // Update existing render object with new buffer info and state
+          renderObject.geometryBuffer = geometryResource.vb;
+          renderObject.indexBuffer = geometryResource.ib;
           renderObject.instanceBuffer = bufferInfo;
           renderObject.pickingInstanceBuffer = pickingBufferInfo;
           renderObject.indexFormat = geometryResource.indexFormat;
@@ -1237,6 +1242,10 @@ export function SceneInner({
           debugProbe: sceneDebugRef.current,
           maxInstancesPerDraw,
         });
+        const hoverPosition = lastHoverScreenPositionRef.current;
+        if (!draggingState.current && hoverPosition) {
+          await pickAtScreenXY(hoverPosition.x, hoverPosition.y, "hover");
+        }
         onRenderComplete();
       } catch (err) {
         console.error("[Debug] Error during renderPass:", err.message);
@@ -1325,12 +1334,12 @@ export function SceneInner({
       const { device, pickTexture, readbackBuffer } = gpuRef.current;
       if (!pickTexture || !readbackBuffer) return;
 
-      // Convert screen coordinates to device pixels
-      const dpr = window.devicePixelRatio || 1;
-      const pickX = Math.floor(screenX * dpr);
-      const pickY = Math.floor(screenY * dpr);
-      const displayWidth = Math.floor(containerWidth * dpr);
-      const displayHeight = Math.floor(containerHeight * dpr);
+      // Map from CSS pixels to the canvas backing texture.
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const displayWidth = canvasRef.current.width;
+      const displayHeight = canvasRef.current.height;
+      const pickX = Math.floor((screenX / canvasRect.width) * displayWidth);
+      const pickY = Math.floor((screenY / canvasRect.height) * displayHeight);
 
       if (
         pickX < 0 ||
@@ -1346,6 +1355,10 @@ export function SceneInner({
         mode,
         pickX,
         pickY,
+        canvasRectWidth: canvasRect.width,
+        canvasRectHeight: canvasRect.height,
+        textureWidth: displayWidth,
+        textureHeight: displayHeight,
         maxInstancesPerDraw: formatInstanceLimit(maxInstancesPerDraw),
       });
 
@@ -1521,10 +1534,16 @@ export function SceneInner({
       const rect = canvasRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      lastHoverScreenPositionRef.current = { x, y };
       throttledPickAtScreenXY(x, y, "hover");
     },
     [throttledPickAtScreenXY],
   );
+
+  const handlePickingMouseLeave = useCallback(() => {
+    lastHoverScreenPositionRef.current = null;
+    handleHoverID(0);
+  }, [components]);
 
   // Drag handler - attached/detached directly during drag
   const handleDragMouseMove = useCallback(
@@ -1606,13 +1625,15 @@ export function SceneInner({
     if (!canvas) return;
 
     canvas.addEventListener("mousemove", handlePickingMouseMove);
+    canvas.addEventListener("mouseleave", handlePickingMouseLeave);
     canvas.addEventListener("mousedown", handleScene3dMouseDown);
 
     return () => {
       canvas.removeEventListener("mousemove", handlePickingMouseMove);
+      canvas.removeEventListener("mouseleave", handlePickingMouseLeave);
       canvas.removeEventListener("mousedown", handleScene3dMouseDown);
     };
-  }, [handlePickingMouseMove, handleScene3dMouseDown]);
+  }, [handlePickingMouseLeave, handlePickingMouseMove, handleScene3dMouseDown]);
 
   /******************************************************
    * F) Lifecycle & Render-on-demand
@@ -1762,7 +1783,16 @@ export function SceneInner({
 
   return (
     <div style={{ width: "100%", position: "relative" }}>
-      <canvas ref={canvasRef} style={{ border: "none", ...style }} />
+      <canvas
+        ref={canvasRef}
+        style={{
+          border: "none",
+          width: `${containerWidth}px`,
+          height: `${containerHeight}px`,
+          display: "block",
+          ...style,
+        }}
+      />
     </div>
   );
 }

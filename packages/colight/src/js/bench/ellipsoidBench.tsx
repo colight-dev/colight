@@ -15,7 +15,7 @@ import {
   type Scene3DDebugRegistry,
   type Scene3DDebugState,
 } from "../scene3d/debug";
-import { Ellipsoid } from "../scene3d/scene3d";
+import { Ellipsoid, deco } from "../scene3d/scene3d";
 import type { ComponentConfig } from "../scene3d/components";
 import {
   DEFAULT_SCENE3D_GEOMETRY_OPTIONS,
@@ -102,6 +102,7 @@ const DEFAULT_HEIGHT = 900;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 const DEFAULT_HALF_SIZE: [number, number, number] = [0.018, 0.03, 0.018];
+const HOVER_ELLIPSOID_COLOR: [number, number, number] = [1, 0.24, 0.08];
 
 function parseInteger(value: string | null, fallback: number) {
   if (!value) return fallback;
@@ -381,6 +382,8 @@ function SceneBench({
   width,
   height,
   geometryOptions,
+  hoveredIndex,
+  onHoverChange,
   onFrameRendered,
 }: {
   dataset: Dataset | null;
@@ -391,6 +394,8 @@ function SceneBench({
     Scene3DGeometryOptions,
     "ellipsoidStacks" | "ellipsoidSlices"
   >;
+  hoveredIndex: number | null;
+  onHoverChange: (index: number | null) => void;
   onFrameRendered: (timestamp: number) => void;
 }) {
   const components = useMemo<ComponentConfig[]>(() => {
@@ -403,9 +408,18 @@ function SceneBench({
         alpha: 1,
         half_size: dataset.halfSize,
         quaternion: [0, 0, 0, 1],
+        decorations:
+          hoveredIndex == null
+            ? undefined
+            : [
+                deco(hoveredIndex, {
+                  color: HOVER_ELLIPSOID_COLOR,
+                }),
+              ],
+        onHover: onHoverChange,
       }),
     ];
-  }, [dataset, frameIndex]);
+  }, [dataset, frameIndex, hoveredIndex, onHoverChange]);
 
   if (!dataset) {
     return (
@@ -450,6 +464,7 @@ function App() {
   const [frameIndex, setFrameIndex] = useState(0);
   const [playFps, setPlayFps] = useState(30);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
@@ -510,6 +525,7 @@ function App() {
       const requestId = ++previewRequestIdRef.current;
 
       setIsPlaying(false);
+      setHoveredIndex(null);
       setPreviewStatus("preparing");
       setPreviewError(null);
       setPreviewCount(count);
@@ -627,6 +643,10 @@ function App() {
     [queueMeasuredFrame],
   );
 
+  const handleHoverChange = useCallback((index: number | null) => {
+    setHoveredIndex(index);
+  }, []);
+
   const run = useCallback(
     async (partialOptions?: Partial<BenchOptions>) => {
       const options: BenchOptions = {
@@ -643,6 +663,7 @@ function App() {
       previewRequestIdRef.current += 1;
       const runId = activeRunIdRef.current;
       setIsPlaying(false);
+      setHoveredIndex(null);
       setPreviewStatus("idle");
       setPreviewError(null);
       setDataset(null);
@@ -816,6 +837,10 @@ function App() {
   }, [$state, run]);
 
   useEffect(() => {
+    setHoveredIndex(null);
+  }, [dataset?.count]);
+
+  useEffect(() => {
     if (!isPlaying || !dataset || benchmarkActive) {
       return;
     }
@@ -859,6 +884,8 @@ function App() {
             ellipsoidStacks,
             ellipsoidSlices,
           }}
+          hoveredIndex={hoveredIndex}
+          onHoverChange={handleHoverChange}
           onFrameRendered={handleFrameRendered}
         />
       </$StateContext.Provider>
@@ -869,8 +896,10 @@ function App() {
     ellipsoidSlices,
     ellipsoidStacks,
     frameIndex,
+    handleHoverChange,
     handleFrameRendered,
     height,
+    hoveredIndex,
     width,
   ]);
 
@@ -1068,6 +1097,9 @@ function App() {
           </div>
           {previewCount != null && (
             <div>Preview count: {previewCount.toLocaleString()}</div>
+          )}
+          {hoveredIndex != null && (
+            <div>Hovered ellipsoid: {hoveredIndex.toLocaleString()}</div>
           )}
           {activeTriangleCount != null && (
             <div>
