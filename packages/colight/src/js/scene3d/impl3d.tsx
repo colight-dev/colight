@@ -52,7 +52,18 @@ import {
   DynamicBuffers,
   RenderObjectCache,
   ComponentOffset,
+  Scene3DGeometryOptions,
+  resolveScene3DGeometryOptions,
 } from "./types";
+import {
+  buildDrawSlices,
+  createScene3DDebugProbe,
+  formatInstanceLimit,
+  parseScene3DDebugOptions,
+  serializeGpuLimits,
+  type Scene3DDebugProbe,
+  withGpuErrorScopes,
+} from "./debug";
 
 /**
  * Aligns a size or offset to 16 bytes, which is a common requirement for WebGPU buffers.
@@ -63,9 +74,19 @@ function align16(value: number): number {
   return Math.ceil(value / 16) * 16;
 }
 
+let scene3DDebugIdCounter = 0;
+
+function nextScene3DDebugId() {
+  scene3DDebugIdCounter += 1;
+  return `scene3d-${scene3DDebugIdCounter}`;
+}
+
 export interface SceneInnerProps {
   /** Array of 3D components to render in the scene */
   components: ComponentConfig[];
+
+  /** Optional geometry configuration applied when base meshes are created */
+  geometryOptions?: Partial<Scene3DGeometryOptions>;
 
   /** Width of the container in pixels */
   containerWidth: number;
@@ -95,12 +116,16 @@ export interface SceneInnerProps {
 function initGeometryResources(
   device: GPUDevice,
   resources: GeometryResources,
+  geometryOptions: Scene3DGeometryOptions,
 ) {
   // Create geometry for each primitive type
   for (const [primitiveName, spec] of Object.entries(primitiveRegistry)) {
     const typedName = primitiveName as keyof GeometryResources;
     if (!resources[typedName]) {
-      resources[typedName] = spec.createGeometryResource(device);
+      resources[typedName] = spec.createGeometryResource(
+        device,
+        geometryOptions,
+      );
     }
   }
 }
@@ -122,13 +147,9 @@ function ensurePickingData(
 
   const { pickingData, componentOffsets, spec, sortedPositions } = ro;
 
-  let dataOffset = 0;
   for (let i = 0; i < componentOffsets.length; i++) {
     const offset = componentOffsets[i];
     const component = components[offset.componentIdx];
-    const floatsPerInstance = spec.floatsPerPicking;
-    const componentFloats =
-      offset.elementCount * spec.instancesPerElement * floatsPerInstance;
     buildPickingData(
       component,
       spec,
@@ -137,8 +158,6 @@ function ensurePickingData(
       offset.elementStart,
       sortedPositions,
     );
-
-    dataOffset += componentFloats;
   }
 
   // Write picking data to GPU
@@ -227,56 +246,120 @@ async function renderPass({
   device,
   context,
   depthTexture,
+  pickTexture,
   renderObjects,
   uniformBindGroup,
+  debugProbe,
+  maxInstancesPerDraw,
 }: {
   device: GPUDevice;
   context: GPUCanvasContext;
   depthTexture: GPUTexture | null;
+  pickTexture: GPUTexture | null;
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
+  debugProbe?: Scene3DDebugProbe | null;
+  maxInstancesPerDraw: number;
 }) {
   try {
-    // Begin render pass
-    const cmd = device.createCommandEncoder();
-    const pass = cmd.beginRenderPass({
-      colorAttachments: [
-        {
-          view: context.getCurrentTexture().createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: "clear",
-          storeOp: "store",
-        },
-      ],
-      depthStencilAttachment: depthTexture
-        ? {
-            view: depthTexture.createView(),
-            depthClearValue: 1.0,
-            depthLoadOp: "clear",
-            depthStoreOp: "store",
+    return await withGpuErrorScopes(
+      device,
+      debugProbe,
+      "scene3d/render-pass",
+      {
+        renderObjectCount: renderObjects.length,
+        maxInstancesPerDraw: Number.isFinite(maxInstancesPerDraw)
+          ? maxInstancesPerDraw
+          : "unlimited",
+      },
+      async () => {
+        const cmd = device.createCommandEncoder({ label: "scene3d/render" });
+        const pass = cmd.beginRenderPass({
+          colorAttachments: [
+            {
+              view: context.getCurrentTexture().createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store",
+            },
+            {
+              view: pickTexture!.createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store",
+            },
+          ],
+          depthStencilAttachment: depthTexture
+            ? {
+                view: depthTexture.createView(),
+                depthClearValue: 1.0,
+                depthLoadOp: "clear",
+                depthStoreOp: "store",
+              }
+            : undefined,
+        });
+
+        for (const ro of renderObjects) {
+          const drawSlices = buildDrawSlices(
+            ro.instanceCount,
+            maxInstancesPerDraw,
+          );
+          if (debugProbe?.options.verbose) {
+            debugProbe.record("render-draw", `${ro.spec.type} render`, {
+              instanceCount: ro.instanceCount,
+              drawCalls: drawSlices.length,
+              indexCount: ro.indexCount,
+              firstInstance:
+                drawSlices.length > 1 ? drawSlices[0].firstInstance : 0,
+            });
           }
-        : undefined,
-    });
 
-    // Draw each object
-    for (const ro of renderObjects) {
-      pass.setPipeline(ro.pipeline);
-      pass.setBindGroup(0, uniformBindGroup);
-      pass.setVertexBuffer(0, ro.geometryBuffer);
-      pass.setVertexBuffer(
-        1,
-        ro.instanceBuffer.buffer,
-        ro.instanceBuffer.offset,
-      );
-      pass.setIndexBuffer(ro.indexBuffer, "uint16");
-      pass.drawIndexed(ro.indexCount, ro.instanceCount);
-    }
+          pass.setPipeline(ro.pipeline);
+          pass.setBindGroup(0, uniformBindGroup);
+          pass.setVertexBuffer(0, ro.geometryBuffer);
+          pass.setVertexBuffer(
+            1,
+            ro.instanceBuffer.buffer,
+            ro.instanceBuffer.offset,
+          );
+          pass.setVertexBuffer(
+            2,
+            ro.pickingInstanceBuffer.buffer,
+            ro.pickingInstanceBuffer.offset,
+          );
 
-    pass.end();
-    device.queue.submit([cmd.finish()]);
-    return device.queue.onSubmittedWorkDone();
+          if (ro.indexBuffer) {
+            pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat);
+            drawSlices.forEach((slice) => {
+              pass.drawIndexed(
+                ro.indexCount,
+                slice.instanceCount,
+                0,
+                0,
+                slice.firstInstance,
+              );
+            });
+          } else if (ro.vertexCount) {
+            drawSlices.forEach((slice) => {
+              pass.draw(
+                ro.vertexCount!,
+                slice.instanceCount,
+                0,
+                slice.firstInstance,
+              );
+            });
+          }
+        }
+
+        pass.end();
+        device.queue.submit([cmd.finish()]);
+        return await device.queue.onSubmittedWorkDone();
+      },
+    );
   } catch (err) {
     console.error(err);
+    debugProbe?.error("scene3d/render-pass", err);
+    throw err;
   }
 }
 
@@ -400,6 +483,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
 
 export function SceneInner({
   components,
+  geometryOptions,
   containerWidth,
   containerHeight,
   style,
@@ -410,6 +494,29 @@ export function SceneInner({
   onReady,
 }: SceneInnerProps) {
   const $state = useContext($StateContext);
+  const sceneDebugOptionsRef =
+    useRef<ReturnType<typeof parseScene3DDebugOptions>>();
+  if (!sceneDebugOptionsRef.current) {
+    sceneDebugOptionsRef.current = parseScene3DDebugOptions();
+  }
+
+  const sceneDebugRef = useRef<Scene3DDebugProbe>();
+  if (!sceneDebugRef.current) {
+    sceneDebugRef.current = createScene3DDebugProbe(
+      nextScene3DDebugId(),
+      sceneDebugOptionsRef.current,
+    );
+  }
+  const maxInstancesPerDraw = sceneDebugOptionsRef.current.maxInstancesPerDraw;
+  const resolvedGeometryOptions = useMemo(
+    () => resolveScene3DGeometryOptions(geometryOptions),
+    [
+      geometryOptions?.ellipsoidStacks,
+      geometryOptions?.ellipsoidSlices,
+      geometryOptions?.ellipsoidAxesMajorSegments,
+      geometryOptions?.ellipsoidAxesMinorSegments,
+    ],
+  );
 
   // We'll store references to the GPU + other stuff in a ref object
   const gpuRef = useRef<{
@@ -420,7 +527,6 @@ export function SceneInner({
     bindGroupLayout: GPUBindGroupLayout;
     depthTexture: GPUTexture | null;
     pickTexture: GPUTexture | null;
-    pickDepthTexture: GPUTexture | null;
     readbackBuffer: GPUBuffer;
 
     renderObjects: RenderObject[];
@@ -469,7 +575,9 @@ export function SceneInner({
   const renderToTexture = useCallback(
     async (targetTexture: GPUTexture, depthTexture: GPUTexture | null) => {
       if (!gpuRef.current) return;
-      const { device, uniformBindGroup, renderObjects } = gpuRef.current;
+      const { device, uniformBindGroup, renderObjects, pickTexture } =
+        gpuRef.current;
+      if (!pickTexture) return;
 
       // Reuse the existing renderPass function with a temporary context
       // that redirects rendering to our snapshot texture
@@ -481,11 +589,19 @@ export function SceneInner({
         device,
         context: tempContext,
         depthTexture: depthTexture || null,
+        pickTexture,
         renderObjects,
         uniformBindGroup,
+        debugProbe: sceneDebugRef.current,
+        maxInstancesPerDraw,
       });
     },
-    [containerWidth, containerHeight, activeCameraRef.current!],
+    [
+      containerWidth,
+      containerHeight,
+      activeCameraRef.current!,
+      maxInstancesPerDraw,
+    ],
   );
 
   const { canvasRef } = useCanvasSnapshot(
@@ -512,15 +628,38 @@ export function SceneInner({
     if (!canvasRef.current) return;
     if (!navigator.gpu) {
       console.error("[Debug] WebGPU not supported in this browser.");
+      sceneDebugRef.current.error(
+        "scene3d/init/no-webgpu",
+        new Error("navigator.gpu is not available"),
+      );
       return;
     }
     try {
       const adapter = await requestAdapterWithRetry();
+      if (isDisposedRef.current) return;
+      sceneDebugRef.current.snapshot(
+        "adapterLimits",
+        serializeGpuLimits(adapter.limits),
+      );
 
       const device = await adapter.requestDevice().catch((err) => {
         console.error("[Debug] Failed to create WebGPU device:", err);
+        sceneDebugRef.current.error("scene3d/init/request-device", err);
         throw err;
       });
+      if (isDisposedRef.current || !canvasRef.current) return;
+
+      sceneDebugRef.current.snapshot("device", {
+        maxInstancesPerDraw: Number.isFinite(maxInstancesPerDraw)
+          ? maxInstancesPerDraw
+          : null,
+        maxInstancesPerDrawLabel: formatInstanceLimit(maxInstancesPerDraw),
+        userAgent: sceneDebugOptionsRef.current.userAgent,
+      });
+      sceneDebugRef.current.snapshot(
+        "deviceLimits",
+        serializeGpuLimits(device.limits),
+      );
 
       // Add error handling for uncaptured errors
       device.addEventListener("uncapturederror", ((event: Event) => {
@@ -528,6 +667,9 @@ export function SceneInner({
           console.error("Uncaptured WebGPU error:", event.error);
           // Log additional context about where the error occurred
           console.error("Error source:", event.error.message);
+          sceneDebugRef.current.error("scene3d/uncapturederror", event.error, {
+            source: event.error.message,
+          });
         }
       }) as EventListener);
 
@@ -573,7 +715,6 @@ export function SceneInner({
         bindGroupLayout,
         depthTexture: null,
         pickTexture: null,
-        pickDepthTexture: null,
         readbackBuffer,
         renderObjects: [],
         pipelineCache: new Map(),
@@ -588,13 +729,26 @@ export function SceneInner({
       };
 
       // Now initialize geometry resources
-      initGeometryResources(device, gpuRef.current.resources);
+      sceneDebugRef.current.snapshot(
+        "geometryOptions",
+        resolvedGeometryOptions,
+      );
+      initGeometryResources(
+        device,
+        gpuRef.current.resources,
+        resolvedGeometryOptions,
+      );
+      sceneDebugRef.current.record("lifecycle", "scene3d initialized", {
+        canvasWidth: canvasRef.current.width,
+        canvasHeight: canvasRef.current.height,
+      });
 
       setIsReady(true);
     } catch (err) {
       console.error("[Debug] Error during WebGPU initialization:", err);
+      sceneDebugRef.current.error("scene3d/init", err);
     }
-  }, []);
+  }, [maxInstancesPerDraw]);
 
   /******************************************************
    * B) Depth & Pick textures
@@ -619,7 +773,7 @@ export function SceneInner({
 
   const createOrUpdatePickTextures = useCallback(() => {
     if (!gpuRef.current || !canvasRef.current) return;
-    const { device, pickTexture, pickDepthTexture } = gpuRef.current;
+    const { device, pickTexture } = gpuRef.current;
 
     // Get the actual canvas size
     const canvas = canvasRef.current;
@@ -627,20 +781,13 @@ export function SceneInner({
     const displayHeight = canvas.height;
 
     if (pickTexture) pickTexture.destroy();
-    if (pickDepthTexture) pickDepthTexture.destroy();
 
     const colorTex = device.createTexture({
       size: [displayWidth, displayHeight],
       format: "rgba8unorm",
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
     });
-    const depthTex = device.createTexture({
-      size: [displayWidth, displayHeight],
-      format: "depth24plus",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
     gpuRef.current.pickTexture = colorTex;
-    gpuRef.current.pickDepthTexture = depthTex;
   }, []);
 
   type ComponentType = ComponentConfig["type"];
@@ -752,6 +899,27 @@ export function SceneInner({
           Float32Array.BYTES_PER_ELEMENT,
       );
     });
+    const maxBufferSize =
+      device.limits?.maxBufferSize ?? Number.POSITIVE_INFINITY;
+
+    sceneDebugRef.current.snapshot("bufferPlan", {
+      componentCount: components.length,
+      totalRenderSize,
+      totalPickingSize,
+      maxBufferSize: Number.isFinite(maxBufferSize) ? maxBufferSize : null,
+    });
+
+    if (totalRenderSize > maxBufferSize || totalPickingSize > maxBufferSize) {
+      const error = new Error(
+        `scene3d dynamic buffers exceed device maxBufferSize (render=${totalRenderSize}, picking=${totalPickingSize}, limit=${maxBufferSize})`,
+      );
+      sceneDebugRef.current.error("scene3d/buffer-limit", error, {
+        totalRenderSize,
+        totalPickingSize,
+        maxBufferSize,
+      });
+      throw error;
+    }
 
     // Create or recreate dynamic buffers if needed
     if (
@@ -829,14 +997,6 @@ export function SceneInner({
         );
         if (!pipeline) return;
 
-        // Get picking pipeline
-        const pickingPipeline = spec.getPickingPipeline(
-          device,
-          bindGroupLayout,
-          pipelineCache,
-        );
-        if (!pickingPipeline) return;
-
         // Build component offsets for this type's components
         const typeComponentOffsets: ComponentOffset[] = [];
         let typeStartIndex = globalStartIndex;
@@ -876,10 +1036,10 @@ export function SceneInner({
           const geometryResource = getGeometryResource(resources, type);
           renderObject = {
             pipeline,
-            pickingPipeline,
             geometryBuffer: geometryResource.vb,
             instanceBuffer: bufferInfo,
             indexBuffer: geometryResource.ib,
+            indexFormat: geometryResource.indexFormat,
             indexCount: geometryResource.indexCount,
             instanceCount: totalInstanceCount,
             vertexCount: geometryResource.vertexCount,
@@ -898,6 +1058,9 @@ export function SceneInner({
           // Update existing render object with new buffer info and state
           renderObject.instanceBuffer = bufferInfo;
           renderObject.pickingInstanceBuffer = pickingBufferInfo;
+          renderObject.indexFormat = geometryResource.indexFormat;
+          renderObject.indexCount = geometryResource.indexCount;
+          renderObject.vertexCount = geometryResource.vertexCount;
           renderObject.instanceCount = totalInstanceCount;
           renderObject.componentIndex = info.indices[0];
           renderObject.componentOffsets = typeComponentOffsets;
@@ -925,8 +1088,29 @@ export function SceneInner({
           );
       } catch (error) {
         console.error(`Error creating render object for type ${type}:`, error);
+        sceneDebugRef.current.error("scene3d/build-render-object", error, {
+          type,
+        });
       }
     });
+
+    sceneDebugRef.current.snapshot(
+      "renderObjects",
+      validRenderObjects.map((renderObject) => ({
+        type: renderObject.spec.type,
+        instanceCount: renderObject.instanceCount,
+        indexCount: renderObject.indexCount,
+        vertexCount: renderObject.vertexCount,
+        renderOffset: renderObject.instanceBuffer.offset,
+        renderBytes: renderObject.renderData.byteLength,
+        pickingOffset: renderObject.pickingInstanceBuffer.offset,
+        pickingBytes: renderObject.pickingData.byteLength,
+        drawCalls: buildDrawSlices(
+          renderObject.instanceCount,
+          maxInstancesPerDraw,
+        ).length,
+      })),
+    );
 
     return validRenderObjects;
   }
@@ -936,6 +1120,16 @@ export function SceneInner({
    ******************************************************/
 
   const pendingAnimationFrameRef = useRef<number | null>(null);
+  const renderInFlightRef = useRef(false);
+  const isDisposedRef = useRef(false);
+  const latestComponentsRef = useRef<ComponentConfig[]>(components);
+  const pendingRenderRequestRef = useRef<{
+    label: string;
+    camState?: CameraState;
+    components?: ComponentConfig[];
+  } | null>(null);
+
+  latestComponentsRef.current = components;
 
   const renderFrame = useCallback(
     async function renderFrameInner(
@@ -943,11 +1137,7 @@ export function SceneInner({
       camState?: CameraState,
       components?: ComponentConfig[],
     ) {
-      if (pendingAnimationFrameRef.current) {
-        cancelAnimationFrame(pendingAnimationFrameRef.current);
-        pendingAnimationFrameRef.current = null;
-      }
-      if (!gpuRef.current) return;
+      if (!gpuRef.current || isDisposedRef.current) return;
 
       camState = camState || activeCameraRef.current!;
 
@@ -969,7 +1159,9 @@ export function SceneInner({
         uniformBindGroup,
         renderObjects,
         depthTexture,
+        pickTexture,
       } = gpuRef.current;
+      if (!pickTexture) return;
 
       const cameraMoved = hasCameraMoved(
         camState.position,
@@ -1017,6 +1209,8 @@ export function SceneInner({
           renderData.byteOffset,
           renderData.byteLength,
         );
+
+        ensurePickingData(device, components!, ro);
       });
 
       const uniformData = computeUniformData(
@@ -1025,34 +1219,96 @@ export function SceneInner({
         camState,
       );
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+      sceneDebugRef.current.snapshot("lastRenderRequest", {
+        source,
+        componentCount: components?.length ?? 0,
+        cameraPosition: Array.from(camState.position),
+        drawLimit: formatInstanceLimit(maxInstancesPerDraw),
+      });
 
       try {
         await renderPass({
           device,
           context,
           depthTexture,
+          pickTexture,
           renderObjects,
           uniformBindGroup,
+          debugProbe: sceneDebugRef.current,
+          maxInstancesPerDraw,
         });
         onRenderComplete();
       } catch (err) {
         console.error("[Debug] Error during renderPass:", err.message);
+        sceneDebugRef.current.error("scene3d/render-frame", err, { source });
         onRenderComplete();
       }
 
+      if (isDisposedRef.current) return;
       onFrameRendered?.(performance.now());
       onReady();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [
+      containerWidth,
+      containerHeight,
+      maxInstancesPerDraw,
+      onFrameRendered,
+      components,
+    ],
   );
 
-  function requestRender(label: string) {
-    if (!pendingAnimationFrameRef.current) {
-      pendingAnimationFrameRef.current = requestAnimationFrame((t) =>
-        renderFrame(label),
-      );
+  const flushPendingRender = useCallback(() => {
+    if (isDisposedRef.current) return;
+    if (pendingAnimationFrameRef.current || renderInFlightRef.current) {
+      return;
     }
-  }
+
+    pendingAnimationFrameRef.current = requestAnimationFrame(() => {
+      pendingAnimationFrameRef.current = null;
+      if (isDisposedRef.current) return;
+
+      if (renderInFlightRef.current) {
+        flushPendingRender();
+        return;
+      }
+
+      const request = pendingRenderRequestRef.current;
+      if (!request) return;
+
+      pendingRenderRequestRef.current = null;
+      renderInFlightRef.current = true;
+
+      void renderFrame(
+        request.label,
+        request.camState,
+        request.components,
+      ).finally(() => {
+        renderInFlightRef.current = false;
+        if (!isDisposedRef.current && pendingRenderRequestRef.current) {
+          flushPendingRender();
+        }
+      });
+    });
+  }, [renderFrame]);
+
+  const requestRender = useCallback(
+    (
+      label: string,
+      camState: CameraState | undefined = activeCameraRef.current || undefined,
+      nextComponents:
+        | ComponentConfig[]
+        | undefined = latestComponentsRef.current,
+    ) => {
+      if (isDisposedRef.current) return;
+      pendingRenderRequestRef.current = {
+        label,
+        camState,
+        components: nextComponents,
+      };
+      flushPendingRender();
+    },
+    [flushPendingRender],
+  );
 
   /******************************************************
    * D) Pick pass (on hover/click)
@@ -1063,29 +1319,11 @@ export function SceneInner({
     mode: "hover" | "click",
   ) {
     if (!gpuRef.current || !canvasRef.current || pickingLockRef.current) return;
-    const pickingId = Date.now();
-    const currentPickingId = pickingId;
     pickingLockRef.current = true;
 
     try {
-      const {
-        device,
-        pickTexture,
-        pickDepthTexture,
-        readbackBuffer,
-        uniformBindGroup,
-        renderObjects,
-      } = gpuRef.current;
-      if (!pickTexture || !pickDepthTexture || !readbackBuffer) return;
-
-      // Ensure picking data is ready for all objects
-      for (let i = 0; i < renderObjects.length; i++) {
-        ensurePickingData(
-          gpuRef.current.device,
-          gpuRef.current.renderedComponents!,
-          renderObjects[i],
-        );
-      }
+      const { device, pickTexture, readbackBuffer } = gpuRef.current;
+      if (!pickTexture || !readbackBuffer) return;
 
       // Convert screen coordinates to device pixels
       const dpr = window.devicePixelRatio || 1;
@@ -1104,60 +1342,35 @@ export function SceneInner({
         return;
       }
 
-      const cmd = device.createCommandEncoder({ label: "Picking encoder" });
-      const passDesc: GPURenderPassDescriptor = {
-        colorAttachments: [
-          {
-            view: pickTexture.createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store",
-          },
-        ],
-        depthStencilAttachment: {
-          view: pickDepthTexture.createView(),
-          depthClearValue: 1.0,
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
+      sceneDebugRef.current.snapshot("lastPickRequest", {
+        mode,
+        pickX,
+        pickY,
+        maxInstancesPerDraw: formatInstanceLimit(maxInstancesPerDraw),
+      });
+
+      await withGpuErrorScopes(
+        device,
+        sceneDebugRef.current,
+        "scene3d/pick-readback",
+        {
+          mode,
         },
-      };
-      const pass = cmd.beginRenderPass(passDesc);
-      pass.setBindGroup(0, uniformBindGroup);
-
-      for (const ro of renderObjects) {
-        pass.setPipeline(ro.pickingPipeline);
-        pass.setBindGroup(0, uniformBindGroup);
-        pass.setVertexBuffer(0, ro.geometryBuffer);
-        pass.setVertexBuffer(
-          1,
-          ro.pickingInstanceBuffer.buffer,
-          ro.pickingInstanceBuffer.offset,
-        );
-
-        // Draw with indices if we have them, otherwise use vertex count
-        if (ro.indexBuffer) {
-          pass.setIndexBuffer(ro.indexBuffer, "uint16");
-          pass.drawIndexed(ro.indexCount, ro.instanceCount);
-        } else if (ro.vertexCount) {
-          pass.draw(ro.vertexCount, ro.instanceCount);
-        }
-      }
-
-      pass.end();
-
-      cmd.copyTextureToBuffer(
-        { texture: pickTexture, origin: { x: pickX, y: pickY } },
-        { buffer: readbackBuffer, bytesPerRow: 256, rowsPerImage: 1 },
-        [1, 1, 1],
+        async () => {
+          const cmd = device.createCommandEncoder({
+            label: "Picking readback",
+          });
+          cmd.copyTextureToBuffer(
+            { texture: pickTexture, origin: { x: pickX, y: pickY } },
+            { buffer: readbackBuffer, bytesPerRow: 256, rowsPerImage: 1 },
+            [1, 1, 1],
+          );
+          device.queue.submit([cmd.finish()]);
+        },
       );
-      device.queue.submit([cmd.finish()]);
 
-      if (currentPickingId !== pickingId) return;
+      await device.queue.onSubmittedWorkDone();
       await readbackBuffer.mapAsync(GPUMapMode.READ);
-      if (currentPickingId !== pickingId) {
-        readbackBuffer.unmap();
-        return;
-      }
       const arr = new Uint8Array(readbackBuffer.getMappedRange());
       const r = arr[0],
         g = arr[1],
@@ -1170,6 +1383,9 @@ export function SceneInner({
       } else {
         handleClickID(pickedID);
       }
+    } catch (error) {
+      sceneDebugRef.current.error("scene3d/pick", error, { mode });
+      throw error;
     } finally {
       pickingLockRef.current = false;
     }
@@ -1403,12 +1619,35 @@ export function SceneInner({
    ******************************************************/
   // Init once
   useEffect(() => {
+    isDisposedRef.current = false;
     initWebGPU();
     return () => {
+      isDisposedRef.current = true;
+      if (pendingAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(pendingAnimationFrameRef.current);
+        pendingAnimationFrameRef.current = null;
+      }
+      pendingRenderRequestRef.current = null;
+      renderInFlightRef.current = false;
+      pickingLockRef.current = false;
+      sceneDebugRef.current.record("lifecycle", "scene3d dispose");
       if (gpuRef.current) {
-        const { device, resources, pipelineCache } = gpuRef.current;
+        const {
+          device,
+          resources,
+          pipelineCache,
+          dynamicBuffers,
+          depthTexture,
+          pickTexture,
+          readbackBuffer,
+        } = gpuRef.current;
 
         device.queue.onSubmittedWorkDone().then(() => {
+          depthTexture?.destroy();
+          pickTexture?.destroy();
+          readbackBuffer.destroy();
+          dynamicBuffers?.renderBuffer.destroy();
+          dynamicBuffers?.pickingBuffer.destroy();
           for (const resource of Object.values(resources)) {
             if (resource) {
               resource.vb.destroy();
@@ -1420,6 +1659,7 @@ export function SceneInner({
           pipelineCache.clear();
         });
       }
+      sceneDebugRef.current.dispose();
     };
   }, [initWebGPU]);
 
@@ -1450,6 +1690,13 @@ export function SceneInner({
     if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
       canvas.width = displayWidth;
       canvas.height = displayHeight;
+      sceneDebugRef.current.snapshot("canvas", {
+        cssWidth: containerWidth,
+        cssHeight: containerHeight,
+        pixelWidth: displayWidth,
+        pixelHeight: displayHeight,
+        devicePixelRatio: dpr,
+      });
 
       // Update textures after canvas size change
       createOrUpdateDepthTexture();
@@ -1461,7 +1708,7 @@ export function SceneInner({
     containerHeight,
     createOrUpdateDepthTexture,
     createOrUpdatePickTextures,
-    renderFrame,
+    requestRender,
   ]);
 
   // Render when camera or components change
@@ -1473,7 +1720,11 @@ export function SceneInner({
           gpuRef.current.renderedComponents,
         )
       ) {
-        renderFrame("components changed", activeCameraRef.current!, components);
+        requestRender(
+          "components changed",
+          activeCameraRef.current || undefined,
+          components,
+        );
       } else if (
         !deepEqualModuloTypedArrays(
           activeCameraRef.current,
@@ -1483,7 +1734,7 @@ export function SceneInner({
         requestRender("camera changed");
       }
     }
-  }, [isReady, components, activeCameraRef.current]);
+  }, [isReady, components, requestRender, activeCameraRef.current]);
 
   // Wheel handling
   useEffect(() => {

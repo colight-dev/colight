@@ -67,373 +67,6 @@ fn calculateLighting(baseColor: vec3<f32>, normal: vec3<f32>, worldPos: vec3<f32
   return color;
 }`;
 
-// Standardize VSOut struct for regular rendering
-const standardVSOut = /*wgsl*/ `
-struct VSOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) color: vec3<f32>,
-  @location(1) alpha: f32,
-  @location(2) worldPos: vec3<f32>,
-  @location(3) normal: vec3<f32>
-};`;
-
-// Standardize VSOut struct for picking
-export const pickingVSOut = /*wgsl*/ `
-struct VSOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
-};`;
-
-export const billboardVertCode = /*wgsl*/ `
-${cameraStruct}
-${standardVSOut}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: f32,
-  @location(4) color: vec3<f32>,
-  @location(5) alpha: f32
-)-> VSOut {
-  // Create camera-facing orientation
-  let right = camera.cameraRight;
-  let up = camera.cameraUp;
-
-  // Transform quad vertices to world space
-  let scaledRight = right * (localPos.x * size);
-  let scaledUp = up * (localPos.y * size);
-  let worldPos = position + scaledRight + scaledUp;
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.color = color;
-  out.alpha = alpha;
-  out.worldPos = worldPos;
-  out.normal = normal;
-  return out;
-}`;
-
-export const billboardPickingVertCode = /*wgsl*/ `
-${cameraStruct}
-${pickingVSOut}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: f32,
-  @location(4) pickID: f32
-)-> VSOut {
-  // Create camera-facing orientation
-  let right = camera.cameraRight;
-  let up = camera.cameraUp;
-
-  // Transform quad vertices to world space
-  let scaledRight = right * (localPos.x * size);
-  let scaledUp = up * (localPos.y * size);
-  let worldPos = position + scaledRight + scaledUp;
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;
-  return out;
-}`;
-
-export const billboardFragCode = /*wgsl*/ `
-@fragment
-fn fs_main(
-  @location(0) color: vec3<f32>,
-  @location(1) alpha: f32,
-  @location(2) worldPos: vec3<f32>,
-  @location(3) normal: vec3<f32>
-)-> @location(0) vec4<f32> {
-  return vec4<f32>(color, alpha);
-}`;
-
-export const ellipsoidVertCode = /*wgsl*/ `
-${cameraStruct}
-${standardVSOut}
-${quaternionShaderFunctions}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: vec3<f32>,
-  @location(4) quaternion: vec4<f32>,
-  @location(5) color: vec3<f32>,
-  @location(6) alpha: f32
-)-> VSOut {
-  // Scale local position
-  let scaledLocal = localPos * size;
-
-  // Apply rotation using quaternion
-  let rotatedPos = quat_rotate(quaternion, scaledLocal);
-
-  // Apply translation
-  let worldPos = position + rotatedPos;
-
-  // Transform normal - first normalize by size, then rotate by quaternion
-  let invScaledNorm = normalize(normal / size);
-  let rotatedNorm = quat_rotate(quaternion, invScaledNorm);
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.color = color;
-  out.alpha = alpha;
-  out.worldPos = worldPos;
-  out.normal = rotatedNorm;
-  return out;
-}`;
-
-export const ellipsoidPickingVertCode = /*wgsl*/ `
-${cameraStruct}
-${pickingVSOut}
-${quaternionShaderFunctions}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: vec3<f32>,
-  @location(4) quaternion: vec4<f32>,
-  @location(5) pickID: f32
-)-> VSOut {
-  // Scale local position
-  let scaledLocal = localPos * size;
-
-  // Apply rotation using quaternion
-  let rotatedPos = quat_rotate(quaternion, scaledLocal);
-
-  // Apply translation
-  let worldPos = position + rotatedPos;
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;
-  return out;
-}`;
-
-export const ellipsoidFragCode = /*wgsl*/ `
-${cameraStruct}
-${lightingConstants}
-${lightingCalc}
-
-@fragment
-fn fs_main(
-  @location(0) color: vec3<f32>,
-  @location(1) alpha: f32,
-  @location(2) worldPos: vec3<f32>,
-  @location(3) normal: vec3<f32>
-)-> @location(0) vec4<f32> {
-  let litColor = calculateLighting(color, normal, worldPos);
-  return vec4<f32>(litColor, alpha);
-}`;
-
-export const cuboidVertCode = /*wgsl*/ `
-${cameraStruct}
-${standardVSOut}
-${quaternionShaderFunctions}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: vec3<f32>,
-  @location(4) quaternion: vec4<f32>,
-  @location(5) color: vec3<f32>,
-  @location(6) alpha: f32
-)-> VSOut {
-  // Scale local position
-  let scaledLocal = localPos * size;
-
-  // Apply rotation using quaternion
-  let rotatedPos = quat_rotate(quaternion, scaledLocal);
-
-  // Apply translation
-  let worldPos = position + rotatedPos;
-
-  // Transform normal - first normalize by size, then rotate by quaternion
-  let invScaledNorm = normalize(normal / size);
-  let rotatedNorm = quat_rotate(quaternion, invScaledNorm);
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.color = color;
-  out.alpha = alpha;
-  out.worldPos = worldPos;
-  out.normal = rotatedNorm;
-  return out;
-}`;
-
-export const cuboidPickingVertCode = /*wgsl*/ `
-${cameraStruct}
-${pickingVSOut}
-${quaternionShaderFunctions}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) position: vec3<f32>,
-  @location(3) size: vec3<f32>,
-  @location(4) quaternion: vec4<f32>,
-  @location(5) pickID: f32
-)-> VSOut {
-  // Scale local position
-  let scaledLocal = localPos * size;
-
-  // Apply rotation using quaternion
-  let rotatedPos = quat_rotate(quaternion, scaledLocal);
-
-  // Apply translation
-  let worldPos = position + rotatedPos;
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;
-  return out;
-}`;
-
-export const cuboidFragCode = /*wgsl*/ `
-${cameraStruct}
-${lightingConstants}
-${lightingCalc}
-
-@fragment
-fn fs_main(
-  @location(0) color: vec3<f32>,
-  @location(1) alpha: f32,
-  @location(2) worldPos: vec3<f32>,
-  @location(3) normal: vec3<f32>
-)-> @location(0) vec4<f32> {
-  let litColor = calculateLighting(color, normal, worldPos);
-  return vec4<f32>(litColor, alpha);
-}`;
-
-export const lineBeamVertCode = /*wgsl*/ `
-${cameraStruct}
-${standardVSOut}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) startPos: vec3<f32>,
-  @location(3) endPos: vec3<f32>,
-  @location(4) size: f32,
-  @location(5) color: vec3<f32>,
-  @location(6) alpha: f32
-)-> VSOut {
-  let segDir = endPos - startPos;
-  let length = max(length(segDir), 0.000001);
-  let zDir = normalize(segDir);
-
-  // Build basis vectors
-  var tempUp = vec3<f32>(0,0,1);
-  if (abs(dot(zDir, tempUp)) > 0.99) {
-    tempUp = vec3<f32>(0,1,0);
-  }
-  let xDir = normalize(cross(zDir, tempUp));
-  let yDir = cross(zDir, xDir);
-
-  // Transform to world space
-  let localX = localPos.x * size;
-  let localY = localPos.y * size;
-  let localZ = localPos.z * length;
-  let worldPos = startPos
-    + xDir * localX
-    + yDir * localY
-    + zDir * localZ;
-
-  // Transform normal to world space
-  let worldNorm = normalize(
-    xDir * normal.x +
-    yDir * normal.y +
-    zDir * normal.z
-  );
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.color = color;
-  out.alpha = alpha;
-  out.worldPos = worldPos;
-  out.normal = worldNorm;
-  return out;
-}`;
-
-export const lineBeamFragCode = /*wgsl*/ `
-${cameraStruct}
-${lightingConstants}
-${lightingCalc}
-
-@fragment
-fn fs_main(
-  @location(0) color: vec3<f32>,
-  @location(1) alpha: f32,
-  @location(2) worldPos: vec3<f32>,
-  @location(3) normal: vec3<f32>
-)-> @location(0) vec4<f32> {
-  let litColor = calculateLighting(color, normal, worldPos);
-  return vec4<f32>(litColor, alpha);
-}`;
-
-export const lineBeamPickingVertCode = /*wgsl*/ `
-${cameraStruct}
-${pickingVSOut}
-
-@vertex
-fn vs_main(
-  @location(0) localPos: vec3<f32>,
-  @location(1) normal: vec3<f32>,
-  @location(2) startPos: vec3<f32>,
-  @location(3) endPos: vec3<f32>,
-  @location(4) size: f32,
-  @location(5) pickID: f32
-)-> VSOut {
-  let segDir = endPos - startPos;
-  let length = max(length(segDir), 0.000001);
-  let zDir = normalize(segDir);
-
-  // Build basis vectors
-  var tempUp = vec3<f32>(0,0,1);
-  if (abs(dot(zDir, tempUp)) > 0.99) {
-    tempUp = vec3<f32>(0,1,0);
-  }
-  let xDir = normalize(cross(zDir, tempUp));
-  let yDir = cross(zDir, xDir);
-
-  // Transform to world space
-  let localX = localPos.x * size;
-  let localY = localPos.y * size;
-  let localZ = localPos.z * length;
-  let worldPos = startPos
-    + xDir * localX
-    + yDir * localY
-    + zDir * localZ;
-
-  var out: VSOut;
-  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;
-  return out;
-}`;
-
-export const pickingFragCode = /*wgsl*/ `
-@fragment
-fn fs_pick(@location(0) pickID: f32)-> @location(0) vec4<f32> {
-  let iID = u32(pickID);
-  let r = f32(iID & 255u)/255.0;
-  let g = f32((iID>>8)&255u)/255.0;
-  let b = f32((iID>>16)&255u)/255.0;
-  return vec4<f32>(r,g,b,1.0);
-}`;
-
 // Helper function to create vertex buffer layouts
 export function createVertexBufferLayout(
   attributes: Array<[number, GPUVertexFormat]>,
@@ -464,95 +97,431 @@ export function createVertexBufferLayout(
   };
 }
 
+export type ShaderFieldType = "f32" | "vec2" | "vec3" | "vec4";
+
+export interface ShaderFieldDefinition {
+  name: string;
+  type: ShaderFieldType;
+}
+
+export type PrimitiveShadingModel = "unlit" | "lit";
+
+export type PrimitiveTransformSpec =
+  | {
+      kind: "billboard";
+      position: string;
+      size: string;
+      geometryPosition?: string;
+      geometryNormal?: string;
+    }
+  | {
+      kind: "rigid";
+      position: string;
+      size: string;
+      quaternion: string;
+      geometryPosition?: string;
+      geometryNormal?: string;
+    }
+  | {
+      kind: "beam";
+      start: string;
+      end: string;
+      size: string;
+      geometryPosition?: string;
+      geometryNormal?: string;
+    };
+
+export interface PrimitiveShaderDefinition {
+  geometryLayout: VertexBufferLayout;
+  renderFields: ShaderFieldDefinition[];
+  transform: PrimitiveTransformSpec;
+  shading: PrimitiveShadingModel;
+  instanceLocationStart?: number;
+}
+
+export interface GeneratedPrimitiveShaderProgram {
+  geometryLayout: VertexBufferLayout;
+  renderLayout: VertexBufferLayout;
+  pickIDLayout: VertexBufferLayout;
+  renderVertex: string;
+  fragment: string;
+  renderFloatsPerInstance: number;
+  pickIDFloatsPerInstance: number;
+  colorOffset: number;
+  alphaOffset: number;
+}
+
+const SHADER_FIELD_INFO: Record<
+  ShaderFieldType,
+  { format: GPUVertexFormat; wgslType: string; floats: number }
+> = {
+  f32: { format: "float32", wgslType: "f32", floats: 1 },
+  vec2: { format: "float32x2", wgslType: "vec2<f32>", floats: 2 },
+  vec3: { format: "float32x3", wgslType: "vec3<f32>", floats: 3 },
+  vec4: { format: "float32x4", wgslType: "vec4<f32>", floats: 4 },
+};
+
+function createRenderVSOut(shading: PrimitiveShadingModel): string {
+  if (shading === "lit") {
+    return /*wgsl*/ `
+struct VSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec3<f32>,
+  @location(1) alpha: f32,
+  @location(2) worldPos: vec3<f32>,
+  @location(3) normal: vec3<f32>,
+  @location(4) pickID: f32
+};`;
+  }
+
+  return /*wgsl*/ `
+struct VSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec3<f32>,
+  @location(1) alpha: f32,
+  @location(2) pickID: f32
+};`;
+}
+
+export const pickingEncoding = /*wgsl*/ `
+fn encodePickID(pickID: f32) -> vec4<f32> {
+  let iID = u32(pickID);
+  let r = f32(iID & 255u) / 255.0;
+  let g = f32((iID >> 8u) & 255u) / 255.0;
+  let b = f32((iID >> 16u) & 255u) / 255.0;
+  return vec4<f32>(r, g, b, 1.0);
+}
+
+struct FSOut {
+  @location(0) color: vec4<f32>,
+  @location(1) pick: vec4<f32>
+};`;
+
+function createFragmentShader(shading: PrimitiveShadingModel): string {
+  if (shading === "lit") {
+    return /*wgsl*/ `
+${cameraStruct}
+${lightingConstants}
+${lightingCalc}
+${pickingEncoding}
+
+@fragment
+fn fs_main(
+  @location(0) color: vec3<f32>,
+  @location(1) alpha: f32,
+  @location(2) worldPos: vec3<f32>,
+  @location(3) normal: vec3<f32>,
+  @location(4) pickID: f32
+)-> FSOut {
+  let litColor = calculateLighting(color, normal, worldPos);
+  var out: FSOut;
+  out.color = vec4<f32>(litColor, alpha);
+  out.pick = encodePickID(pickID);
+  return out;
+}`;
+  }
+
+  return /*wgsl*/ `
+${pickingEncoding}
+
+@fragment
+fn fs_main(
+  @location(0) color: vec3<f32>,
+  @location(1) alpha: f32,
+  @location(2) pickID: f32
+)-> FSOut {
+  var out: FSOut;
+  out.color = vec4<f32>(color, alpha);
+  out.pick = encodePickID(pickID);
+  return out;
+}`;
+}
+
+function createVertexBufferLayoutFromFields(
+  fields: ShaderFieldDefinition[],
+  startLocation: number,
+  stepMode: GPUVertexStepMode = "instance",
+): VertexBufferLayout {
+  return createVertexBufferLayout(
+    fields.map((field, index) => [
+      startLocation + index,
+      SHADER_FIELD_INFO[field.type].format,
+    ]),
+    stepMode,
+  );
+}
+
+function countFloats(fields: ShaderFieldDefinition[]): number {
+  return fields.reduce(
+    (sum, field) => sum + SHADER_FIELD_INFO[field.type].floats,
+    0,
+  );
+}
+
+function findFieldOffset(
+  fields: ShaderFieldDefinition[],
+  name: string,
+): number {
+  let offset = 0;
+  for (const field of fields) {
+    if (field.name === name) {
+      return offset;
+    }
+    offset += SHADER_FIELD_INFO[field.type].floats;
+  }
+  throw new Error(`scene3d: shader field "${name}" is required`);
+}
+
+function findField(
+  fields: ShaderFieldDefinition[],
+  name: string,
+): ShaderFieldDefinition {
+  const field = fields.find((candidate) => candidate.name === name);
+  if (!field) {
+    throw new Error(`scene3d: shader field "${name}" is required`);
+  }
+  return field;
+}
+
+function buildFieldParameters(
+  fields: ShaderFieldDefinition[],
+  startLocation: number,
+): string[] {
+  return fields.map(
+    (field, index) =>
+      `@location(${startLocation + index}) ${field.name}: ${SHADER_FIELD_INFO[field.type].wgslType}`,
+  );
+}
+
+function buildTransformCode(
+  transform: PrimitiveTransformSpec,
+  includeNormal: boolean,
+): { helpers: string; code: string } {
+  const geometryPosition = transform.geometryPosition ?? "localPos";
+  const geometryNormal = transform.geometryNormal ?? "normal";
+
+  switch (transform.kind) {
+    case "billboard":
+      return {
+        helpers: "",
+        code: /*wgsl*/ `
+  let right = camera.cameraRight;
+  let up = camera.cameraUp;
+  let scaledRight = right * (${geometryPosition}.x * ${transform.size});
+  let scaledUp = up * (${geometryPosition}.y * ${transform.size});
+  let worldPos = ${transform.position} + scaledRight + scaledUp;
+${includeNormal ? `  let worldNormal = ${geometryNormal};` : ""}`,
+      };
+
+    case "rigid":
+      return {
+        helpers: quaternionShaderFunctions,
+        code: /*wgsl*/ `
+  let scaledLocal = ${geometryPosition} * ${transform.size};
+  let rotatedPos = quat_rotate(${transform.quaternion}, scaledLocal);
+  let worldPos = ${transform.position} + rotatedPos;
+${
+  includeNormal
+    ? `  let invScaledNorm = normalize(${geometryNormal} / ${transform.size});
+  let worldNormal = quat_rotate(${transform.quaternion}, invScaledNorm);`
+    : ""
+}`,
+      };
+
+    case "beam":
+      return {
+        helpers: "",
+        code: /*wgsl*/ `
+  let segDir = ${transform.end} - ${transform.start};
+  let segmentLength = max(length(segDir), 0.000001);
+  let zDir = normalize(segDir);
+
+  var tempUp = vec3<f32>(0.0, 0.0, 1.0);
+  if (abs(dot(zDir, tempUp)) > 0.99) {
+    tempUp = vec3<f32>(0.0, 1.0, 0.0);
+  }
+  let xDir = normalize(cross(zDir, tempUp));
+  let yDir = cross(zDir, xDir);
+
+  let localX = ${geometryPosition}.x * ${transform.size};
+  let localY = ${geometryPosition}.y * ${transform.size};
+  let localZ = ${geometryPosition}.z * segmentLength;
+  let worldPos = ${transform.start}
+    + xDir * localX
+    + yDir * localY
+    + zDir * localZ;
+${
+  includeNormal
+    ? `  let worldNormal = normalize(
+    xDir * ${geometryNormal}.x +
+    yDir * ${geometryNormal}.y +
+    zDir * ${geometryNormal}.z
+  );`
+    : ""
+}`,
+      };
+  }
+}
+
+function buildRenderVertexShader(
+  definition: PrimitiveShaderDefinition,
+): string {
+  const geometryPosition = definition.transform.geometryPosition ?? "localPos";
+  const geometryNormal = definition.transform.geometryNormal ?? "normal";
+  const instanceLocationStart = definition.instanceLocationStart ?? 2;
+  const pickIDLocation = instanceLocationStart + definition.renderFields.length;
+  const parameters = [
+    `@location(0) ${geometryPosition}: vec3<f32>`,
+    `@location(1) ${geometryNormal}: vec3<f32>`,
+    ...buildFieldParameters(definition.renderFields, instanceLocationStart),
+    `@location(${pickIDLocation}) pickID: f32`,
+  ].join(",\n  ");
+  const transform = buildTransformCode(
+    definition.transform,
+    definition.shading === "lit",
+  );
+  const colorField = findField(definition.renderFields, "color");
+  const alphaField = findField(definition.renderFields, "alpha");
+  const lightingAssignments =
+    definition.shading === "lit"
+      ? `
+  out.worldPos = worldPos;
+  out.normal = worldNormal;`
+      : "";
+
+  return /*wgsl*/ `
+${cameraStruct}
+${createRenderVSOut(definition.shading)}
+${transform.helpers}
+
+@vertex
+fn vs_main(
+  ${parameters}
+)-> VSOut {
+${transform.code}
+
+  var out: VSOut;
+  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
+  out.color = ${colorField.name};
+  out.alpha = ${alphaField.name};
+  out.pickID = pickID;${lightingAssignments}
+  return out;
+}`;
+}
+
+export function generatePrimitiveShaderProgram(
+  definition: PrimitiveShaderDefinition,
+): GeneratedPrimitiveShaderProgram {
+  const instanceLocationStart = definition.instanceLocationStart ?? 2;
+  const renderLayout = createVertexBufferLayoutFromFields(
+    definition.renderFields,
+    instanceLocationStart,
+  );
+  const pickIDLayout = createVertexBufferLayout(
+    [[instanceLocationStart + definition.renderFields.length, "float32"]],
+    "instance",
+  );
+
+  return {
+    geometryLayout: definition.geometryLayout,
+    renderLayout,
+    pickIDLayout,
+    renderVertex: buildRenderVertexShader(definition),
+    fragment: createFragmentShader(definition.shading),
+    renderFloatsPerInstance: countFloats(definition.renderFields),
+    pickIDFloatsPerInstance: 1,
+    colorOffset: findFieldOffset(definition.renderFields, "color"),
+    alphaOffset: findFieldOffset(definition.renderFields, "alpha"),
+  };
+}
+
 // Common vertex buffer layouts
 export const POINT_CLOUD_GEOMETRY_LAYOUT = createVertexBufferLayout([
-  [0, "float32x3"], // center
-  [1, "float32x3"], // normal
+  [0, "float32x3"],
+  [1, "float32x3"],
 ]);
-
-export const POINT_CLOUD_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // center
-    [3, "float32"], // size
-    [4, "float32x3"], // color
-    [5, "float32"], // alpha
-  ],
-  "instance",
-);
-
-export const POINT_CLOUD_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // center
-    [3, "float32"], // size
-    [4, "float32"], // pickID
-  ],
-  "instance",
-);
 
 export const MESH_GEOMETRY_LAYOUT = createVertexBufferLayout([
-  [0, "float32x3"], // position
-  [1, "float32x3"], // normal
+  [0, "float32x3"],
+  [1, "float32x3"],
 ]);
 
-export const ELLIPSOID_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // position
-    [3, "float32x3"], // size
-    [4, "float32x4"], // quaternion (quaternion)
-    [5, "float32x3"], // color
-    [6, "float32"], // alpha
+export const billboardShaderProgram = generatePrimitiveShaderProgram({
+  geometryLayout: POINT_CLOUD_GEOMETRY_LAYOUT,
+  renderFields: [
+    { name: "position", type: "vec3" },
+    { name: "size", type: "f32" },
+    { name: "color", type: "vec3" },
+    { name: "alpha", type: "f32" },
   ],
-  "instance",
-);
+  transform: {
+    kind: "billboard",
+    position: "position",
+    size: "size",
+  },
+  shading: "unlit",
+});
 
-export const ELLIPSOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // position
-    [3, "float32x3"], // size
-    [4, "float32x4"], // quaternion (quaternion)
-    [5, "float32"], // pickID
+export const rigidLitShaderProgram = generatePrimitiveShaderProgram({
+  geometryLayout: MESH_GEOMETRY_LAYOUT,
+  renderFields: [
+    { name: "position", type: "vec3" },
+    { name: "size", type: "vec3" },
+    { name: "quaternion", type: "vec4" },
+    { name: "color", type: "vec3" },
+    { name: "alpha", type: "f32" },
   ],
-  "instance",
-);
+  transform: {
+    kind: "rigid",
+    position: "position",
+    size: "size",
+    quaternion: "quaternion",
+  },
+  shading: "lit",
+});
 
-export const LINE_BEAM_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // startPos (position1)
-    [3, "float32x3"], // endPos (position2)
-    [4, "float32"], // size
-    [5, "float32x3"], // color
-    [6, "float32"], // alpha
+export const lineBeamShaderProgram = generatePrimitiveShaderProgram({
+  geometryLayout: MESH_GEOMETRY_LAYOUT,
+  renderFields: [
+    { name: "startPos", type: "vec3" },
+    { name: "endPos", type: "vec3" },
+    { name: "size", type: "f32" },
+    { name: "color", type: "vec3" },
+    { name: "alpha", type: "f32" },
   ],
-  "instance",
-);
+  transform: {
+    kind: "beam",
+    start: "startPos",
+    end: "endPos",
+    size: "size",
+  },
+  shading: "lit",
+});
 
-export const LINE_BEAM_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // startPos (position1)
-    [3, "float32x3"], // endPos (position2)
-    [4, "float32"], // size
-    [5, "float32"], // pickID
-  ],
-  "instance",
-);
+export const billboardVertCode = billboardShaderProgram.renderVertex;
+export const billboardFragCode = billboardShaderProgram.fragment;
 
-export const CUBOID_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // position
-    [3, "float32x3"], // size
-    [4, "float32x4"], // quaternion (quaternion)
-    [5, "float32x3"], // color
-    [6, "float32"], // alpha
-  ],
-  "instance",
-);
+export const ellipsoidVertCode = rigidLitShaderProgram.renderVertex;
+export const ellipsoidFragCode = rigidLitShaderProgram.fragment;
 
-export const CUBOID_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [2, "float32x3"], // position
-    [3, "float32x3"], // size
-    [4, "float32x4"], // quaternion (quaternion)
-    [5, "float32"], // pickID
-  ],
-  "instance",
-);
+export const cuboidVertCode = rigidLitShaderProgram.renderVertex;
+export const cuboidFragCode = rigidLitShaderProgram.fragment;
+
+export const lineBeamVertCode = lineBeamShaderProgram.renderVertex;
+export const lineBeamFragCode = lineBeamShaderProgram.fragment;
+
+export const POINT_CLOUD_INSTANCE_LAYOUT = billboardShaderProgram.renderLayout;
+export const POINT_CLOUD_PICKING_INSTANCE_LAYOUT =
+  billboardShaderProgram.pickIDLayout;
+
+export const ELLIPSOID_INSTANCE_LAYOUT = rigidLitShaderProgram.renderLayout;
+export const ELLIPSOID_PICKING_INSTANCE_LAYOUT =
+  rigidLitShaderProgram.pickIDLayout;
+
+export const LINE_BEAM_INSTANCE_LAYOUT = lineBeamShaderProgram.renderLayout;
+export const LINE_BEAM_PICKING_INSTANCE_LAYOUT =
+  lineBeamShaderProgram.pickIDLayout;
+
+export const CUBOID_INSTANCE_LAYOUT = rigidLitShaderProgram.renderLayout;
+export const CUBOID_PICKING_INSTANCE_LAYOUT =
+  rigidLitShaderProgram.pickIDLayout;

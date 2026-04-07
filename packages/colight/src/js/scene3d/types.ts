@@ -3,6 +3,48 @@ export interface PipelineCacheEntry {
   device: GPUDevice;
 }
 
+export interface Scene3DGeometryOptions {
+  ellipsoidStacks: number;
+  ellipsoidSlices: number;
+  ellipsoidAxesMajorSegments: number;
+  ellipsoidAxesMinorSegments: number;
+}
+
+export const DEFAULT_SCENE3D_GEOMETRY_OPTIONS: Scene3DGeometryOptions = {
+  ellipsoidStacks: 32,
+  ellipsoidSlices: 48,
+  ellipsoidAxesMajorSegments: 32,
+  ellipsoidAxesMinorSegments: 16,
+};
+
+function normalizeSegmentCount(value: number | undefined, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(3, Math.floor(value!));
+}
+
+export function resolveScene3DGeometryOptions(
+  options?: Partial<Scene3DGeometryOptions>,
+): Scene3DGeometryOptions {
+  return {
+    ellipsoidStacks: normalizeSegmentCount(
+      options?.ellipsoidStacks,
+      DEFAULT_SCENE3D_GEOMETRY_OPTIONS.ellipsoidStacks,
+    ),
+    ellipsoidSlices: normalizeSegmentCount(
+      options?.ellipsoidSlices,
+      DEFAULT_SCENE3D_GEOMETRY_OPTIONS.ellipsoidSlices,
+    ),
+    ellipsoidAxesMajorSegments: normalizeSegmentCount(
+      options?.ellipsoidAxesMajorSegments,
+      DEFAULT_SCENE3D_GEOMETRY_OPTIONS.ellipsoidAxesMajorSegments,
+    ),
+    ellipsoidAxesMinorSegments: normalizeSegmentCount(
+      options?.ellipsoidAxesMinorSegments,
+      DEFAULT_SCENE3D_GEOMETRY_OPTIONS.ellipsoidAxesMinorSegments,
+    ),
+  };
+}
+
 export interface PrimitiveSpec<ConfigType> {
   /**
    * The type/name of this primitive spec
@@ -79,24 +121,6 @@ export interface PrimitiveSpec<ConfigType> {
     out: Float32Array,
     offset: number,
     scaleFactor: number,
-  ): void;
-
-  /**
-   * Fills geometry data for picking a single instance.
-   * @param component The component containing instance data
-   * @param instanceIndex Index of the instance to fill data for
-   * @param out Output Float32Array to write data to
-   * @param offset Offset in the output array to start writing
-   * @param baseID Base ID for picking
-   * @param scale Scale factor to apply to the instance
-   */
-  fillPickingGeometry(
-    constants: ElementConstants,
-    elem: ConfigType,
-    i: number,
-    out: Float32Array,
-    offset: number,
-    baseID: number,
   ): void;
 
   /**
@@ -178,22 +202,13 @@ export interface PrimitiveSpec<ConfigType> {
   ): GPURenderPipeline;
 
   /**
-   * Creates or retrieves a cached WebGPU pipeline for picking.
-   * @param device The WebGPU device
-   * @param bindGroupLayout Layout for uniform bindings
-   * @param cache Pipeline cache to prevent duplicate creation
-   */
-  getPickingPipeline(
-    device: GPUDevice,
-    bindGroupLayout: GPUBindGroupLayout,
-    cache: Map<string, PipelineCacheEntry>,
-  ): GPURenderPipeline;
-
-  /**
    * Creates the base geometry buffers needed for this primitive type.
    * These buffers are shared across all instances of the primitive.
    */
-  createGeometryResource(device: GPUDevice): GeometryResource;
+  createGeometryResource(
+    device: GPUDevice,
+    geometryOptions: Scene3DGeometryOptions,
+  ): GeometryResource;
 }
 
 export interface Decoration {
@@ -288,6 +303,7 @@ export interface PipelineConfig {
     color?: GPUBlendComponent;
     alpha?: GPUBlendComponent;
   };
+  pickFormat?: GPUTextureFormat;
   depthStencil?: {
     format: GPUTextureFormat;
     depthWriteEnabled: boolean;
@@ -304,6 +320,7 @@ export interface GeometryData {
 export interface GeometryResource {
   vb: GPUBuffer;
   ib: GPUBuffer;
+  indexFormat: GPUIndexFormat;
   indexCount: number;
   vertexCount: number;
 }
@@ -327,11 +344,11 @@ export interface RenderObject {
   geometryBuffer: GPUBuffer;
   instanceBuffer: BufferInfo;
   indexBuffer: GPUBuffer;
+  indexFormat: GPUIndexFormat;
   indexCount: number;
   instanceCount: number;
   vertexCount: number;
 
-  pickingPipeline: GPURenderPipeline;
   pickingInstanceBuffer: BufferInfo;
 
   componentIndex: number;

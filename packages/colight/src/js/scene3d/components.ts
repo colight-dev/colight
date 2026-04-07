@@ -1,29 +1,10 @@
 // components.ts
 
 import {
-  billboardVertCode,
-  billboardFragCode,
-  billboardPickingVertCode,
-  ellipsoidVertCode,
-  ellipsoidFragCode,
-  ellipsoidPickingVertCode,
-  cuboidVertCode,
-  cuboidFragCode,
-  cuboidPickingVertCode,
-  lineBeamVertCode,
-  lineBeamFragCode,
-  lineBeamPickingVertCode,
-  pickingFragCode,
-  POINT_CLOUD_GEOMETRY_LAYOUT,
-  POINT_CLOUD_INSTANCE_LAYOUT,
-  POINT_CLOUD_PICKING_INSTANCE_LAYOUT,
-  MESH_GEOMETRY_LAYOUT,
-  ELLIPSOID_INSTANCE_LAYOUT,
-  ELLIPSOID_PICKING_INSTANCE_LAYOUT,
-  LINE_BEAM_INSTANCE_LAYOUT,
-  LINE_BEAM_PICKING_INSTANCE_LAYOUT,
-  CUBOID_INSTANCE_LAYOUT,
-  CUBOID_PICKING_INSTANCE_LAYOUT,
+  billboardShaderProgram,
+  rigidLitShaderProgram,
+  lineBeamShaderProgram,
+  GeneratedPrimitiveShaderProgram,
 } from "./shaders";
 
 import {
@@ -43,6 +24,7 @@ import {
   GeometryResource,
   GeometryData,
   ElementConstants,
+  Scene3DGeometryOptions,
 } from "./types";
 
 import { acopy } from "../utils";
@@ -180,8 +162,7 @@ export function buildRenderData<ConfigType extends BaseComponentConfig>(
 }
 
 /**
- * Builds picking data for any shape using the shape's fillPickingGeometry callback,
- * plus handling sorted indices, decorations that affect scale, and base pick ID.
+ * Builds per-instance pick IDs in the same instance order as the render buffer.
  */
 export function buildPickingData<ConfigType extends BaseComponentConfig>(
   elem: ConfigType,
@@ -191,44 +172,22 @@ export function buildPickingData<ConfigType extends BaseComponentConfig>(
   baseOffset: number,
   sortedPositions?: Uint32Array,
 ): void {
-  // Get element count and instance count
   const elementCount = spec.getElementCount(elem);
   const instancesPerElement = spec.instancesPerElement;
 
   if (elementCount === 0) return;
 
-  const constants = getElementConstants(spec, elem);
-
   for (let i = 0; i < elementCount; i++) {
     const sortedIndex = sortedPositions
       ? sortedPositions[baseOffset + i] - baseOffset
       : i;
-    // For each instance of this element
+    const pickID = packID(pickingBase + i);
     for (let instOffset = 0; instOffset < instancesPerElement; instOffset++) {
       const outIndex =
         (sortedIndex + baseOffset) * instancesPerElement + instOffset;
-      spec.fillPickingGeometry(constants, elem, i, out, outIndex, pickingBase);
+      out[outIndex * spec.floatsPerPicking] = pickID;
     }
   }
-
-  // Apply decorations that affect scale
-  applyDecorations(
-    elem.decorations,
-    (outIndex, dec) => {
-      if (dec.scale !== undefined && dec.scale !== 1.0) {
-        if (spec.applyDecorationScale) {
-          spec.applyDecorationScale(
-            out,
-            outIndex * spec.floatsPerPicking,
-            dec.scale,
-          );
-        }
-      }
-    },
-    baseOffset,
-    sortedPositions,
-    instancesPerElement,
-  );
 }
 
 /** ===================== GPU PIPELINE HELPERS (unchanged) ===================== **/
@@ -294,6 +253,14 @@ export function createRenderPipeline(
             },
           }),
         },
+        ...(config.pickFormat
+          ? [
+              {
+                format: config.pickFormat,
+                writeMask: GPUColorWrite.ALL,
+              },
+            ]
+          : []),
       ],
     },
     primitive: primitiveConfig,
@@ -344,6 +311,8 @@ export const createBuffers = (
   device: GPUDevice,
   { vertexData, indexData }: GeometryData,
 ): GeometryResource => {
+  const indexFormat: GPUIndexFormat =
+    indexData instanceof Uint32Array ? "uint32" : "uint16";
   const vb = device.createBuffer({
     size: vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
@@ -362,10 +331,84 @@ export const createBuffers = (
   return {
     vb,
     ib,
+    indexFormat,
     indexCount: indexData.length,
     vertexCount,
   };
 };
+
+type PrimitiveDefinition<ConfigType extends BaseComponentConfig> = ThisType<
+  PrimitiveSpec<ConfigType>
+> & {
+  type: string;
+  defaults?: ElementConstants;
+  instancesPerElement?: number;
+  shaderProgram: GeneratedPrimitiveShaderProgram;
+  pipelineKey: string;
+  renderConfig: PrimitiveSpec<ConfigType>["renderConfig"];
+  getElementCount: PrimitiveSpec<ConfigType>["getElementCount"];
+  getCenters: PrimitiveSpec<ConfigType>["getCenters"];
+  fillRenderGeometry: PrimitiveSpec<ConfigType>["fillRenderGeometry"];
+  applyDecorationScale: PrimitiveSpec<ConfigType>["applyDecorationScale"];
+  getColorIndexForInstance?: PrimitiveSpec<ConfigType>["getColorIndexForInstance"];
+  applyDecoration?: PrimitiveSpec<ConfigType>["applyDecoration"];
+  fillColor?: PrimitiveSpec<ConfigType>["fillColor"];
+  fillAlpha?: PrimitiveSpec<ConfigType>["fillAlpha"];
+  createGeometryResource: PrimitiveSpec<ConfigType>["createGeometryResource"];
+};
+
+function definePrimitive<ConfigType extends BaseComponentConfig>(
+  definition: PrimitiveDefinition<ConfigType>,
+): PrimitiveSpec<ConfigType> {
+  return {
+    type: definition.type,
+    defaults: definition.defaults,
+    instancesPerElement: definition.instancesPerElement ?? 1,
+    floatsPerInstance: definition.shaderProgram.renderFloatsPerInstance,
+    floatsPerPicking: definition.shaderProgram.pickIDFloatsPerInstance,
+    getElementCount: definition.getElementCount,
+    getCenters: definition.getCenters,
+    colorOffset: definition.shaderProgram.colorOffset,
+    alphaOffset: definition.shaderProgram.alphaOffset,
+    fillRenderGeometry: definition.fillRenderGeometry,
+    applyDecorationScale: definition.applyDecorationScale,
+    getColorIndexForInstance: definition.getColorIndexForInstance,
+    applyDecoration: definition.applyDecoration,
+    fillColor: definition.fillColor,
+    fillAlpha: definition.fillAlpha,
+    renderConfig: definition.renderConfig,
+
+    getRenderPipeline(device, bindGroupLayout, cache) {
+      const format = navigator.gpu.getPreferredCanvasFormat();
+      return getOrCreatePipeline(
+        device,
+        `${definition.pipelineKey}:render`,
+        () =>
+          createTranslucentGeometryPipeline(
+            device,
+            bindGroupLayout,
+            {
+              vertexShader: definition.shaderProgram.renderVertex,
+              fragmentShader: definition.shaderProgram.fragment,
+              vertexEntryPoint: "vs_main",
+              fragmentEntryPoint: "fs_main",
+              bufferLayouts: [
+                definition.shaderProgram.geometryLayout,
+                definition.shaderProgram.renderLayout,
+                definition.shaderProgram.pickIDLayout,
+              ],
+              pickFormat: "rgba8unorm",
+            },
+            format,
+            this,
+          ),
+        cache,
+      );
+    },
+
+    createGeometryResource: definition.createGeometryResource,
+  };
+}
 
 const computeConstants = (spec: any, elem: any) => {
   const constants: ElementConstants = {};
@@ -437,10 +480,10 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
   size?: number; // Default size, defaults to 0.02
 }
 
-export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
+export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   type: "PointCloud",
-  instancesPerElement: 1,
-
+  shaderProgram: billboardShaderProgram,
+  pipelineKey: "PointCloud",
   defaults: {
     size: 0.02,
   },
@@ -449,17 +492,9 @@ export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
     return elem.centers.length / 3;
   },
 
-  floatsPerInstance: 8, // position(3) + size(1) + color(3) + alpha(1) = 8
-
-  floatsPerPicking: 5, // position(3) + size(1) + pickID(1) = 5
-
   getCenters(elem) {
     return elem.centers;
   },
-
-  // Geometry Offsets
-  colorOffset: 4, // color starts at out[offset+4]
-  alphaOffset: 7, // alpha is at out[offset+7]
 
   // fillRenderGeometry: shape-specific code, ignoring color/alpha
   fillRenderGeometry(constants, elem, i, out, outIndex) {
@@ -477,95 +512,12 @@ export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
   applyDecorationScale(out, offset, scaleFactor) {
     out[offset + 3] *= scaleFactor;
   },
-
-  // fillPickingGeometry
-  fillPickingGeometry(constants, elem, elemIndex, out, outIndex, baseID) {
-    const outOffset = outIndex * this.floatsPerPicking;
-    out[outOffset + 0] = elem.centers[elemIndex * 3 + 0];
-    out[outOffset + 1] = elem.centers[elemIndex * 3 + 1];
-    out[outOffset + 2] = elem.centers[elemIndex * 3 + 2];
-
-    const pointSize = constants.size || elem.sizes![elemIndex];
-    out[outOffset + 3] = pointSize;
-
-    // pickID
-    out[outOffset + 4] = packID(baseID + elemIndex);
-  },
-  // Rendering configuration
   renderConfig: {
     cullMode: "none",
     topology: "triangle-list",
   },
 
-  // Pipeline creation methods
-  getRenderPipeline(device, bindGroupLayout, cache) {
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    return getOrCreatePipeline(
-      device,
-      "PointCloudShading",
-      () =>
-        createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: billboardVertCode,
-            fragmentShader: billboardFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_main",
-            bufferLayouts: [
-              POINT_CLOUD_GEOMETRY_LAYOUT,
-              POINT_CLOUD_INSTANCE_LAYOUT,
-            ],
-            primitive: this.renderConfig,
-            blend: {
-              color: {
-                srcFactor: "src-alpha",
-                dstFactor: "one-minus-src-alpha",
-                operation: "add",
-              },
-              alpha: {
-                srcFactor: "one",
-                dstFactor: "one-minus-src-alpha",
-                operation: "add",
-              },
-            },
-            depthStencil: {
-              format: "depth24plus",
-              depthWriteEnabled: true,
-              depthCompare: "less",
-            },
-          },
-          format,
-        ),
-      cache,
-    );
-  },
-
-  getPickingPipeline(device, bindGroupLayout, cache) {
-    return getOrCreatePipeline(
-      device,
-      "PointCloudPicking",
-      () =>
-        createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: billboardPickingVertCode,
-            fragmentShader: pickingFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_pick",
-            bufferLayouts: [
-              POINT_CLOUD_GEOMETRY_LAYOUT,
-              POINT_CLOUD_PICKING_INSTANCE_LAYOUT,
-            ],
-          },
-          "rgba8unorm",
-        ),
-      cache,
-    );
-  },
-
-  createGeometryResource(device) {
+  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
     return createBuffers(device, {
       vertexData: new Float32Array([
         // Position (x,y,z) and Normal (nx,ny,nz) for each vertex
@@ -597,7 +549,7 @@ export const pointCloudSpec: PrimitiveSpec<PointCloudComponentConfig> = {
       indexData: new Uint16Array([0, 1, 2, 2, 1, 3]),
     });
   },
-};
+});
 
 /** ===================== ELLIPSOID ===================== **/
 
@@ -611,10 +563,10 @@ export interface EllipsoidComponentConfig extends BaseComponentConfig {
   fill_mode?: "Solid" | "MajorWireframe";
 }
 
-export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
+export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
   type: "Ellipsoid",
-  instancesPerElement: 1,
-
+  shaderProgram: rigidLitShaderProgram,
+  pipelineKey: "Ellipsoid",
   defaults: {
     half_size: [0.5, 0.5, 0.5],
     quaternion: [0, 0, 0, 1],
@@ -623,10 +575,6 @@ export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
   getElementCount(elem) {
     return elem.centers.length / 3;
   },
-
-  floatsPerInstance: 14, // pos(3) + size(3) + quat(4) + color(3) + alpha(1) = 14
-
-  floatsPerPicking: 11, // pos(3) + size(3) + quat(4) + pickID(1) = 11
 
   getCenters(elem) {
     return elem.centers;
@@ -661,8 +609,6 @@ export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     fillAlpha(this, constants, elem, elemIndex, out, outOffset);
     fillColor(this, constants, elem, elemIndex, out, outOffset);
   },
-  colorOffset: 10,
-  alphaOffset: 13,
 
   applyDecorationScale(out, offset, scaleFactor) {
     // Multiply the sizes
@@ -670,94 +616,21 @@ export const ellipsoidSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     out[offset + 4] *= scaleFactor;
     out[offset + 5] *= scaleFactor;
   },
-
-  // Fill picking geometry for a single element
-  fillPickingGeometry(constants, elem, elemIndex, out, outIndex, baseID) {
-    const outOffset = outIndex * this.floatsPerPicking;
-
-    // Position - same for all 3 rings
-    acopy(elem.centers, elemIndex * 3, out, outOffset, 3);
-
-    // Half sizes - same for all 3 rings
-    if (constants.half_size) {
-      acopy(constants.half_size as ArrayLike<number>, 0, out, outOffset + 3, 3);
-    } else {
-      acopy(elem.half_sizes!, elemIndex * 3, out, outOffset + 3, 3);
-    }
-
-    // Quaternion - same for all 3 rings
-    if (constants.quaternion) {
-      acopy(constants.quaternion, 0, out, outOffset + 6, 4);
-    } else {
-      acopy(elem.quaternions!, elemIndex * 4, out, outOffset + 6, 4);
-    }
-
-    // The shader will handle the ring orientation based on instance_index
-    // See ringPickingVertCode in shaders.ts which uses the instance_index to determine
-    // which axis (X, Y, or Z) the ring should be oriented along
-
-    // Use the ellipsoid index for picking - same for all 3 rings
-    out[outOffset + 10] = packID(baseID + elemIndex);
-  },
-
   renderConfig: {
     cullMode: "back",
     topology: "triangle-list",
   },
 
-  getRenderPipeline(device, bindGroupLayout, cache) {
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    return getOrCreatePipeline(
+  createGeometryResource(device, geometryOptions: Scene3DGeometryOptions) {
+    return createBuffers(
       device,
-      "EllipsoidShading",
-      () => {
-        return createTranslucentGeometryPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: ellipsoidVertCode,
-            fragmentShader: ellipsoidFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_main",
-            bufferLayouts: [MESH_GEOMETRY_LAYOUT, ELLIPSOID_INSTANCE_LAYOUT],
-          },
-          format,
-          ellipsoidSpec,
-        );
-      },
-      cache,
+      createSphereGeometry(
+        geometryOptions.ellipsoidStacks,
+        geometryOptions.ellipsoidSlices,
+      ),
     );
   },
-
-  getPickingPipeline(device, bindGroupLayout, cache) {
-    return getOrCreatePipeline(
-      device,
-      "EllipsoidPicking",
-      () => {
-        return createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: ellipsoidPickingVertCode,
-            fragmentShader: pickingFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_pick",
-            bufferLayouts: [
-              MESH_GEOMETRY_LAYOUT,
-              ELLIPSOID_PICKING_INSTANCE_LAYOUT,
-            ],
-          },
-          "rgba8unorm",
-        );
-      },
-      cache,
-    );
-  },
-
-  createGeometryResource(device) {
-    return createBuffers(device, createSphereGeometry(32, 48));
-  },
-};
+});
 
 /** ===================== CUBOID ===================== **/
 
@@ -770,10 +643,10 @@ export interface CuboidComponentConfig extends BaseComponentConfig {
   quaternion?: [number, number, number, number];
 }
 
-export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
+export const cuboidSpec = definePrimitive<CuboidComponentConfig>({
   type: "Cuboid",
-  instancesPerElement: 1,
-
+  shaderProgram: rigidLitShaderProgram,
+  pipelineKey: "Cuboid",
   defaults: {
     half_size: [0.1, 0.1, 0.1],
     quaternion: [0, 0, 0, 1],
@@ -782,10 +655,6 @@ export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
   getElementCount(elem) {
     return elem.centers.length / 3;
   },
-
-  floatsPerInstance: 14, // 3 pos + 3 size + 4 quat + 3 color + 1 alpha = 14
-
-  floatsPerPicking: 11, // 3 pos + 3 size + 4 quat + 1 pickID = 11
 
   getCenters(elem) {
     return elem.centers;
@@ -814,8 +683,6 @@ export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
     fillAlpha(this, constants, elem, i, out, outOffset);
     fillColor(this, constants, elem, i, out, outOffset);
   },
-  colorOffset: 10,
-  alphaOffset: 13,
 
   applyDecorationScale(out, offset, scaleFactor) {
     // multiply half_sizes
@@ -823,90 +690,15 @@ export const cuboidSpec: PrimitiveSpec<CuboidComponentConfig> = {
     out[offset + 4] *= scaleFactor;
     out[offset + 5] *= scaleFactor;
   },
-
-  fillPickingGeometry(constants, elem, i, out, outIndex, baseID) {
-    const outOffset = outIndex * this.floatsPerPicking;
-
-    // Position
-    acopy(elem.centers, i * 3, out, outOffset, 3);
-
-    // Half sizes
-    if (constants.half_size) {
-      acopy(constants.half_size as ArrayLike<number>, 0, out, outOffset + 3, 3);
-    } else {
-      acopy(elem.half_sizes as ArrayLike<number>, i * 3, out, outOffset + 3, 3);
-    }
-
-    // Quaternion
-    if (constants.quaternion) {
-      acopy(constants.quaternion, 0, out, outOffset + 6, 4);
-    } else {
-      acopy(elem.quaternions!, i * 4, out, outOffset + 6, 4);
-    }
-
-    // picking ID
-    out[outOffset + 10] = packID(baseID + i);
-  },
-
   renderConfig: {
     cullMode: "none",
     topology: "triangle-list",
   },
 
-  getRenderPipeline(device, bindGroupLayout, cache) {
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    return getOrCreatePipeline(
-      device,
-      "CuboidShading",
-      () => {
-        return createTranslucentGeometryPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: cuboidVertCode,
-            fragmentShader: cuboidFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_main",
-            bufferLayouts: [MESH_GEOMETRY_LAYOUT, CUBOID_INSTANCE_LAYOUT],
-          },
-          format,
-          cuboidSpec,
-        );
-      },
-      cache,
-    );
-  },
-
-  getPickingPipeline(device, bindGroupLayout, cache) {
-    return getOrCreatePipeline(
-      device,
-      "CuboidPicking",
-      () => {
-        return createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: cuboidPickingVertCode,
-            fragmentShader: pickingFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_pick",
-            bufferLayouts: [
-              MESH_GEOMETRY_LAYOUT,
-              CUBOID_PICKING_INSTANCE_LAYOUT,
-            ],
-            primitive: this.renderConfig,
-          },
-          "rgba8unorm",
-        );
-      },
-      cache,
-    );
-  },
-
-  createGeometryResource(device) {
+  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
     return createBuffers(device, createCubeGeometry());
   },
-};
+});
 
 /** ===================== LINE BEAMS ===================== **/
 
@@ -948,10 +740,10 @@ function countSegments(elem: LineBeamsComponentConfig): number {
   return prepareLineSegments(elem).length;
 }
 
-export const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
+export const lineBeamsSpec = definePrimitive<LineBeamsComponentConfig>({
   type: "LineBeams",
-  instancesPerElement: 1,
-
+  shaderProgram: lineBeamShaderProgram,
+  pipelineKey: "LineBeams",
   defaults: {
     size: 0.02,
   },
@@ -979,10 +771,6 @@ export const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     }
     return centers;
   },
-
-  floatsPerInstance: 11, // start(3) + end(3) + size(1) + color(3) + alpha(1) = 11
-
-  floatsPerPicking: 8, // start(3) + end(3) + size(1) + pickID(1) = 8
 
   /**
    * We want color/alpha to come from the line index (points[..+3]),
@@ -1013,92 +801,20 @@ export const lineBeamsSpec: PrimitiveSpec<LineBeamsComponentConfig> = {
     fillAlpha(this, constants, elem, segmentIndex, out, outOffset);
     fillColor(this, constants, elem, segmentIndex, out, outOffset);
   },
-  colorOffset: 7,
-  alphaOffset: 10,
 
   applyDecorationScale(out, offset, scaleFactor) {
     // only the size is at offset+6
     out[offset + 6] *= scaleFactor;
   },
-
-  fillPickingGeometry(constants, elem, segmentIndex, out, outIndex, baseID) {
-    const outOffset = outIndex * this.floatsPerPicking;
-    const segMap = prepareLineSegments(elem);
-    const p = segMap[segmentIndex];
-
-    // Start
-    acopy(elem.points, p * 4, out, outOffset, 3);
-
-    // End
-    acopy(elem.points, (p + 1) * 4, out, outOffset + 3, 3);
-
-    // Size
-    const lineIndex = Math.floor(elem.points[p * 4 + 3]);
-    out[outOffset + 6] = constants.size || elem.sizes![lineIndex];
-
-    // pickID
-    out[outOffset + 7] = packID(baseID + segmentIndex);
-  },
-
   renderConfig: {
     cullMode: "none",
     topology: "triangle-list",
   },
 
-  getRenderPipeline(device, bindGroupLayout, cache) {
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    return getOrCreatePipeline(
-      device,
-      "LineBeamsShading",
-      () => {
-        return createTranslucentGeometryPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: lineBeamVertCode,
-            fragmentShader: lineBeamFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_main",
-            bufferLayouts: [MESH_GEOMETRY_LAYOUT, LINE_BEAM_INSTANCE_LAYOUT],
-          },
-          format,
-          this,
-        );
-      },
-      cache,
-    );
-  },
-
-  getPickingPipeline(device, bindGroupLayout, cache) {
-    return getOrCreatePipeline(
-      device,
-      "LineBeamsPicking",
-      () => {
-        return createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: lineBeamPickingVertCode,
-            fragmentShader: pickingFragCode,
-            vertexEntryPoint: "vs_main",
-            fragmentEntryPoint: "fs_pick",
-            bufferLayouts: [
-              MESH_GEOMETRY_LAYOUT,
-              LINE_BEAM_PICKING_INSTANCE_LAYOUT,
-            ],
-            primitive: this.renderConfig,
-          },
-          "rgba8unorm",
-        );
-      },
-      cache,
-    );
-  },
-
-  createGeometryResource(device) {
+  createGeometryResource(device, _geometryOptions: Scene3DGeometryOptions) {
     return createBuffers(device, createBeamGeometry());
   },
-};
+});
 
 /** ===================== UNION TYPE FOR ALL COMPONENT CONFIGS ===================== **/
 

@@ -63,7 +63,15 @@ const liveConfig = {
   }
 };
 
-const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig]
+const ellipsoidBenchConfig = {
+  ...commonOptions,
+  format: 'iife',
+  entryPoints: ['packages/colight/src/js/bench/ellipsoidBench.tsx'],
+  outfile: DIST_DIR+'/ellipsoid-bench.js',
+  plugins: [],
+};
+
+const configs = [widgetESM, anywidgetESM, embedConfigJS, embedConfigESM, liveConfig, ellipsoidBenchConfig]
 
 // Apply CDN imports if enabled
 const USE_CDN_IMPORTS = false //!watch

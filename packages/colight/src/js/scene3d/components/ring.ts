@@ -4,11 +4,10 @@ import {
   cameraStruct,
   lightingConstants,
   lightingCalc,
-  pickingVSOut,
-  pickingFragCode,
+  pickingEncoding,
 } from "../shaders";
 
-import { PrimitiveSpec } from "../types";
+import { PrimitiveSpec, Scene3DGeometryOptions } from "../types";
 
 import {
   fillAlpha,
@@ -21,7 +20,6 @@ import {
   createTranslucentGeometryPipeline,
 } from "../components";
 
-import { packID } from "../picking";
 import { acopy } from "../../utils";
 
 import { createEllipsoidAxes } from "../geometry";
@@ -38,12 +36,7 @@ export const RING_INSTANCE_LAYOUT = createVertexBufferLayout(
 );
 
 export const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [3, "float32x3"], // position
-    [4, "float32x3"], // size
-    [5, "float32x4"], // quaternion
-    [6, "float32"], // pickID (now shared across rings)
-  ],
+  [[8, "float32"]], // pickID
   "instance",
 );
 
@@ -59,14 +52,14 @@ export const RING_GEOMETRY_LAYOUT = createVertexBufferLayout(
 export const ringShaders = /*wgsl*/ `
   ${cameraStruct}
   ${quaternionShaderFunctions}
-  ${pickingVSOut}
 
   struct RenderVSOut {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
     @location(1) alpha: f32,
     @location(2) worldPos: vec3<f32>,
-    @location(3) normal: vec3<f32>
+    @location(3) normal: vec3<f32>,
+    @location(4) pickID: f32
   };
 
   fn computeRingPosition(
@@ -96,7 +89,8 @@ export const ringShaders = /*wgsl*/ `
     @location(4) size: vec3<f32>,      // Instance non-uniform scaling for ellipsoid
     @location(5) quaternion: vec4<f32>,// Instance rotation
     @location(6) inColor: vec3<f32>,   // Color attribute
-    @location(7) alpha: f32            // Alpha attribute
+    @location(7) alpha: f32,           // Alpha attribute
+    @location(8) pickID: f32           // Picking ID
   ) -> RenderVSOut {
     let worldPos = computeRingPosition(center, offset, position, size, quaternion);
 
@@ -109,23 +103,6 @@ export const ringShaders = /*wgsl*/ `
     out.alpha = alpha;
     out.worldPos = worldPos;
     out.normal = worldNormal;
-    return out;
-  }
-
-  @vertex
-  fn vs_pick(
-    @location(0) center: vec3<f32>,  // Centerline attribute (first 3 floats)
-    @location(1) offset: vec3<f32>,  // Tube offset attribute (next 3 floats)
-    @location(2) inNormal: vec3<f32>, // Precomputed normal (last 3 floats)
-    @location(3) position: vec3<f32>,  // Instance center
-    @location(4) size: vec3<f32>,      // Instance non-uniform scaling for ellipsoid
-    @location(5) quaternion: vec4<f32>,// Instance rotation
-    @location(6) pickID: f32           // Picking ID
-  ) -> VSOut {
-    let worldPos = computeRingPosition(center, offset, position, size, quaternion);
-
-    var out: VSOut;
-    out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
     out.pickID = pickID;
     return out;
   }`;
@@ -134,16 +111,21 @@ export const ringFragCode = /*wgsl*/ `
   ${cameraStruct}
   ${lightingConstants}
   ${lightingCalc}
+  ${pickingEncoding}
 
   @fragment
   fn fs_main(
     @location(0) color: vec3<f32>,
     @location(1) alpha: f32,
     @location(2) worldPos: vec3<f32>,
-    @location(3) normal: vec3<f32>
-  )-> @location(0) vec4<f32> {
+    @location(3) normal: vec3<f32>,
+    @location(4) pickID: f32
+  )-> FSOut {
     let litColor = calculateLighting(color, normal, worldPos);
-    return vec4<f32>(litColor, alpha);
+    var out: FSOut;
+    out.color = vec4<f32>(litColor, alpha);
+    out.pick = encodePickID(pickID);
+    return out;
   }`;
 
 export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
@@ -161,7 +143,7 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
 
   floatsPerInstance: 14, // position(3) + size(3) + quat(4) + color(3) + alpha(1) = 14 per ring
 
-  floatsPerPicking: 11, // same layout as Ellipsoid: 11 per ring
+  floatsPerPicking: 1,
 
   // This tells the system we have 3 instances per element
   instancesPerElement: 3,
@@ -213,31 +195,6 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     out[offset + 5] *= scaleFactor;
   },
 
-  fillPickingGeometry(constants, elem, elemIndex, out, outIndex, baseID) {
-    const outOffset = outIndex * this.floatsPerPicking;
-
-    // Position
-    acopy(elem.centers, elemIndex * 3, out, outOffset, 3);
-
-    // Half sizes
-    if (constants.half_size) {
-      acopy(constants.half_size as ArrayLike<number>, 0, out, outOffset + 3, 3);
-    } else {
-      acopy(elem.half_sizes!, elemIndex * 3, out, outOffset + 3, 3);
-    }
-
-    // Quaternion
-    if (constants.quaternion) {
-      acopy(constants.quaternion, 0, out, outOffset + 6, 4);
-    } else {
-      acopy(elem.quaternions!, elemIndex * 4, out, outOffset + 6, 4);
-    }
-
-    // The shader will handle the ring orientation based on instance_index
-
-    // Use the ellipsoid index for picking
-    out[outOffset + 10] = packID(baseID + elemIndex);
-  },
   renderConfig: {
     cullMode: "back",
     topology: "triangle-list",
@@ -257,8 +214,13 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
             fragmentShader: ringFragCode,
             vertexEntryPoint: "vs_render",
             fragmentEntryPoint: "fs_main",
-            bufferLayouts: [RING_GEOMETRY_LAYOUT, RING_INSTANCE_LAYOUT],
+            bufferLayouts: [
+              RING_GEOMETRY_LAYOUT,
+              RING_INSTANCE_LAYOUT,
+              RING_PICKING_INSTANCE_LAYOUT,
+            ],
             primitive: this.renderConfig,
+            pickFormat: "rgba8unorm",
           },
           format,
           ellipsoidAxesSpec,
@@ -268,30 +230,15 @@ export const ellipsoidAxesSpec: PrimitiveSpec<EllipsoidComponentConfig> = {
     );
   },
 
-  getPickingPipeline(device, bindGroupLayout, cache) {
-    return getOrCreatePipeline(
+  createGeometryResource(device, geometryOptions: Scene3DGeometryOptions) {
+    return createBuffers(
       device,
-      "EllipsoidAxesPicking",
-      () => {
-        return createRenderPipeline(
-          device,
-          bindGroupLayout,
-          {
-            vertexShader: ringShaders,
-            fragmentShader: pickingFragCode,
-            vertexEntryPoint: "vs_pick",
-            fragmentEntryPoint: "fs_pick",
-            bufferLayouts: [RING_GEOMETRY_LAYOUT, RING_PICKING_INSTANCE_LAYOUT],
-            primitive: this.renderConfig,
-          },
-          "rgba8unorm",
-        );
-      },
-      cache,
+      createEllipsoidAxes(
+        1.0,
+        0.05,
+        geometryOptions.ellipsoidAxesMajorSegments,
+        geometryOptions.ellipsoidAxesMinorSegments,
+      ),
     );
-  },
-
-  createGeometryResource(device) {
-    return createBuffers(device, createEllipsoidAxes(1.0, 0.05, 32, 16));
   },
 };

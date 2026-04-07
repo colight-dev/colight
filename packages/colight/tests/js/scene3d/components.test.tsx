@@ -1,6 +1,6 @@
 /// <reference types="@webgpu/types" />
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, waitFor } from "@testing-library/react";
 import React from "react";
 import { SceneInner } from "../../../src/js/scene3d/impl3d";
 import type {
@@ -178,7 +178,9 @@ describe("Scene3D Components", () => {
 
       // Verify pipeline creation with blend state
       const createRenderPipeline = mockDevice.createRenderPipeline as Mock;
-      expect(createRenderPipeline).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(createRenderPipeline).toHaveBeenCalled();
+      });
     });
 
     it("should update when positions change", async () => {
@@ -225,7 +227,9 @@ describe("Scene3D Components", () => {
         );
       });
 
-      expect(writeBuffer).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(writeBuffer).toHaveBeenCalled();
+      });
     });
   });
 

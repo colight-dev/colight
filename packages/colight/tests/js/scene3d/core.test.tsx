@@ -1,6 +1,6 @@
 /// <reference types="@webgpu/types" />
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, waitFor } from "@testing-library/react";
 import React from "react";
 import { SceneInner } from "../../../src/js/scene3d/impl3d";
 import type { ComponentConfig } from "../../../src/js/scene3d/components";
@@ -314,7 +314,9 @@ describe("Scene3D Core Rendering", () => {
         );
       });
 
-      expect(onFrameRendered).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(onFrameRendered).toHaveBeenCalled();
+      });
       expect(onFrameRendered.mock.calls[0][0]).toBeGreaterThan(0);
     });
   });
