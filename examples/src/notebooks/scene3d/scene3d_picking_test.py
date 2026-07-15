@@ -20,7 +20,9 @@ scene_points = PointCloud(
     colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1]]),
     size=0.2,
     alpha=0.7,
-    onHover=js("(i) => $state.update({hover_point: typeof i === 'number' ? [i] : []})"),
+    on_hover=js(
+        "(i) => $state.update({hover_point: typeof i === 'number' ? [i] : []})"
+    ),
     decorations=[
         deco(
             js("$state.hover_point"),
@@ -54,7 +56,7 @@ scene_ellipsoids = (
         quaternions=np.array(
             [[1, 0, 0, 0], [0, 0.707, 0, 0.707], [0.5, 0, 0.5, 0.707]]
         ),
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_ellipsoid: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -72,7 +74,7 @@ scene_ellipsoids = (
         colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
         half_size=0.4,
         alpha=0.5,
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_ellipsoid_2: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -96,7 +98,7 @@ scene_ellipsoids = (
         quaternions=np.array(
             [[0.866, 0, 0.5, 0], [0.707, 0.707, 0, 0], [0.5, 0.5, 0.5, 0.5]]
         ),
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_axes: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -134,7 +136,7 @@ scene_cuboids = Cuboid(
     alphas=np.array([0.5, 0.7, 0.9]),
     half_size=0.4,
     quaternions=np.array([[1, 0, 0, 0], [0.707, 0, 0.707, 0], [0.5, 0.5, 0.5, 0.5]]),
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_cuboid: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
@@ -187,7 +189,7 @@ scene_beams = LineBeams(
     size=0.06,
     alpha=0.7,
     quaternions=np.array([[1, 0, 0, 0], [0.707, 0, 0.707, 0]]),
-    onHover=js("(i) => $state.update({hover_beam: typeof i === 'number' ? [i] : []})"),
+    on_hover=js("(i) => $state.update({hover_beam: typeof i === 'number' ? [i] : []})"),
     decorations=[
         deco(
             js("$state.hover_beam"),
@@ -216,7 +218,7 @@ mixed_scene = (
         colors=np.array([[1, 0, 0]]),
         half_sizes=[0.5, 0.5, 0.5],
         quaternions=np.array([[0.707, 0, 0.707, 0]]),
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_mixed_ellipsoid: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -232,7 +234,7 @@ mixed_scene = (
         colors=np.array([[0, 1, 0], [0, 0, 1]]),
         size=0.2,
         quaternions=np.array([[1, 0, 0, 0], [0.707, 0.707, 0, 0]]),
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_mixed_point: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -285,7 +287,7 @@ scene_grid_cuboids = (
         colors=colors[: len(colors) // 2],
         half_sizes=[0.15],
         alpha=0.85,
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_grid_cuboid1: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -301,7 +303,7 @@ scene_grid_cuboids = (
         colors=colors[len(colors) // 2 :],
         half_sizes=[0.15],
         alpha=0.85,
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_grid_cuboid2: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[

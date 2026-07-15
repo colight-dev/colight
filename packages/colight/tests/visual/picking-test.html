@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Scene3D Picking Test Harness</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+    }
+    .scene-wrapper {
+      width: 600px;
+      height: 600px;
+      border: 1px solid #444;
+      position: relative;
+    }
+    .debug-panel {
+      width: 400px;
+      background: #16213e;
+      padding: 16px;
+      border-radius: 8px;
+    }
+    .debug-panel h3 {
+      margin-bottom: 12px;
+      color: #0f4c75;
+    }
+    .debug-section {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #1a1a2e;
+      border-radius: 4px;
+    }
+    .debug-section h4 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .debug-value {
+      font-family: monospace;
+      font-size: 14px;
+      word-break: break-all;
+    }
+    .debug-value.highlight {
+      color: #3fc1c9;
+    }
+    .test-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #0f4c75;
+      color: white;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover {
+      background: #3282b8;
+    }
+    button.success {
+      background: #2e7d32;
+    }
+    button.fail {
+      background: #c62828;
+    }
+    .test-results {
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: #0d1b2a;
+      padding: 12px;
+      border-radius: 4px;
+    }
+    .test-pass { color: #4caf50; }
+    .test-fail { color: #f44336; }
+    #root {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1 style="margin-bottom: 20px;">Scene3D Picking Test Harness</h1>
+
+  <div class="container">
+    <div class="scene-wrapper" id="scene-container">
+      <div id="root"></div>
+    </div>
+
+    <div class="debug-panel">
+      <h3>Picking Debug Info</h3>
+
+      <div class="debug-section">
+        <h4>Last Pick Event</h4>
+        <div class="debug-value" id="pick-event">-</div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Hit Position (World)</h4>
+        <div class="debug-value highlight" id="hit-position">-</div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Hit Normal (World)</h4>
+        <div class="debug-value highlight" id="hit-normal">-</div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Face Detected</h4>
+        <div class="debug-value highlight" id="face-detected">-</div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Local Position</h4>
+        <div class="debug-value" id="local-position">-</div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Raw GPU Normal Bytes</h4>
+        <div class="debug-value" id="raw-normal">-</div>
+      </div>
+
+      <h3 style="margin-top: 24px;">Automated Tests</h3>
+      <div class="test-buttons">
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="runFaceDetectionTest()">Face Detection</button>
+        <button onclick="runNormalAccuracyTest()">Normal Accuracy</button>
+      </div>
+      <div class="test-results" id="test-results"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { Scene, DEFAULT_CAMERA, screenRay } from '/scene3d.mjs';
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+    import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18';
+
+    // Expose for automated testing
+    window.testResults = [];
+    window.lastPickInfo = null;
+
+    function formatVec3(v) {
+      if (!v) return '-';
+      return `[${v[0].toFixed(4)}, ${v[1].toFixed(4)}, ${v[2].toFixed(4)}]`;
+    }
+
+    function updateDebug(info) {
+      window.lastPickInfo = info;
+
+      document.getElementById('pick-event').textContent = info?.event || '-';
+      document.getElementById('hit-position').textContent = formatVec3(info?.hit?.position);
+      document.getElementById('hit-normal').textContent = formatVec3(info?.hit?.normal);
+      document.getElementById('face-detected').textContent = info?.face?.name || '-';
+      document.getElementById('local-position').textContent = formatVec3(info?.local?.position);
+      document.getElementById('raw-normal').textContent = info?.rawNormalBytes
+        ? `[${info.rawNormalBytes.join(', ')}]`
+        : '-';
+    }
+
+    function TestScene() {
+      const [camera, setCamera] = useState({
+        position: [3, 3, 3],
+        target: [0, 0, 0],
+        up: [0, 0, 1],
+        fov: 45,
+        near: 0.01,
+        far: 100,
+      });
+
+      const handleHoverDetail = (info) => {
+        if (info) {
+          updateDebug(info);
+        }
+      };
+
+      const handleClickDetail = (info) => {
+        if (info) {
+          console.log('Click:', info);
+          updateDebug(info);
+        }
+      };
+
+      // Test scene with a single axis-aligned cube at origin
+      const components = [
+        {
+          type: 'Cuboid',
+          centers: new Float32Array([0, 0, 0]),
+          half_size: [1, 1, 1],
+          color: [0.2, 0.6, 1.0],
+          alpha: 1.0,
+          onHoverDetail: handleHoverDetail,
+          onClickDetail: handleClickDetail,
+        }
+      ];
+
+      return React.createElement(Scene, {
+        components,
+        defaultCamera: camera,
+        onCameraChange: setCamera,
+      });
+    }
+
+    // Mount the scene
+    const root = createRoot(document.getElementById('root'));
+    root.render(React.createElement(TestScene));
+
+    // Automated test functions
+    window.runAllTests = async function() {
+      const results = document.getElementById('test-results');
+      results.innerHTML = 'Running tests...\n';
+
+      await runFaceDetectionTest();
+      await runNormalAccuracyTest();
+
+      results.innerHTML += '\n--- All tests complete ---';
+    };
+
+    window.runFaceDetectionTest = async function() {
+      const results = document.getElementById('test-results');
+      results.innerHTML += '\n[Face Detection Test]\n';
+
+      // This would be automated via Playwright clicking specific screen positions
+      // For manual testing, click each face and verify
+      results.innerHTML += '  Manual: Click each cube face and verify detected face name\n';
+      results.innerHTML += '  Expected: +x, -x, +y, -y, +z, -z based on camera angle\n';
+    };
+
+    window.runNormalAccuracyTest = async function() {
+      const results = document.getElementById('test-results');
+      results.innerHTML += '\n[Normal Accuracy Test]\n';
+
+      if (!window.lastPickInfo?.hit?.normal) {
+        results.innerHTML += '  <span class="test-fail">SKIP: No pick data available</span>\n';
+        return;
+      }
+
+      const normal = window.lastPickInfo.hit.normal;
+      const length = Math.sqrt(normal[0]**2 + normal[1]**2 + normal[2]**2);
+
+      if (Math.abs(length - 1.0) < 0.1) {
+        results.innerHTML += `  <span class="test-pass">PASS: Normal is unit length (${length.toFixed(4)})</span>\n`;
+      } else {
+        results.innerHTML += `  <span class="test-fail">FAIL: Normal length ${length.toFixed(4)} != 1.0</span>\n`;
+      }
+    };
+
+    // Expose scene interaction for Playwright
+    window.pickAt = async function(x, y) {
+      // Simulate click at x, y coordinates
+      const container = document.getElementById('scene-container');
+      const canvas = container.querySelector('canvas');
+      if (!canvas) return null;
+
+      const event = new MouseEvent('click', {
+        clientX: container.offsetLeft + x,
+        clientY: container.offsetTop + y,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(event);
+
+      // Wait for pick result
+      await new Promise(r => setTimeout(r, 100));
+      return window.lastPickInfo;
+    };
+  </script>
+</body>
+</html>

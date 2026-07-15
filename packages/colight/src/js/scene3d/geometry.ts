@@ -304,3 +304,104 @@ export function createBeamGeometry() {
     indexData: cube.indexData,
   };
 }
+
+/******************************************************
+ * createCylinderBeamGeometry
+ * Returns a cylindrical "unit beam" from z=0..1, with circular cross-section.
+ * Radius is 0.5 (diameter 1) to match the rectangular beam's width.
+ * This provides rotation-invariant appearance for wireframes.
+ ******************************************************/
+export function createCylinderBeamGeometry(segments: number = 12) {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+
+  const radius = 0.5;
+
+  // Generate vertices for two rings (z=0 and z=1)
+  for (let ring = 0; ring <= 1; ring++) {
+    const z = ring;
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+
+      // Position
+      positions.push(x, y, z);
+
+      // Normal (points outward from cylinder axis)
+      normals.push(Math.cos(angle), Math.sin(angle), 0);
+    }
+  }
+
+  // Generate side faces (quads as two triangles)
+  for (let i = 0; i < segments; i++) {
+    const i0 = i; // bottom ring
+    const i1 = (i + 1) % segments; // next on bottom
+    const i2 = i + segments; // top ring
+    const i3 = ((i + 1) % segments) + segments; // next on top
+
+    // Two triangles per quad
+    indices.push(i0, i1, i2);
+    indices.push(i1, i3, i2);
+  }
+
+  // Add end caps
+  const bottomCenter = positions.length / 3;
+  positions.push(0, 0, 0);
+  normals.push(0, 0, -1);
+
+  const topCenter = positions.length / 3;
+  positions.push(0, 0, 1);
+  normals.push(0, 0, 1);
+
+  // Bottom cap vertices (need separate vertices for different normals)
+  const bottomCapStart = positions.length / 3;
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    positions.push(x, y, 0);
+    normals.push(0, 0, -1);
+  }
+
+  // Top cap vertices
+  const topCapStart = positions.length / 3;
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    positions.push(x, y, 1);
+    normals.push(0, 0, 1);
+  }
+
+  // Bottom cap triangles (winding order for outward normal)
+  for (let i = 0; i < segments; i++) {
+    const i0 = bottomCapStart + i;
+    const i1 = bottomCapStart + ((i + 1) % segments);
+    indices.push(bottomCenter, i1, i0);
+  }
+
+  // Top cap triangles
+  for (let i = 0; i < segments; i++) {
+    const i0 = topCapStart + i;
+    const i1 = topCapStart + ((i + 1) % segments);
+    indices.push(topCenter, i0, i1);
+  }
+
+  // Interleave positions and normals
+  const vertexData = new Float32Array(positions.length * 2);
+  for (let i = 0; i < positions.length / 3; i++) {
+    vertexData[i * 6 + 0] = positions[i * 3 + 0];
+    vertexData[i * 6 + 1] = positions[i * 3 + 1];
+    vertexData[i * 6 + 2] = positions[i * 3 + 2];
+    vertexData[i * 6 + 3] = normals[i * 3 + 0];
+    vertexData[i * 6 + 4] = normals[i * 3 + 1];
+    vertexData[i * 6 + 5] = normals[i * 3 + 2];
+  }
+
+  return {
+    vertexData,
+    indexData: new Uint16Array(indices),
+  };
+}
