@@ -3,10 +3,12 @@
 import asyncio
 import base64
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import webbrowser
 from typing import Any, Dict, List, Optional
 
@@ -1251,6 +1253,11 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     show_default=True,
     help="Max seconds to wait for render readiness (0 to disable).",
 )
+@click.option(
+    "--no-daemon",
+    is_flag=True,
+    help="Bypass a running colight daemon and render directly.",
+)
 @click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
 def screenshot(
     target: pathlib.Path,
@@ -1263,6 +1270,7 @@ def screenshot(
     check: bool,
     frame: Optional[str],
     ready_timeout: float,
+    no_daemon: bool,
     debug: bool,
 ):
     """Render TARGET to a PNG with deterministic settings.
@@ -1295,21 +1303,37 @@ def screenshot(
     (width/height are actual PNG pixel dimensions; coverage fractions are
     of the scene canvas.)
     """
-    from colight.cli_tools import screenshot_tools
+    from colight.cli_tools import daemon_client, screenshot_tools
 
+    effective_timeout = None if ready_timeout <= 0 else ready_timeout
     try:
-        payload = screenshot_tools.screenshot_target(
-            target,
-            out,
-            block=block,
-            width=width,
-            height=height,
-            dpr=dpr,
-            check=check,
-            frame=frame,
-            debug=debug,
-            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
-        )
+        payload = None
+        if not no_daemon:
+            payload = daemon_client.try_screenshot(
+                target,
+                out,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                check=check,
+                frame=frame,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
+        if payload is None:
+            payload = screenshot_tools.screenshot_target(
+                target,
+                out,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                check=check,
+                frame=frame,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(2)
@@ -1388,6 +1412,11 @@ def screenshot(
     show_default=True,
     help="Max seconds to wait for render readiness (0 to disable).",
 )
+@click.option(
+    "--no-daemon",
+    is_flag=True,
+    help="Bypass a running colight daemon and render directly.",
+)
 @click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
 def pick_at(
     target: pathlib.Path,
@@ -1399,6 +1428,7 @@ def pick_at(
     height: Optional[int],
     dpr: float,
     ready_timeout: float,
+    no_daemon: bool,
     debug: bool,
 ):
     """What is at point X,Y? Re-render TARGET and query the GPU pick buffer.
@@ -1429,7 +1459,7 @@ def pick_at(
     sampled disc covered by that instance; scene.rect maps page pixels to
     the canvas.)
     """
-    from colight.cli_tools import scene_pick
+    from colight.cli_tools import daemon_client, scene_pick
 
     try:
         x_text, y_text = coords.split(",", 1)
@@ -1438,19 +1468,35 @@ def pick_at(
         click.echo(f'Error: COORDS must be "X,Y", got {coords!r}', err=True)
         sys.exit(2)
 
+    effective_timeout = None if ready_timeout <= 0 else ready_timeout
     try:
-        payload = scene_pick.pick_at_target(
-            target,
-            x,
-            y,
-            radius=radius,
-            block=block,
-            width=width,
-            height=height,
-            dpr=dpr,
-            debug=debug,
-            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
-        )
+        payload = None
+        if not no_daemon:
+            payload = daemon_client.try_pick_at(
+                target,
+                x,
+                y,
+                radius=radius,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
+        if payload is None:
+            payload = scene_pick.pick_at_target(
+                target,
+                x,
+                y,
+                radius=radius,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(2)
@@ -1532,6 +1578,11 @@ def pick_at(
     show_default=True,
     help="Max seconds to wait for render readiness (0 to disable).",
 )
+@click.option(
+    "--no-daemon",
+    is_flag=True,
+    help="Bypass a running colight daemon and render directly.",
+)
 @click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
 def pick_where(
     target: pathlib.Path,
@@ -1544,6 +1595,7 @@ def pick_where(
     height: Optional[int],
     dpr: float,
     ready_timeout: float,
+    no_daemon: bool,
     debug: bool,
 ):
     """Where does a selection land on screen? Selection -> screen truth.
@@ -1575,26 +1627,42 @@ def pick_where(
     (bbox/centroid in page CSS pixels; projected_bbox appears when the
     selection is fully occluded but would land on screen.)
     """
-    from colight.cli_tools import scene_pick
+    from colight.cli_tools import daemon_client, scene_pick
 
+    effective_timeout = None if ready_timeout <= 0 else ready_timeout
     try:
         ranges = (
             scene_pick.parse_instance_ranges(instances)
             if instances is not None
             else None
         )
-        payload = scene_pick.pick_where_target(
-            target,
-            component_selector,
-            instances=ranges,
-            out=out,
-            block=block,
-            width=width,
-            height=height,
-            dpr=dpr,
-            debug=debug,
-            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
-        )
+        payload = None
+        if not no_daemon:
+            payload = daemon_client.try_pick_where(
+                target,
+                component_selector,
+                instances=ranges,
+                out=out,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
+        if payload is None:
+            payload = scene_pick.pick_where_target(
+                target,
+                component_selector,
+                instances=ranges,
+                out=out,
+                block=block,
+                width=width,
+                height=height,
+                dpr=dpr,
+                debug=debug,
+                ready_timeout=effective_timeout,
+            )
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(2)
@@ -1653,6 +1721,11 @@ def pick_where(
     show_default=True,
     help="Numeric threshold for the semantic diff reported on mismatch.",
 )
+@click.option(
+    "--no-daemon",
+    is_flag=True,
+    help="Bypass a running colight daemon for the screenshot layer.",
+)
 def verify(
     targets: tuple[pathlib.Path, ...],
     as_json: bool,
@@ -1660,6 +1733,7 @@ def verify(
     goldens_root: Optional[pathlib.Path],
     no_pixels: bool,
     epsilon: float,
+    no_daemon: bool,
 ):
     """Verify TARGETs against stored goldens (or pin them with --update).
 
@@ -1697,15 +1771,34 @@ def verify(
                       "changed_paths"?: [str], "components": {...},
                       "values_changed": int, "state": {...}}}]}]}
     """
-    from colight.cli_tools import verify_tools
+    from colight.cli_tools import daemon_client, verify_tools
 
-    payload, exit_code = verify_tools.run_verify(
-        list(targets),
-        goldens_root=goldens_root,
-        update=update,
-        pixels=not no_pixels,
-        epsilon=epsilon,
-    )
+    session_factory = None
+    if not no_daemon and not no_pixels and targets:
+        info = daemon_client.discover_for_target(targets[0])
+        if info is not None:
+            session_factory = lambda width, dpr: daemon_client.RemoteRenderSession(  # noqa: E731
+                info, width, dpr
+            )
+
+    try:
+        payload, exit_code = verify_tools.run_verify(
+            list(targets),
+            goldens_root=goldens_root,
+            update=update,
+            pixels=not no_pixels,
+            epsilon=epsilon,
+            session_factory=session_factory,
+        )
+    except daemon_client.DaemonUnavailable:
+        # The daemon vanished mid-run; redo the whole verify directly.
+        payload, exit_code = verify_tools.run_verify(
+            list(targets),
+            goldens_root=goldens_root,
+            update=update,
+            pixels=not no_pixels,
+            epsilon=epsilon,
+        )
 
     if as_json:
         _echo_json(payload)
@@ -1748,6 +1841,187 @@ def verify(
             )
 
     sys.exit(exit_code)
+
+
+@main.group()
+def daemon():
+    """Manage the colight render daemon (keeps headless Chrome warm).
+
+    The daemon serves the render-path commands (screenshot, pick-at,
+    pick-where, verify pixels) from a pool of warm Chrome instances plus a
+    small cache of loaded scenes, so tight agent loops skip the ~1-2s
+    browser launch per invocation. Discovery is automatic: it writes
+    <project_root>/.colight_cache/daemon.json and commands use it whenever
+    that file points at a live, version-matched daemon — otherwise they
+    silently run direct. Pass --no-daemon to any routed command to bypass.
+    """
+
+
+@daemon.command("start")
+@click.option(
+    "--idle-timeout",
+    type=float,
+    default=1800.0,
+    show_default=True,
+    help="Self-shutdown after this many seconds without a tool request.",
+)
+@click.option(
+    "--pool",
+    "pool_size",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Maximum concurrent isolated Chrome instances.",
+)
+@click.option(
+    "--scene-cache",
+    type=int,
+    default=4,
+    show_default=True,
+    help="Loaded scenes kept warm (LRU).",
+)
+@click.option(
+    "--foreground",
+    is_flag=True,
+    help="Run in the foreground instead of detaching.",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Log requests to stderr.")
+def daemon_start(
+    idle_timeout: float,
+    pool_size: int,
+    scene_cache: int,
+    foreground: bool,
+    verbose: bool,
+):
+    """Start a daemon for the current project root (no-op if one runs)."""
+    from colight.cli_tools import daemon as daemon_mod
+    from colight.cli_tools import daemon_client
+    from colight.runtime.parser import find_project_root
+
+    root = find_project_root(pathlib.Path.cwd())
+    existing = daemon_client.read_daemon_file(daemon_client.daemon_file_path(root))
+    if existing is not None and daemon_client.validate_info(existing):
+        click.echo(f"daemon already running (pid {existing.pid}, port {existing.port})")
+        return
+
+    if foreground:
+        server = daemon_mod.DaemonServer(
+            root,
+            idle_timeout=idle_timeout,
+            pool_size=pool_size,
+            scene_cache=scene_cache,
+            verbose=verbose,
+        )
+        server.start()
+        click.echo(
+            f"colight daemon on 127.0.0.1:{server.port} "
+            f"(root {root}, pool {pool_size}, idle-timeout {idle_timeout:g}s)"
+        )
+        server.run_until_shutdown()
+        return
+
+    log_path = root / ".colight_cache" / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "colight_cli",
+        "daemon",
+        "start",
+        "--foreground",
+        "--idle-timeout",
+        str(idle_timeout),
+        "--pool",
+        str(pool_size),
+        "--scene-cache",
+        str(scene_cache),
+    ]
+    if verbose:
+        command.append("--verbose")
+    with open(log_path, "ab") as log:
+        subprocess.Popen(
+            command,
+            cwd=root,
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        info = daemon_client.read_daemon_file(daemon_client.daemon_file_path(root))
+        if info is not None and daemon_client.validate_info(info):
+            click.echo(f"daemon started (pid {info.pid}, port {info.port})")
+            return
+        time.sleep(0.1)
+    click.echo(f"Error: daemon did not come up (see {log_path})", err=True)
+    sys.exit(1)
+
+
+@daemon.command("stop")
+def daemon_stop():
+    """Stop the project's daemon (reads the discovery file, signals it)."""
+    import signal as signal_mod
+
+    from colight.cli_tools import daemon_client
+    from colight.runtime.parser import find_project_root
+
+    root = find_project_root(pathlib.Path.cwd())
+    path = daemon_client.daemon_file_path(root)
+    info = daemon_client.read_daemon_file(path)
+    if info is None or not daemon_client.pid_alive(info.pid):
+        if info is not None:
+            path.unlink(missing_ok=True)
+        click.echo("no daemon running")
+        return
+    os.kill(info.pid, signal_mod.SIGTERM)
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if not daemon_client.pid_alive(info.pid):
+            path.unlink(missing_ok=True)
+            click.echo(f"daemon stopped (pid {info.pid})")
+            return
+        time.sleep(0.1)
+    click.echo(f"Error: daemon (pid {info.pid}) did not exit within 10s", err=True)
+    sys.exit(1)
+
+
+@daemon.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+def daemon_status(as_json: bool):
+    """Report the project daemon's health, pool and warm-scene stats."""
+    from colight.cli_tools import daemon_client
+    from colight.runtime.parser import find_project_root
+
+    root = find_project_root(pathlib.Path.cwd())
+    info = daemon_client.read_daemon_file(daemon_client.daemon_file_path(root))
+    if info is None or not daemon_client.validate_info(info):
+        if as_json:
+            _echo_json({"running": False})
+        else:
+            click.echo("no daemon running")
+        sys.exit(1)
+    status = daemon_client.request(info, "GET", "/status")
+    if as_json:
+        _echo_json({"running": True, **status})
+        return
+    pool = status["pool"]
+    warm = status["warm"]
+    requests = status["requests"]
+    click.echo(
+        f"daemon pid {status['pid']} port {status['port']} "
+        f"uptime {status['uptime']:g}s idle-timeout {status['idle_timeout']:g}s"
+    )
+    click.echo(
+        f"  chrome pool: {pool['instances']}/{pool['max']} instances "
+        f"({pool['busy']} busy, {pool['launches']} launched)"
+    )
+    click.echo(
+        f"  warm scenes: {warm['entries']}/{warm['capacity']} "
+        f"(hits {warm['hits']}, misses {warm['misses']}, "
+        f"evictions {warm['evictions']})"
+    )
+    click.echo(f"  requests: {requests['total']}")
 
 
 if __name__ == "__main__":
