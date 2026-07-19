@@ -51,8 +51,11 @@ colight view path/to/plot.colight
 colight blocks path/to/notebook.py --json
 
 # Headless evaluation; consecutive runs report a per-block diff
-# (cached | ran:unchanged | ran:changed | new | removed | error)
+# (cached | ran:unchanged | ran:changed | new | removed | error).
+# --force re-executes everything; `# | pragma: always-eval` marks a
+# block as never-cached
 colight run path/to/notebook.py --json
+colight run path/to/notebook.py --force
 
 # Inspect a visual's structure without rendering: components, array
 # schemas, state keys, and sanity warnings (NaN/Inf, empty arrays, ...)
@@ -67,6 +70,13 @@ colight diff before.colight after.colight --json
 # render completion; --check renders twice and byte-compares
 colight screenshot path/to/plot.colight --out shot.png --json
 colight screenshot notebook.py --block ID --out shot.png
+
+# Golden verification: pin each visual's artifact, structure hash and
+# screenshot sha under tests/goldens/; verify reports which layer changed
+# (structure vs pixels) with a semantic diff summary.
+# Exit 0 = match, 1 = mismatch, 2 = error, 3 = no goldens yet
+colight verify notebook.py --json
+colight verify notebook.py --update   # pin/refresh goldens (reports changes)
 ```
 
 There is also `colight eval`, an eval server used by the VS Code extension.

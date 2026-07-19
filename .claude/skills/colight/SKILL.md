@@ -19,6 +19,22 @@ colight run FILE.py            # per-block: cached | ran:unchanged | ran:changed
 Block statuses tell you exactly what your edit affected — `ran:changed` on blocks you did
 not intend to change is a regression signal. Add `--json` for structured output; nonzero
 exit means a block errored (errors include block id, line range, and user-frame traceback).
+`--force` re-executes everything (statuses still compare against stored fingerprints);
+`# | pragma: always-eval` on a block means it never reports `cached`.
+
+## Pinning known-good state
+
+```bash
+colight verify FILE.py --update      # pin goldens: artifact + structure hash +
+                                     # screenshot sha per visual block
+colight verify FILE.py [--json]      # exit 0 match | 1 mismatch | 2 error | 3 no goldens
+```
+
+On mismatch the report names the changed layer (structure vs pixels) and includes a
+semantic diff (max/mean |delta|, changed paths). `--update` reports the same diff before
+overwriting, so refreshing goldens is an informed act. Goldens live in
+`<project_root>/tests/goldens/` (`--goldens DIR` overrides); `--no-pixels` skips the
+screenshot layer (auto-skipped without Chrome).
 
 ## Perception commands (cheapest first)
 

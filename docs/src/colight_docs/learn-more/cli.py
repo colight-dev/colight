@@ -166,7 +166,10 @@
 # # Headless evaluation with a persistent per-file record; consecutive runs
 # # report a per-block diff (cached | ran:unchanged | ran:changed | new |
 # # removed | error). Exit code is nonzero if any block errored.
-# colight run notebook.py [--json] [--block ID]
+# # --force re-executes every block, ignoring cache keys (statuses then
+# # compare against the stored fingerprints); blocks tagged
+# # `# | pragma: always-eval` never report cached.
+# colight run notebook.py [--json] [--block ID] [--force]
 #
 # # Structural inspection of a .colight artifact (or every visual a .py file
 # # produces): components, per-array dtype/shape/min/max, state keys,
@@ -191,6 +194,20 @@
 # # mismatch); JSON reports pixel size, sha256 and determinism.
 # colight screenshot target.colight --out shot.png [--json] [--check]
 # colight screenshot notebook.py --block ID --out shot.png
+#
+# # Golden verification. A golden pins three layers per visual-producing
+# # block: the .colight artifact bytes, the canonicalized-structure hash
+# # (per-run ids normalized), and the deterministic screenshot sha256 +
+# # dimensions. On mismatch the report names the changed layer (structure
+# # vs pixels); structure changes include a semantic diff summary
+# # (max/mean |delta|, changed paths). --update pins/refreshes goldens and
+# # reports what changed vs the previous set. The pixel layer is skipped
+# # with a warning when Chrome is unavailable, or via --no-pixels.
+# # Goldens live in <project_root>/tests/goldens/<relpath-of-target>/
+# # (override with --goldens DIR).
+# # Exit 0 = all match, 1 = mismatches, 2 = error, 3 = no goldens found.
+# colight verify notebook.py [--json] [--no-pixels] [--goldens DIR]
+# colight verify notebook.py --update
 # ```
 #
 # Block ids are short hashes of each block's own source, so they survive

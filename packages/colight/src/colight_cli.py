@@ -1318,5 +1318,133 @@ def screenshot(
         sys.exit(1)
 
 
+@main.command()
+@click.argument(
+    "targets",
+    nargs=-1,
+    required=True,
+    type=click.Path(exists=True, path_type=pathlib.Path),
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--update",
+    is_flag=True,
+    help="Write/refresh goldens, reporting what changed vs the previous set.",
+)
+@click.option(
+    "--goldens",
+    "goldens_root",
+    type=click.Path(path_type=pathlib.Path),
+    help="Golden storage root (default: <project_root>/tests/goldens).",
+)
+@click.option(
+    "--no-pixels",
+    is_flag=True,
+    help="Skip the screenshot layer (for Chrome-less environments).",
+)
+@click.option(
+    "--epsilon",
+    type=float,
+    default=1e-9,
+    show_default=True,
+    help="Numeric threshold for the semantic diff reported on mismatch.",
+)
+def verify(
+    targets: tuple[pathlib.Path, ...],
+    as_json: bool,
+    update: bool,
+    goldens_root: Optional[pathlib.Path],
+    no_pixels: bool,
+    epsilon: float,
+):
+    """Verify TARGETs against stored goldens (or pin them with --update).
+
+    Each TARGET is a .py document (every visual-producing block gets a
+    golden) or a .colight artifact. A golden pins three layers per visual:
+    the .colight artifact bytes, the canonicalized-structure hash (per-run
+    ids normalized), and the deterministic screenshot sha256 + dimensions.
+    On mismatch the report says which layer changed; structure changes
+    include a semantic diff summary (max/mean |delta|, changed paths).
+    The screenshot layer is skipped with a warning when Chrome or the JS
+    bundle is unavailable, or explicitly via --no-pixels.
+
+    Goldens live in <project_root>/tests/goldens/<relpath-of-target>/
+    (manifest.json + one .colight per visual); --goldens overrides.
+
+    Exit code: 0 all match (or update succeeded), 1 mismatches, 2 error,
+    3 no goldens found (run with --update to create them).
+
+    \b
+    JSON schema:
+      {"ok": bool, "targets": [
+        {"target": str, "goldens": str, "kind": "py"|"colight",
+         "status": "match"|"mismatch"|"no-goldens"|"updated"|"error",
+         "warnings"?: [str], "hint"?: str, "errors"?: [...],
+         "blocks": [
+           {"id": str, "lines"?: [start, end], "golden_id"?: str,
+            "status": "match"|"structure-changed"|"pixels-changed"|"new"|
+                      "removed"|"added"|"updated"|"unchanged",
+            "layer"?: "structure"|"pixels",
+            "structure"?: {"hash", "golden_hash", "match"},
+            "pixels"?: {"sha256", "golden_sha256", "width", "height",
+                        "match"},
+            "diff"?: {"arrays_changed": int, "max_abs_delta"?: float,
+                      "max_abs_delta_path"?: str, "mean_abs_delta"?: float,
+                      "changed_paths"?: [str], "components": {...},
+                      "values_changed": int, "state": {...}}}]}]}
+    """
+    from colight.cli_tools import verify_tools
+
+    payload, exit_code = verify_tools.run_verify(
+        list(targets),
+        goldens_root=goldens_root,
+        update=update,
+        pixels=not no_pixels,
+        epsilon=epsilon,
+    )
+
+    if as_json:
+        _echo_json(payload)
+        sys.exit(exit_code)
+
+    for result in payload["targets"]:
+        click.echo(f"{result['target']} — {result['status']}")
+        for warning in result.get("warnings", []):
+            click.echo(f"  warning: {warning}")
+        if "hint" in result:
+            click.echo(f"  {result['hint']}")
+        for block in result.get("blocks", []):
+            line = f"  {block['status']:<18} {block['id']}"
+            if block.get("layer"):
+                line += f" [{block['layer']}]"
+            diff = block.get("diff")
+            if diff:
+                parts = [f"{diff['arrays_changed']} array(s)"]
+                if "max_abs_delta" in diff:
+                    parts.append(
+                        f"max |Δ| {diff['max_abs_delta']:.4g} "
+                        f"in {diff['max_abs_delta_path']}"
+                    )
+                if diff.get("values_changed"):
+                    parts.append(f"{diff['values_changed']} value(s)")
+                line += f" — {'; '.join(parts)}"
+            elif block["status"] == "pixels-changed" and "pixels" in block:
+                line += (
+                    f" — sha {block['pixels']['golden_sha256'][:12]}… -> "
+                    f"{block['pixels']['sha256'][:12]}…"
+                )
+            click.echo(line)
+        for error_item in result.get("errors", []):
+            error = error_item.get("error", {})
+            block_id = error_item.get("block", "?")
+            click.echo(
+                f"  error in block {block_id}: "
+                f"{error.get('type')}: {error.get('message')}",
+                err=True,
+            )
+
+    sys.exit(exit_code)
+
+
 if __name__ == "__main__":
     main()
