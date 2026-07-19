@@ -3,6 +3,7 @@
 import contextlib
 import io
 import sys
+import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,9 +19,53 @@ class ExecutionResult:
     value: Any = None
     output: str = ""
     error: Optional[str] = None
+    error_info: Optional[Dict[str, Any]] = None
     colight_bytes: Optional[bytes] = None
     cache_hit: bool = False
     content_changed: bool = False
+
+
+def structured_error(exc: BaseException, filename: str) -> Dict[str, Any]:
+    """Build a structured, machine-readable error description.
+
+    The traceback is trimmed to user frames: internal executor frames
+    (the ``exec``/``eval`` calls in this module) are dropped.
+
+    Args:
+        exc: The exception that was raised.
+        filename: The file being executed (used to flag user frames).
+
+    Returns:
+        Dict with ``type``, ``message`` and ``frames`` (list of dicts with
+        ``file``, ``line``, ``in`` and ``code`` keys).
+    """
+    frames: List[Dict[str, Any]] = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        if frame.filename == __file__:
+            continue  # Internal executor frame (exec/eval plumbing)
+        frames.append(
+            {
+                "file": frame.filename,
+                "line": frame.lineno,
+                "in": frame.name,
+                "code": (frame.line or "").strip() or None,
+            }
+        )
+    info: Dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+        "frames": frames,
+    }
+    if isinstance(exc, SyntaxError) and exc.lineno is not None:
+        info["frames"] = frames + [
+            {
+                "file": exc.filename or filename,
+                "line": exc.lineno,
+                "in": "<module>",
+                "code": (exc.text or "").strip() or None,
+            }
+        ]
+    return info
 
 
 class BlockExecutor:
@@ -165,16 +210,14 @@ except ImportError:
                 # Capture output
                 result.output = stdout_capture.getvalue()
 
-            except Exception:
-                # Capture error with better formatting
-                import traceback
-
+            except Exception as exc:
                 # Get the raw traceback
                 tb = traceback.format_exc()
 
                 # If we have a real filename (not <string>), the traceback will
                 # already show correct line numbers due to our padding in compile_once
                 result.error = tb
+                result.error_info = structured_error(exc, filename)
 
                 # Also capture any stderr output
                 stderr_output = stderr_capture.getvalue()

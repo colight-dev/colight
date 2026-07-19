@@ -3,7 +3,7 @@
 import hashlib
 import os
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from enum import Enum, auto
 from typing import Iterator, List, Literal, Optional, Union
 
@@ -84,6 +84,15 @@ class RawBlock:
     code_nodes: List[Union[cst.CSTNode, EmptyLine]]
     pragma_lines: List[str]
     start_line: int
+    # Source line numbers aligned 1:1 with code_nodes (EmptyLine included).
+    code_linenos: List[int] = dataclass_field(default_factory=list)
+
+    def first_code_line(self, default: int) -> int:
+        """Line number of the first real code node (default if none)."""
+        for node, lineno in zip(self.code_nodes, self.code_linenos):
+            if not isinstance(node, EmptyLine):
+                return lineno
+        return default
 
 
 # State machine for block grouping
@@ -212,8 +221,11 @@ def lex(source_code: str) -> List[ParsedLine]:
     # Parse with LibCST
     module = cst.parse_module(source_code)
 
-    # Enable position tracking
+    # Enable position tracking. MetadataWrapper deep-copies the module, so we
+    # must iterate over the wrapper's copy — otherwise position lookups miss
+    # and every statement falls back to a stale line counter.
     wrapper = MetadataWrapper(module)
+    module = wrapper.module
     positions = wrapper.resolve(PositionProvider)
 
     # Process header comments first
@@ -360,6 +372,7 @@ def _group_blocks_generator(elements: List[ParsedLine]) -> Iterator[RawBlock]:
             if el.is_empty_comment and block.code_nodes:
                 # Empty comment within code - add sentinel
                 block.code_nodes.append(EmptyLine())
+                block.code_linenos.append(el.lineno)
             else:
                 # Regular comment - add to prose
                 block.prose_lines.append(el.content)
@@ -367,6 +380,7 @@ def _group_blocks_generator(elements: List[ParsedLine]) -> Iterator[RawBlock]:
             block.pragma_lines.append(el.content)
         elif isinstance(el, CodeLine):
             block.code_nodes.append(el.content)
+            block.code_linenos.append(el.lineno)
         # BlankLine is handled separately in state machine
 
     def _blank_ends_block(current_block: RawBlock) -> bool:
@@ -470,7 +484,7 @@ def build_document(
                     code_elem = Element(
                         kind=elem_kind,
                         content=node,
-                        lineno=raw_block.start_line + len(raw_block.prose_lines) + 1,
+                        lineno=raw_block.first_code_line(raw_block.start_line),
                     )
                     elements.append(code_elem)
             else:
@@ -494,7 +508,7 @@ def build_document(
                     code_elem = Element(
                         kind=last_kind,
                         content=raw_block.code_nodes,
-                        lineno=raw_block.start_line + len(raw_block.prose_lines) + 1,
+                        lineno=raw_block.first_code_line(raw_block.start_line),
                     )
                     elements.append(code_elem)
                 else:
@@ -510,21 +524,18 @@ def build_document(
                         code_elem = Element(
                             kind="STATEMENT",
                             content=raw_block.code_nodes,
-                            lineno=raw_block.start_line
-                            + len(raw_block.prose_lines)
-                            + 1,
+                            lineno=raw_block.first_code_line(raw_block.start_line),
                         )
                         elements.append(code_elem)
                     else:
                         # Mixed or has expressions - add separately
-                        line_offset = (
-                            raw_block.start_line + len(raw_block.prose_lines) + 1
-                        )
                         for i, node in enumerate(raw_block.code_nodes):
                             if isinstance(node, cst.CSTNode):
                                 elem_kind = _classify_code_node(node)
                                 code_elem = Element(
-                                    kind=elem_kind, content=node, lineno=line_offset + i
+                                    kind=elem_kind,
+                                    content=node,
+                                    lineno=raw_block.code_linenos[i],
                                 )
                                 elements.append(code_elem)
 
