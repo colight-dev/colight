@@ -150,3 +150,32 @@
 #
 # Block-level pragmas > CLI `--pragma` options > file-level `hide-all-*`
 # defaults. An explicit `show-*` always overrides a matching `hide-*`.
+#
+# %% [markdown]
+# ## Agent-facing commands
+#
+# Three subcommands expose the block structure and evaluation results as
+# structured data (add `--json` to any of them for machine-readable output):
+#
+# ```bash
+# # Dump the block graph: stable ids, line ranges, provides/requires,
+# # upstream dependencies, pragma tags
+# colight blocks notebook.py [--json]
+#
+# # Headless evaluation with a persistent per-file record; consecutive runs
+# # report a per-block diff (cached | ran:unchanged | ran:changed | new |
+# # removed | error). Exit code is nonzero if any block errored.
+# colight run notebook.py [--json] [--block ID]
+#
+# # Structural inspection of a .colight artifact (or every visual a .py file
+# # produces): components, per-array dtype/shape/min/max, state keys,
+# # callbacks, plus sanity warnings (empty arrays, NaN/Inf, alphas ~0,
+# # zero-extent bounds, mismatched per-instance lengths)
+# colight inspect target.colight [--json]
+# colight inspect notebook.py [--json]
+# ```
+#
+# Block ids are short hashes of each block's own source, so they survive
+# edits to other blocks. `colight run` keeps its fingerprint records in
+# `.colight_cache/cli-run/` under the project root; `--block ID` restricts
+# detailed output to that block and its dependents.

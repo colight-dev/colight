@@ -46,6 +46,17 @@ colight render path/to/plot.colight updates.colight --out plot.mp4
 
 # Open a .colight file in the browser
 colight view path/to/plot.colight
+
+# Dump a file's block graph (stable ids, line ranges, dependencies)
+colight blocks path/to/notebook.py --json
+
+# Headless evaluation; consecutive runs report a per-block diff
+# (cached | ran:unchanged | ran:changed | new | removed | error)
+colight run path/to/notebook.py --json
+
+# Inspect a visual's structure without rendering: components, array
+# schemas, state keys, and sanity warnings (NaN/Inf, empty arrays, ...)
+colight inspect path/to/plot.colight --json
 ```
 
 There is also `colight eval`, an eval server used by the VS Code extension.
