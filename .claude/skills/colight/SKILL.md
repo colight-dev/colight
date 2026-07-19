@@ -57,6 +57,36 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
 - Refer to blocks by the stable ids from `colight blocks` (content hashes of each block's
   own source — they survive edits to other blocks), not by line numbers.
 
+## Scene3d pick queries (perceive cheaply → locate → zoom → dereference)
+
+For 3D scenes, the GPU pick buffer answers "what's on screen" without eyeballing pixels.
+Every query re-renders deterministically; nothing is persisted. Coordinates are CSS px of
+the rendered page (origin top-left, y down) — the same space as a screenshot PNG at the
+same `--width/--height` (dpr 1).
+
+```bash
+colight screenshot scene.py --out s.png --json   # 1. perceive: `coverage` = fraction of
+                                                 #    canvas per component + background
+colight pick-at scene.py X,Y [--radius 6] --json # 2. locate: ranked hits at a point,
+                                                 #    with dereferenced values (center,
+                                                 #    color, size — as rendered)
+colight pick-where scene.py --component C \
+    [--instances A-B] [--out overlay.png] --json # 3. selection → screen truth: bbox,
+                                                 #    centroid, visibility (visible px /
+                                                 #    unoccluded footprint); --out draws
+                                                 #    the selection highlighted
+colight screenshot scene.py --out zoom.png \
+    --frame "C[:A-B]" --json                     # 4. zoom: camera fit to the selection;
+                                                 #    its coverage fraction increases
+```
+
+- `--component` takes an index or type name (as reported by `coverage`).
+- Exit codes: pick-at 1 = no hit; pick-where 1 = selection entirely invisible
+  (`projected_bbox` says where it _would_ land if merely occluded); 2 = error, including
+  non-scene3d targets — these commands are scene3d-only.
+- Use the same `--width/--height` across screenshot and pick queries so coordinates line
+  up; the payload's `scene.rect` maps page pixels to the canvas.
+
 ## Conventions
 
 - Run Python via `uv run` (e.g. `uv run colight ...` inside this repo).

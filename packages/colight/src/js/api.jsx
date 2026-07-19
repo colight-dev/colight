@@ -15,12 +15,15 @@ import { NOOP_READY_STATE } from "./scene3d/types";
 import {
   createCanvasOverlays,
   removeCanvasOverlays,
+  scene3dAgentApi,
 } from "./scene3d/canvasSnapshot";
 import { colight } from "./globals";
 
 // Register scene3d snapshot utilities with colight global for PDF export
 colight.beforeScreenCapture = createCanvasOverlays;
 colight.afterScreenCapture = removeCanvasOverlays;
+// Agent-facing scene3d queries (full-frame pick readback, framing, highlight)
+colight.scene3d = scene3dAgentApi;
 
 // Wrap Scene to inject readyState from colight context
 function ColightScene(props) {
