@@ -6,6 +6,56 @@
  */
 
 import { useEffect, useRef, useMemo } from "react";
+import { CameraParams } from "./camera3d";
+import { InstanceRanges, PickLegendEntry } from "./pick-snapshot";
+
+/** Full-frame pick readback: packed ids plus the decoding legend. */
+export interface PickBufferResult {
+  /** Buffer width in device pixels. */
+  width: number;
+  /** Buffer height in device pixels. */
+  height: number;
+  /** base64 of a little-endian u32 per pixel, row-major from the top-left.
+   * 0 = background; otherwise decode with the legend (see pick-snapshot). */
+  ids: string;
+  legend: PickLegendEntry[];
+}
+
+/**
+ * Agent-facing snapshot API each mounted scene registers.
+ * Implemented in impl3d.tsx; dispatched via the colight global (api.jsx).
+ */
+export interface SceneSnapshotApi {
+  /** Canvas dimensions, CSS rect, dpr, camera, and component summary. */
+  getInfo(): Record<string, unknown>;
+  /** Renders the pick pass full-frame and reads back the id buffer.
+   * With componentIdx, draws only that component (optionally only the
+   * given instance ranges) — the selection's unoccluded footprint. */
+  pickBuffer(options?: {
+    componentIdx?: number | null;
+    instances?: InstanceRanges;
+  }): Promise<PickBufferResult | null>;
+  /** Dereferenced attribute values for one instance. */
+  instanceInfo(
+    componentIdx: number,
+    instanceIdx: number,
+  ): Record<string, unknown> | null;
+  /** Fits the camera to a component/instance selection (null = whole
+   * scene) and re-renders; returns the fitted camera. */
+  frameOnSelection(
+    componentIdx: number | null,
+    ranges?: InstanceRanges,
+  ): Promise<CameraParams | null>;
+  /** Re-renders with the selection highlighted via per-instance
+   * decorations (everything else dimmed). */
+  applyHighlight(
+    componentIdx: number,
+    ranges?: InstanceRanges,
+    options?: { color?: [number, number, number]; dim?: number },
+  ): Promise<boolean>;
+  /** Restores the un-highlighted scene. */
+  clearHighlight(): Promise<void>;
+}
 
 interface CanvasEntry {
   canvas: HTMLCanvasElement;
@@ -16,6 +66,7 @@ interface CanvasEntry {
     texture: GPUTexture,
     depthTexture: GPUTexture | null,
   ) => Promise<void>;
+  snapshotApi?: SceneSnapshotApi;
 }
 
 interface CanvasRegistry {
@@ -31,6 +82,7 @@ const activeCanvases: CanvasRegistry = {};
  * @param device - Optional WebGPU device to use for texture copying
  * @param context - Optional WebGPU context for rendering
  * @param renderCallback - Optional callback to render the scene to a texture
+ * @param snapshotApi - Optional agent-facing snapshot API for this scene
  * @returns Object containing the ref to attach to canvas
  */
 export function useCanvasSnapshot(
@@ -40,6 +92,7 @@ export function useCanvasSnapshot(
     texture: GPUTexture,
     depthTexture: GPUTexture | null,
   ) => Promise<void>,
+  snapshotApi?: SceneSnapshotApi,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const id = useMemo(
@@ -55,6 +108,7 @@ export function useCanvasSnapshot(
         device,
         context,
         renderCallback,
+        snapshotApi,
       };
 
       // Cleanup on unmount
@@ -62,13 +116,142 @@ export function useCanvasSnapshot(
         delete activeCanvases[id];
       };
     }
-  }, [id, device, context, renderCallback]);
+  }, [id, device, context, renderCallback, snapshotApi]);
 
   return {
     canvasRef,
     getActiveCanvases: () => Object.keys(activeCanvases),
   };
 }
+
+/** Registered scene snapshot APIs, in mount order. */
+function sceneApis(): SceneSnapshotApi[] {
+  return Object.values(activeCanvases)
+    .map((entry) => entry.snapshotApi)
+    .filter((api): api is SceneSnapshotApi => !!api);
+}
+
+function sceneApiAt(index: number): SceneSnapshotApi | null {
+  return sceneApis()[index] ?? null;
+}
+
+/**
+ * Agent-facing dispatch surface, exposed as `window.colight.scene3d`.
+ * Every method returns JSON-serializable data (or `{error}` on failure) so
+ * the CLI can call it through CDP `Runtime.evaluate`.
+ */
+export const scene3dAgentApi = {
+  /** Number of mounted scene3d scenes. */
+  count(): number {
+    return sceneApis().length;
+  },
+
+  /** Per-scene info (dimensions, CSS rect, dpr, camera, components). */
+  info(): Record<string, unknown>[] {
+    return sceneApis().map((api, index) => ({ index, ...api.getInfo() }));
+  },
+
+  /** Full-frame pick readback for one scene (default scene 0). */
+  async snapshot(options?: {
+    scene?: number;
+    component?: number | null;
+    instances?: InstanceRanges;
+  }): Promise<Record<string, unknown>> {
+    const sceneIndex = options?.scene ?? 0;
+    const api = sceneApiAt(sceneIndex);
+    if (!api) return { error: `no scene3d scene at index ${sceneIndex}` };
+    try {
+      const result = await api.pickBuffer({
+        componentIdx: options?.component ?? undefined,
+        instances: options?.instances,
+      });
+      if (!result) return { error: "pick readback unavailable" };
+      return {
+        scenes: sceneApis().length,
+        scene: { index: sceneIndex, ...api.getInfo() },
+        ...result,
+      };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  },
+
+  /** Dereferenced attribute values for one instance. */
+  instanceInfo(options: {
+    scene?: number;
+    component: number;
+    instance: number;
+  }): Record<string, unknown> {
+    const api = sceneApiAt(options.scene ?? 0);
+    if (!api)
+      return { error: `no scene3d scene at index ${options.scene ?? 0}` };
+    const values = api.instanceInfo(options.component, options.instance);
+    if (!values) {
+      return {
+        error: `no instance ${options.instance} in component ${options.component}`,
+      };
+    }
+    return { values };
+  },
+
+  /** Fits the camera on a selection (component omitted/null = whole scene). */
+  async frame(options?: {
+    scene?: number;
+    component?: number | null;
+    instances?: InstanceRanges;
+  }): Promise<Record<string, unknown>> {
+    const api = sceneApiAt(options?.scene ?? 0);
+    if (!api)
+      return { error: `no scene3d scene at index ${options?.scene ?? 0}` };
+    try {
+      const camera = await api.frameOnSelection(
+        options?.component ?? null,
+        options?.instances,
+      );
+      if (!camera) return { error: "selection has no bounds to frame" };
+      return { camera };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  },
+
+  /** Highlights a selection via per-instance decorations. */
+  async highlight(options: {
+    scene?: number;
+    component: number;
+    instances?: InstanceRanges;
+    color?: [number, number, number];
+    dim?: number;
+  }): Promise<Record<string, unknown>> {
+    const api = sceneApiAt(options.scene ?? 0);
+    if (!api)
+      return { error: `no scene3d scene at index ${options.scene ?? 0}` };
+    try {
+      const ok = await api.applyHighlight(
+        options.component,
+        options.instances,
+        {
+          color: options.color,
+          dim: options.dim,
+        },
+      );
+      return ok ? { ok: true } : { error: "highlight failed" };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  },
+
+  /** Restores the un-highlighted scene. */
+  async clearHighlight(options?: {
+    scene?: number;
+  }): Promise<Record<string, unknown>> {
+    const api = sceneApiAt(options?.scene ?? 0);
+    if (!api)
+      return { error: `no scene3d scene at index ${options?.scene ?? 0}` };
+    await api.clearHighlight();
+    return { ok: true };
+  },
+};
 
 /**
  * Creates image overlays for all registered WebGPU canvases.

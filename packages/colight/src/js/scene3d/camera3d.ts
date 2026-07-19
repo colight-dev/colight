@@ -517,6 +517,74 @@ function clamp(x: number, minVal: number, maxVal: number): number {
   return Math.max(minVal, Math.min(x, maxVal));
 }
 
+/**
+ * Fits a camera to axis-aligned bounds, preserving the current view
+ * direction and up vector. The camera targets the bounds center at a
+ * distance where the bounding sphere fits the (vertical and horizontal)
+ * field of view, with a small margin.
+ *
+ * @param camera Camera whose direction/up/fov to preserve
+ * @param bounds World-space bounds as {min, max}
+ * @param aspect Viewport aspect ratio (width / height)
+ * @param margin Multiplier on the fitted distance (default 1.15)
+ */
+export function fitCameraToBounds(
+  camera: CameraParams,
+  bounds: {
+    min: [number, number, number];
+    max: [number, number, number];
+  },
+  aspect: number,
+  margin: number = 1.15,
+): CameraParams {
+  const center = glMatrix.vec3.fromValues(
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2,
+  );
+  const halfDiagonal =
+    Math.sqrt(
+      (bounds.max[0] - bounds.min[0]) ** 2 +
+        (bounds.max[1] - bounds.min[1]) ** 2 +
+        (bounds.max[2] - bounds.min[2]) ** 2,
+    ) / 2;
+  // Degenerate (single point / zero extent) selections still get a
+  // reasonable close-up rather than a divide-by-zero.
+  const radius = Math.max(halfDiagonal, 1e-3);
+
+  const state = createCameraState(camera);
+  const direction = glMatrix.vec3.sub(
+    glMatrix.vec3.create(),
+    state.position,
+    state.target,
+  );
+  if (glMatrix.vec3.length(direction) < 1e-9) {
+    glMatrix.vec3.set(direction, 1, 1, 1);
+  }
+  glMatrix.vec3.normalize(direction, direction);
+
+  const fovY = degreesToRadians(state.fov);
+  const fovX = 2 * Math.atan(Math.tan(fovY / 2) * Math.max(aspect, 1e-3));
+  const halfFov = Math.min(fovY, fovX) / 2;
+  const distance = (radius / Math.sin(Math.max(halfFov, 1e-3))) * margin;
+
+  const position = glMatrix.vec3.scaleAndAdd(
+    glMatrix.vec3.create(),
+    center,
+    direction,
+    distance,
+  );
+
+  return {
+    position: Array.from(position) as [number, number, number],
+    target: Array.from(center) as [number, number, number],
+    up: Array.from(state.up) as [number, number, number],
+    fov: state.fov,
+    near: Math.max(distance * 1e-3, distance - radius * 4),
+    far: distance + radius * 4,
+  };
+}
+
 export function hasCameraMoved(
   current: glMatrix.vec3,
   last: glMatrix.vec3 | undefined,

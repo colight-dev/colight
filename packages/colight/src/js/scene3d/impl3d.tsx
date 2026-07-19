@@ -10,7 +10,11 @@ import React, {
   useState,
 } from "react";
 import { throttle, deepEqualModuloTypedArrays } from "./utils";
-import { useCanvasSnapshot } from "./canvasSnapshot";
+import {
+  useCanvasSnapshot,
+  SceneSnapshotApi,
+  PickBufferResult,
+} from "./canvasSnapshot";
 import {
   CameraParams,
   CameraState,
@@ -18,6 +22,7 @@ import {
   createCameraState,
   dolly,
   adjustFov,
+  fitCameraToBounds,
   orbit,
   pan,
   roll,
@@ -27,6 +32,16 @@ import {
   getProjectionMatrix,
   getViewMatrix,
 } from "./camera3d";
+import {
+  buildPickLegend,
+  computeSelectionBounds,
+  describeInstance,
+  inRanges,
+  unionBounds,
+  u32ToBase64,
+  Bounds3,
+  InstanceRanges,
+} from "./pick-snapshot";
 
 // @ts-ignore - lodash-es types are available via @types/lodash-es
 import isEqual from "lodash-es/isEqual";
@@ -1143,10 +1158,30 @@ export function SceneImpl({
     ],
   );
 
+  // Agent-facing snapshot API (full-frame pick readback, camera framing,
+  // selection highlighting). The impl closes over per-render props/refs and
+  // is reassigned every render; the stable wrapper lives in the registry.
+  const snapshotImplRef = useRef<SceneSnapshotApi | null>(null);
+  const stableSnapshotApi = useMemo<SceneSnapshotApi>(
+    () => ({
+      getInfo: () => snapshotImplRef.current!.getInfo(),
+      pickBuffer: (options) => snapshotImplRef.current!.pickBuffer(options),
+      instanceInfo: (componentIdx, instanceIdx) =>
+        snapshotImplRef.current!.instanceInfo(componentIdx, instanceIdx),
+      frameOnSelection: (componentIdx, ranges) =>
+        snapshotImplRef.current!.frameOnSelection(componentIdx, ranges),
+      applyHighlight: (componentIdx, ranges, options) =>
+        snapshotImplRef.current!.applyHighlight(componentIdx, ranges, options),
+      clearHighlight: () => snapshotImplRef.current!.clearHighlight(),
+    }),
+    [],
+  );
+
   const { canvasRef } = useCanvasSnapshot(
     gpuRef.current?.device,
     gpuRef.current?.context,
     renderToTexture,
+    stableSnapshotApi,
   );
 
   const [isReady, setIsReady] = useState(false);
@@ -2288,14 +2323,9 @@ export function SceneImpl({
     pickingLockRef.current = true;
 
     try {
-      const {
-        device,
-        pickTexture,
-        pickDepthTexture,
-        readbackBuffer,
-        uniformBindGroup,
-        renderObjects,
-      } = gpuRef.current;
+      const { device, pickTexture, pickDepthTexture, readbackBuffer } =
+        gpuRef.current;
+      const { renderObjects } = gpuRef.current;
       if (!pickTexture || !pickDepthTexture || !readbackBuffer) return;
 
       // Ensure picking data is ready for all objects
@@ -2328,58 +2358,8 @@ export function SceneImpl({
         return;
       }
 
-      // Sort render objects for picking: scene first, then overlay
-      // Overlay objects use depthCompare: "always" so they overwrite scene objects,
-      // giving them picking priority even when geometrically behind
-      const sortedForPicking = [...renderObjects].sort((a, b) => {
-        const aOverlay = a.layer === "overlay" ? 1 : 0;
-        const bOverlay = b.layer === "overlay" ? 1 : 0;
-        return aOverlay - bOverlay;
-      });
-
       const cmd = device.createCommandEncoder({ label: "Picking encoder" });
-      const passDesc: GPURenderPassDescriptor = {
-        colorAttachments: [
-          {
-            view: pickTexture.createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store",
-          },
-        ],
-        depthStencilAttachment: {
-          view: pickDepthTexture.createView(),
-          depthClearValue: 1.0,
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
-        },
-      };
-      const pass = cmd.beginRenderPass(passDesc);
-      pass.setBindGroup(0, uniformBindGroup);
-
-      for (const ro of sortedForPicking) {
-        pass.setPipeline(ro.pickingPipeline);
-        pass.setBindGroup(0, uniformBindGroup);
-        if (ro.textureBindGroup) {
-          pass.setBindGroup(1, ro.textureBindGroup);
-        }
-        pass.setVertexBuffer(0, ro.geometryBuffer);
-        pass.setVertexBuffer(
-          1,
-          ro.pickingInstanceBuffer.buffer,
-          ro.pickingInstanceBuffer.offset,
-        );
-
-        // Draw with indices if we have them, otherwise use vertex count
-        if (ro.indexBuffer && ro.indexCount > 0) {
-          pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
-          pass.drawIndexed(ro.indexCount, ro.instanceCount);
-        } else if (ro.vertexCount) {
-          pass.draw(ro.vertexCount, ro.instanceCount);
-        }
-      }
-
-      pass.end();
+      encodeFullPickPass(cmd);
 
       cmd.copyTextureToBuffer(
         { texture: pickTexture, origin: { x: pickX, y: pickY } },
@@ -2440,6 +2420,409 @@ export function SceneImpl({
     }
     return null;
   }
+
+  /******************************************************
+   * D2) Agent-facing snapshot API (full-frame pick readback)
+   ******************************************************/
+
+  /**
+   * Encodes the standard pick pass (all render objects) into the shared
+   * pick texture. Used by interactive picking and full-frame readback so
+   * both consume identical pick ids.
+   */
+  function encodeFullPickPass(cmd: GPUCommandEncoder): boolean {
+    if (!gpuRef.current) return false;
+    const { pickTexture, pickDepthTexture, uniformBindGroup, renderObjects } =
+      gpuRef.current;
+    if (!pickTexture || !pickDepthTexture) return false;
+
+    // Sort render objects for picking: scene first, then overlay
+    // Overlay objects use depthCompare: "always" so they overwrite scene
+    // objects, giving them picking priority even when geometrically behind
+    const sortedForPicking = [...renderObjects].sort((a, b) => {
+      const aOverlay = a.layer === "overlay" ? 1 : 0;
+      const bOverlay = b.layer === "overlay" ? 1 : 0;
+      return aOverlay - bOverlay;
+    });
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: pickTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: pickDepthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+    pass.setBindGroup(0, uniformBindGroup);
+
+    for (const ro of sortedForPicking) {
+      pass.setPipeline(ro.pickingPipeline);
+      pass.setBindGroup(0, uniformBindGroup);
+      if (ro.textureBindGroup) {
+        pass.setBindGroup(1, ro.textureBindGroup);
+      }
+      pass.setVertexBuffer(0, ro.geometryBuffer);
+      pass.setVertexBuffer(
+        1,
+        ro.pickingInstanceBuffer.buffer,
+        ro.pickingInstanceBuffer.offset,
+      );
+
+      // Draw with indices if we have them, otherwise use vertex count
+      if (ro.indexBuffer && ro.indexCount > 0) {
+        pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+        pass.drawIndexed(ro.indexCount, ro.instanceCount);
+      } else if (ro.vertexCount) {
+        pass.draw(ro.vertexCount, ro.instanceCount);
+      }
+    }
+
+    pass.end();
+    return true;
+  }
+
+  /**
+   * Encodes a pick pass drawing ONLY the given component (optionally only
+   * the given instance ranges). Instance data is rebuilt unsorted with the
+   * scene's real pick ids, so the readback decodes against the same legend
+   * as the full pass. Used to measure a selection's unoccluded footprint.
+   */
+  function encodeSelectionPickPass(
+    cmd: GPUCommandEncoder,
+    componentIdx: number,
+    ranges: InstanceRanges | undefined,
+    tempBuffers: GPUBuffer[],
+  ): boolean {
+    if (!gpuRef.current) return false;
+    const {
+      device,
+      pickTexture,
+      pickDepthTexture,
+      uniformBindGroup,
+      renderObjects,
+      renderedComponents,
+    } = gpuRef.current;
+    if (!pickTexture || !pickDepthTexture || !renderedComponents) return false;
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: pickTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: pickDepthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+    pass.setBindGroup(0, uniformBindGroup);
+
+    for (const ro of renderObjects) {
+      const offset = ro.componentOffsets.find(
+        (o) => o.componentIdx === componentIdx,
+      );
+      if (!offset || offset.elementCount === 0) continue;
+      const component = renderedComponents[componentIdx];
+      const spec = ro.spec;
+      const floatsPerElement = spec.instancesPerElement * spec.floatsPerPicking;
+
+      // Unsorted build with baseOffset 0; pickingBase keeps the real ids.
+      const full = new Float32Array(offset.elementCount * floatsPerElement);
+      buildPickingData(component, spec, full, offset.pickingStart, 0);
+
+      let data = full;
+      let instanceCount = offset.elementCount * spec.instancesPerElement;
+      if (ranges && ranges.length) {
+        const selected: number[] = [];
+        for (let i = 0; i < offset.elementCount; i++) {
+          if (inRanges(i, ranges)) selected.push(i);
+        }
+        data = new Float32Array(selected.length * floatsPerElement);
+        selected.forEach((elementIdx, j) => {
+          data.set(
+            full.subarray(
+              elementIdx * floatsPerElement,
+              (elementIdx + 1) * floatsPerElement,
+            ),
+            j * floatsPerElement,
+          );
+        });
+        instanceCount = selected.length * spec.instancesPerElement;
+      }
+      if (instanceCount === 0) continue;
+
+      const buffer = device.createBuffer({
+        size: Math.max(data.byteLength, 16),
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        label: "Selection pick instance buffer",
+      });
+      device.queue.writeBuffer(
+        buffer,
+        0,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+      );
+      tempBuffers.push(buffer);
+
+      pass.setPipeline(ro.pickingPipeline);
+      pass.setBindGroup(0, uniformBindGroup);
+      if (ro.textureBindGroup) {
+        pass.setBindGroup(1, ro.textureBindGroup);
+      }
+      pass.setVertexBuffer(0, ro.geometryBuffer);
+      pass.setVertexBuffer(1, buffer, 0);
+      if (ro.indexBuffer && ro.indexCount > 0) {
+        pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+        pass.drawIndexed(ro.indexCount, instanceCount);
+      } else if (ro.vertexCount) {
+        pass.draw(ro.vertexCount, instanceCount);
+      }
+    }
+
+    pass.end();
+    return true;
+  }
+
+  /** Latest components as compiled for rendering, ignoring any highlight. */
+  const originalComponentsRef = useRef<ComponentConfig[] | null>(null);
+
+  function snapshotBaseComponents(): ComponentConfig[] {
+    return (
+      originalComponentsRef.current ??
+      gpuRef.current?.renderedComponents ??
+      components
+    );
+  }
+
+  function snapshotInfo() {
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    const comps = snapshotBaseComponents();
+    return {
+      width: canvas?.width ?? 0,
+      height: canvas?.height ?? 0,
+      dpr: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+      rect: rect
+        ? {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          }
+        : null,
+      camera: activeCameraRef.current
+        ? createCameraParams(activeCameraRef.current)
+        : null,
+      components: comps.map((comp, index) => ({
+        component: index,
+        type: comp.type,
+        count: primitiveRegistry[comp.type]?.getElementCount(comp) ?? 0,
+      })),
+    };
+  }
+
+  async function snapshotPickBuffer(options?: {
+    componentIdx?: number;
+    instances?: InstanceRanges;
+  }): Promise<PickBufferResult | null> {
+    if (!gpuRef.current || !canvasRef.current) return null;
+    const { device, pickTexture, renderObjects, renderedComponents } =
+      gpuRef.current;
+    if (!pickTexture || !renderedComponents) return null;
+
+    for (const ro of renderObjects) {
+      ensurePickingData(device, renderedComponents, ro);
+    }
+
+    const cmd = device.createCommandEncoder({
+      label: "Full-frame pick encoder",
+    });
+    const tempBuffers: GPUBuffer[] = [];
+    const encoded =
+      options?.componentIdx !== undefined && options.componentIdx !== null
+        ? encodeSelectionPickPass(
+            cmd,
+            options.componentIdx,
+            options.instances,
+            tempBuffers,
+          )
+        : encodeFullPickPass(cmd);
+    if (!encoded) return null;
+
+    const width = pickTexture.width;
+    const height = pickTexture.height;
+    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    const readback = device.createBuffer({
+      size: bytesPerRow * height,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      label: "Full-frame pick readback",
+    });
+    cmd.copyTextureToBuffer(
+      { texture: pickTexture },
+      { buffer: readback, bytesPerRow, rowsPerImage: height },
+      [width, height, 1],
+    );
+    device.queue.submit([cmd.finish()]);
+
+    await readback.mapAsync(GPUMapMode.READ);
+    const mapped = new Uint32Array(readback.getMappedRange());
+    const ids = new Uint32Array(width * height);
+    const rowStride = bytesPerRow / 4;
+    for (let y = 0; y < height; y++) {
+      const src = y * rowStride;
+      const dst = y * width;
+      for (let x = 0; x < width; x++) {
+        // rgba8unorm little-endian: r | g<<8 | b<<16 | a<<24; the pick id
+        // occupies rgb (see the interactive readback in pickAtScreenXY).
+        ids[dst + x] = mapped[src + x] & 0xffffff;
+      }
+    }
+    readback.unmap();
+    readback.destroy();
+    for (const buffer of tempBuffers) buffer.destroy();
+
+    // The legend is serialized from the same componentOffsets registry that
+    // findPickedElement (interactive picking) decodes against.
+    const legend = buildPickLegend(
+      renderedComponents,
+      renderObjects.map((ro) => ro.componentOffsets),
+    );
+    return { width, height, ids: u32ToBase64(ids), legend };
+  }
+
+  function snapshotInstanceInfo(
+    componentIdx: number,
+    instanceIdx: number,
+  ): Record<string, unknown> | null {
+    const comps = snapshotBaseComponents();
+    const component = comps[componentIdx];
+    if (!component) return null;
+    const spec = primitiveRegistry[component.type];
+    if (!spec) return null;
+    const count = spec.getElementCount(component);
+    if (instanceIdx < 0 || instanceIdx >= count) return null;
+    return describeInstance(component, spec, instanceIdx);
+  }
+
+  async function snapshotFrameOnSelection(
+    componentIdx: number | null,
+    ranges?: InstanceRanges,
+  ): Promise<CameraParams | null> {
+    if (!gpuRef.current) return null;
+    const comps = gpuRef.current.renderedComponents ?? components;
+    let bounds: Bounds3 | null = null;
+    if (componentIdx === null || componentIdx === undefined) {
+      for (const comp of comps) {
+        const spec = primitiveRegistry[comp.type];
+        if (!spec) continue;
+        bounds = unionBounds(
+          bounds,
+          computeSelectionBounds(comp, spec, transforms),
+        );
+      }
+    } else {
+      const component = comps[componentIdx];
+      if (!component) return null;
+      const spec = primitiveRegistry[component.type];
+      if (!spec) return null;
+      bounds = computeSelectionBounds(component, spec, transforms, ranges);
+    }
+    if (!bounds) return null;
+
+    const fitted = fitCameraToBounds(
+      createCameraParams(activeCameraRef.current!),
+      bounds,
+      containerWidth / containerHeight,
+    );
+    const camState = createCameraState(fitted);
+    // Keep the internal camera in sync so later pick passes and captures
+    // use the framed view. (Headless snapshot flow; no user interaction.)
+    activeCameraRef.current = camState;
+    await renderFrame("frame-selection", camState);
+    return fitted;
+  }
+
+  async function snapshotApplyHighlight(
+    componentIdx: number,
+    ranges?: InstanceRanges,
+    options?: { color?: [number, number, number]; dim?: number },
+  ): Promise<boolean> {
+    if (!gpuRef.current) return false;
+    const base = snapshotBaseComponents();
+    const target = base[componentIdx];
+    if (!target) return false;
+    const targetSpec = primitiveRegistry[target.type];
+    if (!targetSpec) return false;
+
+    const color = options?.color ?? [1.0, 0.15, 0.9];
+    const dim = options?.dim ?? 0.15;
+    const elementCount = targetSpec.getElementCount(target);
+    const indexes: number[] = [];
+    for (let i = 0; i < elementCount; i++) {
+      if (inRanges(i, ranges)) indexes.push(i);
+    }
+
+    const modified = base.map((comp, idx) => {
+      const spec = primitiveRegistry[comp.type];
+      // Skip components whose buffer layout has no alpha slot (e.g. custom
+      // primitives without transparency) — decorations could corrupt data.
+      if (!spec || spec.alphaOffset < 0) return comp;
+      if (idx !== componentIdx) {
+        return {
+          ...comp,
+          alpha: dim,
+          alphas: undefined,
+          decorations: undefined,
+        } as ComponentConfig;
+      }
+      const decoration: any = { indexes, alpha: 1.0 };
+      if (spec.colorOffset >= 0) decoration.color = color;
+      return {
+        ...comp,
+        alpha: dim,
+        alphas: undefined,
+        decorations: [decoration],
+      } as ComponentConfig;
+    });
+
+    originalComponentsRef.current = base;
+    await renderFrame(
+      "highlight-selection",
+      activeCameraRef.current!,
+      modified,
+    );
+    return true;
+  }
+
+  async function snapshotClearHighlight(): Promise<void> {
+    if (!gpuRef.current || !originalComponentsRef.current) return;
+    const base = originalComponentsRef.current;
+    originalComponentsRef.current = null;
+    await renderFrame("clear-highlight", activeCameraRef.current!, base);
+  }
+
+  snapshotImplRef.current = {
+    getInfo: snapshotInfo,
+    pickBuffer: snapshotPickBuffer,
+    instanceInfo: snapshotInstanceInfo,
+    frameOnSelection: snapshotFrameOnSelection,
+    applyHighlight: snapshotApplyHighlight,
+    clearHighlight: snapshotClearHighlight,
+  };
 
   function handleHoverID(pickedID: number) {
     if (!gpuRef.current) return;
