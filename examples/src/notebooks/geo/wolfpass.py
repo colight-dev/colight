@@ -84,13 +84,17 @@ overview
 
 # ## Drillholes colored by copper grade
 #
-# Each of the 8,583 assay intervals is a line segment colored by Cu %.
-# Scene3D has no built-in colormap, so grades are mapped to viridis colors
-# in Python (`colight.omf_loader.colormap`). The color scale is clamped to
-# 0–2 % Cu; the hot intervals cluster along the dipping mineralized zone.
+# Each of the 8,583 assay intervals is a line segment colored by Cu %
+# through Scene3D's first-class `color_by` colormap support — the viridis
+# scale is clamped to 0–2 % Cu and the scene renders a legend for it, so
+# "yellow = 2 % Cu" is readable off the image (and reported by
+# `colight inspect` / `screenshot --json`). The hot intervals cluster
+# along the dipping mineralized zone.
 
 scene3d.Scene(
-    drillholes.line_segments(color_by="CU_pct", vmin=0.0, vmax=2.0, size=10.0),
+    drillholes.line_segments(
+        color_by="CU_pct", domain=(0.0, 2.0), label="Cu %", size=10.0
+    ),
     collars.point_cloud(color=[0.95, 0.26, 0.21], size=25.0),
     topo.mesh(
         color=[0.82, 0.76, 0.65],
@@ -112,7 +116,7 @@ CUTOFFS = [0.5, 0.7, 1.0]
 block_layers = [
     Plot.cond(
         Plot.js(f"$state.cutoff_idx === {i}"),
-        block_model.cuboids("CU_pct", cutoff=c, vmin=0.0, vmax=2.0),
+        block_model.cuboids("CU_pct", cutoff=c, domain=(0.0, 2.0), label="Cu %"),
     )
     for i, c in enumerate(CUTOFFS)
 ]

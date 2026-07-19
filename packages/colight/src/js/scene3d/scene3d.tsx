@@ -66,8 +66,21 @@ import {
   CameraExtrinsics,
 } from "./helpers";
 
+import {
+  Legend,
+  SceneLegends,
+  collectLegendEntries,
+  ColorByMeta,
+  LegendPosition,
+} from "./legend";
+
 // Re-export helpers for external use
 export { GridHelper, CameraFrustum, ImageProjection };
+
+// Re-export legend components (Legend is the standalone layout component,
+// reachable from Python as scene3d.Legend)
+export { Legend, SceneLegends };
+export type { ColorByMeta, LegendPosition };
 export type {
   GridHelperProps,
   CameraFrustumProps,
@@ -625,6 +638,14 @@ function SceneInner({
     return compileScene(rawComponents, primitiveSpecs);
   }, [children, componentsProp, primitiveSpecs]);
 
+  // Colormap legends: components carrying a color_by spec get a DOM
+  // overlay legend docked over the canvas (indices match the compiled
+  // components array used by picking/coverage).
+  const legendEntries = useMemo(
+    () => collectLegendEntries(components as any[]),
+    [components],
+  );
+
   const cameraChangeCallback = useCallback(
     (cam: CameraParams) => {
       internalCameraRef.current = cam;
@@ -708,6 +729,7 @@ function SceneInner({
             primitiveSpecs={mergedSpecs}
             groupRegistry={groupRegistry}
           />
+          <SceneLegends entries={legendEntries} />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu
             showFps={showFps}

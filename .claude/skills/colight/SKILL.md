@@ -50,6 +50,9 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
 
 - **Blank/empty scene?** `colight inspect` first — its warnings (NaN values, empty arrays,
   alphas ≈ 0, degenerate bounds, length mismatches) catch most causes without rendering.
+- **What do the colors mean?** Read `legends` from `inspect`/`screenshot --json`
+  (`{component, label, cmap, domain, categorical}` for every `color_by`-colored
+  component) instead of guessing color meanings from pixels.
 - **Did my change do what I intended?** `colight diff old.py new.py` (or two artifacts)
   before reaching for pixels.
 - **Need to see it?** `colight screenshot`, then Read the PNG. Screenshots are

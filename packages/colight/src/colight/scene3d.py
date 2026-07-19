@@ -1,8 +1,9 @@
-from typing import Any, Dict, Literal, Optional, TypedDict, Union
+from typing import Any, Dict, Literal, Optional, Sequence, TypedDict, Union
 
 import numpy as np
 
 import colight.plot as Plot
+from colight import colormaps
 from colight.layout import JSExpr
 
 # Move Array type definition after imports
@@ -98,6 +99,60 @@ DRAG_PLANE_YZ: DragConstraint = {"type": "plane", "normal": [1, 0, 0]}
 DRAG_SURFACE: DragConstraint = {"type": "surface"}  # Drag along hit surface (default)
 DRAG_SCREEN: DragConstraint = {"type": "screen"}  # Screen-space drag (fixed depth)
 DRAG_FREE: DragConstraint = {"type": "free"}  # Camera-facing plane through start point
+
+
+class ColorBy(TypedDict, total=False):
+    """Colormap-driven coloring for instanced primitives.
+
+    ``values`` is required; everything else has defaults. Colors are
+    computed in Python via :mod:`colight.colormaps`; the colormap spec
+    (cmap, domain, label, ...) travels with the component so the scene can
+    render a legend and ``colight inspect`` / ``screenshot --json`` can
+    report what the colors encode.
+    """
+
+    values: ArrayLike  # scalar values (continuous) or category codes
+    cmap: str  # colormap name, default "viridis"
+    domain: Sequence[float]  # (min, max) for continuous maps
+    label: str  # what the colors encode (legend title)
+    categories: Sequence[str]  # display names for categorical codes
+    nan_color: Sequence[float]  # RGB for NaN/invalid values
+    legend: Union[bool, str]  # False hides; or a dock corner like "top-left"
+
+
+_LEGEND_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def _apply_color_by(
+    data: Dict[str, Any],
+    color_by: Optional[Union[ColorBy, Dict[str, Any]]],
+) -> None:
+    """Resolve a ``color_by`` spec into per-instance colors + legend metadata.
+
+    Mutates ``data``: sets ``colors`` (float32 RGB) and ``color_by`` (the
+    JSON-safe colormap spec consumed by the JS legend and CLI reporting).
+
+    Raises:
+        ValueError: When explicit ``colors``/``color`` are also present, or
+            the spec is malformed.
+    """
+    if color_by is None:
+        return
+    if "colors" in data or "color" in data:
+        raise ValueError("pass either color_by or colors/color, not both")
+    spec: Dict[str, Any] = dict(color_by)
+    legend: Union[bool, str] = spec.pop("legend", True)
+    if isinstance(legend, str) and legend not in _LEGEND_POSITIONS:
+        raise ValueError(
+            f"invalid legend position {legend!r} (one of {', '.join(_LEGEND_POSITIONS)})"
+        )
+    colors, meta = colormaps.resolve_color_by(spec)
+    if legend is False:
+        meta["legend"] = False
+    elif isinstance(legend, str):
+        meta["position"] = legend
+    data["colors"] = flatten_array(colors, dtype=np.float32)
+    data["color_by"] = meta
 
 
 class Decoration(TypedDict, total=False):
@@ -379,6 +434,7 @@ def PointCloud(
     center: Optional[ArrayLike] = None,  # Singular form for a single point
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all points
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-point colors
     sizes: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
@@ -395,6 +451,8 @@ def PointCloud(
         center: Single point center [x, y, z] (convenience for single-point case)
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all points if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-point colors (see ColorBy); adds a legend
         sizes: N array of point sizes or flattened array (optional)
         size: Default size for all points if sizes not provided
         alphas: Array of alpha values per point (optional)
@@ -416,6 +474,7 @@ def PointCloud(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     if color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
 
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
@@ -449,6 +508,7 @@ def Ellipsoid(
     quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
@@ -469,6 +529,8 @@ def Ellipsoid(
         quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-instance colors (see ColorBy); adds a legend
         alphas: Array of alpha values per ellipsoid (optional)
         alpha: Default alpha value for all ellipsoids if alphas not provided
         fill_mode: How the shape is drawn. One of:
@@ -501,6 +563,7 @@ def Ellipsoid(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
@@ -532,6 +595,7 @@ def Cuboid(
     quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
     layer: Optional[Literal["scene", "overlay"]] = None,
@@ -550,6 +614,8 @@ def Cuboid(
         quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all cuboids if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-instance colors (see ColorBy); adds a legend
         alphas: Array of alpha values per cuboid (optional)
         alpha: Default alpha value for all cuboids if alphas not provided
         layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
@@ -579,6 +645,7 @@ def Cuboid(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
@@ -602,6 +669,7 @@ def LineBeams(
     color: Optional[ArrayLike] = None,  # Default RGB color for all beams
     size: Optional[NumberLike] = None,  # Default size for all beams
     colors: Optional[ArrayLike] = None,  # Per-line colors
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-line colors
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
@@ -617,6 +685,8 @@ def LineBeams(
         color: Default RGB color [r,g,b] for all beams if colors not provided
         size: Default size for all beams if sizes not provided
         colors: Array of RGB colors per line (optional)
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-line colors (see ColorBy); adds a legend
         sizes: Array of sizes per line (optional)
         alpha: Default alpha value for all beams if alphas not provided
         alphas: Array of alpha values per line (optional)
@@ -637,6 +707,7 @@ def LineBeams(
         data["size"] = size
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
+    _apply_color_by(data, color_by)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:
@@ -662,6 +733,7 @@ def LineSegments(
     color: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,
     colors: Optional[ArrayLike] = None,
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-segment colors
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     alphas: Optional[ArrayLike] = None,
@@ -678,6 +750,8 @@ def LineSegments(
         color: Default RGB color [r,g,b] for all segments if colors not provided
         size: Default size for all segments if sizes not provided
         colors: Array of RGB colors per segment (optional)
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-segment colors (see ColorBy); adds a legend
         sizes: Array of sizes per segment (optional)
         alpha: Default alpha value for all segments if alphas not provided
         alphas: Array of alpha values per segment (optional)
@@ -700,6 +774,7 @@ def LineSegments(
         data["size"] = size
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
+    _apply_color_by(data, color_by)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:
@@ -1064,6 +1139,50 @@ def CustomPrimitive(
 
 
 # =============================================================================
+# Legend
+# =============================================================================
+
+
+class Legend(Plot.LayoutItem):
+    """A standalone colormap legend, usable anywhere in a layout.
+
+    Scenes render legends automatically for components with ``color_by``;
+    this class renders the same legend UI outside a scene (e.g. next to a
+    plot, or in a layout row).
+
+    Example:
+        >>> scene | Legend(cmap="viridis", domain=(0, 2.5), label="Cu %")
+    """
+
+    def __init__(
+        self,
+        cmap: str = "viridis",
+        domain: Optional[Sequence[float]] = None,
+        label: Optional[str] = None,
+        categories: Optional[Sequence[str]] = None,
+    ):
+        """Initialize the legend.
+
+        Args:
+            cmap: Colormap name (continuous ramp or categorical palette).
+            domain: (min, max) the colors span (continuous maps only).
+            label: What the colors encode (legend title).
+            categories: Display names for categorical codes 0..K-1.
+        """
+        super().__init__()
+        self.spec = colormaps.colormap_metadata(
+            cmap,
+            domain=domain,
+            label=label,
+            categories=list(categories) if categories is not None else None,
+        )
+
+    def for_json(self) -> Any:
+        """Convert to JSON representation for JavaScript."""
+        return [Plot.JSRef("scene3d.Legend"), {"spec": self.spec}]
+
+
+# =============================================================================
 # Gizmo (Prototype - API may change)
 # =============================================================================
 
@@ -1272,6 +1391,9 @@ __all__ = [
     "Mesh",
     "CustomPrimitive",
     "deco",
+    # Colormaps & legends
+    "ColorBy",
+    "Legend",
     # Hover props
     "HoverProps",
     # Drag constraints

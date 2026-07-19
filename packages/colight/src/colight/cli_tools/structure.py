@@ -47,6 +47,9 @@ class ComponentRecord:
     path: str
     display_path: str
     arrays: List[ArrayRecord] = field(default_factory=list)
+    # Colormap legend spec ({cmap, domain, label, categorical, ...}) when
+    # the component was colored via color_by (see colight/colormaps.py).
+    color_by: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -138,6 +141,13 @@ def _walk(node: Any, path: str, key: Optional[str], state: WalkState) -> None:
             return
         for k, v in node.items():
             if k in ("__type__", "path", "bufferLayout", "id"):
+                continue
+            # A color_by spec is legend metadata, not data: record it on the
+            # enclosing component and don't descend (its stops/colors lists
+            # would otherwise pollute the array records).
+            if k == "color_by" and isinstance(v, dict) and "cmap" in v:
+                if state.stack:
+                    state.stack[-1].color_by = v
                 continue
             _walk(v, f"{path}.{k}" if path else k, k, state)
     elif isinstance(node, list):

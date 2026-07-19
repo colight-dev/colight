@@ -313,6 +313,29 @@ class DirectSceneSource:
             yield session
 
 
+# Collects colormap legends from the rendered DOM: every legend card (in a
+# scene3d corner dock or standalone in a layout) carries its spec in a
+# data-colight-legend attribute — the report is read from exactly what was
+# rendered (and captured), so it cannot drift from the pixels.
+_LEGEND_QUERY = (
+    "Array.from(document.querySelectorAll('[data-colight-legend]'))"
+    ".map((el) => JSON.parse(el.getAttribute('data-colight-legend')))"
+)
+
+
+def collect_dom_legends(studio: StudioContext) -> List[Dict[str, Any]]:
+    """Colormap legends present in the rendered page.
+
+    Returns:
+        One entry per rendered legend card: ``{"cmap", "categorical",
+        "label"?, "domain"?, "categories"?, "component"?, "type"?}`` —
+        ``component`` is the scene3d compiled-component index (absent for
+        standalone legends).
+    """
+    result = studio.evaluate(_LEGEND_QUERY)
+    return result if isinstance(result, list) else []
+
+
 def _capture_scene(
     scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
@@ -351,6 +374,10 @@ def _capture_scene(
             extras["frame"]["instances"] = [list(pair) for pair in ranges]
 
     png, pixel_width, pixel_height = scene.capture()
+
+    legends = collect_dom_legends(scene.studio)
+    if legends:
+        extras["legends"] = legends
 
     if want_coverage and is_scene:
         snapshot = scene_pick.take_snapshot(scene.studio)
@@ -453,6 +480,7 @@ def screenshot_source(
     if views:
         with source.scene() as scene:
             cells, cameras, frame_info = _capture_views(scene, views, frame)
+            legends = collect_dom_legends(scene.studio)
         composed = compose.compose_grid(cells)
         out.write_bytes(composed)
         pixel_width, pixel_height = compose.png_size(composed)
@@ -465,6 +493,8 @@ def screenshot_source(
                 "views": cameras,
             }
         )
+        if legends:
+            payload["legends"] = legends
         if frame_info is not None:
             payload["frame"] = frame_info
         if source.block_id is not None:
@@ -561,7 +591,9 @@ def screenshot_target(
         ``frame`` (fitted camera, with ``--frame``), ``rulers``
         ({spacing, margin}, with ``rulers``), ``views`` (per-view fitted
         cameras, with ``views``), ``coverage`` (scene3d single-view only:
-        per-component pixel fractions), and ``deterministic`` (only when
+        per-component pixel fractions), ``legends`` (colormap legends
+        rendered in the capture: {component?, type?, label?, cmap,
+        domain?, categorical, categories?}), and ``deterministic`` (only when
         ``check`` is set — compares the underlying renders;
         ``sha256_recheck`` is added when they differ).
     """
@@ -594,6 +626,7 @@ __all__ = [
     "RenderSession",
     "SceneLike",
     "SceneSource",
+    "collect_dom_legends",
     "fit_max_edge",
     "load_visual",
     "render_png",

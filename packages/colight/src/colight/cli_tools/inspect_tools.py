@@ -145,6 +145,29 @@ def structure_warnings(state: WalkState) -> List[Dict[str, str]]:
     return warnings
 
 
+def legend_payload(
+    color_by: Dict[str, Any], component: Optional[str] = None
+) -> Dict[str, Any]:
+    """Machine-readable legend entry for a component's ``color_by`` spec.
+
+    Lean on purpose (no color tables): agents read what the colors encode —
+    ``{"component"?, "label"?, "cmap", "domain"?, "categorical",
+    "categories"?}``.
+    """
+    entry: Dict[str, Any] = {}
+    if component is not None:
+        entry["component"] = component
+    if "label" in color_by:
+        entry["label"] = color_by["label"]
+    entry["cmap"] = color_by.get("cmap")
+    if "domain" in color_by:
+        entry["domain"] = color_by["domain"]
+    entry["categorical"] = bool(color_by.get("categorical"))
+    if "categories" in color_by:
+        entry["categories"] = color_by["categories"]
+    return entry
+
+
 def inspect_visual_data(
     data: Dict[str, Any], buffers: List[bytes]
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -206,6 +229,13 @@ def inspect_visual_data(
             "total_bytes": sum(len(b) for b in buffers),
         },
     }
+    legends = [
+        legend_payload(component.color_by, component=component.path)
+        for component in state.components
+        if component.color_by is not None
+    ]
+    if legends:
+        payload["legends"] = legends
     return payload, warnings
 
 
