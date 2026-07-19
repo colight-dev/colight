@@ -9,7 +9,7 @@
 #
 # The project contains 55 drillhole collars, an 8,583-segment drillhole trace
 # set with assay data (Cu, Au, Ag, Mo, ...), a topography surface, five
-# geology wireframes, and a 110x160x96 block model of estimated copper grade.
+# geology surfaces, and a 110x160x96 block model of estimated copper grade.
 
 import os
 from pathlib import Path
@@ -33,7 +33,7 @@ drillholes = project.line_sets["wolfpass_WP_assay"]
 topo = project.surfaces["Topography"]
 block_model = project.volumes["Block Model"]
 
-# A Leapfrog-style color scheme for the geology wireframes.
+# A Leapfrog-style color scheme for the geology surfaces.
 
 GEOLOGY_COLORS = {
     "Cover": [0.62, 0.77, 0.55],
@@ -89,8 +89,6 @@ overview
 # in Python (`colight.omf_loader.colormap`). The color scale is clamped to
 # 0–2 % Cu; the hot intervals cluster along the dipping mineralized zone.
 
-cu = drillholes.segment_attributes["CU_pct"]
-
 scene3d.Scene(
     drillholes.line_segments(color_by="CU_pct", vmin=0.0, vmax=2.0, size=10.0),
     collars.point_cloud(color=[0.95, 0.26, 0.21], size=25.0),
@@ -144,5 +142,5 @@ counts = [int((block_model.cell_attributes["CU_pct"] >= c).sum()) for c in CUTOF
 )
 
 # At a 0.5 % cutoff the shell holds 274,780 blocks; at 1.0 %, 106,780. The
-# high-grade core sits inside the Early Diorite, which is what the wireframe
-# overlay in the overview scene suggests.
+# high-grade core sits inside the Early Diorite volume, which is what the
+# geology surfaces in the overview scene suggest.
