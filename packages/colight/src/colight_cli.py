@@ -1062,7 +1062,10 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     components added/removed/type-changed, per-array shape/dtype changes and
     magnitude stats (max/mean |delta|, fraction changed beyond epsilon,
     bounds drift), scalar value changes, state-key changes, buffer deltas
-    and warnings introduced/resolved.
+    and warnings introduced/resolved. Numeric leaf changes in nested JSON
+    lists that differ only in list indices are aggregated into one
+    array-style entry with a wildcarded path (e.g. "...args[1][*][0]") and
+    a leaves changed/total count; itemized value lists are capped.
 
     Exit code: 0 identical (within epsilon), 1 differences found, 2 error.
 
@@ -1077,9 +1080,11 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
            "changed": [{"path", "dtype"?: [a, b], "shape"?: [a, b],
                         "max_abs_delta"?, "mean_abs_delta"?,
                         "changed_fraction"?, "nan_mismatch"?,
+                        "leaves"?: {"changed": int, "total": int},
                         "bounds"?: {"from": [min, max], "to": [min, max]}}]},
          "values": {"added": [path], "removed": [path],
-                    "changed": [{"path", "from", "to"}]},
+                    "changed": [{"path", "from", "to"}],
+                    "truncated"?: {"added"?, "removed"?, "changed"?: int}},
          "state": {"added": [key], "removed": [key], "changed": [key]},
          "buffers": {"count": [a, b], "total_bytes": [a, b]},
          "warnings": {"introduced": [WARNING], "resolved": [WARNING]}}],
@@ -1125,11 +1130,17 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
                 if "shape" in item:
                     detail_parts.append(f"shape {item['shape'][0]}->{item['shape'][1]}")
                 if "max_abs_delta" in item:
-                    detail_parts.append(
+                    stats = (
                         f"max |Δ| {item['max_abs_delta']:.4g} "
                         f"mean {item['mean_abs_delta']:.4g} "
                         f"changed {item['changed_fraction']:.1%}"
                     )
+                    if "leaves" in item:
+                        stats += (
+                            f" ({item['leaves']['changed']}/"
+                            f"{item['leaves']['total']} leaves)"
+                        )
+                    detail_parts.append(stats)
                 if "bounds" in item:
                     detail_parts.append(
                         f"bounds {item['bounds']['from']} -> {item['bounds']['to']}"
@@ -1139,8 +1150,13 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
                 click.echo(f"  array removed {item['path']}")
             for item in pair["arrays"]["added"]:
                 click.echo(f"  array added {item['path']}")
-            for item in pair["values"]["changed"]:
+            changed_values = pair["values"]["changed"]
+            hidden_values = pair["values"].get("truncated", {}).get("changed", 0)
+            for item in changed_values[:5]:
                 click.echo(f"  value {item['path']}: {item['from']} -> {item['to']}")
+            hidden_values += max(0, len(changed_values) - 5)
+            if hidden_values:
+                click.echo(f"  … {hidden_values} more value change(s)")
             state = pair["state"]
             for kind in ("added", "removed", "changed"):
                 if state[kind]:
