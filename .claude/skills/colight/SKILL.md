@@ -87,6 +87,14 @@ colight screenshot scene.py --out zoom.png \
 - Use the same `--width/--height` across screenshot and pick queries so coordinates line
   up; the payload's `scene.rect` maps page pixels to the canvas.
 
+## Daemon (faster loops)
+
+Render-path commands (screenshot / pick-at / pick-where / verify) discover a running
+`colight daemon` automatically (via `.colight_cache/daemon.json`) and use its warm Chrome
+pool + scene cache — a repeated pick-at on an unchanged file drops from ~1.5s to ~0.4s.
+No flags needed; it just works. Run `colight daemon start` once to warm up before a tight
+loop (it self-stops after 30 idle minutes); `--no-daemon` bypasses it per call.
+
 ## Conventions
 
 - Run Python via `uv run` (e.g. `uv run colight ...` inside this repo).

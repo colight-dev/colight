@@ -236,6 +236,24 @@
 # # Exit 0 = all match, 1 = mismatches, 2 = error, 3 = no goldens found.
 # colight verify notebook.py [--json] [--no-pixels] [--goldens DIR]
 # colight verify notebook.py --update
+#
+# # Daemon: keeps headless Chrome (and recently loaded scenes) warm so
+# # tight loops of the render-path commands above skip the ~1-2s browser
+# # launch per invocation. Discovery is automatic: the daemon writes
+# # <project_root>/.colight_cache/daemon.json and screenshot / pick-at /
+# # pick-where / verify use it transparently whenever the file points at a
+# # live, version-matched daemon — otherwise they silently run direct.
+# # Repeated queries against an unchanged target are served from a warm
+# # scene cache keyed by content fingerprint (the same transitive cache
+# # keys `colight run` uses), skipping re-evaluation and re-loading; user
+# # code still runs only in the CLI process, never in the daemon.
+# # The daemon shuts itself down after --idle-timeout seconds (default
+# # 30 min) and owns up to --pool isolated Chrome instances (default 2)
+# # so parallel queries parallelize.
+# colight daemon start [--idle-timeout 1800] [--pool 2] [--foreground]
+# colight daemon status [--json]   # pool, warm-scene and request stats
+# colight daemon stop
+# colight screenshot scene.py --out shot.png --no-daemon   # bypass per call
 # ```
 #
 # Block ids are short hashes of each block's own source, so they survive

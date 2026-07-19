@@ -87,6 +87,18 @@ colight pick-where scene.py --component Ellipsoid --instances 0-4 --out overlay.
 # Exit 0 = match, 1 = mismatch, 2 = error, 3 = no goldens yet
 colight verify notebook.py --json
 colight verify notebook.py --update   # pin/refresh goldens (reports changes)
+
+# Daemon: keeps headless Chrome (and recently loaded scenes) warm so tight
+# loops of screenshot/pick-at/pick-where/verify skip the browser launch.
+# Discovery is automatic via <project_root>/.colight_cache/daemon.json:
+# render-path commands use a running daemon transparently (falling back
+# silently to direct mode when none is usable) — no flags needed.
+# A repeated query against an unchanged target is also served from a warm
+# scene cache, skipping re-evaluation and re-loading entirely.
+colight daemon start        # detached; self-stops after 30 idle minutes
+colight daemon status --json
+colight daemon stop
+colight screenshot scene.py --out shot.png --no-daemon   # opt out per call
 ```
 
 There is also `colight eval`, an eval server used by the VS Code extension.
