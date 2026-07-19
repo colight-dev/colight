@@ -103,7 +103,7 @@ scene_ellipsoids = Ellipsoid(
     quaternions=quaternions,
     colors=colors,
     alpha=0.7,
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_ellipsoid: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
@@ -146,7 +146,7 @@ scene_ellipsoid_axes = Ellipsoid(
     half_size=[0.5, 0.3, 0.2],  # Non-uniform half-size to show rotation clearly
     quaternions=quaternions,
     alpha=0.9,
-    onHover=js("(i) => $state.update({hover_axes: typeof i === 'number' ? [i] : []})"),
+    on_hover=js("(i) => $state.update({hover_axes: typeof i === 'number' ? [i] : []})"),
     decorations=[
         deco(
             js("$state.hover_axes"),
@@ -196,7 +196,7 @@ scene_cuboids = Cuboid(
     quaternions=quaternions,
     colors=colors,
     alpha=0.8,
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_cuboid: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
@@ -276,7 +276,7 @@ scene_comparison = Cuboid(
     quaternions=quaternions,
     colors=colors,
     alpha=0.8,
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_comparison: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
@@ -308,7 +308,7 @@ print("Demo 5: Combined scene with all quaternion demonstrations")
         quaternions=quaternions,
         colors=colors,
         alpha=0.7,
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_combined: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -327,7 +327,7 @@ print("Demo 5: Combined scene with all quaternion demonstrations")
         quaternions=quaternions,
         colors=colors,
         alpha=0.8,
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_combined2: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[
@@ -377,7 +377,7 @@ scene_rotation_sequence = Cuboid(
     quaternions=quaternions,
     colors=colors,
     alpha=0.9,
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_rotation: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[
@@ -457,7 +457,7 @@ Cuboid(
     quaternions=quaternions,
     colors=colors,
     alpha=0.9,
-    onHover=js(
+    on_hover=js(
         "(i) => $state.update({hover_multi_axis: typeof i === 'number' ? [i] : []})"
     ),
     decorations=[

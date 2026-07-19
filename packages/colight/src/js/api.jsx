@@ -10,7 +10,30 @@ import * as ReactDOM from "react-dom/client";
 import { renderChildEvents } from "./plot/render";
 import { Grid, Row, Column } from "./layout";
 import { joinClasses, tw } from "./utils";
-import * as scene3d from "./scene3d/scene3d";
+import * as scene3dModule from "./scene3d/scene3d";
+import { NOOP_READY_STATE } from "./scene3d/types";
+import {
+  createCanvasOverlays,
+  removeCanvasOverlays,
+} from "./scene3d/canvasSnapshot";
+import { colight } from "./globals";
+
+// Register scene3d snapshot utilities with colight global for PDF export
+colight.beforeScreenCapture = createCanvasOverlays;
+colight.afterScreenCapture = removeCanvasOverlays;
+
+// Wrap Scene to inject readyState from colight context
+function ColightScene(props) {
+  const $state = useContext($StateContext);
+  const readyState = $state ?? NOOP_READY_STATE;
+  return <scene3dModule.Scene {...props} readyState={readyState} />;
+}
+
+// Re-export scene3d with wrapped Scene
+const scene3d = {
+  ...scene3dModule,
+  Scene: ColightScene,
+};
 import { Bitmap } from "./components/bitmap";
 import { inspect } from "./inspect";
 import { md, katex } from "./markdown";

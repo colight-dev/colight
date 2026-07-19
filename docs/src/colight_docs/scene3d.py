@@ -73,7 +73,7 @@ scene_pc
 # %% [markdown]
 # ## Other Primitives
 #
-# Scene3D supports several primitive types: PointCloud, Ellipsoid, Cuboid, and LineBeams.
+# Scene3D supports several primitive types: PointCloud, Ellipsoid, Cuboid, LineBeams, and BoundingBox.
 
 # %%
 

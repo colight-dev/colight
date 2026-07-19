@@ -1,7 +1,7 @@
 import React, { useRef, useCallback } from "react";
 
 interface FPSCounterProps {
-  fpsRef: React.RefObject<HTMLDivElement>;
+  fpsRef: React.RefObject<HTMLDivElement | null>;
 }
 export function FPSCounter({ fpsRef }: FPSCounterProps) {
   return (
