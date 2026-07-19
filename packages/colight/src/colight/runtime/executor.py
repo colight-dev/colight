@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import os
 import sys
 import traceback
 from dataclasses import dataclass
@@ -10,6 +11,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from colight.inspect import inspect
 
 from .model import Block, Document
+
+# Root of the installed colight package: frames originating here are
+# internal plumbing (executor exec/eval, model compile, ...) and are dropped
+# from structured errors shown to users.
+_COLIGHT_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _is_internal_frame(frame_file: str, filename: str) -> bool:
+    """True for frames inside the colight package (except the user's file)."""
+    if frame_file == filename:
+        return False
+    return os.path.abspath(frame_file).startswith(_COLIGHT_PACKAGE_ROOT + os.sep)
 
 
 @dataclass
@@ -28,8 +41,9 @@ class ExecutionResult:
 def structured_error(exc: BaseException, filename: str) -> Dict[str, Any]:
     """Build a structured, machine-readable error description.
 
-    The traceback is trimmed to user frames: internal executor frames
-    (the ``exec``/``eval`` calls in this module) are dropped.
+    The traceback is trimmed to user frames: frames originating inside the
+    colight package (executor exec/eval plumbing, ``compile_once``, ...) are
+    dropped, keeping genuine user/document frames.
 
     Args:
         exc: The exception that was raised.
@@ -41,8 +55,8 @@ def structured_error(exc: BaseException, filename: str) -> Dict[str, Any]:
     """
     frames: List[Dict[str, Any]] = []
     for frame in traceback.extract_tb(exc.__traceback__):
-        if frame.filename == __file__:
-            continue  # Internal executor frame (exec/eval plumbing)
+        if _is_internal_frame(frame.filename, filename):
+            continue
         frames.append(
             {
                 "file": frame.filename,
