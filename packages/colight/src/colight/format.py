@@ -1,6 +1,9 @@
 """
 Colight file format writer.
 
+The authoritative specification of the .colight format lives in
+docs/src/colight_docs/format.md; keep this module and that document in sync.
+
 The .colight format is a self-contained binary format inspired by PNG and SQLite:
 
 Header Structure (96 bytes):
@@ -179,8 +182,11 @@ def parse_entry(f, offset: int = 0) -> tuple[Dict[str, Any], List[bytes], int]:
         raise ValueError(f"Invalid .colight file: Wrong magic bytes {magic}")
 
     version = struct.unpack_from("<Q", header, 8)[0]
-    if version > CURRENT_VERSION:
-        raise ValueError(f"Unsupported .colight file version: {version}")
+    if version != CURRENT_VERSION:
+        raise ValueError(
+            f"Unsupported .colight file version: found {version}, "
+            f"this reader supports version {CURRENT_VERSION}"
+        )
 
     json_offset = struct.unpack_from("<Q", header, 16)[0]
     json_length = struct.unpack_from("<Q", header, 24)[0]
@@ -273,7 +279,13 @@ def parse_file(
                 first_entry = False
                 offset += entry_size
             except Exception:
-                # If we can't parse an entry, we've reached the end
+                # A malformed first entry means the file itself is invalid:
+                # surface the error (wrong magic, unsupported version, ...).
+                if first_entry:
+                    raise
+                # After the first entry, a parse failure means we've reached
+                # the end of the valid entries (e.g. a partially appended
+                # update); stop reading.
                 break
 
     return initial_data, initial_buffers, updates
@@ -318,6 +330,8 @@ def parse_file_with_updates(
                 first_entry = False
                 offset += entry_size
             except Exception:
+                if first_entry:
+                    raise
                 break
 
     return initial_data, initial_buffers, update_entries
