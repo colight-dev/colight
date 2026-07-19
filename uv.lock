@@ -311,6 +311,11 @@ dependencies = [
     { name = "werkzeug" },
 ]
 
+[package.optional-dependencies]
+geo = [
+    { name = "omf" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "anthropic" },
@@ -319,6 +324,7 @@ dev = [
     { name = "jupyter-client" },
     { name = "nbformat" },
     { name = "numpy" },
+    { name = "omf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "python-dotenv" },
@@ -332,11 +338,13 @@ requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "libcst", specifier = ">=1.4" },
     { name = "markdown", specifier = ">=3.5" },
+    { name = "omf", marker = "extra == 'geo'", specifier = ">=1.0.1,<2" },
     { name = "traitlets", specifier = ">=5.14.3" },
     { name = "watchfiles", specifier = ">=0.21.0" },
     { name = "websockets", specifier = ">=15.0" },
     { name = "werkzeug", specifier = ">=3.1.3" },
 ]
+provides-extras = ["geo"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -346,6 +354,7 @@ dev = [
     { name = "jupyter-client", specifier = ">=8.6.2" },
     { name = "nbformat", specifier = ">=5.10.4" },
     { name = "numpy", specifier = ">=1.22,<2.0.0" },
+    { name = "omf", specifier = ">=1.0.1,<2" },
     { name = "pytest", specifier = ">=8.4.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
@@ -1348,6 +1357,19 @@ wheels = [
 ]
 
 [[package]]
+name = "omf"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "properties" },
+    { name = "pypng" },
+    { name = "six" },
+    { name = "vectormath" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/3b/209f117f7a184ad13c3cc083e7e9f9392fe525c62ebd5c481bbd8e6444cf/omf-1.0.1.tar.gz", hash = "sha256:2622abc202e66d976d203da99d580dadfa90d7164df3c522395c30c3d0a18445", size = 11822, upload-time = "2019-03-01T21:16:20.985Z" }
+
+[[package]]
 name = "opt-einsum"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1560,6 +1582,15 @@ wheels = [
 ]
 
 [[package]]
+name = "properties"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c0/9a/cd2def3421cd077d80d4973c802d29dcb3fba625190b3678480f228a85bf/properties-0.6.1.tar.gz", hash = "sha256:b119ce4c53f4717fa29371c1bb929f422dda7ed90a4559b3583ea77389177263", size = 52000, upload-time = "2019-09-23T22:20:56.398Z" }
+
+[[package]]
 name = "psutil"
 version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1752,6 +1783,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/08/92/a7296491dbf5585b3a987f3f3fc87af0e632121ff3e490c14b5f2d2b4eb5/pymdown_extensions-10.15.tar.gz", hash = "sha256:0e5994e32155f4b03504f939e501b981d306daf7ec2aa1cd2eb6bd300784f8f7", size = 852320, upload-time = "2025-04-27T23:48:29.183Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/d1/c54e608505776ce4e7966d03358ae635cfd51dff1da6ee421c090dbc797b/pymdown_extensions-10.15-py3-none-any.whl", hash = "sha256:46e99bb272612b0de3b7e7caf6da8dd5f4ca5212c0b273feb9304e236c484e5f", size = 265845, upload-time = "2025-04-27T23:48:27.359Z" },
+]
+
+[[package]]
+name = "pypng"
+version = "0.20220715.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/cd/112f092ec27cca83e0516de0a3368dbd9128c187fb6b52aaaa7cde39c96d/pypng-0.20220715.0.tar.gz", hash = "sha256:739c433ba96f078315de54c0db975aee537cbc3e1d0ae4ed9aab0ca1e427e2c1", size = 128992, upload-time = "2022-07-15T14:11:05.301Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/b9/3766cc361d93edb2ce81e2e1f87dd98f314d7d513877a342d31b30741680/pypng-0.20220715.0-py3-none-any.whl", hash = "sha256:4a43e969b8f5aaafb2a415536c1a8ec7e341cd6a3f957fd5b5f32a4cfeed902c", size = 58057, upload-time = "2022-07-15T14:11:03.713Z" },
 ]
 
 [[package]]
@@ -2326,6 +2366,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/8a/78/16493d9c386d8e60e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/11/cc635220681e93a0183390e26485430ca2c7b5f9d33b15c74c2861cb8091/urllib3-2.4.0-py3-none-any.whl", hash = "sha256:4e16665048960a0900c702d4a66415956a584919c03361cac9f1df5c5dd7e813", size = 128680, upload-time = "2025-04-10T15:23:37.377Z" },
 ]
+
+[[package]]
+name = "vectormath"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/d3/5d49b6e961d87ba4845205509fbd0f2fa39875859ccb5e4778035518b89f/vectormath-0.2.2.tar.gz", hash = "sha256:f9f9209d350ec89dc11e2548e0e6397c1b9489c8468eb50ce33788ee4322a7b8", size = 9205, upload-time = "2019-04-03T20:27:15.39Z" }
 
 [[package]]
 name = "watchdog"

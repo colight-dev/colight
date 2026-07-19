@@ -1,0 +1,409 @@
+"""Load OMF (Open Mining Format) v1 projects into colight scene3d components.
+
+Requires the optional ``omf`` dependency (``pip install colight[geo]``).
+
+OMF projects use real-world (often UTM) coordinates in the hundreds of
+kilometres, which exceed float32 precision on the GPU. ``load_omf`` therefore
+re-centers all geometry about the midpoint of the project bounds by default;
+the subtracted offset is kept on ``OMFProject.center`` so values can be mapped
+back to world coordinates.
+
+Element mapping:
+
+- ``PointSetElement``  -> :class:`OMFPointSet`  -> ``scene3d.PointCloud``
+- ``LineSetElement``   -> :class:`OMFLineSet`   -> ``scene3d.LineSegments``
+- ``SurfaceElement``   -> :class:`OMFSurface`   -> ``scene3d.Mesh``
+- ``VolumeElement`` (regular grid) -> :class:`OMFGridVolume` -> ``scene3d.Cuboid``
+
+scene3d has no built-in colormap support, so this module ships a minimal
+numpy colormap (:func:`colormap`) used to turn scalar attributes into
+per-instance RGB arrays.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Tuple, Union
+
+import numpy as np
+
+from colight import scene3d
+
+PathLike = Union[str, "Any"]
+
+# Anchor colors for a small built-in "viridis" ramp (matplotlib anchor values).
+_VIRIDIS = np.array(
+    [
+        [0.267004, 0.004874, 0.329415],
+        [0.282623, 0.140926, 0.457517],
+        [0.253935, 0.265254, 0.529983],
+        [0.206756, 0.371758, 0.553117],
+        [0.163625, 0.471133, 0.558148],
+        [0.127568, 0.566949, 0.550556],
+        [0.134692, 0.658636, 0.517649],
+        [0.266941, 0.748751, 0.440573],
+        [0.477504, 0.821444, 0.318195],
+        [0.741388, 0.873449, 0.149561],
+        [0.993248, 0.906157, 0.143936],
+    ]
+)
+
+
+def colormap(
+    values: np.ndarray,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    stops: Optional[np.ndarray] = None,
+    nan_color: Tuple[float, float, float] = (0.5, 0.5, 0.5),
+) -> np.ndarray:
+    """Map scalar values to RGB colors with a piecewise-linear ramp.
+
+    Args:
+        values: 1D array of scalar values (NaNs allowed).
+        vmin: Lower bound of the ramp; defaults to ``nanmin(values)``.
+        vmax: Upper bound of the ramp; defaults to ``nanmax(values)``.
+        stops: Kx3 array of RGB anchor colors, evenly spaced over [vmin, vmax].
+            Defaults to a viridis-like ramp.
+        nan_color: RGB color assigned to NaN values.
+
+    Returns:
+        Nx3 float32 array of RGB colors in [0, 1].
+    """
+    values = np.asarray(values, dtype=np.float64)
+    ramp = _VIRIDIS if stops is None else np.asarray(stops, dtype=np.float64)
+    lo = float(np.nanmin(values)) if vmin is None else float(vmin)
+    hi = float(np.nanmax(values)) if vmax is None else float(vmax)
+    span = hi - lo if hi > lo else 1.0
+    nan_mask = np.isnan(values)
+    t = np.clip((np.where(nan_mask, lo, values) - lo) / span, 0.0, 1.0)
+    xs = np.linspace(0.0, 1.0, len(ramp))
+    rgb = np.stack([np.interp(t, xs, ramp[:, c]) for c in range(3)], axis=-1)
+    rgb[nan_mask] = nan_color
+    return rgb.astype(np.float32)
+
+
+@dataclass
+class OMFPointSet:
+    """A recentred OMF point set (e.g. drillhole collars)."""
+
+    name: str
+    vertices: np.ndarray  # (N, 3) float64, recentred
+    attributes: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    def point_cloud(self, **kwargs: Any) -> scene3d.SceneComponent:
+        """Build a scene3d PointCloud from the vertices.
+
+        Args:
+            **kwargs: Forwarded to ``scene3d.PointCloud`` (color, size, ...).
+        """
+        return scene3d.PointCloud(centers=self.vertices.astype(np.float32), **kwargs)
+
+
+@dataclass
+class OMFLineSet:
+    """A recentred OMF line set (e.g. drillhole traces with assay data)."""
+
+    name: str
+    vertices: np.ndarray  # (N, 3) float64, recentred
+    segments: np.ndarray  # (M, 2) int vertex indices
+    vertex_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
+    segment_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    @property
+    def starts(self) -> np.ndarray:
+        """(M, 3) start position of each segment."""
+        return self.vertices[self.segments[:, 0]]
+
+    @property
+    def ends(self) -> np.ndarray:
+        """(M, 3) end position of each segment."""
+        return self.vertices[self.segments[:, 1]]
+
+    def line_segments(
+        self,
+        color_by: Optional[str] = None,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
+        **kwargs: Any,
+    ) -> scene3d.SceneComponent:
+        """Build a scene3d LineSegments component.
+
+        Args:
+            color_by: Name of a segment attribute to map through
+                :func:`colormap` as per-segment colors.
+            vmin: Colormap lower bound (see :func:`colormap`).
+            vmax: Colormap upper bound (see :func:`colormap`).
+            **kwargs: Forwarded to ``scene3d.LineSegments`` (size, color, ...).
+        """
+        if color_by is not None:
+            values = self.segment_attributes[color_by]
+            kwargs.setdefault("colors", colormap(values, vmin=vmin, vmax=vmax))
+        return scene3d.LineSegments(
+            starts=self.starts.astype(np.float32),
+            ends=self.ends.astype(np.float32),
+            **kwargs,
+        )
+
+
+@dataclass
+class OMFSurface:
+    """A recentred OMF triangulated surface (topography, geology wireframes)."""
+
+    name: str
+    vertices: np.ndarray  # (N, 3) float64, recentred
+    triangles: np.ndarray  # (M, 3) int vertex indices
+    vertex_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    def mesh(self, **kwargs: Any) -> scene3d.SceneComponent:
+        """Build a scene3d Mesh from the triangulation.
+
+        Args:
+            **kwargs: Forwarded to ``scene3d.Mesh`` (color, alpha via
+                decorations, cull_mode, ...). ``cull_mode`` defaults to
+                "none" since geological surfaces are viewed from both sides.
+        """
+        kwargs.setdefault("cull_mode", "none")
+        # scene3d.Mesh is instance-based and requires at least one center;
+        # geometry is already in scene coordinates, so instance at the origin.
+        if "centers" not in kwargs:
+            kwargs.setdefault("center", [0.0, 0.0, 0.0])
+        return scene3d.Mesh(
+            positions=self.vertices.astype(np.float32),
+            indices=self.triangles.astype(np.uint32),
+            **kwargs,
+        )
+
+
+@dataclass
+class OMFGridVolume:
+    """A recentred OMF regular-grid block model.
+
+    Cell attribute arrays are stored flat in OMF order: C-contiguous over
+    ``(nu, nv, nw)``, i.e. the w (z) index varies fastest.
+    """
+
+    name: str
+    corner: np.ndarray  # (3,) recentred min corner of the grid
+    axes: np.ndarray  # (3, 3) rows = axis_u, axis_v, axis_w unit vectors
+    tensors: Tuple[np.ndarray, np.ndarray, np.ndarray]  # cell widths along u, v, w
+    cell_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    @property
+    def shape(self) -> Tuple[int, int, int]:
+        """Number of cells along (u, v, w)."""
+        return (len(self.tensors[0]), len(self.tensors[1]), len(self.tensors[2]))
+
+    def grid(self, key: str) -> np.ndarray:
+        """Return a cell attribute reshaped to ``(nu, nv, nw)``."""
+        return self.cell_attributes[key].reshape(self.shape)
+
+    def cell_centers(self) -> np.ndarray:
+        """Compute all cell centers as an ``(nu*nv*nw, 3)`` array in OMF order."""
+        offsets = [np.cumsum(t) - t / 2.0 for t in self.tensors]
+        u, v, w = np.meshgrid(*offsets, indexing="ij")
+        local = np.stack([u, v, w], axis=-1).reshape(-1, 3)
+        return self.corner + local @ self.axes
+
+    def cuboids(
+        self,
+        color_by: str,
+        cutoff: Optional[float] = None,
+        stride: int = 1,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
+        **kwargs: Any,
+    ) -> scene3d.SceneComponent:
+        """Build a scene3d Cuboid instance layer for cells passing a cutoff.
+
+        Args:
+            color_by: Cell attribute mapped through :func:`colormap` for
+                per-cell colors (and used for the cutoff test).
+            cutoff: Keep only cells with ``value >= cutoff``. None keeps all.
+            stride: Subsample the grid, keeping every ``stride``-th cell
+                along each axis (before the cutoff filter).
+            vmin: Colormap lower bound; defaults to ``cutoff`` when given.
+            vmax: Colormap upper bound.
+            **kwargs: Forwarded to ``scene3d.Cuboid``.
+
+        Returns:
+            A Cuboid component with one instance per surviving cell.
+        """
+        centers, values = self.filtered_cells(color_by, cutoff=cutoff, stride=stride)
+        half = np.array([t[0] for t in self.tensors], dtype=np.float32) / 2.0
+        kwargs.setdefault(
+            "colors",
+            colormap(values, vmin=cutoff if vmin is None else vmin, vmax=vmax),
+        )
+        kwargs.setdefault("half_size", half.tolist())
+        return scene3d.Cuboid(centers=centers.astype(np.float32), **kwargs)
+
+    def filtered_cells(
+        self,
+        key: str,
+        cutoff: Optional[float] = None,
+        stride: int = 1,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Select cell centers and values by stride and cutoff.
+
+        Args:
+            key: Cell attribute to filter on.
+            cutoff: Keep only cells with ``value >= cutoff``. None keeps all.
+            stride: Keep every ``stride``-th cell along each axis.
+
+        Returns:
+            Tuple of ``(centers, values)`` where centers is (N, 3) and values
+            is (N,) for the surviving cells.
+        """
+        values = self.grid(key)
+        centers = self.cell_centers().reshape(self.shape + (3,))
+        if stride > 1:
+            values = values[::stride, ::stride, ::stride]
+            centers = centers[::stride, ::stride, ::stride]
+        values = values.reshape(-1)
+        centers = centers.reshape(-1, 3)
+        if cutoff is not None:
+            mask = values >= cutoff
+            values = values[mask]
+            centers = centers[mask]
+        return centers, values
+
+
+@dataclass
+class OMFProject:
+    """An OMF project with all element geometry recentred about ``center``."""
+
+    name: str
+    center: np.ndarray  # (3,) world-coordinate offset subtracted from geometry
+    points: Dict[str, OMFPointSet] = field(default_factory=dict)
+    line_sets: Dict[str, OMFLineSet] = field(default_factory=dict)
+    surfaces: Dict[str, OMFSurface] = field(default_factory=dict)
+    volumes: Dict[str, OMFGridVolume] = field(default_factory=dict)
+
+    def bounds(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (min, max) recentred bounds over all point/line/surface vertices."""
+        stacks = [
+            e.vertices
+            for group in (self.points, self.line_sets, self.surfaces)
+            for e in group.values()
+        ]
+        allv = np.vstack(stacks)
+        return allv.min(axis=0), allv.max(axis=0)
+
+
+def _attribute_arrays(element: Any, location: str) -> Dict[str, np.ndarray]:
+    """Collect an OMF element's data arrays for one location ('vertices'/'segments'/'cells')."""
+    out: Dict[str, np.ndarray] = {}
+    for data in getattr(element, "data", []):
+        if data.location == location:
+            out[data.name] = np.asarray(data.array.array)
+    return out
+
+
+def load_omf(path: PathLike, recenter: bool = True) -> OMFProject:
+    """Load an OMF v1 file into recentred numpy-backed element records.
+
+    Args:
+        path: Path to a ``.omf`` file (OMF v1).
+        recenter: Subtract the midpoint of the project bounds from all
+            geometry so coordinates are small enough for float32 GPU buffers.
+            The offset is stored on ``OMFProject.center``.
+
+    Returns:
+        An :class:`OMFProject` with elements grouped by type, keyed by name.
+
+    Raises:
+        ImportError: If the ``omf`` package is not installed.
+    """
+    try:
+        import omf
+    except ImportError as e:  # pragma: no cover
+        raise ImportError(
+            "Loading OMF files requires the 'omf' package. "
+            "Install it with: pip install colight[geo]"
+        ) from e
+
+    project = omf.OMFReader(str(path)).get_project()
+    project_origin = np.asarray(project.origin, dtype=np.float64)
+
+    points: Dict[str, OMFPointSet] = {}
+    line_sets: Dict[str, OMFLineSet] = {}
+    surfaces: Dict[str, OMFSurface] = {}
+    volumes: Dict[str, OMFGridVolume] = {}
+
+    lo = np.full(3, np.inf)
+    hi = np.full(3, -np.inf)
+
+    def track(v: np.ndarray) -> None:
+        nonlocal lo, hi
+        lo = np.minimum(lo, v.min(axis=0))
+        hi = np.maximum(hi, v.max(axis=0))
+
+    for element in project.elements:
+        geometry = element.geometry
+        origin = project_origin + np.asarray(geometry.origin, dtype=np.float64)
+        kind = type(geometry).__name__
+        if kind == "PointSetGeometry":
+            vertices = np.asarray(geometry.vertices.array, dtype=np.float64) + origin
+            track(vertices)
+            points[element.name] = OMFPointSet(
+                name=element.name,
+                vertices=vertices,
+                attributes=_attribute_arrays(element, "vertices"),
+            )
+        elif kind == "LineSetGeometry":
+            vertices = np.asarray(geometry.vertices.array, dtype=np.float64) + origin
+            track(vertices)
+            line_sets[element.name] = OMFLineSet(
+                name=element.name,
+                vertices=vertices,
+                segments=np.asarray(geometry.segments.array),
+                vertex_attributes=_attribute_arrays(element, "vertices"),
+                segment_attributes=_attribute_arrays(element, "segments"),
+            )
+        elif kind == "SurfaceGeometry":
+            vertices = np.asarray(geometry.vertices.array, dtype=np.float64) + origin
+            track(vertices)
+            surfaces[element.name] = OMFSurface(
+                name=element.name,
+                vertices=vertices,
+                triangles=np.asarray(geometry.triangles.array),
+                vertex_attributes=_attribute_arrays(element, "vertices"),
+            )
+        elif kind == "VolumeGridGeometry":
+            tensors = tuple(
+                np.asarray(getattr(geometry, f"tensor_{axis}"), dtype=np.float64)
+                for axis in "uvw"
+            )
+            axes = np.asarray(
+                [geometry.axis_u, geometry.axis_v, geometry.axis_w], dtype=np.float64
+            )
+            extent = axes.T @ np.array([t.sum() for t in tensors])
+            track(np.stack([origin, origin + extent]))
+            volumes[element.name] = OMFGridVolume(
+                name=element.name,
+                corner=origin,
+                axes=axes,
+                tensors=(tensors[0], tensors[1], tensors[2]),
+                cell_attributes=_attribute_arrays(element, "cells"),
+            )
+        # Other geometry kinds (e.g. VolumeGridGeometry variants we don't
+        # know) are skipped; Wolfpass only contains the four above.
+
+    center = (lo + hi) / 2.0 if recenter else np.zeros(3)
+    for point_set in points.values():
+        point_set.vertices = point_set.vertices - center
+    for line_set in line_sets.values():
+        line_set.vertices = line_set.vertices - center
+    for surface in surfaces.values():
+        surface.vertices = surface.vertices - center
+    for volume in volumes.values():
+        volume.corner = volume.corner - center
+
+    return OMFProject(
+        name=project.name,
+        center=center,
+        points=points,
+        line_sets=line_sets,
+        surfaces=surfaces,
+        volumes=volumes,
+    )
