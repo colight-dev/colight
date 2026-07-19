@@ -27,14 +27,11 @@ class JsonDocumentGenerator:
         None  # For incremental execution
     )
 
-    def generate_json(
-        self, source_path: pathlib.Path, changed_blocks: Optional[set] = None
-    ) -> str:
+    def generate_json(self, source_path: pathlib.Path) -> str:
         """Generate JSON representation of a Python file.
 
         Args:
             source_path: Path to the source file
-            changed_blocks: Set of block IDs that have changed (for incremental execution)
         """
         # Parse the file
         document = parse_colight_file(source_path)
@@ -47,7 +44,7 @@ class JsonDocumentGenerator:
         if self.incremental_executor:
             block_results = list(
                 self.incremental_executor.execute_incremental_streaming(
-                    document, changed_blocks, str(source_path), str(source_path)
+                    document, str(source_path), str(source_path)
                 )
             )
             # Extract just the results in order
