@@ -1247,6 +1247,24 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     "or type name, optional inclusive instance ranges) before capture.",
 )
 @click.option(
+    "--rulers",
+    is_flag=True,
+    help="Compose labeled coordinate rulers (page CSS px, the pick-at "
+    "space) around the capture. Post-capture: the render is untouched.",
+)
+@click.option(
+    "--views",
+    type=str,
+    help="Comma-separated camera presets (front,back,left,right,side,top,"
+    "bottom,iso) composed into one labeled contact sheet. Scene3d only.",
+)
+@click.option(
+    "--max-edge",
+    type=int,
+    help="Scale the viewport so the output PNG's long edge is exactly N "
+    "pixels (preserves aspect; avoids double resampling for agents).",
+)
+@click.option(
     "--ready-timeout",
     type=float,
     default=30.0,
@@ -1269,6 +1287,9 @@ def screenshot(
     dpr: float,
     check: bool,
     frame: Optional[str],
+    rulers: bool,
+    views: Optional[str],
+    max_edge: Optional[int],
     ready_timeout: float,
     no_daemon: bool,
     debug: bool,
@@ -1287,53 +1308,118 @@ def screenshot(
     accept --frame "C[:A-B]" to fit the camera on a component (or instance
     range) before capture — the agent's zoom loop.
 
+    Machine legibility (all composed post-capture; the render stays
+    untouched): --rulers surrounds the capture with big labeled coordinate
+    rulers in the exact page-pixel space `pick-at` consumes (read a
+    coordinate off the ruler, pass it to pick-at); --views renders a
+    labeled contact sheet of camera presets (one image of four views costs
+    an agent fewer tiles than four images) — rulers are single-view only
+    and error when combined; --max-edge N sizes the render so the PNG's
+    long edge is exactly N, letting agents that know their harness's
+    native input size skip a second lossy resampling.
+
     Exit code: 0 success, 1 --check found nondeterminism, 2 error.
 
     \b
     JSON schema:
       {"target": str, "out": str, "width": int, "height": int, "dpr": float,
        "block"?: str, "sha256": str, "deterministic"?: bool,
-       "sha256_recheck"?: str,
+       "sha256_recheck"?: str, "max_edge"?: int,
+       "rulers"?: {"spacing": int, "margin": int},
+       "views"?: [{"view": str, "camera": {...}}],
        "frame"?: {"component": int, "type": str, "instances"?: [[a, b]],
                   "camera": {"position", "target", "up", "fov", ...}},
        "coverage"?: {"width": int, "height": int, "rect": {...},
          "components": [{"component", "type", "instances", "pixels",
                          "fraction"}],
          "background": {"pixels": int, "fraction": float}}}
-    (width/height are actual PNG pixel dimensions; coverage fractions are
-    of the scene canvas.)
+    (width/height are actual PNG pixel dimensions including any composed
+    margin; rulers.spacing is CSS px between ticks, rulers.margin the
+    composed band in PNG px — page coordinate = (png_px - margin) / dpr;
+    coverage fractions are of the scene canvas.)
     """
-    from colight.cli_tools import daemon_client, screenshot_tools
+    from colight.cli_tools import daemon_client, scene_pick, screenshot_tools
 
     effective_timeout = None if ready_timeout <= 0 else ready_timeout
-    try:
+
+    def run_shot(
+        run_width: int,
+        run_height: Optional[int],
+        run_out: pathlib.Path,
+        run_check: bool,
+        run_frame: Optional[str],
+        run_rulers: bool,
+        run_views: Optional[List[str]],
+    ) -> dict:
         payload = None
         if not no_daemon:
             payload = daemon_client.try_screenshot(
                 target,
-                out,
+                run_out,
                 block=block,
-                width=width,
-                height=height,
+                width=run_width,
+                height=run_height,
                 dpr=dpr,
-                check=check,
-                frame=frame,
+                check=run_check,
+                frame=run_frame,
                 debug=debug,
                 ready_timeout=effective_timeout,
+                rulers=run_rulers,
+                views=run_views,
             )
         if payload is None:
             payload = screenshot_tools.screenshot_target(
                 target,
-                out,
+                run_out,
                 block=block,
-                width=width,
-                height=height,
+                width=run_width,
+                height=run_height,
                 dpr=dpr,
-                check=check,
-                frame=frame,
+                check=run_check,
+                frame=run_frame,
                 debug=debug,
                 ready_timeout=effective_timeout,
+                rulers=run_rulers,
+                views=run_views,
             )
+        return payload
+
+    try:
+        if rulers and views:
+            raise ValueError(
+                "--rulers applies to single-view screenshots only "
+                "(a contact sheet's cells have their own coordinate spaces)"
+            )
+        view_names = scene_pick.parse_views(views) if views else None
+
+        if max_edge is not None:
+            long_css = max_edge / dpr
+            if abs(long_css - round(long_css)) > 1e-9:
+                raise ValueError(
+                    f"--max-edge {max_edge} is not reachable at --dpr {dpr:g} "
+                    "(max-edge must be divisible by dpr)"
+                )
+            if height is None:
+                # Measure the content's aspect with a probe render at the
+                # requested width, then re-render at the fitted viewport.
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    probe = run_shot(
+                        width,
+                        None,
+                        pathlib.Path(tmp_dir) / "probe.png",
+                        False,
+                        None,
+                        False,
+                        None,
+                    )
+                height = max(1, int(round(probe["height"] / dpr)))
+            width, height = screenshot_tools.fit_max_edge(
+                width, height, int(round(long_css))
+            )
+
+        payload = run_shot(width, height, out, check, frame, rulers, view_names)
+        if max_edge is not None:
+            payload["max_edge"] = max_edge
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(2)
@@ -1349,6 +1435,13 @@ def screenshot(
         ]
         if "block" in payload:
             parts.insert(1, f"block={payload['block']}")
+        if "rulers" in payload:
+            parts.append(
+                f"rulers: every {payload['rulers']['spacing']}px, "
+                f"margin {payload['rulers']['margin']}px"
+            )
+        if "views" in payload:
+            parts.append("views: " + ", ".join(v["view"] for v in payload["views"]))
         if "frame" in payload:
             parts.append(
                 f"framed={payload['frame']['type']}[{payload['frame']['component']}]"

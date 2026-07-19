@@ -308,8 +308,14 @@ def try_screenshot(
     frame: Optional[str],
     debug: bool,
     ready_timeout: Optional[float],
+    rulers: bool = False,
+    views: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Route ``colight screenshot`` through a discovered daemon.
+
+    Composition (rulers/views) happens in the daemon's
+    ``screenshot_source`` call — the identical code direct mode runs (the
+    version match discovery enforces guarantees identical bytes).
 
     Returns:
         The CLI payload, or None when no usable daemon exists (or it became
@@ -334,6 +340,8 @@ def try_screenshot(
                 "out_label": str(out),
                 "check": check,
                 "frame": frame,
+                "rulers": rulers,
+                "views": views,
             },
         )
     except DaemonUnavailable:
