@@ -1,7 +1,7 @@
 # The `.colight` File Format
 
 This document is the authoritative specification of the `.colight` binary
-format, **version 1**. It is the language-neutral boundary between the Python
+format, **version 2**. It is the language-neutral boundary between the Python
 authoring side and the JS/WebGPU rendering side. A reader for a new language
 should be implementable from this document alone, without consulting the
 Colight source code.
@@ -38,7 +38,7 @@ entry unless stated otherwise.
 | Offset | Size | Type     | Field           | Value / meaning                                                                                                                               |
 | ------ | ---- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0      | 8    | bytes    | `magic`         | `"COLIGHT\x00"` — hex `43 4F 4C 49 47 48 54 00`                                                                                               |
-| 8      | 8    | uint64le | `version`       | Format version. Currently `1`. See [Versioning](#5-versioning).                                                                               |
+| 8      | 8    | uint64le | `version`       | Format version. Currently `2`. See [Versioning](#5-versioning).                                                                               |
 | 16     | 8    | uint64le | `json_offset`   | Offset of the JSON section from the entry start. The writer always emits `96` (JSON immediately follows the header).                          |
 | 24     | 8    | uint64le | `json_length`   | Length of the JSON section in bytes (exact, excludes padding).                                                                                |
 | 32     | 8    | uint64le | `binary_offset` | Offset of the binary section from the entry start. Always `(json_offset + json_length)` rounded **up** to the next multiple of 8.             |
@@ -56,18 +56,23 @@ entry_start
 ├── JSON section      json_length bytes of UTF-8 JSON (one JSON object)
 ├── zero padding      (binary_offset − json_offset − json_length) bytes, all 0x00
 ├── binary section    binary_length bytes
-entry_end = entry_start + binary_offset + binary_length
+├── zero padding      to the next multiple of 8, all 0x00
+entry_end = entry_start + align8(binary_offset + binary_length)
 ```
+
+(`align8(n)` rounds `n` up to the next multiple of 8.)
 
 - `json_offset = 96` (readers use the header value, but the writer never
   emits anything else).
 - `binary_offset ≥ json_offset + json_length`, and `binary_offset` is a
   multiple of 8. The gap is zero padding. The padding is written even when
   the entry has no buffers.
-- **Entry size** is defined as `binary_offset + binary_length`. The next
-  entry (if any) begins at exactly `entry_start + entry_size`. There is no
-  entry count field and no terminator: readers walk entries sequentially
-  until end of data.
+- **Entry size** is defined as `align8(binary_offset + binary_length)`: the
+  writer pads every entry with trailing zeros to an 8-byte boundary so that
+  every entry — including appended updates — starts at an absolute offset
+  that is a multiple of 8. The next entry (if any) begins at exactly
+  `entry_start + entry_size`. There is no entry count field and no
+  terminator: readers walk entries sequentially until end of data.
 - The JSON section is a single JSON **object**, encoded as UTF-8 without a
   BOM. The Python writer uses compact separators (`","`/`":"`) but readers
   MUST NOT rely on any particular JSON whitespace.
@@ -82,15 +87,16 @@ buffer-index order, with zero padding between them such that:
 
 - each buffer starts at an offset that is a multiple of 8 **relative to the
   start of the binary section**, and
-- for the first entry of a file, the binary section itself starts at a
-  multiple of 8 **relative to the start of the file** (header is 96 bytes,
-  JSON is padded — see 2.2).
+- every entry starts at a multiple of 8 relative to the start of the file
+  (entry sizes are padded — see 2.2), the header is 96 bytes, and the JSON
+  section is padded, so the binary section of **every** entry starts at a
+  multiple of 8 **relative to the start of the file**.
 
-Together these guarantee that every buffer of the first entry is 8-byte
-aligned relative to the file start, which allows zero-copy typed-array views
-over an in-memory copy of the file for every element type up to `float64`.
-(For appended entries this absolute guarantee can break — see
-[Known discrepancies](#8-known-discrepancies).)
+Together these guarantee that every buffer of every entry is 8-byte aligned
+relative to the file start, which allows zero-copy typed-array views over an
+in-memory copy of the file for every element type up to `float64`. The
+reference JS reader relies on this: it always constructs typed arrays
+directly over the file bytes without copying.
 
 Buffer positions are described by the `bufferLayout` object in the same
 entry's JSON:
@@ -178,6 +184,11 @@ binary buffers by zero-based index:
 - `dtype` — one of: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`,
   `uint32`, `uint64`, `float32`, `float64`. The buffer holds the elements
   **little-endian**, densely packed (no strides), in **C (row-major) order**.
+  The Python writer enforces this: big-endian NumPy arrays are converted to
+  little-endian at write time (a cheap copy, only when needed), and the
+  `dtype` string is always the canonical name above — never a
+  byte-order-qualified spelling like `">f4"`. Readers MUST error loudly on a
+  `dtype` they do not recognize rather than guessing an element type.
 - `shape` — array of non-negative integers; the product of the dimensions
   times the element size equals the buffer's length in bytes.
 - `data` — always `null` in files. (The same envelope is used on transports
@@ -249,7 +260,9 @@ Semantics of an update, in order of application:
 
 1. `imports` are loaded and `state` entries are merged into the environment
    (new keys added; listeners merged).
-2. If `ast` is `null`, the update is state-only.
+2. If `ast` is `null`, the update is **state-only**: the consumer applies
+   every entry of `state` as a `"reset"` (overwriting existing keys, not
+   just backfilling new ones).
 3. If `ast` is a new visual AST, the consumer re-renders with it.
 4. If `ast` is a list of update operations `[key, op, payload]` — `op` one
    of `"reset"` (replace value), `"append"` (add one item to a list),
@@ -270,6 +283,8 @@ Writer algorithm (what `colight.format.create_bytes` does):
    `binary_offset = align8(96 + json_length)`.
 4. Emit header, JSON bytes, zero padding to `binary_offset`, then each buffer
    preceded by its zero padding.
+5. Pad the entry with zeros to `align8(binary_offset + binary_length)`, so
+   the next appended entry starts 8-byte aligned.
 
 To append an update: serialize the update payload, wrap it as
 `{"updates": ...}`, run the same algorithm, and append the resulting bytes to
@@ -278,21 +293,34 @@ the file (`colight.format.append_update`).
 ## 5. Versioning
 
 - The format version is the single `uint64le` at header bytes 8–15 of
-  **every** entry. The current version is **1**. A single integer (rather
+  **every** entry. The current version is **2**. A single integer (rather
   than semver) is used deliberately: the format is pre-release and every
   change is breaking-by-default, so there is nothing for minor/patch
   components to express.
 - Readers MUST accept exactly the version(s) they implement and MUST fail
   loudly otherwise, naming both the found and the supported version. The
   reference readers raise
-  `Unsupported .colight file version: found N, this reader supports version 1`.
+  `Unsupported .colight file version: found N, this reader supports version 2`.
 - Policy (pre-release): any change to the byte layout, the framing rules, or
   the required JSON contract (`bufferLayout`, buffer-reference envelopes,
   `updates` wrapping) requires bumping `CURRENT_VERSION` in
   `colight/format.py` **and** `js/format.js`, plus updating this document.
   No silent format drift: if the bytes change, the number changes.
 - Backward-compatibility windows may be introduced after release; today
-  there is exactly one supported version.
+  there is exactly one supported version. Version 2 readers deliberately do
+  **not** read version 1 files: at the time of the bump no `.colight` files
+  existed outside locally regenerable artifacts (nothing is committed to the
+  repository and there are no external consumers), so a compatibility window
+  would have been dead code. Regenerate any local v1 artifact from its
+  source.
+
+Version history:
+
+- **2** (2026-07) — entry sizes are padded to a multiple of 8 so appended
+  entries (and all their buffers) stay 8-byte aligned absolutely; the writer
+  normalizes array byte order to little-endian and always emits canonical
+  dtype names.
+- **1** — initial format.
 
 ## 6. Embedding variants
 
@@ -324,7 +352,7 @@ A complete reader, from this document alone:
    2. Read the six `uint64le` header fields at offsets 8, 16, 24, 32, 40, 48
       (version, json_offset, json_length, binary_offset, binary_length,
       num_buffers).
-   3. Verify `version == 1`; otherwise fail with found-vs-supported versions.
+   3. Verify `version == 2`; otherwise fail with found-vs-supported versions.
    4. Decode `json_length` bytes at `offset + json_offset` as UTF-8 and
       parse as JSON → `entry_json`.
    5. If `num_buffers > 0`: read `entry_json.bufferLayout`; verify
@@ -339,7 +367,7 @@ A complete reader, from this document alone:
       Else if `entry_json` has `"updates"`: append
       `{data: entry_json.updates, buffers}` to the updates list. Else:
       ignore the entry.
-   8. `offset += binary_offset + binary_length`; `first = false`.
+   8. `offset += align8(binary_offset + binary_length)`; `first = false`.
 3. **Materialize arrays.** Walk `initial` (and each update's `data`)
    recursively; replace `{"__buffer_index__": i}` with `buffers[i]`, and
    ndarray envelopes with an array of element type `dtype` (little-endian,
@@ -367,43 +395,27 @@ Differences between this spec's intent and the current implementations, kept
 here rather than silently fixed. Each requires an explicit decision (and, if
 bytes change, a version bump).
 
-1. **Appended entries can break absolute 8-byte alignment.** Entry size is
-   `binary_offset + binary_length`, which is not rounded up to 8. If an
-   entry's last buffer has a length that is not a multiple of 8 (e.g. a
-   3-byte `uint8` array), every subsequent entry starts misaligned, so its
-   buffers — although 8-aligned _relative to their entry's binary section_ —
-   are misaligned relative to the file. The JS client's zero-copy
-   typed-array construction (`evaluateNdarray`) then throws a `RangeError`
-   for multi-byte dtypes. Fix would be to pad entries to 8 bytes (writer
-   change → version bump) or to copy misaligned buffers on read.
-2. **State-only update entries crash the JS widget.** The Python writer
-   emits `ast: null` for `Plot.State(...)` updates, and the render CLI
-   handles that, but `applyUpdateEntries` in `js/widget.jsx` passes
-   `data.ast` straight into `normalizeUpdates`, which calls `.flatMap` on it
-   — `null.flatMap` throws. Confirmed by test; the JS in-browser path has
-   never successfully applied a state-only update entry.
-3. **Endianness is assumed, not enforced.** The Python writer serializes
-   arrays with `array.tobytes()` and `str(array.dtype)` without normalizing
-   byte order. A non-native-endian NumPy array (e.g. dtype `>f4`) writes
-   big-endian bytes with dtype string `">f4"`, which the JS reader does not
-   recognize.
-4. **Unknown dtypes decode silently as `float64` in JS.**
-   `evaluateNdarray` falls back to `Float64Array` for any unrecognized
-   dtype string instead of erroring — silent data corruption for e.g.
-   `float16` or big-endian dtype strings.
-5. **`bufferLayout.count` and `totalSize` are unvalidated.** Both readers
+1. **`bufferLayout.count` and `totalSize` are unvalidated.** Both readers
    validate `num_buffers` against the _lengths of_ `offsets`/`lengths` but
    never check `count` or `totalSize`; they are informational duplicates
    (as is `num_buffers` itself relative to the JSON).
-6. **`int64`/`uint64` lose precision in JS** beyond ±2^53 (converted from
+2. **`int64`/`uint64` lose precision in JS** beyond ±2^53 (converted from
    BigInt arrays to plain numbers).
-7. **Python `parse_file` drops update buffers.** `parse_file` returns update
+3. **Python `parse_file` drops update buffers.** `parse_file` returns update
    JSON only; callers that need an update's buffers must use
    `parse_file_with_updates`. Internal API asymmetry, not a wire-format
    issue.
-8. **Historical version tolerance.** Before 2026-07 both readers accepted
+4. **Historical version tolerance.** Before 2026-07 both readers accepted
    any version `≤ 1` (i.e. also the never-issued version 0) and Python's
    `parse_file` swallowed _all_ first-entry errors, returning an empty
-   result for arbitrary garbage. Both readers now require exactly version 1
-   and propagate first-entry errors; error tolerance after the first entry
-   (the walk rule in section 3.1) is retained by design.
+   result for arbitrary garbage. Both readers now require exactly the
+   current version and propagate first-entry errors; error tolerance after
+   the first entry (the walk rule in section 3.1) is retained by design.
+
+Resolved in version 2 (2026-07): appended entries breaking absolute 8-byte
+alignment (entries are now padded, section 2.2); state-only update entries
+crashing the JS widget (`applyUpdateEntries` now applies `ast: null` entries
+as state resets, section 3.6); unenforced endianness (the writer now converts
+big-endian arrays to little-endian, section 3.3); unknown dtypes silently
+decoding as `float64` in JS (`evaluateNdarray` now errors loudly,
+section 3.3).

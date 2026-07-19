@@ -23,6 +23,8 @@ After header:
 Alignment guarantees:
 - The binary section starts at an 8-byte aligned offset from the file beginning
 - Each buffer within the binary section starts at an 8-byte aligned offset
+- Every entry's total size is padded to a multiple of 8, so appended entries
+  (and therefore every buffer's absolute file offset) stay 8-byte aligned
 - This ensures zero-copy typed array creation for all standard numeric types
 
 The JSON includes buffer layout with offsets and lengths for each buffer.
@@ -40,8 +42,13 @@ from colight.widget import to_json_with_state
 
 # File format constants
 MAGIC_BYTES = b"COLIGHT\x00"
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
 HEADER_SIZE = 96
+
+
+def align8(n: int) -> int:
+    """Round ``n`` up to the next multiple of 8."""
+    return (n + 7) & ~7
 
 
 def create_bytes(
@@ -97,7 +104,7 @@ def create_bytes(
 
     # Ensure binary section starts at an 8-byte aligned offset
     unaligned_binary_offset = json_offset + json_length
-    binary_offset = (unaligned_binary_offset + 7) & ~7  # Round up to 8-byte boundary
+    binary_offset = align8(unaligned_binary_offset)
     json_padding = binary_offset - unaligned_binary_offset
 
     binary_length = current_offset
@@ -132,6 +139,10 @@ def create_bytes(
 
         result.extend(buffer)
         written_offset += len(buffer)
+
+    # Pad the entry to an 8-byte boundary so that any appended entry (and
+    # therefore every buffer's absolute file offset) stays 8-byte aligned.
+    result.extend(b"\x00" * (align8(len(result)) - len(result)))
 
     return bytes(result)
 
@@ -228,8 +239,9 @@ def parse_entry(f, offset: int = 0) -> tuple[Dict[str, Any], List[bytes], int]:
             buffer = binary_data[offset_in_binary : offset_in_binary + length]
             buffers.append(buffer)
 
-    # Calculate total entry size
-    entry_size = binary_offset + binary_length
+    # Total entry size, including the trailing padding that keeps the next
+    # entry 8-byte aligned.
+    entry_size = align8(binary_offset + binary_length)
 
     return json_data, buffers, entry_size
 

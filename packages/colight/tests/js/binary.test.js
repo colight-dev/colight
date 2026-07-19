@@ -44,15 +44,20 @@ describe("binary.js", () => {
       expect(Array.from(result)).toEqual([1, 2, 3, 4]);
     });
 
-    it("should handle unknown dtype by defaulting to Float64Array", () => {
+    it("should throw loudly on an unknown dtype", () => {
       const data = new Float64Array([1, 2]).buffer;
       const node = {
         data: new DataView(data),
-        dtype: "unknown",
+        dtype: "float16",
         shape: [2],
       };
-      const result = evaluateNdarray(node);
-      expect(result).toBeInstanceOf(Float64Array);
+      expect(() => evaluateNdarray(node)).toThrow(
+        'Unknown ndarray dtype: "float16"',
+      );
+      // Big-endian dtype strings are unknown too (files are little-endian).
+      expect(() => evaluateNdarray({ ...node, dtype: ">f4" })).toThrow(
+        'Unknown ndarray dtype: ">f4"',
+      );
     });
   });
 

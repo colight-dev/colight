@@ -1,6 +1,6 @@
 """Binary data serialization utilities for colight widgets."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 
@@ -28,7 +28,9 @@ def serialize_binary_data(
     }
 
 
-def deserialize_buffer_entry(data: Dict[str, Any], buffers: List[bytes]) -> Any:
+def deserialize_buffer_entry(
+    data: Dict[str, Any], buffers: Sequence[bytes | bytearray | memoryview]
+) -> Any:
     """Parse a buffer entry, converting to numpy array if needed.
 
     Args:
@@ -48,7 +50,9 @@ def deserialize_buffer_entry(data: Dict[str, Any], buffers: List[bytes]) -> Any:
     return buffers[buffer_idx]
 
 
-def replace_buffers(data: Any, buffers: List[bytes]) -> Any:
+def replace_buffers(
+    data: Any, buffers: Sequence[bytes | bytearray | memoryview]
+) -> Any:
     """Replace buffer indices with actual buffer data in a nested data structure.
 
     Args:

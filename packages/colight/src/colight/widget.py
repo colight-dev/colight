@@ -1,4 +1,5 @@
 import datetime
+import sys
 from typing import Any, Callable, Dict, Iterable, List, Optional, Union, Tuple, cast
 from types import SimpleNamespace
 
@@ -217,13 +218,20 @@ def serialize_numpy_array(data: Any, collected_state: Optional[CollectedState]) 
     if array.ndim == 0:  # It's a scalar
         return array.item()
 
+    # The wire format is little-endian (see docs/src/colight_docs/format.md
+    # section 3.3). Convert big-endian arrays on write: cheap (copies only
+    # when needed) and friendlier than rejecting them.
+    byteorder = array.dtype.byteorder
+    if byteorder == ">" or (byteorder == "=" and sys.byteorder == "big"):
+        array = array.astype(array.dtype.newbyteorder("<"))
+
     bytes_data = array.tobytes()
     return serialize_binary_data(
         collected_state.buffers,
         {
             "__type__": "ndarray",
             "data": bytes_data,
-            "dtype": str(array.dtype),
+            "dtype": array.dtype.name,
             "shape": array.shape,
         },
     )

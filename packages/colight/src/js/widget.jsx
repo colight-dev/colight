@@ -345,7 +345,15 @@ export async function createStateStore(data) {
         }
         mobx.runInAction(() => {
           entries.forEach(({ data, buffers }) => {
-            $state.updateWithBuffers(data.ast, buffers);
+            if (data.ast != null) {
+              // ast is a list of update operations to apply.
+              $state.updateWithBuffers(data.ast, buffers);
+            } else if (data.state && Object.keys(data.state).length > 0) {
+              // State-only update (ast: null): the state values overwrite
+              // existing keys (matching the render CLI) — the __backfill in
+              // __updateEnvironment above only adds keys that are new.
+              $state.updateWithBuffers([data.state], buffers);
+            }
           });
         });
       },
