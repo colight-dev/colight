@@ -280,6 +280,8 @@ export const imagePlaneSpec = definePrimitive<ImagePlaneComponentConfig>({
 
   coerce: coerceImagePlane,
 
+  extraProps: ["image", "imageKey", "position", "width", "height", "opacity"],
+
   attributes: {
     position: attr.vec3("centers"),
     rotation: attr.quat("quaternions"),

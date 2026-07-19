@@ -10,6 +10,7 @@ import { ComponentConfig, PrimitiveSpec } from "./components";
 import {
   pointCloudSpec,
   ellipsoidSpec,
+  ellipsoidAxesSpec,
   cuboidSpec,
   imagePlaneSpec,
   boundingBoxSpec,
@@ -74,6 +75,7 @@ export interface CompiledScene {
 const PRIMITIVE_SPECS: Record<string, PrimitiveSpec<any>> = {
   PointCloud: pointCloudSpec,
   Ellipsoid: ellipsoidSpec,
+  EllipsoidAxes: ellipsoidAxesSpec,
   Cuboid: cuboidSpec,
   ImagePlane: imagePlaneSpec,
   BoundingBox: boundingBoxSpec,
@@ -175,6 +177,40 @@ function expandHelpers(components: RawComponent[]): RawComponent[] {
 // =============================================================================
 
 /**
+ * Messages already emitted by warnUnknownProps, to avoid re-warning on
+ * every render of the same scene.
+ */
+const emittedUnknownPropWarnings = new Set<string>();
+
+/**
+ * Warns (once per unique message) about props a primitive does not accept.
+ * Unknown props are silently ignored by the rendering pipeline, so surfacing
+ * them loudly is the only way key drift (e.g. naming-convention mismatches
+ * at the Python↔JS boundary) becomes visible.
+ */
+function warnUnknownProps(
+  component: { type: string } & Record<string, unknown>,
+  knownProps: Set<string>,
+): void {
+  const unknown = Object.keys(component).filter(
+    (key) => !knownProps.has(key) && !key.startsWith("_"),
+  );
+  if (unknown.length === 0) return;
+
+  const message =
+    `scene3d: ${component.type} received unknown prop(s) ` +
+    `[${unknown.join(", ")}] — they will be IGNORED. Accepted props: ` +
+    `${[...knownProps]
+      .filter((k) => !k.startsWith("_"))
+      .sort()
+      .join(", ")}`;
+  if (!emittedUnknownPropWarnings.has(message)) {
+    emittedUnknownPropWarnings.add(message);
+    console.warn(message);
+  }
+}
+
+/**
  * Applies coercion to a raw component config via spec.coerce.
  * Each primitive's coerce function handles:
  * - Input coercion (singular → plural, scalar expansion)
@@ -182,6 +218,12 @@ function expandHelpers(components: RawComponent[]): RawComponent[] {
  */
 function coerceComponent<T extends { type: string }>(component: T): T {
   const spec = PRIMITIVE_SPECS[component.type];
+  if (spec?.knownProps) {
+    warnUnknownProps(
+      component as { type: string } & Record<string, unknown>,
+      spec.knownProps,
+    );
+  }
   if (spec?.coerce) {
     return spec.coerce(component) as T;
   }
