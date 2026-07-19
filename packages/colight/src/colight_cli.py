@@ -1239,6 +1239,12 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     help="Render twice and byte-compare; report determinism (exit 1 on mismatch).",
 )
 @click.option(
+    "--frame",
+    type=str,
+    help='Fit the camera on a scene3d selection "C[:A-B]" (component index '
+    "or type name, optional inclusive instance ranges) before capture.",
+)
+@click.option(
     "--ready-timeout",
     type=float,
     default=30.0,
@@ -1255,6 +1261,7 @@ def screenshot(
     height: Optional[int],
     dpr: float,
     check: bool,
+    frame: Optional[str],
     ready_timeout: float,
     debug: bool,
 ):
@@ -1267,14 +1274,26 @@ def screenshot(
     renders at t=0 (no update entries applied). With --check the render is
     repeated in a fresh tab and byte-compared.
 
+    Scene3d targets additionally report a `coverage` object (fraction of
+    canvas pixels each component covers, from the GPU pick buffer) and
+    accept --frame "C[:A-B]" to fit the camera on a component (or instance
+    range) before capture — the agent's zoom loop.
+
     Exit code: 0 success, 1 --check found nondeterminism, 2 error.
 
     \b
     JSON schema:
       {"target": str, "out": str, "width": int, "height": int, "dpr": float,
        "block"?: str, "sha256": str, "deterministic"?: bool,
-       "sha256_recheck"?: str}
-    (width/height are actual PNG pixel dimensions.)
+       "sha256_recheck"?: str,
+       "frame"?: {"component": int, "type": str, "instances"?: [[a, b]],
+                  "camera": {"position", "target", "up", "fov", ...}},
+       "coverage"?: {"width": int, "height": int, "rect": {...},
+         "components": [{"component", "type", "instances", "pixels",
+                         "fraction"}],
+         "background": {"pixels": int, "fraction": float}}}
+    (width/height are actual PNG pixel dimensions; coverage fractions are
+    of the scene canvas.)
     """
     from colight.cli_tools import screenshot_tools
 
@@ -1287,6 +1306,7 @@ def screenshot(
             height=height,
             dpr=dpr,
             check=check,
+            frame=frame,
             debug=debug,
             ready_timeout=None if ready_timeout <= 0 else ready_timeout,
         )
@@ -1305,6 +1325,17 @@ def screenshot(
         ]
         if "block" in payload:
             parts.insert(1, f"block={payload['block']}")
+        if "frame" in payload:
+            parts.append(
+                f"framed={payload['frame']['type']}[{payload['frame']['component']}]"
+            )
+        if "coverage" in payload:
+            fractions = ", ".join(
+                f"{c['type']}[{c['component']}]={c['fraction']:.1%}"
+                for c in payload["coverage"]["components"]
+            )
+            background = payload["coverage"]["background"]["fraction"]
+            parts.append(f"coverage: {fractions} bg={background:.1%}")
         if "deterministic" in payload:
             parts.append(
                 "deterministic" if payload["deterministic"] else "NONDETERMINISTIC"
@@ -1313,6 +1344,282 @@ def screenshot(
 
     if payload.get("deterministic") is False:
         sys.exit(1)
+
+
+@main.command("pick-at")
+@click.argument("target", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.argument("coords", type=str)
+@click.option(
+    "--radius",
+    type=float,
+    default=6.0,
+    show_default=True,
+    help="Sampling disc radius in CSS pixels.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--block",
+    type=str,
+    help="Stable block id to select a visual (.py targets; default = last visual).",
+)
+@click.option(
+    "--width",
+    type=int,
+    default=800,
+    show_default=True,
+    help="Viewport width in CSS pixels (match your screenshot).",
+)
+@click.option(
+    "--height",
+    type=int,
+    help="Viewport height in CSS pixels (default: measure rendered content).",
+)
+@click.option(
+    "--dpr",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Device pixel ratio.",
+)
+@click.option(
+    "--ready-timeout",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max seconds to wait for render readiness (0 to disable).",
+)
+@click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
+def pick_at(
+    target: pathlib.Path,
+    coords: str,
+    radius: float,
+    as_json: bool,
+    block: Optional[str],
+    width: int,
+    height: Optional[int],
+    dpr: float,
+    ready_timeout: float,
+    debug: bool,
+):
+    """What is at point X,Y? Re-render TARGET and query the GPU pick buffer.
+
+    COORDS is "X,Y" in CSS pixels of the rendered page: origin at the
+    top-left, y grows downward — the same coordinate space as a
+    `colight screenshot` PNG taken with the same --width/--height (at
+    --dpr 1; with a different dpr, divide PNG pixel coordinates by dpr).
+    Hits within --radius are ranked by distance then coverage, and the top
+    hits include the instance's dereferenced attribute values
+    (center/color/size/... as actually rendered). Scene3d targets only:
+    other visuals exit 2 with a clear message.
+
+    Exit code: 0 hit found, 1 no hit within radius, 2 error.
+
+    \b
+    JSON schema:
+      {"target": str, "block"?: str, "x": float, "y": float,
+       "radius": float,
+       "scene": {"rect": {"left", "top", "width", "height"},
+                 "width": int, "height": int, "dpr": float, "scenes"?: int},
+       "hits": [{"component": int, "type": str, "instance": int,
+                 "distance": float, "pixels": int, "share": float,
+                 "values"?: {"center": [x, y, z], "color"?, "alpha"?,
+                             "half_size"?, "size"?, "quaternion"?, ...}}],
+       "background_share": float}
+    (distance in CSS px from the query point; share = fraction of the
+    sampled disc covered by that instance; scene.rect maps page pixels to
+    the canvas.)
+    """
+    from colight.cli_tools import scene_pick
+
+    try:
+        x_text, y_text = coords.split(",", 1)
+        x, y = float(x_text), float(y_text)
+    except ValueError:
+        click.echo(f'Error: COORDS must be "X,Y", got {coords!r}', err=True)
+        sys.exit(2)
+
+    try:
+        payload = scene_pick.pick_at_target(
+            target,
+            x,
+            y,
+            radius=radius,
+            block=block,
+            width=width,
+            height=height,
+            dpr=dpr,
+            debug=debug,
+            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+    else:
+        if not payload["hits"]:
+            click.echo(
+                f"no hit within {payload['radius']:g}px of "
+                f"({payload['x']:g}, {payload['y']:g})"
+            )
+        for hit in payload["hits"]:
+            values = hit.get("values") or {}
+            center = values.get("center")
+            center_text = (
+                " center=[" + ", ".join(f"{v:.3g}" for v in center) + "]"
+                if center
+                else ""
+            )
+            click.echo(
+                f"{hit['type']}[{hit['component']}] instance {hit['instance']}"
+                f"  dist={hit['distance']:g}px share={hit['share']:.1%}"
+                f"{center_text}"
+            )
+
+    sys.exit(0 if payload["hits"] else 1)
+
+
+@main.command("pick-where")
+@click.argument("target", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option(
+    "--component",
+    "component_selector",
+    required=True,
+    type=str,
+    help="Component index or type name (as reported by coverage/pick-at).",
+)
+@click.option(
+    "--instances",
+    type=str,
+    help='Inclusive instance ranges, e.g. "0-3,7" (default: all instances).',
+)
+@click.option(
+    "--out",
+    "-o",
+    type=click.Path(path_type=pathlib.Path),
+    help="Write a highlight-overlay PNG (selection emphasized, rest dimmed).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--block",
+    type=str,
+    help="Stable block id to select a visual (.py targets; default = last visual).",
+)
+@click.option(
+    "--width",
+    type=int,
+    default=800,
+    show_default=True,
+    help="Viewport width in CSS pixels (match your screenshot).",
+)
+@click.option(
+    "--height",
+    type=int,
+    help="Viewport height in CSS pixels (default: measure rendered content).",
+)
+@click.option(
+    "--dpr",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Device pixel ratio.",
+)
+@click.option(
+    "--ready-timeout",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max seconds to wait for render readiness (0 to disable).",
+)
+@click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
+def pick_where(
+    target: pathlib.Path,
+    component_selector: str,
+    instances: Optional[str],
+    out: Optional[pathlib.Path],
+    as_json: bool,
+    block: Optional[str],
+    width: int,
+    height: Optional[int],
+    dpr: float,
+    ready_timeout: float,
+    debug: bool,
+):
+    """Where does a selection land on screen? Selection -> screen truth.
+
+    Re-renders TARGET (scene3d only) and reports the selection's visible
+    pixel count, bounding box and centroid (page CSS pixels, origin
+    top-left, y down — the same space `pick-at` samples), plus a
+    visibility fraction: visible pixels / the pixels the selection would
+    cover with everything else hidden (its unoccluded projected footprint,
+    measured by re-rendering only the selection). visibility < 1 means
+    partially occluded; 0 with a nonzero projected footprint means fully
+    occluded; 0 with no footprint means out of view. With --out, writes a
+    PNG with the selection highlighted via scene3d's per-instance
+    decorations (everything else dimmed) so the selection can be SEEN.
+
+    Exit code: 0 selection visible, 1 selection entirely invisible,
+    2 error.
+
+    \b
+    JSON schema:
+      {"target": str, "block"?: str, "component": int, "type": str,
+       "instances": [[a, b]] | "all",
+       "scene": {"rect": {...}, "width": int, "height": int, "dpr": float},
+       "selected": int, "visible_pixels": int, "projected_pixels": int,
+       "visibility": float, "visible_instances": int,
+       "hidden_instances": int,
+       "bbox"?: [x0, y0, x1, y1], "centroid"?: [x, y],
+       "projected_bbox"?: [x0, y0, x1, y1], "out"?: str}
+    (bbox/centroid in page CSS pixels; projected_bbox appears when the
+    selection is fully occluded but would land on screen.)
+    """
+    from colight.cli_tools import scene_pick
+
+    try:
+        ranges = (
+            scene_pick.parse_instance_ranges(instances)
+            if instances is not None
+            else None
+        )
+        payload = scene_pick.pick_where_target(
+            target,
+            component_selector,
+            instances=ranges,
+            out=out,
+            block=block,
+            width=width,
+            height=height,
+            dpr=dpr,
+            debug=debug,
+            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+    else:
+        selection = f"{payload['type']}[{payload['component']}]"
+        if payload["instances"] != "all":
+            selection += f" instances {payload['instances']}"
+        click.echo(
+            f"{selection}: {payload['visible_instances']}/{payload['selected']} "
+            f"instance(s) visible, {payload['visible_pixels']}px "
+            f"(visibility {payload['visibility']:.1%})"
+        )
+        if "bbox" in payload:
+            click.echo(f"  bbox={payload['bbox']} centroid={payload['centroid']}")
+        elif "projected_bbox" in payload:
+            click.echo(f"  fully occluded; would cover {payload['projected_bbox']}")
+        else:
+            click.echo("  out of view (no projected footprint)")
+        if "out" in payload:
+            click.echo(f"  overlay: {payload['out']}")
+
+    sys.exit(0 if payload["visible_pixels"] > 0 else 1)
 
 
 @main.command()
