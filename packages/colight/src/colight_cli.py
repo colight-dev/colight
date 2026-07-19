@@ -1177,5 +1177,121 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     sys.exit(0 if payload["identical"] else 1)
 
 
+@main.command()
+@click.argument("target", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option(
+    "--out",
+    "-o",
+    required=True,
+    type=click.Path(path_type=pathlib.Path),
+    help="Output PNG path.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--block",
+    type=str,
+    help="Stable block id to screenshot (.py targets; default = last visual).",
+)
+@click.option(
+    "--width",
+    type=int,
+    default=800,
+    show_default=True,
+    help="Viewport width in CSS pixels.",
+)
+@click.option(
+    "--height",
+    type=int,
+    help="Viewport height in CSS pixels (default: measure rendered content).",
+)
+@click.option(
+    "--dpr",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Device pixel ratio (output pixels = CSS pixels * dpr).",
+)
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Render twice and byte-compare; report determinism (exit 1 on mismatch).",
+)
+@click.option(
+    "--ready-timeout",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max seconds to wait for render readiness (0 to disable).",
+)
+@click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
+def screenshot(
+    target: pathlib.Path,
+    out: pathlib.Path,
+    as_json: bool,
+    block: Optional[str],
+    width: int,
+    height: Optional[int],
+    dpr: float,
+    check: bool,
+    ready_timeout: float,
+    debug: bool,
+):
+    """Render TARGET to a PNG with deterministic settings.
+
+    TARGET is a .colight artifact or a .py file (evaluated headlessly;
+    --block selects one visual by stable id, default = last visual in the
+    file). Uses the same headless-Chrome path as `colight render` with a
+    fixed viewport and device-pixel-ratio, waits for render completion, and
+    renders at t=0 (no update entries applied). With --check the render is
+    repeated in a fresh tab and byte-compared.
+
+    Exit code: 0 success, 1 --check found nondeterminism, 2 error.
+
+    \b
+    JSON schema:
+      {"target": str, "out": str, "width": int, "height": int, "dpr": float,
+       "block"?: str, "sha256": str, "deterministic"?: bool,
+       "sha256_recheck"?: str}
+    (width/height are actual PNG pixel dimensions.)
+    """
+    from colight.cli_tools import screenshot_tools
+
+    try:
+        payload = screenshot_tools.screenshot_target(
+            target,
+            out,
+            block=block,
+            width=width,
+            height=height,
+            dpr=dpr,
+            check=check,
+            debug=debug,
+            ready_timeout=None if ready_timeout <= 0 else ready_timeout,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+    else:
+        parts = [
+            f"{payload['out']}",
+            f"{payload['width']}x{payload['height']}px",
+            f"dpr={payload['dpr']:g}",
+            f"sha256={payload['sha256'][:16]}…",
+        ]
+        if "block" in payload:
+            parts.insert(1, f"block={payload['block']}")
+        if "deterministic" in payload:
+            parts.append(
+                "deterministic" if payload["deterministic"] else "NONDETERMINISTIC"
+            )
+        click.echo("  ".join(parts))
+
+    if payload.get("deterministic") is False:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
