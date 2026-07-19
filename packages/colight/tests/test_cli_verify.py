@@ -177,6 +177,31 @@ class TestVerify:
         payload, exit_code = verify_tools.run_verify([target], pixels=False)
         assert exit_code == 1
 
+    def test_goldens_collision_is_an_error(self, tmp_path_factory):
+        """One --goldens root + same project-relative path must not clobber."""
+        shared = tmp_path_factory.mktemp("shared-goldens")
+        targets = []
+        for name in ("proj-a", "proj-b"):
+            proj = tmp_path_factory.mktemp(name)
+            (proj / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+            targets.append(write_nb(proj))
+
+        payload, exit_code = verify_tools.run_verify(
+            targets, goldens_root=shared, update=True, pixels=False
+        )
+        assert exit_code == 2
+        result = payload["targets"][0]
+        assert result["status"] == "error"
+        assert "collision" in result["errors"][0]["error"]["message"]
+        # Nothing was written: the collision is detected before any update.
+        assert not (shared / "nb.py").exists()
+
+        # Distinct relative paths under one root remain fine.
+        _payload, exit_code = verify_tools.run_verify(
+            [targets[0]], goldens_root=shared, update=True, pixels=False
+        )
+        assert exit_code == 0
+
     def test_goldens_override_dir(self, project: pathlib.Path, tmp_path_factory):
         path = write_nb(project)
         alt = tmp_path_factory.mktemp("alt-goldens")

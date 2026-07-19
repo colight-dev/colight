@@ -17,16 +17,15 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 
 import colight.format as colight_format
-from colight.runtime.executor import ExecutionResult
-
-MAX_REPR = 120
 
 # Ids regenerated on every run (widget ids, uuid state keys) must not leak
-# into fingerprints.
-_VOLATILE_ID_RE = re.compile(
-    r"(?:colight-widget-[0-9a-f]{32}"
-    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
-)
+# into fingerprints. The pattern lives beside the mint sites in colight.ids.
+from colight.ids import VOLATILE_ID_RE
+from colight.runtime.executor import ExecutionResult
+
+from .structure import component_label, iter_component_paths
+
+MAX_REPR = 120
 
 
 def truncated_repr(value: Any, limit: int = MAX_REPR) -> str:
@@ -113,29 +112,76 @@ def parse_colight_bytes(data: bytes) -> Tuple[Dict[str, Any], List[bytes]]:
     return json_data, buffers
 
 
-def _collect_volatile_ids(node: Any, mapping: Dict[str, str]) -> None:
-    """First pass: assign stable placeholders to volatile ids in traversal order."""
+_MASKED_ID = "<id>"
 
-    def visit(value: Any) -> None:
-        if isinstance(value, str):
-            for match in _VOLATILE_ID_RE.findall(value):
-                if match not in mapping:
-                    mapping[match] = f"id{len(mapping)}"
-        elif isinstance(value, dict):
-            for k, v in value.items():
-                visit(k)
-                visit(v)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                visit(item)
 
-    visit(node)
+def _mask_ids(text: str) -> str:
+    return VOLATILE_ID_RE.sub(_MASKED_ID, text)
+
+
+def _collect_volatile_ids(node: Any, path: str, first_paths: Dict[str, str]) -> None:
+    """Map each volatile id to the masked path of its first occurrence.
+
+    Paths use dict keys (volatile ids masked) and ``[*]`` for list indices,
+    so an id's first-use path does not shift when siblings are inserted.
+    Dict insertion order makes the traversal deterministic.
+    """
+    if isinstance(node, str):
+        for match in VOLATILE_ID_RE.findall(node):
+            first_paths.setdefault(match, path)
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            _collect_volatile_ids(k, path, first_paths)
+            child = f"{path}.{_mask_ids(k)}" if isinstance(k, str) else f"{path}.?"
+            _collect_volatile_ids(v, child, first_paths)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_volatile_ids(item, f"{path}[*]", first_paths)
+
+
+def _volatile_id_mapping(trimmed: Dict[str, Any]) -> Dict[str, str]:
+    """Assign a stable placeholder to every volatile id in the payload.
+
+    The placeholder is ``id-<hash>`` where the hash covers the id's
+    first-occurrence *context*: the shallow kind of its state entry (its
+    component label, e.g. ``MarkSpec:dot``, or its value type) plus the
+    masked path of its first use. That context is stable both when *other*
+    stateful nodes (Refs, widgets, MarkSpec state) are inserted or removed
+    and when the entry's own data is edited — so diffs neither report
+    unrelated state keys as removed+added nor lose pairing on content
+    changes. Ids with identical context are disambiguated by
+    first-occurrence order, which keeps the mapping deterministic for
+    fingerprinting.
+    """
+    first_paths: Dict[str, str] = {}
+    _collect_volatile_ids(trimmed, "", first_paths)
+    state = trimmed.get("state")
+    state = state if isinstance(state, dict) else {}
+
+    mapping: Dict[str, str] = {}
+    used: Dict[str, int] = {}
+    for volatile_id, first_path in first_paths.items():
+        kind = ""
+        if volatile_id in state:
+            value = state[volatile_id]
+            if isinstance(value, dict):
+                kind = component_label(value) or "dict"
+            elif isinstance(value, (list, tuple)):
+                kind = "list"
+            else:
+                kind = type(value).__name__
+        signature = f"{kind}|{first_path}"
+        base = f"id-{hashlib.sha256(signature.encode()).hexdigest()[:8]}"
+        count = used.get(base, 0) + 1
+        used[base] = count
+        mapping[volatile_id] = base if count == 1 else f"{base}-{count}"
+    return mapping
 
 
 def _replace_volatile_ids(node: Any, mapping: Dict[str, str]) -> Any:
-    """Second pass: rewrite volatile ids using the collected mapping."""
+    """Rewrite volatile ids using the collected mapping."""
     if isinstance(node, str):
-        return _VOLATILE_ID_RE.sub(lambda m: mapping[m.group(0)], node)
+        return VOLATILE_ID_RE.sub(lambda m: mapping[m.group(0)], node)
     if isinstance(node, dict):
         return {
             _replace_volatile_ids(k, mapping): _replace_volatile_ids(v, mapping)
@@ -150,13 +196,12 @@ def canonicalize_visual_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """Canonicalize a visual's JSON payload (as data, not text).
 
     Drops per-run identifiers (top-level ``id``, ``bufferLayout``) and maps
-    generated uuid state keys / widget ids to stable placeholders assigned in
-    traversal order. Buffer index references are left untouched.
+    generated uuid state keys / widget ids to stable content-derived
+    placeholders (see :func:`_volatile_id_mapping`). Buffer index references
+    are left untouched.
     """
     trimmed = {k: v for k, v in data.items() if k not in ("id", "bufferLayout")}
-    mapping: Dict[str, str] = {}
-    _collect_volatile_ids(trimmed, mapping)
-    return _replace_volatile_ids(trimmed, mapping)
+    return _replace_volatile_ids(trimmed, _volatile_id_mapping(trimmed))
 
 
 def canonicalize_visual_json(data: Dict[str, Any]) -> str:
@@ -174,36 +219,6 @@ def visual_fingerprint(colight_bytes: bytes) -> str:
     for buffer in buffers:
         hasher.update(hashlib.sha256(bytes(buffer)).digest())
     return hasher.hexdigest()[:16]
-
-
-def iter_component_paths(node: Any) -> List[str]:
-    """List component paths appearing in an AST/state payload, in order.
-
-    Component nodes are ``{"__type__": "function"|"js_ref", "path": ...}``.
-    ``MarkSpec`` nodes are qualified with their mark name (e.g.
-    ``MarkSpec:dot``).
-    """
-    found: List[str] = []
-
-    def visit(value: Any) -> None:
-        if isinstance(value, dict):
-            node_type = value.get("__type__")
-            path = value.get("path")
-            if node_type in ("function", "js_ref") and isinstance(path, str):
-                label = path
-                if path == "MarkSpec":
-                    args = value.get("args") or []
-                    if args and isinstance(args[0], str):
-                        label = f"MarkSpec:{args[0]}"
-                found.append(label)
-            for v in value.values():
-                visit(v)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                visit(item)
-
-    visit(node)
-    return found
 
 
 def summarize_visual(colight_bytes: bytes) -> Dict[str, Any]:
@@ -263,7 +278,6 @@ __all__ = [
     "array_stats",
     "canonicalize_visual_data",
     "canonicalize_visual_json",
-    "iter_component_paths",
     "parse_colight_bytes",
     "result_fingerprint",
     "summarize_result",

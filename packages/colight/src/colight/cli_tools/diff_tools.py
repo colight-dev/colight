@@ -18,9 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-import colight.format as colight_format
-
-from . import inspect_tools, summaries
+from . import inspect_tools, structure, summaries, targets
 
 DEFAULT_EPSILON = 1e-9
 
@@ -50,26 +48,16 @@ def load_target(file_path: pathlib.Path) -> Dict[str, Any]:
         ValueError: If the target has an unsupported extension or a
             ``.colight`` file has no initial state entry.
     """
-    if file_path.suffix == ".colight":
-        data, buffers, updates = colight_format.parse_file(file_path)
-        if data is None:
-            raise ValueError(f"file contains no initial state entry: {file_path}")
-        return {
-            "file": str(file_path),
-            "kind": "colight",
-            "updates": len(updates),
-            "visuals": [{"data": data, "buffers": buffers}],
-            "errors": [],
-        }
-    if file_path.suffix == ".py":
-        visuals, errors = inspect_tools.evaluate_python_visuals(file_path)
-        return {
-            "file": str(file_path),
-            "kind": "py",
-            "visuals": visuals,
-            "errors": errors,
-        }
-    raise ValueError(f"Unsupported target (expected .colight or .py): {file_path}")
+    loaded = targets.load_target(file_path)
+    out: Dict[str, Any] = {
+        "file": str(file_path),
+        "kind": loaded.kind,
+        "visuals": loaded.visuals,
+        "errors": loaded.errors,
+    }
+    if loaded.kind == "colight":
+        out["updates"] = loaded.updates
+    return out
 
 
 def _is_number(value: Any) -> bool:
@@ -92,7 +80,7 @@ def _flatten_leaves(
                 continue
             _flatten_leaves(v, f"{path}.{k}" if path else k, k, out)
     elif isinstance(node, list):
-        if key is not None and inspect_tools._coerce_inline_array(node) is not None:
+        if key is not None and structure.coerce_inline_array(node) is not None:
             return
         for i, item in enumerate(node):
             _flatten_leaves(item, f"{path}[{i}]", None, out)
@@ -259,10 +247,10 @@ def _aggregate_leaf_changes(
 
     Plot data often travels as nested JSON lists rather than typed buffers;
     a single conceptual array change then appears as many leaf changes like
-    ``state.id0.args[1][27][0]``. Groups of at least
+    ``state.id-1a2b3c4d.args[1][27][0]``. Groups of at least
     ``AGGREGATE_MIN_CHANGED`` changed numeric leaves whose paths differ only
     in index segments are collapsed into one entry with a wildcarded path
-    (``state.id0.args[1][*][0]``) and the same magnitude stats typed arrays
+    (``state.id-1a2b3c4d.args[1][*][0]``) and the same magnitude stats typed arrays
     get; index positions that are constant across the group stay literal.
 
     Args:
@@ -283,9 +271,23 @@ def _aggregate_leaf_changes(
         key = _INDEX_TOKEN_RE.sub("[*]", path)
         groups.setdefault(key, []).append((path, float(value_a), float(value_b)))
 
+    # Bucket all common numeric leaves once by their fully-wildcarded key;
+    # each group then scans only its own bucket (linear overall) to count
+    # totals against the partially-wildcarded pattern.
+    buckets: Dict[str, List[Tuple[List[str], str]]] = {}
+    if any(len(members) >= AGGREGATE_MIN_CHANGED for members in groups.values()):
+        for path, value_a in leaves_a.items():
+            if path not in leaves_b:
+                continue
+            if not (_is_number(value_a) and _is_number(leaves_b[path])):
+                continue
+            key = _INDEX_TOKEN_RE.sub("[*]", path)
+            if key in groups:
+                buckets.setdefault(key, []).append((_INDEX_TOKEN_RE.split(path), path))
+
     aggregated: List[Dict[str, Any]] = []
     consumed: set = set()
-    for members in groups.values():
+    for key, members in groups.items():
         if len(members) < AGGREGATE_MIN_CHANGED:
             continue
         token_rows = [_INDEX_TOKEN_RE.split(path) for path, _va, _vb in members]
@@ -297,19 +299,15 @@ def _aggregate_leaf_changes(
             for i in range(length)
         ]
 
-        def matches(path: str) -> bool:
-            tokens = _INDEX_TOKEN_RE.split(path)
-            return len(tokens) == length and all(
-                pattern[i] == "[*]" or tokens[i] == pattern[i] for i in range(length)
-            )
-
+        # Same wildcard key implies the same token structure, so only the
+        # literal (constant) index positions need checking.
         group_paths = [
             path
-            for path, value_a in leaves_a.items()
-            if path in leaves_b
-            and _is_number(value_a)
-            and _is_number(leaves_b[path])
-            and matches(path)
+            for tokens, path in buckets.get(key, [])
+            if all(
+                pattern[i] == "[*]" or tokens[i] == pattern[i]
+                for i in range(1, length, 2)
+            )
         ]
         old_values = np.array([float(leaves_a[p]) for p in group_paths])
         new_values = np.array([float(leaves_b[p]) for p in group_paths])
@@ -424,8 +422,8 @@ def diff_visual_pair(
     buffers_a = visual_a["buffers"]
     buffers_b = visual_b["buffers"]
 
-    structure_a = inspect_tools.collect_structure(data_a, buffers_a)
-    structure_b = inspect_tools.collect_structure(data_b, buffers_b)
+    structure_a = structure.collect_structure(data_a, buffers_a)
+    structure_b = structure.collect_structure(data_b, buffers_b)
 
     comp_added, comp_removed, comp_changed = _diff_components(
         structure_a.components, structure_b.components
@@ -434,10 +432,12 @@ def diff_visual_pair(
 
     leaves_a: Dict[str, Any] = {}
     leaves_b: Dict[str, Any] = {}
-    _flatten_leaves({"ast": data_a.get("ast")}, "", None, leaves_a)
-    _flatten_leaves({"state": data_a.get("state")}, "", None, leaves_a)
-    _flatten_leaves({"ast": data_b.get("ast")}, "", None, leaves_b)
-    _flatten_leaves({"state": data_b.get("state")}, "", None, leaves_b)
+    _flatten_leaves(
+        {"ast": data_a.get("ast"), "state": data_a.get("state")}, "", None, leaves_a
+    )
+    _flatten_leaves(
+        {"ast": data_b.get("ast"), "state": data_b.get("state")}, "", None, leaves_b
+    )
     leaves_added, leaves_removed, changed_raw = _diff_leaves(
         leaves_a, leaves_b, epsilon
     )
@@ -449,8 +449,10 @@ def diff_visual_pair(
         data_a, data_b, arrays, [path for path, _va, _vb in changed_raw]
     )
 
-    _, warnings_a = inspect_tools.inspect_visual_data(visual_a["data"], buffers_a)
-    _, warnings_b = inspect_tools.inspect_visual_data(visual_b["data"], buffers_b)
+    # Reuse the structures already collected above; warning paths then use
+    # the same canonical ids on both sides, so unchanged warnings pair up.
+    warnings_a = inspect_tools.structure_warnings(structure_a)
+    warnings_b = inspect_tools.structure_warnings(structure_b)
 
     result: Dict[str, Any] = {
         "components": {

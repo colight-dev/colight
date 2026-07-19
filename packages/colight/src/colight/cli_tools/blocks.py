@@ -16,7 +16,7 @@ whether a block needs re-execution.
 """
 
 import pathlib
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from colight.runtime.model import Block, Document
 from colight.runtime.parser import parse_colight_file
@@ -43,6 +43,41 @@ def assign_stable_ids(document: Document) -> BlockPairs:
         stable_id = digest if occurrence == 1 else f"{digest}-{occurrence}"
         pairs.append((block, stable_id))
     return pairs
+
+
+def pair_by_stable_id(
+    current_ids: List[str], previous: List[Dict[str, Any]]
+) -> Tuple[List[Optional[Dict[str, Any]]], List[Dict[str, Any]]]:
+    """Pair current stable ids with previous entries (dicts with an ``id``).
+
+    Exact id matches win first; leftover current ids are then paired with
+    leftover previous entries in order, so an *edited* block (whose stable
+    id changed with its source) keeps its identity instead of degrading to
+    "new" + "removed".
+
+    Args:
+        current_ids: Current stable ids in document order.
+        previous: Previous entries (each with an ``id`` key) in order.
+
+    Returns:
+        Tuple of (per-current-id matches, ``None`` where unpaired; orphaned
+        previous entries).
+    """
+    previous_by_id = {entry["id"]: entry for entry in previous}
+    matches: List[Optional[Dict[str, Any]]] = [
+        previous_by_id.get(sid) for sid in current_ids
+    ]
+    used = {id(entry) for entry in matches if entry is not None}
+    leftovers = iter(entry for entry in previous if id(entry) not in used)
+    for index, entry in enumerate(matches):
+        if entry is None:
+            entry = next(leftovers, None)
+            if entry is None:
+                break
+            matches[index] = entry
+            used.add(id(entry))
+    orphaned = [entry for entry in previous if id(entry) not in used]
+    return matches, orphaned
 
 
 def block_lines(block: Block) -> Tuple[int, int]:

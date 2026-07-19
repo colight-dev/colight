@@ -180,6 +180,23 @@ class TestRun:
         result = CliRunner().invoke(cli_main, ["run", str(path)])
         assert result.exit_code == 1
 
+    def test_syntax_error_has_no_internal_frames(self, project: pathlib.Path):
+        """compile()-raised SyntaxError must not leak colight frames."""
+        import colight
+
+        # Parses as a document but fails to compile (SyntaxError at exec).
+        path = write_fixture(project, "a = 1\n\nnonlocal a\n")
+        payload = run_mod.run_file(path)
+        error_block = [b for b in payload["blocks"] if b["status"] == "error"][0]
+        error = error_block["error"]
+        assert error["type"] == "SyntaxError"
+        frames = error["frames"]
+        assert frames, "expected the appended user frame"
+        package_root = str(pathlib.Path(colight.__file__).parent)
+        assert all(not f["file"].startswith(package_root) for f in frames), frames
+        assert frames[-1]["file"] == str(path)
+        assert frames[-1]["line"] == 3
+
     def test_errors_always_rerun(self, project: pathlib.Path):
         path = write_fixture(project, "boom = 1 / 0\n")
         run_mod.run_file(path)
@@ -294,7 +311,7 @@ class TestInspect:
 
     def test_inspect_colight_warnings(self, tmp_path: pathlib.Path):
         target = self.make_broken_scene(tmp_path)
-        payload = inspect_tools.inspect_colight_file(target)
+        payload = inspect_tools.inspect_target(target)
 
         assert payload["kind"] == "colight"
         codes = {w["code"] for w in payload["warnings"]}
@@ -327,7 +344,7 @@ class TestInspect:
             "import colight.plot as Plot\n\n"
             "Plot.dot({'x': [1, 2, 3], 'y': [4, 5, 6]})\n",
         )
-        payload = inspect_tools.inspect_python_file(path)
+        payload = inspect_tools.inspect_target(path)
         assert payload["kind"] == "py"
         assert len(payload["visuals"]) == 1
         visual = payload["visuals"][0]["visual"]

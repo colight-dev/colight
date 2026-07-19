@@ -79,21 +79,13 @@ def _match_previous(
     """Map current stable ids to previous record entries.
 
     Exact id matches first; leftover current/previous blocks are then paired
-    in document order so an edited block keeps its identity (and can report
-    ``ran:changed`` instead of ``new`` + ``removed``).
+    in document order (see :func:`blocks.pair_by_stable_id`) so an edited
+    block keeps its identity (and can report ``ran:changed`` instead of
+    ``new`` + ``removed``).
     """
-    prev_by_id = {entry["id"]: entry for entry in prev_entries}
-    matched: Dict[str, Dict[str, Any]] = {}
-    used_prev_ids: Set[str] = set()
-    for _block, sid in pairs:
-        if sid in prev_by_id:
-            matched[sid] = prev_by_id[sid]
-            used_prev_ids.add(sid)
-    unmatched_current = [sid for _b, sid in pairs if sid not in matched]
-    unmatched_prev = [e for e in prev_entries if e["id"] not in used_prev_ids]
-    for sid, entry in zip(unmatched_current, unmatched_prev):
-        matched[sid] = entry
-    return matched
+    current_ids = [sid for _block, sid in pairs]
+    matches, _orphaned = blocks_mod.pair_by_stable_id(current_ids, prev_entries)
+    return {sid: entry for sid, entry in zip(current_ids, matches) if entry is not None}
 
 
 def _plan_execution(
@@ -175,7 +167,7 @@ def run_file(
     document = parse_colight_file(file_path, project_root=project_root)
     pairs = blocks_mod.assign_stable_ids(document)
     infos = {info["id"]: info for info in blocks_mod.block_infos(document, pairs)}
-    _depends_on, dependents = blocks_mod.dependency_edges(pairs)
+    dependents = blocks_mod.dependency_edges(pairs)[1]
 
     detail_ids: Optional[Set[str]] = None
     if focus_block is not None:

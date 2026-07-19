@@ -61,11 +61,11 @@ class TestResolveVisual:
         assert "line" in json.dumps(data.get("state"))
 
     def test_py_block_selection(self, project: pathlib.Path):
-        from colight.cli_tools import inspect_tools
+        from colight.cli_tools import targets
 
         path = project / "nb.py"
         path.write_text(TWO_VISUALS)
-        visuals, _errors = inspect_tools.evaluate_python_visuals(path)
+        visuals, _errors = targets.evaluate_python_visuals(path)
         assert len(visuals) == 2
         first_block = visuals[0]["block"]
         data, _buffers, block = screenshot_tools.resolve_visual(path, first_block)

@@ -1029,9 +1029,6 @@ def inspect(target: pathlib.Path, as_json: bool):
 
     click.echo(payload["file"])
     if payload["kind"] == "colight":
-        if "error" in payload:
-            click.echo(f"Error: {payload['error']['message']}", err=True)
-            sys.exit(1)
         if payload["updates"]:
             click.echo(f"  update entries: {payload['updates']}")
         echo_visual(payload["visual"], payload["warnings"])

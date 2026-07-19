@@ -48,6 +48,9 @@ class StudioContext(ChromeContext):
         self._data = data
         self._buffers = buffers
         self._ready_timeout = ready_timeout
+        # Per-load render id: one context can load several plots in
+        # sequence, and readiness must be awaited on the *current* instance.
+        self._load_count = 0
         super().__init__(
             reuse=reuse, keep_alive=keep_alive, window_vars=window_vars, **kwargs
         )
@@ -58,16 +61,23 @@ class StudioContext(ChromeContext):
             self.load_plot(self._plot, data=self._data, buffers=self._buffers)
         return context
 
+    @property
+    def render_id(self) -> str:
+        """Id of the most recently loaded plot instance."""
+        if self._load_count == 0:
+            return self.id
+        return f"{self.id}_{self._load_count}"
+
     def _ready_result_js(self) -> str:
         if self._ready_timeout is None:
             return (
-                f"await window.colight.whenReady('{self.id}');"
+                f"await window.colight.whenReady('{self.render_id}');"
                 "const readyResult = { ok: true };"
             )
         timeout_ms = int(self._ready_timeout * 1000)
         return (
             "const readyResult = await Promise.race(["
-            f"window.colight.whenReady('{self.id}').then(() => ({{ ok: true }})), "
+            f"window.colight.whenReady('{self.render_id}').then(() => ({{ ok: true }})), "
             f"new Promise(resolve => setTimeout(() => resolve({{ ok: false, reason: 'timeout' }}), {timeout_ms}))"
             "]);"
         )
@@ -142,6 +152,7 @@ class StudioContext(ChromeContext):
             print("[StudioContext] Loading plot into Colight")
 
         self.load_studio_html()
+        self._load_count += 1
 
         # Use provided data/buffers if available, otherwise serialize
         if data is not None and buffers is not None:
@@ -149,7 +160,7 @@ class StudioContext(ChromeContext):
         else:
             data, buffers = widget.to_json_with_state(plot, buffers=[])
             colight_data = format.create_bytes(data, buffers)
-        colight_filename = f"plot_{self.id}.colight"
+        colight_filename = f"plot_{self.render_id}.colight"
         self.server.add_served_file(colight_filename, colight_data)
         colight_url = f"http://localhost:{self.server_port}/{colight_filename}"
 
@@ -162,10 +173,10 @@ class StudioContext(ChromeContext):
         ready_wait = self._ready_result_js()
         render_js = f"""
          (async () => {{
-           console.log('[StudioContext] Loading .colight file for ID: {self.id}');
+           console.log('[StudioContext] Loading .colight file for ID: {self.render_id}');
            try {{
              const colightData = await window.colight.loadColightFile('{colight_url}');
-             await window.colight.render('studio', colightData, '{self.id}');
+             await window.colight.render('studio', colightData, '{self.render_id}');
              {ready_wait}
              return readyResult;
            }} catch (error) {{
@@ -222,7 +233,7 @@ class StudioContext(ChromeContext):
                 const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
                     Uint8Array.from(atob(b64), c => c.charCodeAt(0))
                 );
-                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                const result = window.colight.instances['{self.render_id}'].updateWithBuffers(updates, buffers);
                 {ready_wait}
                 return {{
                     ok: readyResult.ok,
@@ -266,7 +277,7 @@ class StudioContext(ChromeContext):
                 const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
                     Uint8Array.from(atob(b64), c => c.charCodeAt(0))
                 );
-                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                const result = window.colight.instances['{self.render_id}'].updateWithBuffers(updates, buffers);
                 {ready_wait}
                 return {{
                     ok: readyResult.ok,
@@ -426,7 +437,8 @@ class StudioContext(ChromeContext):
 
         # Trigger WebGPU canvas capture for 3D content before PDF generation
         self.evaluate(
-            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
 
         # Capture the PDF content (including static images of 3D canvases)
@@ -434,7 +446,8 @@ class StudioContext(ChromeContext):
 
         # Cleanup and restore interactive 3D content
         self.evaluate(
-            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
 
         if output_path:
@@ -450,11 +463,13 @@ class StudioContext(ChromeContext):
     def capture_bytes(self, format: str = "png", quality: int = 90):
         """Capture image bytes in specified format."""
         self.evaluate(
-            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
         bytes = self.capture_image(format=format, quality=quality)
         self.evaluate(
-            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
         return bytes
 

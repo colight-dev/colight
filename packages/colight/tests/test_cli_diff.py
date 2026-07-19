@@ -106,6 +106,62 @@ class TestArtifactDiff:
             for w in reverse["pairs"][0]["warnings"]["resolved"]
         )
 
+    def test_added_mark_ahead_keeps_existing_state_key(self, tmp_path: pathlib.Path):
+        """Inserting a stateful node must not shift existing canonical ids."""
+        data = {"x": [1.0, 2.0], "y": [3.0, 4.0]}
+        a = save_artifact(tmp_path, "a.colight", Plot.dot(data))
+        b = save_artifact(
+            tmp_path,
+            "b.colight",
+            Plot.line({"x": [0.0], "y": [9.0]}) + Plot.dot(data),
+        )
+        pair = diff_tools.diff_targets(a, b)["pairs"][0]
+        # The untouched dot mark's state key is unchanged: only the new
+        # line mark's state key is added.
+        assert len(pair["state"]["added"]) == 1
+        assert pair["state"]["removed"] == []
+        assert pair["state"]["changed"] == []
+        assert pair["arrays"]["changed"] == []
+        assert [c["type"] for c in pair["components"]["added"]] == ["MarkSpec:line"]
+
+    def test_added_ref_ahead_keeps_existing_state_key(self, tmp_path: pathlib.Path):
+        a = save_artifact(
+            tmp_path, "a.colight", Plot.html(["div", Plot.ref([1.0, 2.0, 3.0])])
+        )
+        b = save_artifact(
+            tmp_path,
+            "b.colight",
+            Plot.html(["div", Plot.ref({"mode": "fast"}), Plot.ref([1.0, 2.0, 3.0])]),
+        )
+        pair = diff_tools.diff_targets(a, b)["pairs"][0]
+        assert len(pair["state"]["added"]) == 1
+        assert pair["state"]["removed"] == []
+        assert pair["state"]["changed"] == []
+
+    def test_edited_state_entry_keeps_its_key(self, tmp_path: pathlib.Path):
+        """Editing an entry's data must keep its canonical id (pairing)."""
+        a = dot_artifact(tmp_path, "a.colight", np.array([1.0, 2.0]))
+        b = dot_artifact(tmp_path, "b.colight", np.array([1.0, 5.0]))
+        pair = diff_tools.diff_targets(a, b)["pairs"][0]
+        assert pair["state"]["added"] == []
+        assert pair["state"]["removed"] == []
+        assert len(pair["state"]["changed"]) == 1
+
+    def test_removed_first_array_arg_reports_removed_only(self, tmp_path: pathlib.Path):
+        """Sibling array args have distinct paths: no positional mispairing."""
+        from colight.layout import JSCall
+
+        arr1 = np.arange(6, dtype=np.float32)
+        arr2 = np.arange(6, dtype=np.float32) * 10
+        a = save_artifact(tmp_path, "a.colight", JSCall("View", [arr1, arr2]))
+        b = save_artifact(tmp_path, "b.colight", JSCall("View", [None, arr2]))
+        arrays = diff_tools.diff_targets(a, b)["pairs"][0]["arrays"]
+        assert len(arrays["removed"]) == 1
+        assert arrays["removed"][0]["path"].endswith("View[0]")
+        # The surviving array is not mispaired against the removed one.
+        assert arrays["changed"] == []
+        assert arrays["added"] == []
+
     def test_state_key_changes(self, tmp_path: pathlib.Path):
         a = save_artifact(
             tmp_path, "a.colight", Plot.State({"n": 1, "gone": 2}) | Plot.dot([1, 2])

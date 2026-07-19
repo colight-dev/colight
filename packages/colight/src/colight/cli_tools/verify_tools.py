@@ -29,7 +29,8 @@ import colight.format as colight_format
 from colight.chrome_devtools import find_chrome
 from colight.runtime.parser import find_project_root
 
-from . import diff_tools, summaries
+from . import blocks as blocks_mod
+from . import diff_tools, screenshot_tools, summaries, targets
 
 MANIFEST_VERSION = 1
 MANIFEST_NAME = "manifest.json"
@@ -50,13 +51,13 @@ def default_goldens_root(target: pathlib.Path) -> pathlib.Path:
 
 
 def project_relpath(target: pathlib.Path) -> pathlib.Path:
-    """A target's path relative to its project root (fallback: file name)."""
+    """A target's path relative to its project root.
+
+    ``find_project_root`` always returns an ancestor of the target, so the
+    relative path always exists.
+    """
     resolved = target.resolve()
-    project_root = find_project_root(resolved)
-    try:
-        return resolved.relative_to(project_root)
-    except ValueError:
-        return pathlib.Path(resolved.name)
+    return resolved.relative_to(find_project_root(resolved))
 
 
 def golden_dir(target: pathlib.Path, goldens_root: pathlib.Path) -> pathlib.Path:
@@ -89,26 +90,23 @@ def _load_current_visuals(
     Raises:
         VerifyError: Unsupported target or empty ``.colight`` file.
     """
-    if target.suffix == ".colight":
-        data, buffers, _updates = colight_format.parse_file(target)
-        if data is None:
-            raise VerifyError(f"file contains no initial state entry: {target}")
-        return "colight", [{"id": "artifact", "data": data, "buffers": buffers}], []
-    if target.suffix == ".py":
-        from . import inspect_tools
-
-        produced, errors = inspect_tools.evaluate_python_visuals(target)
-        visuals = [
-            {
-                "id": item["block"],
-                "lines": item["lines"],
-                "data": item["data"],
-                "buffers": item["buffers"],
-            }
-            for item in produced
-        ]
-        return "py", visuals, errors
-    raise VerifyError(f"Unsupported target (expected .colight or .py): {target}")
+    try:
+        loaded = targets.load_target(target)
+    except ValueError as e:
+        raise VerifyError(str(e)) from e
+    if loaded.kind == "colight":
+        visual = loaded.visuals[0]
+        return "colight", [{"id": "artifact", **visual}], []
+    visuals = [
+        {
+            "id": item["block"],
+            "lines": item["lines"],
+            "data": item["data"],
+            "buffers": item["buffers"],
+        }
+        for item in loaded.visuals
+    ]
+    return "py", visuals, loaded.errors
 
 
 def _artifact_bytes(visual: Dict[str, Any]) -> bytes:
@@ -120,15 +118,12 @@ def _structure_hash(artifact: bytes) -> str:
 
 
 def _render_screenshot(
-    visual: Dict[str, Any], width: int, dpr: float
+    session: "screenshot_tools.RenderSession", visual: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Deterministic screenshot layer for a visual (sha256 + dimensions)."""
-    from . import screenshot_tools
-
-    png = screenshot_tools.render_png(
-        visual["data"], visual["buffers"], width=width, height=None, dpr=dpr
+    png, pixel_width, pixel_height = session.render(
+        visual["data"], visual["buffers"], height=None
     )
-    pixel_width, pixel_height = screenshot_tools._png_size(png)
     return {
         "sha256": hashlib.sha256(png).hexdigest(),
         "width": pixel_width,
@@ -141,30 +136,18 @@ def _pair_with_goldens(
 ) -> Tuple[List[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]], List[Dict[str, Any]]]:
     """Pair current visuals to golden entries: by id first, then positionally.
 
-    Positional pairing of the leftovers means an *edited* block (whose
-    stable id changed with its source) still gets a semantic diff against
-    its old golden instead of degrading to "new" + "removed".
+    Positional pairing of the leftovers (see
+    :func:`blocks.pair_by_stable_id`) means an *edited* block (whose stable
+    id changed with its source) still gets a semantic diff against its old
+    golden instead of degrading to "new" + "removed".
 
     Returns:
         Tuple of (pairs, orphaned golden entries).
     """
-    golden_by_id = {entry["id"]: entry for entry in golden_blocks}
-    used: set = set()
-    pairs: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]] = []
-    for visual in visuals:
-        entry = golden_by_id.get(visual["id"])
-        if entry is not None:
-            used.add(id(entry))
-        pairs.append((visual, entry))
-    leftovers = [e for e in golden_blocks if id(e) not in used]
-    idx = 0
-    for i, (visual, entry) in enumerate(pairs):
-        if entry is None and idx < len(leftovers):
-            pairs[i] = (visual, leftovers[idx])
-            used.add(id(leftovers[idx]))
-            idx += 1
-    orphaned = [e for e in golden_blocks if id(e) not in used]
-    return pairs, orphaned
+    matches, orphaned = blocks_mod.pair_by_stable_id(
+        [visual["id"] for visual in visuals], golden_blocks
+    )
+    return list(zip(visuals, matches)), orphaned
 
 
 def _diff_summary(
@@ -224,11 +207,15 @@ def _load_manifest(directory: pathlib.Path) -> Optional[Dict[str, Any]]:
 
 def _compute_entries(
     visuals: List[Dict[str, Any]],
-    check_pixels: bool,
-    width: int,
-    dpr: float,
+    session: Optional["screenshot_tools.RenderSession"],
 ) -> List[Dict[str, Any]]:
-    """Current-state golden entries (artifact bytes kept in-memory)."""
+    """Current-state golden entries (artifact bytes and payloads in-memory).
+
+    Args:
+        visuals: Current visuals (``id``, ``data``, ``buffers``, ...).
+        session: Shared render session for the screenshot layer, or None to
+            skip pixels.
+    """
     entries: List[Dict[str, Any]] = []
     for visual in visuals:
         artifact = _artifact_bytes(visual)
@@ -236,11 +223,13 @@ def _compute_entries(
             "id": visual["id"],
             "artifact_bytes": artifact,
             "structure_hash": _structure_hash(artifact),
+            "data": visual["data"],
+            "buffers": visual["buffers"],
         }
         if "lines" in visual:
             entry["lines"] = visual["lines"]
-        if check_pixels:
-            entry["screenshot"] = _render_screenshot(visual, width, dpr)
+        if session is not None:
+            entry["screenshot"] = _render_screenshot(session, visual)
         entries.append(entry)
     return entries
 
@@ -296,66 +285,72 @@ def verify_target(
 
     blocks_out: List[Dict[str, Any]] = []
     mismatched = False
-    for visual, golden in pairs:
-        entry: Dict[str, Any] = {"id": visual["id"]}
-        if "lines" in visual:
-            entry["lines"] = visual["lines"]
-        if golden is None:
-            entry["status"] = "new"
-            entry["hint"] = "no golden for this visual (run --update)"
-            mismatched = True
-            blocks_out.append(entry)
-            continue
-        if golden["id"] != visual["id"]:
-            entry["golden_id"] = golden["id"]
+    # One shared render session per target: the Chrome tab, HTTP server and
+    # JS bundle load are paid once, not per visual. Opened lazily on the
+    # first screenshot; a no-op to close if pixels were never rendered.
+    with screenshot_tools.RenderSession(width=width, dpr=dpr) as session:
+        for visual, golden in pairs:
+            entry: Dict[str, Any] = {"id": visual["id"]}
+            if "lines" in visual:
+                entry["lines"] = visual["lines"]
+            if golden is None:
+                entry["status"] = "new"
+                entry["hint"] = "no golden for this visual (run --update)"
+                mismatched = True
+                blocks_out.append(entry)
+                continue
+            if golden["id"] != visual["id"]:
+                entry["golden_id"] = golden["id"]
 
-        artifact = _artifact_bytes(visual)
-        structure_hash = _structure_hash(artifact)
-        structure_match = structure_hash == golden["structure_hash"]
-        entry["structure"] = {
-            "hash": structure_hash,
-            "golden_hash": golden["structure_hash"],
-            "match": structure_match,
-        }
-        if not structure_match:
-            golden_path = directory / golden["artifact"]
-            try:
-                entry["diff"] = _diff_summary(golden_path.read_bytes(), visual, epsilon)
-            except OSError:
-                warnings.append(f"golden artifact missing: {golden_path}")
-
-        pixel_match: Optional[bool] = None
-        golden_shot = golden.get("screenshot")
-        if check_pixels and golden_shot:
-            shot = _render_screenshot(visual, width, dpr)
-            pixel_match = shot["sha256"] == golden_shot["sha256"]
-            entry["pixels"] = {
-                "sha256": shot["sha256"],
-                "golden_sha256": golden_shot["sha256"],
-                "width": shot["width"],
-                "height": shot["height"],
-                "match": pixel_match,
+            artifact = _artifact_bytes(visual)
+            structure_hash = _structure_hash(artifact)
+            structure_match = structure_hash == golden["structure_hash"]
+            entry["structure"] = {
+                "hash": structure_hash,
+                "golden_hash": golden["structure_hash"],
+                "match": structure_match,
             }
-            if (shot["width"], shot["height"]) != (
-                golden_shot.get("width"),
-                golden_shot.get("height"),
-            ):
-                entry["pixels"]["golden_size"] = [
+            if not structure_match:
+                golden_path = directory / golden["artifact"]
+                try:
+                    entry["diff"] = _diff_summary(
+                        golden_path.read_bytes(), visual, epsilon
+                    )
+                except OSError:
+                    warnings.append(f"golden artifact missing: {golden_path}")
+
+            pixel_match: Optional[bool] = None
+            golden_shot = golden.get("screenshot")
+            if check_pixels and golden_shot:
+                shot = _render_screenshot(session, visual)
+                pixel_match = shot["sha256"] == golden_shot["sha256"]
+                entry["pixels"] = {
+                    "sha256": shot["sha256"],
+                    "golden_sha256": golden_shot["sha256"],
+                    "width": shot["width"],
+                    "height": shot["height"],
+                    "match": pixel_match,
+                }
+                if (shot["width"], shot["height"]) != (
                     golden_shot.get("width"),
                     golden_shot.get("height"),
-                ]
-        elif check_pixels and not golden_shot:
-            entry["pixels"] = {"match": None, "note": "golden has no screenshot"}
+                ):
+                    entry["pixels"]["golden_size"] = [
+                        golden_shot.get("width"),
+                        golden_shot.get("height"),
+                    ]
+            elif check_pixels and not golden_shot:
+                entry["pixels"] = {"match": None, "note": "golden has no screenshot"}
 
-        if not structure_match:
-            entry["status"] = "structure-changed"
-            mismatched = True
-        elif pixel_match is False:
-            entry["status"] = "pixels-changed"
-            mismatched = True
-        else:
-            entry["status"] = "match"
-        blocks_out.append(entry)
+            if not structure_match:
+                entry["status"] = "structure-changed"
+                mismatched = True
+            elif pixel_match is False:
+                entry["status"] = "pixels-changed"
+                mismatched = True
+            else:
+                entry["status"] = "match"
+            blocks_out.append(entry)
 
     for golden in orphaned:
         blocks_out.append({"id": golden["id"], "status": "removed"})
@@ -416,7 +411,8 @@ def update_target(
     width = prev_shot.get("width", DEFAULT_SCREENSHOT_WIDTH)
     dpr = prev_shot.get("dpr", DEFAULT_SCREENSHOT_DPR)
 
-    entries = _compute_entries(visuals, check_pixels, width, dpr)
+    with screenshot_tools.RenderSession(width=width, dpr=dpr) as session:
+        entries = _compute_entries(visuals, session if check_pixels else None)
     pairs, orphaned = _pair_with_goldens(entries, (previous or {}).get("blocks", []))
 
     blocks_out: List[Dict[str, Any]] = []
@@ -440,12 +436,9 @@ def update_target(
                 report["layer"] = "structure"
                 golden_path = directory / golden["artifact"]
                 try:
-                    data, buffers = summaries.parse_colight_bytes(
-                        entry["artifact_bytes"]
-                    )
                     report["diff"] = _diff_summary(
                         golden_path.read_bytes(),
-                        {"data": data, "buffers": buffers},
+                        {"data": entry["data"], "buffers": entry["buffers"]},
                         epsilon,
                     )
                 except OSError:
@@ -509,6 +502,28 @@ def run_verify(
         Tuple of (payload, exit code). Exit codes: 0 all match (or update
         succeeded), 1 mismatches, 2 error, 3 no goldens found.
     """
+    # Two distinct targets must never share a goldens directory (possible
+    # when one --goldens root is applied to targets from different project
+    # roots whose project-relative paths coincide): verifying would compare
+    # against the wrong goldens and updating would silently clobber them.
+    directories: Dict[pathlib.Path, pathlib.Path] = {}
+    for target in targets:
+        root = goldens_root or default_goldens_root(target)
+        directory = golden_dir(target, root).resolve()
+        other = directories.get(directory)
+        if other is not None and other != target.resolve():
+            message = (
+                f"goldens collision: {other} and {target.resolve()} both map to "
+                f"{directory}; use per-target --goldens roots"
+            )
+            error_result = {
+                "target": str(target),
+                "status": "error",
+                "errors": [{"error": {"type": "ValueError", "message": message}}],
+            }
+            return {"targets": [error_result], "ok": False}, 2
+        directories[directory] = target.resolve()
+
     results: List[Dict[str, Any]] = []
     for target in targets:
         try:
