@@ -124,28 +124,31 @@ def _numeric_delta(
     a: np.ndarray, b: np.ndarray, epsilon: float
 ) -> Optional[Dict[str, Any]]:
     """Magnitude stats for two same-shape numeric arrays; None if within epsilon."""
-    av = np.asarray(a, dtype=np.float64)
-    bv = np.asarray(b, dtype=np.float64)
+    av = np.atleast_1d(np.asarray(a, dtype=np.float64))
+    bv = np.atleast_1d(np.asarray(b, dtype=np.float64))
     nan_a = np.isnan(av)
     nan_b = np.isnan(bv)
     both_nan = nan_a & nan_b
-    delta = np.abs(bv - av)
-    delta[both_nan] = 0.0
-    nan_mismatch = nan_a ^ nan_b
-    finite = np.isfinite(delta)
-    changed_mask = (finite & (delta > epsilon)) | nan_mismatch | (~finite & ~both_nan)
+    with np.errstate(invalid="ignore"):
+        delta = np.abs(bv - av)
+        # Same value on both sides (covers equal infinities); NaN==NaN counts
+        # as same, a NaN paired with anything else counts as changed.
+        same = (av == bv) | both_nan
+    both_finite = np.isfinite(av) & np.isfinite(bv)
+    changed_mask = ~same & np.where(both_finite, delta > epsilon, True)
     changed_count = int(np.count_nonzero(changed_mask))
     if changed_count == 0:
         return None
-    finite_deltas = delta[finite]
+    finite_deltas = delta[both_finite]
     stats: Dict[str, Any] = {
         "changed_fraction": round(changed_count / delta.size, 6),
     }
     if finite_deltas.size:
         stats["max_abs_delta"] = float(np.max(finite_deltas))
         stats["mean_abs_delta"] = float(np.mean(finite_deltas))
-    if int(np.count_nonzero(nan_mismatch)):
-        stats["nan_mismatch"] = int(np.count_nonzero(nan_mismatch))
+    nan_mismatch = int(np.count_nonzero(nan_a ^ nan_b))
+    if nan_mismatch:
+        stats["nan_mismatch"] = nan_mismatch
     return stats
 
 

@@ -119,6 +119,24 @@ class TestArtifactDiff:
         assert "n" in state["changed"]
 
 
+class TestNumericDelta:
+    def test_equal_infinities_and_nans_are_unchanged(self):
+        from colight.cli_tools.diff_tools import _numeric_delta
+
+        inf = np.array([np.inf, 1.0])
+        assert _numeric_delta(inf, inf.copy(), 1e-9) is None
+        nan = np.array([np.nan, 1.0])
+        assert _numeric_delta(nan, nan.copy(), 1e-9) is None
+
+    def test_nan_mismatch_counts_as_changed(self):
+        from colight.cli_tools.diff_tools import _numeric_delta
+
+        stats = _numeric_delta(np.array([1.0, np.nan]), np.array([1.0, 2.0]), 1e-9)
+        assert stats is not None
+        assert stats["nan_mismatch"] == 1
+        assert stats["changed_fraction"] == pytest.approx(0.5)
+
+
 class TestEpsilon:
     def test_below_epsilon_is_identical(self, tmp_path: pathlib.Path):
         a = dot_artifact(tmp_path, "a.colight", np.array([1.0, 2.0]))
