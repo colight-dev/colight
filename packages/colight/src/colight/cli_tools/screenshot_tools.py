@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterator, List, Optional, Protocol, Tuple
 
 from colight.screenshots import StudioContext
 
-from . import targets
+from . import compose, targets
 
 DEFAULT_WIDTH = 800
 DEFAULT_DPR = 1.0
@@ -68,6 +68,27 @@ def load_visual(
     """
     studio.set_size(width=width, height=height or width)
     studio.load_plot(data=data, buffers=buffers, measure=height is None)
+
+
+def fit_max_edge(width: int, height: int, max_edge: int) -> Tuple[int, int]:
+    """Scale a (width, height) pair so its long edge is exactly ``max_edge``.
+
+    All values are in the same unit (CSS pixels); aspect is preserved with
+    the short edge rounded to the nearest integer. Agents that know their
+    harness's native input size use this to render at that size directly,
+    avoiding a second lossy resampling pass.
+
+    Raises:
+        ValueError: Non-positive dimensions or max_edge.
+    """
+    if max_edge <= 0:
+        raise ValueError(f"max edge must be positive, got {max_edge}")
+    if width <= 0 or height <= 0:
+        raise ValueError(f"invalid dimensions {width}x{height}")
+    scale = max_edge / max(width, height)
+    if width >= height:
+        return max_edge, max(1, int(round(height * scale)))
+    return max(1, int(round(width * scale))), max_edge
 
 
 def resolve_visual(
@@ -337,6 +358,49 @@ def _capture_scene(
     return png, pixel_width, pixel_height, extras
 
 
+def _capture_views(
+    scene: SceneLike, view_names: List[str], frame: Optional[str]
+) -> Tuple[List[Tuple[str, bytes]], List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Capture one PNG per view preset from a loaded scene3d scene.
+
+    Returns:
+        (cells, per-view {view, camera}, frame selection info or None).
+    """
+    from . import scene_pick
+
+    studio = scene.studio
+    if scene_pick.scene_count(studio) == 0:
+        raise ValueError(
+            "--views requires a scene3d visual "
+            "(target's visual contains no scene3d scene)"
+        )
+    component: Optional[int] = None
+    ranges = None
+    frame_info: Optional[Dict[str, Any]] = None
+    if frame is not None:
+        selector, ranges = scene_pick.parse_frame_selector(frame)
+        snapshot = scene_pick.take_snapshot(studio)
+        resolved = scene_pick.resolve_component(snapshot.components, selector)
+        component = resolved["component"]
+        frame_info = {"component": component, "type": resolved["type"]}
+        if ranges:
+            frame_info["instances"] = [list(pair) for pair in ranges]
+    # Every view moves the camera: a caching provider must reload the
+    # scene before serving it again.
+    scene.mark_mutated()
+    cells: List[Tuple[str, bytes]] = []
+    cameras: List[Dict[str, Any]] = []
+    for name in view_names:
+        direction, up = scene_pick.VIEW_PRESETS[name]
+        camera = scene_pick.frame_view(
+            studio, direction, up, component=component, instances=ranges
+        )
+        png, _w, _h = scene.capture()
+        cells.append((name, png))
+        cameras.append({"view": name, "camera": camera})
+    return cells, cameras, frame_info
+
+
 def screenshot_source(
     source: SceneSource,
     target_label: str,
@@ -345,8 +409,17 @@ def screenshot_source(
     check: bool = False,
     frame: Optional[str] = None,
     out_label: Optional[str] = None,
+    rulers: bool = False,
+    views: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Screenshot an already-resolved scene source (shared CLI/daemon core).
+
+    Composition (rulers, contact sheets) happens here — post-capture, in
+    the same code path for direct and daemon modes — so both produce
+    identical bytes; the render itself is never touched. ``deterministic``
+    always compares the UNDERLYING renders (raw capture bytes), and since
+    composition is a pure function of them, equal renders imply equal
+    composed output.
 
     Args:
         source: Scene source (direct or daemon-backed).
@@ -354,33 +427,87 @@ def screenshot_source(
         out: Output PNG path (parent dirs are created).
         dpr: Device pixel ratio (reported in the payload).
         check: Render twice (second render fresh) and byte-compare.
-        frame: Scene3d selection to fit the camera on before capture.
+        frame: Scene3d selection to fit the camera on before capture (with
+            ``views``, each preset frames this selection).
         out_label: Payload ``out`` value (defaults to ``str(out)``).
+        rulers: Compose labeled coordinate rulers around the capture.
+        views: View preset names; composes a labeled contact sheet
+            (scene3d only, mutually exclusive with ``rulers``).
 
     Returns:
         The ``colight screenshot`` payload (see :func:`screenshot_target`).
     """
-    with source.scene() as scene:
-        png, pixel_width, pixel_height, extras = _capture_scene(
-            scene, frame=frame, want_coverage=True
+    if rulers and views:
+        raise ValueError(
+            "--rulers applies to single-view screenshots only; a contact "
+            "sheet's cells have their own page coordinate spaces "
+            "(use pick-at against a single --views render instead)"
         )
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(png)
 
     payload: Dict[str, Any] = {
         "target": target_label,
         "out": out_label or str(out),
-        "width": pixel_width,
-        "height": pixel_height,
-        "dpr": dpr,
-        "sha256": hashlib.sha256(png).hexdigest(),
     }
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if views:
+        with source.scene() as scene:
+            cells, cameras, frame_info = _capture_views(scene, views, frame)
+        composed = compose.compose_grid(cells)
+        out.write_bytes(composed)
+        pixel_width, pixel_height = compose.png_size(composed)
+        payload.update(
+            {
+                "width": pixel_width,
+                "height": pixel_height,
+                "dpr": dpr,
+                "sha256": hashlib.sha256(composed).hexdigest(),
+                "views": cameras,
+            }
+        )
+        if frame_info is not None:
+            payload["frame"] = frame_info
+        if source.block_id is not None:
+            payload["block"] = source.block_id
+        if check:
+            with source.scene(fresh=True) as scene:
+                recheck_cells, _cameras, _info = _capture_views(scene, views, frame)
+            raw = [png for _name, png in cells]
+            raw_recheck = [png for _name, png in recheck_cells]
+            payload["deterministic"] = raw_recheck == raw
+            if not payload["deterministic"]:
+                payload["sha256_recheck"] = hashlib.sha256(
+                    compose.compose_grid(recheck_cells)
+                ).hexdigest()
+        return payload
+
+    with source.scene() as scene:
+        png, pixel_width, pixel_height, extras = _capture_scene(
+            scene, frame=frame, want_coverage=True
+        )
+    written = png
+    if rulers:
+        written, ruler_meta = compose.compose_rulers(png, dpr=dpr)
+        pixel_width, pixel_height = compose.png_size(written)
+        payload["rulers"] = ruler_meta
+    out.write_bytes(written)
+
+    payload.update(
+        {
+            "width": pixel_width,
+            "height": pixel_height,
+            "dpr": dpr,
+            "sha256": hashlib.sha256(written).hexdigest(),
+        }
+    )
     payload.update(extras)
     if source.block_id is not None:
         payload["block"] = source.block_id
     if check:
         # Intentionally a fresh, independent render: the determinism claim
-        # is about independent renders, not renders sharing a tab.
+        # is about independent renders, not renders sharing a tab. The raw
+        # captures are compared — composition is pure, so equal renders
+        # imply equal composed bytes.
         with source.scene(fresh=True) as scene:
             png_recheck, _w, _h, _extras = _capture_scene(
                 scene, frame=frame, want_coverage=False
@@ -402,6 +529,8 @@ def screenshot_target(
     frame: Optional[str] = None,
     debug: bool = False,
     ready_timeout: Optional[float] = DEFAULT_READY_TIMEOUT,
+    rulers: bool = False,
+    views: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Screenshot a target deterministically.
 
@@ -419,14 +548,22 @@ def screenshot_target(
             optional instance ranges) to fit the camera on before capture.
         debug: Verbose renderer logging.
         ready_timeout: Max seconds to wait for render readiness.
+        rulers: Compose labeled coordinate rulers around the capture
+            (post-capture; the render itself is untouched).
+        views: View preset names (see :data:`scene_pick.VIEW_PRESETS`);
+            composes a labeled contact sheet. Scene3d only; mutually
+            exclusive with ``rulers``.
 
     Returns:
         Payload with ``target``, ``out``, ``width``/``height`` (actual PNG
-        pixels), ``dpr``, ``block`` (when a .py block was selected),
-        ``sha256``, ``frame`` (fitted camera, with ``--frame``),
-        ``coverage`` (scene3d targets only: per-component pixel fractions),
-        and ``deterministic`` (only when ``check`` is set;
-        ``sha256_recheck`` is added when the two renders differ).
+        pixels, including any composed margin), ``dpr``, ``block`` (when a
+        .py block was selected), ``sha256`` (of the written file),
+        ``frame`` (fitted camera, with ``--frame``), ``rulers``
+        ({spacing, margin}, with ``rulers``), ``views`` (per-view fitted
+        cameras, with ``views``), ``coverage`` (scene3d single-view only:
+        per-component pixel fractions), and ``deterministic`` (only when
+        ``check`` is set — compares the underlying renders;
+        ``sha256_recheck`` is added when they differ).
     """
     source = DirectSceneSource(
         target,
@@ -438,7 +575,14 @@ def screenshot_target(
         ready_timeout=ready_timeout,
     )
     return screenshot_source(
-        source, str(target), out, dpr=dpr, check=check, frame=frame
+        source,
+        str(target),
+        out,
+        dpr=dpr,
+        check=check,
+        frame=frame,
+        rulers=rulers,
+        views=views,
     )
 
 
@@ -450,6 +594,7 @@ __all__ = [
     "RenderSession",
     "SceneLike",
     "SceneSource",
+    "fit_max_edge",
     "load_visual",
     "render_png",
     "resolve_visual",

@@ -14,6 +14,7 @@ import {
   useCanvasSnapshot,
   SceneSnapshotApi,
   PickBufferResult,
+  FrameView,
 } from "./canvasSnapshot";
 import {
   CameraParams,
@@ -1168,8 +1169,8 @@ export function SceneImpl({
       pickBuffer: (options) => snapshotImplRef.current!.pickBuffer(options),
       instanceInfo: (componentIdx, instanceIdx) =>
         snapshotImplRef.current!.instanceInfo(componentIdx, instanceIdx),
-      frameOnSelection: (componentIdx, ranges) =>
-        snapshotImplRef.current!.frameOnSelection(componentIdx, ranges),
+      frameOnSelection: (componentIdx, ranges, view) =>
+        snapshotImplRef.current!.frameOnSelection(componentIdx, ranges, view),
       applyHighlight: (componentIdx, ranges, options) =>
         snapshotImplRef.current!.applyHighlight(componentIdx, ranges, options),
       clearHighlight: () => snapshotImplRef.current!.clearHighlight(),
@@ -2721,6 +2722,7 @@ export function SceneImpl({
   async function snapshotFrameOnSelection(
     componentIdx: number | null,
     ranges?: InstanceRanges,
+    view?: FrameView,
   ): Promise<CameraParams | null> {
     if (!gpuRef.current) return null;
     const comps = gpuRef.current.renderedComponents ?? components;
@@ -2743,8 +2745,43 @@ export function SceneImpl({
     }
     if (!bounds) return null;
 
+    let baseCamera = createCameraParams(activeCameraRef.current!);
+    if (view?.direction) {
+      // Aim from an explicit world-space direction: fitCameraToBounds
+      // preserves the direction/up of the camera it is given, so build a
+      // template camera looking at the bounds center from that direction.
+      const [dx, dy, dz] = view.direction;
+      const length = Math.hypot(dx, dy, dz) || 1;
+      const d: [number, number, number] = [
+        dx / length,
+        dy / length,
+        dz / length,
+      ];
+      let up: [number, number, number] = view.up ?? baseCamera.up;
+      const cross = [
+        d[1] * up[2] - d[2] * up[1],
+        d[2] * up[0] - d[0] * up[2],
+        d[0] * up[1] - d[1] * up[0],
+      ];
+      if (Math.hypot(cross[0], cross[1], cross[2]) < 1e-6) {
+        // Up parallel to the view direction (e.g. a top view with Y up):
+        // substitute a perpendicular up so the view matrix stays valid.
+        up = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
+      }
+      const center: [number, number, number] = [
+        (bounds.min[0] + bounds.max[0]) / 2,
+        (bounds.min[1] + bounds.max[1]) / 2,
+        (bounds.min[2] + bounds.max[2]) / 2,
+      ];
+      baseCamera = {
+        ...baseCamera,
+        position: [center[0] + d[0], center[1] + d[1], center[2] + d[2]],
+        target: center,
+        up,
+      };
+    }
     const fitted = fitCameraToBounds(
-      createCameraParams(activeCameraRef.current!),
+      baseCamera,
       bounds,
       containerWidth / containerHeight,
     );

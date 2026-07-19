@@ -65,8 +65,12 @@ the rendered page (origin top-left, y down) — the same space as a screenshot P
 same `--width/--height` (dpr 1).
 
 ```bash
-colight screenshot scene.py --out s.png --json   # 1. perceive: `coverage` = fraction of
-                                                 #    canvas per component + background
+colight screenshot scene.py --out s.png \
+    --rulers --json                              # 1. perceive: `coverage` = fraction of
+                                                 #    canvas per component + background;
+                                                 #    --rulers adds labeled coordinate
+                                                 #    rulers so step 2's X,Y is READ off
+                                                 #    the image, not guessed
 colight pick-at scene.py X,Y [--radius 6] --json # 2. locate: ranked hits at a point,
                                                  #    with dereferenced values (center,
                                                  #    color, size — as rendered)
@@ -80,6 +84,17 @@ colight screenshot scene.py --out zoom.png \
                                                  #    its coverage fraction increases
 ```
 
+- **Recommended flow**: `screenshot --rulers` → Read the PNG and take X,Y straight from
+  the ruler labels → `pick-at X,Y`. Ruler labels are the exact page-pixel space pick-at
+  consumes (in the composed PNG, coordinate v sits at pixel `margin + v`; JSON reports
+  `rulers: {spacing, margin}`). This kills the biggest pick-at error source: guessing
+  pixel coordinates from a downscaled view.
+- `--views front,top,side,iso` composes one labeled contact sheet from bounds-fit camera
+  presets (scene3d only; per-view cameras in JSON) — you pay per image tile, and one 2×2
+  grid usually beats four separate images. Rulers are single-view only (combining errors);
+  `--frame` + `--views` frames that selection from every preset.
+- `--max-edge N` makes the PNG's long edge exactly N px (aspect preserved) — render at
+  your harness's native input size once instead of being resampled twice.
 - `--component` takes an index or type name (as reported by `coverage`).
 - Exit codes: pick-at 1 = no hit; pick-where 1 = selection entirely invisible
   (`projected_bbox` says where it _would_ land if merely occluded); 2 = error, including

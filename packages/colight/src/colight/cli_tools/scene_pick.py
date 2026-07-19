@@ -31,6 +31,45 @@ MAX_DEREFERENCED_HITS = 8
 
 InstanceRanges = List[Tuple[int, int]]
 
+_ISO = 1.0 / math.sqrt(3.0)
+
+# Contact-sheet camera presets: (direction from target toward camera, up),
+# world-space with the scene3d default Y-up convention. "side" is an alias
+# for "right".
+VIEW_PRESETS: Dict[str, Tuple[List[float], List[float]]] = {
+    "front": ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+    "back": ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]),
+    "right": ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    "side": ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    "left": ([-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    "top": ([0.0, 1.0, 0.0], [0.0, 0.0, -1.0]),
+    "bottom": ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+    "iso": ([_ISO, _ISO, _ISO], [0.0, 1.0, 0.0]),
+}
+
+
+def parse_views(text: str) -> List[str]:
+    """Parse a ``--views`` list like ``"front,top,side,iso"``.
+
+    Returns:
+        The view names, in order.
+
+    Raises:
+        ValueError: Unknown or duplicate view names, or an empty list.
+    """
+    names = [part.strip().lower() for part in text.split(",") if part.strip()]
+    if not names:
+        raise ValueError(f"no views in: {text!r}")
+    known = ", ".join(VIEW_PRESETS)
+    seen = set()
+    for name in names:
+        if name not in VIEW_PRESETS:
+            raise ValueError(f"unknown view {name!r} (views: {known})")
+        if name in seen:
+            raise ValueError(f"duplicate view {name!r}")
+        seen.add(name)
+    return names
+
 
 def parse_instance_ranges(text: str) -> InstanceRanges:
     """Parse instance ranges like ``"0-3,7,10-12"`` (inclusive bounds).
@@ -264,6 +303,37 @@ def frame_selection(
         "window.colight.scene3d.frame("
         f"{{component: {json.dumps(component)}, "
         f"instances: {_ranges_json(instances)}}})",
+        await_promise=True,
+    )
+    return payload["camera"]
+
+
+def frame_view(
+    studio: StudioContext,
+    direction: Sequence[float],
+    up: Sequence[float],
+    component: Optional[int] = None,
+    instances: Optional[InstanceRanges] = None,
+) -> Dict[str, Any]:
+    """Fit the camera on a selection from an explicit view direction.
+
+    Args:
+        studio: Studio context with a scene3d visual loaded.
+        direction: World-space direction from the target toward the camera.
+        up: World-space up vector for the view.
+        component: Component index (None = frame the whole scene).
+        instances: Inclusive instance ranges.
+
+    Returns:
+        The fitted camera parameters.
+    """
+    payload = _api_call(
+        studio,
+        "window.colight.scene3d.frame("
+        f"{{component: {json.dumps(component)}, "
+        f"instances: {_ranges_json(instances)}, "
+        f"direction: {json.dumps(list(direction))}, "
+        f"up: {json.dumps(list(up))}}})",
         await_promise=True,
     )
     return payload["camera"]
@@ -700,16 +770,19 @@ def pick_where_target(
 __all__ = [
     "DEFAULT_RADIUS",
     "SceneSnapshot",
+    "VIEW_PRESETS",
     "clear_highlight",
     "component_mask",
     "coverage_payload",
     "frame_selection",
+    "frame_view",
     "highlight_selection",
     "hits_at",
     "instance_values",
     "legend_entry",
     "parse_frame_selector",
     "parse_instance_ranges",
+    "parse_views",
     "pick_at_source",
     "pick_at_target",
     "pick_where_source",

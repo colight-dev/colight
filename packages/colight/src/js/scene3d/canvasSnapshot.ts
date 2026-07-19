@@ -9,6 +9,15 @@ import { useEffect, useRef, useMemo } from "react";
 import { CameraParams } from "./camera3d";
 import { InstanceRanges, PickLegendEntry } from "./pick-snapshot";
 
+/** Camera-direction override for framing (world-space unit-ish vectors). */
+export interface FrameView {
+  /** Direction from the target toward the camera. */
+  direction: [number, number, number];
+  /** Up vector (defaults to the current camera's up; auto-corrected when
+   * parallel to the direction). */
+  up?: [number, number, number];
+}
+
 /** Full-frame pick readback: packed ids plus the decoding legend. */
 export interface PickBufferResult {
   /** Buffer width in device pixels. */
@@ -41,10 +50,14 @@ export interface SceneSnapshotApi {
     instanceIdx: number,
   ): Record<string, unknown> | null;
   /** Fits the camera to a component/instance selection (null = whole
-   * scene) and re-renders; returns the fitted camera. */
+   * scene) and re-renders; returns the fitted camera. An optional view
+   * overrides the camera direction/up (world-space, position = target +
+   * direction) instead of preserving the current view — used by the CLI's
+   * axis-aligned contact-sheet presets. */
   frameOnSelection(
     componentIdx: number | null,
     ranges?: InstanceRanges,
+    view?: FrameView,
   ): Promise<CameraParams | null>;
   /** Re-renders with the selection highlighted via per-instance
    * decorations (everything else dimmed). */
@@ -194,11 +207,15 @@ export const scene3dAgentApi = {
     return { values };
   },
 
-  /** Fits the camera on a selection (component omitted/null = whole scene). */
+  /** Fits the camera on a selection (component omitted/null = whole
+   * scene). With a direction, the camera is aimed from that world-space
+   * direction instead of preserving the current view. */
   async frame(options?: {
     scene?: number;
     component?: number | null;
     instances?: InstanceRanges;
+    direction?: [number, number, number];
+    up?: [number, number, number];
   }): Promise<Record<string, unknown>> {
     const api = sceneApiAt(options?.scene ?? 0);
     if (!api)
@@ -207,6 +224,9 @@ export const scene3dAgentApi = {
       const camera = await api.frameOnSelection(
         options?.component ?? null,
         options?.instances,
+        options?.direction
+          ? { direction: options.direction, up: options?.up }
+          : undefined,
       );
       if (!camera) return { error: "selection has no bounds to frame" };
       return { camera };

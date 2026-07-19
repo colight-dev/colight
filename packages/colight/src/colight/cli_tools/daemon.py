@@ -400,6 +400,7 @@ class _ServiceSceneSource:
 
 def _handle_screenshot(server: "DaemonServer", body: Dict[str, Any]) -> Dict[str, Any]:
     source = _ServiceSceneSource(server.scenes, body)
+    raw_views = body.get("views")
     return screenshot_tools.screenshot_source(
         source,
         body["target"],
@@ -408,6 +409,8 @@ def _handle_screenshot(server: "DaemonServer", body: Dict[str, Any]) -> Dict[str
         check=bool(body.get("check", False)),
         frame=body.get("frame"),
         out_label=body.get("out_label"),
+        rulers=bool(body.get("rulers", False)),
+        views=[str(name) for name in raw_views] if raw_views else None,
     )
 
 
