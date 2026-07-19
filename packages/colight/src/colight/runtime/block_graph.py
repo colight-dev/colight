@@ -30,6 +30,15 @@ class BlockGraph:
         self.symbol_providers: Dict[
             str, str
         ] = {}  # symbol -> block_id that provides it
+        self._order: Dict[str, int] = {}  # block_id -> document position
+
+    def _document_order(self, block_id: str) -> int:
+        """Sort key: the block's position in the document.
+
+        Block ids are opaque (hex cache keys), so ordering must come from
+        the position blocks were added in, never from parsing the id.
+        """
+        return self._order.get(block_id, len(self._order))
 
     def add_blocks(self, blocks: List[Dict]) -> None:
         """Add blocks to the graph and build dependency edges.
@@ -44,6 +53,7 @@ class BlockGraph:
         self.edges.clear()
         self.reverse_edges.clear()
         self.symbol_providers.clear()
+        self._order.clear()
 
         # First pass: collect all blocks and their interfaces
         for block in blocks:
@@ -52,6 +62,7 @@ class BlockGraph:
                 continue
 
             self.blocks[block_id] = block
+            self._order.setdefault(block_id, len(self._order))
 
             # Extract interface information
             interface = block.get("interface", {})
@@ -65,8 +76,8 @@ class BlockGraph:
             for symbol in provides:
                 self.symbol_providers[symbol] = block_id
 
-        # Sort blocks by ID to ensure proper order
-        ordered_blocks = sorted(self.blocks.keys(), key=lambda x: int(x))
+        # Process blocks in document order
+        ordered_blocks = sorted(self.blocks.keys(), key=self._document_order)
 
         # Second pass: build dependency edges in linear time
         last_provider = {}  # symbol -> block_id that last provided it
@@ -99,9 +110,9 @@ class BlockGraph:
             bid: len(self.reverse_edges.get(bid, set())) for bid in self.blocks
         }
 
-        # Start with blocks that have no dependencies, sorted by ID to maintain order
+        # Start with blocks that have no dependencies, in document order
         initial_blocks = [bid for bid, degree in in_degree.items() if degree == 0]
-        initial_blocks.sort(key=lambda x: int(x))
+        initial_blocks.sort(key=self._document_order)
         queue = deque(initial_blocks)
         result = []
 
@@ -111,9 +122,7 @@ class BlockGraph:
 
             # Process all dependents of current block, maintaining order
             dependents = list(self.edges.get(current, set()))
-            dependents.sort(
-                key=lambda x: int(x)
-            )  # Sort by ID to maintain document order
+            dependents.sort(key=self._document_order)  # Maintain document order
 
             for dependent in dependents:
                 in_degree[dependent] -= 1
@@ -124,7 +133,7 @@ class BlockGraph:
         if len(result) != len(self.blocks):
             # Cycle detected - return blocks in original order
             # Could also raise an exception or return cycle information
-            return sorted(self.blocks.keys(), key=lambda x: int(x))
+            return sorted(self.blocks.keys(), key=self._document_order)
 
         return result
 
