@@ -1,6 +1,6 @@
-import uuid
 from typing import Any, Sequence, TypeAlias, Union
 
+import colight.ids as ids
 from colight.env import CONFIG
 from colight.layout import JSRef, JSCall, LayoutItem
 from colight.protocols import Collector
@@ -16,7 +16,7 @@ SpecInput: TypeAlias = Union[
 
 class MarkSpec(Collector):
     def __init__(self, name, data, options):
-        self._state_key = str(uuid.uuid4())
+        self._state_key = ids.state_key()
         self.ast = JSCall("MarkSpec", [name, data, options])
 
     def for_json(self) -> Any:

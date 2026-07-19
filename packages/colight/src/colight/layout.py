@@ -1,9 +1,9 @@
 import os
-import uuid
 from pathlib import Path
 from typing import Any, List, Optional, Self, Tuple, Union, cast
 
 import colight.format as format
+import colight.ids as ids
 import colight.screenshots as screenshots
 from colight.env import CONFIG
 from colight.html import html_page, html_snippet
@@ -37,7 +37,7 @@ class LayoutItem:
 
     def get_id(self) -> str:
         if self._id is None:
-            self._id = f"colight-widget-{uuid.uuid4().hex}"
+            self._id = ids.widget_id()
         return self._id
 
     def display_as(self, display_as) -> Self:
@@ -486,7 +486,7 @@ def onChange(callbacks):
 
 class Ref(LayoutItem, Collector):
     def __init__(self, value, state_key=None, sync=False):
-        self._state_key = str(uuid.uuid1()) if state_key is None else state_key
+        self._state_key = ids.ref_state_key() if state_key is None else state_key
         self._state_sync = sync
         self.value = value
 
