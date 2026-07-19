@@ -198,7 +198,7 @@ class ChromeInstance:
             chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
         )
         try:
-            port = cls._wait_for_port(process, user_data_dir, debug)
+            port = cls._wait_for_port(process, user_data_dir)
         except Exception:
             _terminate_process(process)
             shutil.rmtree(user_data_dir, ignore_errors=True)
@@ -215,9 +215,7 @@ class ChromeInstance:
         return instance
 
     @staticmethod
-    def _wait_for_port(
-        process: subprocess.Popen, user_data_dir: Path, debug: bool
-    ) -> int:
+    def _wait_for_port(process: subprocess.Popen, user_data_dir: Path) -> int:
         """Poll ``DevToolsActivePort`` until Chrome publishes its port."""
         port_file = user_data_dir / "DevToolsActivePort"
         deadline = time.time() + LAUNCH_TIMEOUT
@@ -278,6 +276,36 @@ def _terminate_process(process: subprocess.Popen) -> None:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
+
+
+def _acquire_shared_instance(
+    width: int, height: Optional[int], debug: bool
+) -> "ChromeInstance":
+    """Return the live shared Chrome, replacing a dead one (``_lock`` held).
+
+    A dead shared instance is properly closed first — reaping the process
+    and removing its temporary profile directory — before a replacement is
+    launched.
+    """
+    global _shared_instance
+    if _shared_instance is not None and not _shared_instance.is_alive():
+        if debug:
+            print(
+                "[chrome_devtools.py] Shared Chrome died "
+                f"(port {_shared_instance.port}); cleaning up and relaunching"
+            )
+        _shared_instance.close(debug=debug)
+        _shared_instance = None
+    if _shared_instance is None:
+        _shared_instance = ChromeInstance.launch(
+            width=width, height=height, debug=debug
+        )
+    elif debug:
+        print(
+            "[chrome_devtools.py] Reusing in-process Chrome "
+            f"on port {_shared_instance.port}"
+        )
+    return _shared_instance
 
 
 def _cancel_shutdown_timer() -> None:
@@ -463,18 +491,9 @@ class ChromeContext:
             with _lock:
                 if self.reuse:
                     _cancel_shutdown_timer()
-                    if _shared_instance is None or not _shared_instance.is_alive():
-                        _shared_instance = ChromeInstance.launch(
-                            width=self.width,
-                            height=self.height,
-                            debug=self.debug,
-                        )
-                    elif self.debug:
-                        print(
-                            "[chrome_devtools.py] Reusing in-process Chrome "
-                            f"on port {_shared_instance.port}"
-                        )
-                    self._instance = _shared_instance
+                    self._instance = _acquire_shared_instance(
+                        self.width, self.height, self.debug
+                    )
                     self._uses_shared = True
                     _active_count += 1
             if self._instance is None:
