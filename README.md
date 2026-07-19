@@ -67,9 +67,19 @@ colight inspect path/to/plot.colight --json
 colight diff before.colight after.colight --json
 
 # Deterministic screenshot: fixed viewport + device-pixel-ratio, waits for
-# render completion; --check renders twice and byte-compares
+# render completion; --check renders twice and byte-compares.
+# Scene3d targets also report per-component pixel `coverage` in --json and
+# accept --frame "C[:A-B]" to fit the camera on a component/instance range
 colight screenshot path/to/plot.colight --out shot.png --json
 colight screenshot notebook.py --block ID --out shot.png
+colight screenshot scene.py --out closeup.png --frame "Ellipsoid:0-4"
+
+# Scene3d pick queries (GPU pick buffer; every query re-renders):
+# pick-at = what is at point X,Y (ranked hits + dereferenced values);
+# pick-where = where does a selection land (bbox/centroid/visibility;
+# --out writes a highlight overlay). Exit 1 = no hit / invisible
+colight pick-at scene.py 240,180 --json
+colight pick-where scene.py --component Ellipsoid --instances 0-4 --out overlay.png
 
 # Golden verification: pin each visual's artifact, structure hash and
 # screenshot sha under tests/goldens/; verify reports which layer changed

@@ -192,8 +192,36 @@
 # # render completion, renders at t=0 (no update entries applied).
 # # --check renders twice in fresh tabs and byte-compares (exit 1 on
 # # mismatch); JSON reports pixel size, sha256 and determinism.
+# # Scene3d targets also report `coverage` in --json (fraction of canvas
+# # pixels per component, read from the GPU pick buffer) and accept
+# # --frame "C[:A-B]" (component index or type name, optional inclusive
+# # instance ranges) to fit the camera on a selection before capture —
+# # the zoom loop: coverage tells you a component is tiny, --frame gets
+# # you a close-up.
 # colight screenshot target.colight --out shot.png [--json] [--check]
 # colight screenshot notebook.py --block ID --out shot.png
+# colight screenshot scene.py --out closeup.png --frame "Ellipsoid:0-4"
+#
+# # What is at point X,Y? Re-renders the target and queries the GPU pick
+# # buffer (scene3d only; every query re-renders — nothing is persisted).
+# # Coordinates are CSS pixels of the rendered page, origin top-left,
+# # y down — the same space as a `colight screenshot` PNG at the same
+# # --width/--height (at dpr 1). Hits within --radius (default 6px) are
+# # ranked by distance then coverage; top hits include the instance's
+# # dereferenced attribute values (center/color/size/... as rendered).
+# # Exit 0 = hit, 1 = no hit within radius, 2 = error (incl. non-scene3d).
+# colight pick-at scene.py 240,180 [--radius 6] [--json]
+#
+# # Where does a selection land on screen? Reports visible pixel count,
+# # bbox and centroid (page CSS pixels) plus a visibility fraction:
+# # visible pixels / the selection's unoccluded projected footprint
+# # (measured by re-rendering only the selection). --out writes a PNG
+# # with the selection highlighted via per-instance decorations and
+# # everything else dimmed, so the selection can be seen.
+# # Exit 0 = visible, 1 = entirely invisible (occluded or out of view),
+# # 2 = error.
+# colight pick-where scene.py --component Ellipsoid [--instances 0-4]
+# colight pick-where scene.py --component 0 --out overlay.png [--json]
 #
 # # Golden verification. A golden pins three layers per visual-producing
 # # block: the .colight artifact bytes, the canonicalized-structure hash
