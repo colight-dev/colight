@@ -323,6 +323,7 @@ export const BASE_COMPONENT_PROPS: readonly string[] = [
   "layer",
   "colors",
   "color",
+  "color_by",
   "alphas",
   "alpha",
   "scales",
@@ -357,6 +358,14 @@ export interface BaseComponentConfig {
    * Each instance requires 3 consecutive values in the range [0,1].
    */
   colors?: Float32Array;
+
+  /**
+   * Colormap legend spec attached by the Python side when colors were
+   * computed via `color_by` (see js/scene3d/legend.tsx `ColorByMeta`).
+   * Metadata only — rendering consumes `colors`; the Scene renders a
+   * legend overlay from this.
+   */
+  color_by?: import("./legend").ColorByMeta;
 
   /**
    * Per-instance alpha (opacity) values.
