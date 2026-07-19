@@ -13,6 +13,7 @@ and no quadratic work.
 
 import difflib
 import pathlib
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -24,6 +25,14 @@ from . import inspect_tools, summaries
 DEFAULT_EPSILON = 1e-9
 
 _SKIP_KEYS = ("__type__", "path", "bufferLayout", "id")
+
+# Leaf changes sharing an array-like path pattern (indices varying) are
+# aggregated into one magnitude-stats entry once this many leaves changed.
+AGGREGATE_MIN_CHANGED = 3
+# Itemized value lists are capped in JSON output; the human view shows fewer.
+MAX_ITEMIZED_VALUES = 50
+
+_INDEX_TOKEN_RE = re.compile(r"(\[\d+\])")
 
 
 def load_target(file_path: pathlib.Path) -> Dict[str, Any]:
@@ -218,11 +227,16 @@ def _diff_arrays(
 
 def _diff_leaves(
     a: Dict[str, Any], b: Dict[str, Any], epsilon: float
-) -> Dict[str, List[Any]]:
-    """Diff scalar leaves by path (numeric leaves use epsilon)."""
+) -> Tuple[List[str], List[str], List[Tuple[str, Any, Any]]]:
+    """Diff scalar leaves by path (numeric leaves use epsilon).
+
+    Returns:
+        Tuple of (added paths, removed paths, changed (path, old, new) raw
+        tuples).
+    """
     added = [p for p in b if p not in a]
     removed = [p for p in a if p not in b]
-    changed: List[Dict[str, Any]] = []
+    changed: List[Tuple[str, Any, Any]] = []
     for path, value_a in a.items():
         if path not in b:
             continue
@@ -232,21 +246,127 @@ def _diff_leaves(
                 continue
         elif value_a == value_b:
             continue
-        changed.append(
-            {
-                "path": path,
-                "from": summaries.truncated_repr(value_a, 60),
-                "to": summaries.truncated_repr(value_b, 60),
-            }
-        )
-    return {"added": added, "removed": removed, "changed": changed}
+        changed.append((path, value_a, value_b))
+    return added, removed, changed
+
+
+def _aggregate_leaf_changes(
+    changed: List[Tuple[str, Any, Any]],
+    leaves_a: Dict[str, Any],
+    leaves_b: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, Any, Any]]]:
+    """Aggregate numeric leaf changes that vary only in list indices.
+
+    Plot data often travels as nested JSON lists rather than typed buffers;
+    a single conceptual array change then appears as many leaf changes like
+    ``state.id0.args[1][27][0]``. Groups of at least
+    ``AGGREGATE_MIN_CHANGED`` changed numeric leaves whose paths differ only
+    in index segments are collapsed into one entry with a wildcarded path
+    (``state.id0.args[1][*][0]``) and the same magnitude stats typed arrays
+    get; index positions that are constant across the group stay literal.
+
+    Args:
+        changed: Raw (path, old, new) changed-leaf tuples.
+        leaves_a: All leaves on the old side (for totals and bounds).
+        leaves_b: All leaves on the new side.
+
+    Returns:
+        Tuple of (aggregated array-style entries, remaining itemized
+        changed tuples).
+    """
+    groups: Dict[str, List[Tuple[str, float, float]]] = {}
+    for path, value_a, value_b in changed:
+        if not (_is_number(value_a) and _is_number(value_b)):
+            continue
+        if not _INDEX_TOKEN_RE.search(path):
+            continue
+        key = _INDEX_TOKEN_RE.sub("[*]", path)
+        groups.setdefault(key, []).append((path, float(value_a), float(value_b)))
+
+    aggregated: List[Dict[str, Any]] = []
+    consumed: set = set()
+    for members in groups.values():
+        if len(members) < AGGREGATE_MIN_CHANGED:
+            continue
+        token_rows = [_INDEX_TOKEN_RE.split(path) for path, _va, _vb in members]
+        length = len(token_rows[0])
+        pattern = [
+            "[*]"
+            if i % 2 == 1 and len({row[i] for row in token_rows}) > 1
+            else token_rows[0][i]
+            for i in range(length)
+        ]
+
+        def matches(path: str) -> bool:
+            tokens = _INDEX_TOKEN_RE.split(path)
+            return len(tokens) == length and all(
+                pattern[i] == "[*]" or tokens[i] == pattern[i] for i in range(length)
+            )
+
+        group_paths = [
+            path
+            for path, value_a in leaves_a.items()
+            if path in leaves_b
+            and _is_number(value_a)
+            and _is_number(leaves_b[path])
+            and matches(path)
+        ]
+        old_values = np.array([float(leaves_a[p]) for p in group_paths])
+        new_values = np.array([float(leaves_b[p]) for p in group_paths])
+        deltas = np.abs(new_values - old_values)
+        entry: Dict[str, Any] = {
+            "path": "".join(pattern),
+            "leaves": {"changed": len(members), "total": len(group_paths)},
+            "changed_fraction": round(len(members) / len(group_paths), 6),
+            "max_abs_delta": float(np.max(deltas)),
+            "mean_abs_delta": float(np.mean(deltas)),
+        }
+        bounds_from = [float(np.min(old_values)), float(np.max(old_values))]
+        bounds_to = [float(np.min(new_values)), float(np.max(new_values))]
+        if bounds_from != bounds_to:
+            entry["bounds"] = {"from": bounds_from, "to": bounds_to}
+        aggregated.append(entry)
+        consumed.update(path for path, _va, _vb in members)
+
+    remaining = [item for item in changed if item[0] not in consumed]
+    return aggregated, remaining
+
+
+def _format_values(
+    added: List[str],
+    removed: List[str],
+    changed: List[Tuple[str, Any, Any]],
+) -> Dict[str, Any]:
+    """Build the ``values`` payload, capping itemized lists for JSON."""
+    changed_entries = [
+        {
+            "path": path,
+            "from": summaries.truncated_repr(value_a, 60),
+            "to": summaries.truncated_repr(value_b, 60),
+        }
+        for path, value_a, value_b in changed
+    ]
+    values: Dict[str, Any] = {}
+    truncated: Dict[str, int] = {}
+    for name, items in (
+        ("added", added),
+        ("removed", removed),
+        ("changed", changed_entries),
+    ):
+        if len(items) > MAX_ITEMIZED_VALUES:
+            truncated[name] = len(items) - MAX_ITEMIZED_VALUES
+            items = items[:MAX_ITEMIZED_VALUES]
+        values[name] = items
+    if truncated:
+        values["truncated"] = truncated
+    return values
 
 
 def _diff_state(
     data_a: Dict[str, Any],
     data_b: Dict[str, Any],
     arrays: Dict[str, List[Dict[str, Any]]],
-    leaves: Dict[str, List[Any]],
+    changed_leaf_paths: List[str],
 ) -> Dict[str, List[str]]:
     """State keys added/removed/changed (via array + leaf diffs under state.*)."""
     keys_a = set((data_a.get("state") or {}).keys())
@@ -262,11 +382,10 @@ def _diff_state(
         return rest
 
     changed = set()
-    for section in (arrays["changed"], leaves["changed"]):
-        for item in section:
-            key = state_key(item)
-            if key is not None and key in keys_a and key in keys_b:
-                changed.add(key)
+    for item in list(arrays["changed"]) + list(changed_leaf_paths):
+        key = state_key(item)
+        if key is not None and key in keys_a and key in keys_b:
+            changed.add(key)
     return {
         "added": sorted(keys_b - keys_a),
         "removed": sorted(keys_a - keys_b),
@@ -319,9 +438,16 @@ def diff_visual_pair(
     _flatten_leaves({"state": data_a.get("state")}, "", None, leaves_a)
     _flatten_leaves({"ast": data_b.get("ast")}, "", None, leaves_b)
     _flatten_leaves({"state": data_b.get("state")}, "", None, leaves_b)
-    leaves = _diff_leaves(leaves_a, leaves_b, epsilon)
+    leaves_added, leaves_removed, changed_raw = _diff_leaves(
+        leaves_a, leaves_b, epsilon
+    )
+    aggregated, changed_raw = _aggregate_leaf_changes(changed_raw, leaves_a, leaves_b)
+    arrays["changed"].extend(aggregated)
+    leaves = _format_values(leaves_added, leaves_removed, changed_raw)
 
-    state = _diff_state(data_a, data_b, arrays, leaves)
+    state = _diff_state(
+        data_a, data_b, arrays, [path for path, _va, _vb in changed_raw]
+    )
 
     _, warnings_a = inspect_tools.inspect_visual_data(visual_a["data"], buffers_a)
     _, warnings_b = inspect_tools.inspect_visual_data(visual_b["data"], buffers_b)
@@ -476,7 +602,7 @@ def verdict_line(payload: Dict[str, Any]) -> str:
     if component_changes:
         parts.append(f"{component_changes} component change(s)")
     value_changes = sum(
-        len(pair["values"][k])
+        len(pair["values"][k]) + pair["values"].get("truncated", {}).get(k, 0)
         for pair in payload["pairs"]
         for k in ("added", "removed", "changed")
     )

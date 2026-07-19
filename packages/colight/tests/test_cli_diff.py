@@ -137,6 +137,76 @@ class TestNumericDelta:
         assert stats["changed_fraction"] == pytest.approx(0.5)
 
 
+class TestLeafAggregation:
+    """Nested-JSON-list changes collapse into one array-style entry."""
+
+    def make_pair(self, tmp_path: pathlib.Path):
+        points_a = [[i * 0.1, float(i % 7)] for i in range(40)]
+        points_b = [
+            [x, y + (0.5 if i % 2 == 0 else 0.0)] for i, (x, y) in enumerate(points_a)
+        ]
+        a = save_artifact(tmp_path, "a.colight", Plot.line(points_a))
+        b = save_artifact(tmp_path, "b.colight", Plot.line(points_b))
+        return a, b
+
+    def test_many_leaf_changes_aggregate(self, tmp_path: pathlib.Path):
+        a, b = self.make_pair(tmp_path)
+        payload = diff_tools.diff_targets(a, b)
+        pair = payload["pairs"][0]
+        # One wildcarded entry instead of 20 itemized value lines; the
+        # constant column index stays literal.
+        entries = [e for e in pair["arrays"]["changed"] if "[*]" in e["path"]]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["path"].endswith("[*][1]")
+        assert entry["leaves"] == {"changed": 20, "total": 40}
+        assert entry["changed_fraction"] == pytest.approx(0.5)
+        assert entry["max_abs_delta"] == pytest.approx(0.5)
+        assert entry["mean_abs_delta"] == pytest.approx(0.25)
+        assert entry["bounds"]["from"] == [0.0, 6.0]
+        assert entry["bounds"]["to"] == [0.0, 6.5]
+        # Consumed leaves are not itemized, and the summary sees the group.
+        assert pair["values"]["changed"] == []
+        assert payload["summary"]["arrays_changed"] == 1
+        assert payload["summary"]["max_abs_delta_path"] == entry["path"]
+
+    def test_small_groups_stay_itemized(self, tmp_path: pathlib.Path):
+        points_a = [[float(i), float(i)] for i in range(10)]
+        points_b = [row[:] for row in points_a]
+        points_b[3][1] = 9.0
+        points_b[7][1] = 9.0  # two changes < AGGREGATE_MIN_CHANGED
+        a = save_artifact(tmp_path, "a.colight", Plot.line(points_a))
+        b = save_artifact(tmp_path, "b.colight", Plot.line(points_b))
+        pair = diff_tools.diff_targets(a, b)["pairs"][0]
+        assert not any("[*]" in e["path"] for e in pair["arrays"]["changed"])
+        assert len(pair["values"]["changed"]) == 2
+
+    def test_itemized_values_are_capped(self, tmp_path: pathlib.Path):
+        count = diff_tools.MAX_ITEMIZED_VALUES + 10
+        a = save_artifact(
+            tmp_path,
+            "a.colight",
+            Plot.State({f"k{i:03d}": f"a{i}" for i in range(count)}),
+        )
+        b = save_artifact(
+            tmp_path,
+            "b.colight",
+            Plot.State({f"k{i:03d}": f"b{i}" for i in range(count)}),
+        )
+        payload = diff_tools.diff_targets(a, b)
+        values = payload["pairs"][0]["values"]
+        assert len(values["changed"]) == diff_tools.MAX_ITEMIZED_VALUES
+        assert values["truncated"] == {"changed": 10}
+
+        result = CliRunner().invoke(cli_main, ["diff", str(a), str(b)])
+        assert result.exit_code == 1
+        itemized = [ln for ln in result.output.splitlines() if "  value " in ln]
+        assert len(itemized) == 5
+        assert f"… {count - 5} more value change(s)" in result.output
+        # Verdict counts the full number of changes, not the capped list.
+        assert f"{count} value change(s)" in result.output
+
+
 class TestEpsilon:
     def test_below_epsilon_is_identical(self, tmp_path: pathlib.Path):
         a = dot_artifact(tmp_path, "a.colight", np.array([1.0, 2.0]))
