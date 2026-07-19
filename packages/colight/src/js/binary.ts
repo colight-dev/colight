@@ -114,10 +114,16 @@ export function inferDtype(value) {
  */
 export function evaluateNdarray(node) {
   const { data, dtype, shape } = node;
-  const ArrayConstructor = dtypeMap[dtype] || Float64Array;
+  const ArrayConstructor = dtypeMap[dtype];
+  if (!ArrayConstructor) {
+    throw new Error(
+      `Unknown ndarray dtype: ${JSON.stringify(dtype)}. Supported dtypes: ${Object.keys(dtypeMap).join(", ")}`,
+    );
+  }
 
-  // Create typed array directly from the DataView's buffer
-  // Our format guarantees 8-byte alignment for all buffers
+  // Create typed array directly from the DataView's buffer.
+  // The format guarantees 8-byte alignment for every buffer in every entry,
+  // so this zero-copy view is always valid.
   const flatArray = new ArrayConstructor(
     data.buffer,
     data.byteOffset,
