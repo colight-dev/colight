@@ -5,7 +5,7 @@ import pytest
 
 omf = pytest.importorskip("omf")
 
-from colight.omf_loader import colormap, load_omf  # noqa: E402
+from colight.omf_loader import load_omf  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -133,6 +133,11 @@ def test_component_builders(omf_path: str) -> None:
     segments = project.line_sets["holes"].line_segments(color_by="grade")
     assert segments.type == "LineSegments"
     assert segments.props["colors"].size == 9
+    # The colormap spec travels with the component (legend + reporting).
+    meta = segments.props["color_by"]
+    assert meta["cmap"] == "viridis"
+    assert meta["label"] == "grade"
+    assert meta["domain"] == [0.1, 0.9]
 
     mesh = project.surfaces["topo"].mesh(color=[1, 0, 0])
     assert mesh.type == "Mesh"
@@ -142,16 +147,5 @@ def test_component_builders(omf_path: str) -> None:
     assert cuboids.type == "Cuboid"
     assert cuboids.props["centers"].size == 9
     assert cuboids.props["half_size"] == [1.0, 1.0, 1.0]
-
-
-def test_colormap_range_and_nan() -> None:
-    values = np.array([0.0, 0.5, 1.0, np.nan])
-    colors = colormap(values, vmin=0.0, vmax=1.0)
-    assert colors.shape == (4, 3)
-    assert colors.dtype == np.float32
-    assert np.all(colors >= 0.0) and np.all(colors <= 1.0)
-    np.testing.assert_allclose(colors[3], [0.5, 0.5, 0.5])
-    # Out-of-range values clamp to the ramp ends.
-    clamped = colormap(np.array([-10.0, 10.0]), vmin=0.0, vmax=1.0)
-    np.testing.assert_allclose(clamped[0], colors[0])
-    np.testing.assert_allclose(clamped[1], colors[2])
+    # Domain anchors at the cutoff so legends read like the cutoff slider.
+    assert cuboids.props["color_by"]["domain"] == [5.0, 7.0]

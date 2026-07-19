@@ -15,15 +15,15 @@ Element mapping:
 - ``SurfaceElement``   -> :class:`OMFSurface`   -> ``scene3d.Mesh``
 - ``VolumeElement`` (regular grid) -> :class:`OMFGridVolume` -> ``scene3d.Cuboid``
 
-scene3d has no built-in colormap support, so this module ships a minimal
-numpy colormap (:func:`colormap`) used to turn scalar attributes into
-per-instance RGB arrays.
+Scalar attributes are colored through scene3d's first-class ``color_by``
+prop (see :mod:`colight.colormaps`), so drillhole traces and block models
+get proper colormaps AND legends for free.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -31,55 +31,19 @@ from colight import scene3d
 
 PathLike = Union[str, "Any"]
 
-# Anchor colors for a small built-in "viridis" ramp (matplotlib anchor values).
-_VIRIDIS = np.array(
-    [
-        [0.267004, 0.004874, 0.329415],
-        [0.282623, 0.140926, 0.457517],
-        [0.253935, 0.265254, 0.529983],
-        [0.206756, 0.371758, 0.553117],
-        [0.163625, 0.471133, 0.558148],
-        [0.127568, 0.566949, 0.550556],
-        [0.134692, 0.658636, 0.517649],
-        [0.266941, 0.748751, 0.440573],
-        [0.477504, 0.821444, 0.318195],
-        [0.741388, 0.873449, 0.149561],
-        [0.993248, 0.906157, 0.143936],
-    ]
-)
 
-
-def colormap(
+def _color_by_spec(
     values: np.ndarray,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-    stops: Optional[np.ndarray] = None,
-    nan_color: Tuple[float, float, float] = (0.5, 0.5, 0.5),
-) -> np.ndarray:
-    """Map scalar values to RGB colors with a piecewise-linear ramp.
-
-    Args:
-        values: 1D array of scalar values (NaNs allowed).
-        vmin: Lower bound of the ramp; defaults to ``nanmin(values)``.
-        vmax: Upper bound of the ramp; defaults to ``nanmax(values)``.
-        stops: Kx3 array of RGB anchor colors, evenly spaced over [vmin, vmax].
-            Defaults to a viridis-like ramp.
-        nan_color: RGB color assigned to NaN values.
-
-    Returns:
-        Nx3 float32 array of RGB colors in [0, 1].
-    """
-    values = np.asarray(values, dtype=np.float64)
-    ramp = _VIRIDIS if stops is None else np.asarray(stops, dtype=np.float64)
-    lo = float(np.nanmin(values)) if vmin is None else float(vmin)
-    hi = float(np.nanmax(values)) if vmax is None else float(vmax)
-    span = hi - lo if hi > lo else 1.0
-    nan_mask = np.isnan(values)
-    t = np.clip((np.where(nan_mask, lo, values) - lo) / span, 0.0, 1.0)
-    xs = np.linspace(0.0, 1.0, len(ramp))
-    rgb = np.stack([np.interp(t, xs, ramp[:, c]) for c in range(3)], axis=-1)
-    rgb[nan_mask] = nan_color
-    return rgb.astype(np.float32)
+    cmap: str,
+    domain: Optional[Sequence[float]],
+    label: Optional[str],
+) -> scene3d.ColorBy:
+    spec: scene3d.ColorBy = {"values": values, "cmap": cmap}
+    if domain is not None:
+        spec["domain"] = domain
+    if label is not None:
+        spec["label"] = label
+    return spec
 
 
 @dataclass
@@ -122,22 +86,27 @@ class OMFLineSet:
     def line_segments(
         self,
         color_by: Optional[str] = None,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
+        cmap: str = "viridis",
+        domain: Optional[Sequence[float]] = None,
+        label: Optional[str] = None,
         **kwargs: Any,
     ) -> scene3d.SceneComponent:
         """Build a scene3d LineSegments component.
 
         Args:
-            color_by: Name of a segment attribute to map through
-                :func:`colormap` as per-segment colors.
-            vmin: Colormap lower bound (see :func:`colormap`).
-            vmax: Colormap upper bound (see :func:`colormap`).
+            color_by: Name of a segment attribute to color by (mapped
+                through ``scene3d``'s colormap support, with a legend).
+            cmap: Colormap name (see :mod:`colight.colormaps`).
+            domain: Colormap (min, max); None derives it from the values.
+            label: Legend label; defaults to the attribute name.
             **kwargs: Forwarded to ``scene3d.LineSegments`` (size, color, ...).
         """
         if color_by is not None:
             values = self.segment_attributes[color_by]
-            kwargs.setdefault("colors", colormap(values, vmin=vmin, vmax=vmax))
+            kwargs.setdefault(
+                "color_by",
+                _color_by_spec(values, cmap, domain, label or color_by),
+            )
         return scene3d.LineSegments(
             starts=self.starts.astype(np.float32),
             ends=self.ends.astype(np.float32),
@@ -209,20 +178,24 @@ class OMFGridVolume:
         color_by: str,
         cutoff: Optional[float] = None,
         stride: int = 1,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
+        cmap: str = "viridis",
+        domain: Optional[Sequence[float]] = None,
+        label: Optional[str] = None,
         **kwargs: Any,
     ) -> scene3d.SceneComponent:
         """Build a scene3d Cuboid instance layer for cells passing a cutoff.
 
         Args:
-            color_by: Cell attribute mapped through :func:`colormap` for
-                per-cell colors (and used for the cutoff test).
+            color_by: Cell attribute to color by (mapped through
+                ``scene3d``'s colormap support, with a legend; also used
+                for the cutoff test).
             cutoff: Keep only cells with ``value >= cutoff``. None keeps all.
             stride: Subsample the grid, keeping every ``stride``-th cell
                 along each axis (before the cutoff filter).
-            vmin: Colormap lower bound; defaults to ``cutoff`` when given.
-            vmax: Colormap upper bound.
+            cmap: Colormap name (see :mod:`colight.colormaps`).
+            domain: Colormap (min, max); None spans ``cutoff`` (when given)
+                to the max surviving value.
+            label: Legend label; defaults to the attribute name.
             **kwargs: Forwarded to ``scene3d.Cuboid``.
 
         Returns:
@@ -230,9 +203,11 @@ class OMFGridVolume:
         """
         centers, values = self.filtered_cells(color_by, cutoff=cutoff, stride=stride)
         half = np.array([t[0] for t in self.tensors], dtype=np.float32) / 2.0
+        if domain is None and cutoff is not None and values.size:
+            domain = (float(cutoff), float(np.nanmax(values)))
         kwargs.setdefault(
-            "colors",
-            colormap(values, vmin=cutoff if vmin is None else vmin, vmax=vmax),
+            "color_by",
+            _color_by_spec(values, cmap, domain, label or color_by),
         )
         kwargs.setdefault("half_size", half.tolist())
         return scene3d.Cuboid(centers=centers.astype(np.float32), **kwargs)
