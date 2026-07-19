@@ -46,6 +46,7 @@ nav:
       - Python Event Loops: learn-more/python-event-loop.py
       - Compare with Observable Plot: learn-more/vs-observable.py
       - Plot Options: learn-more/plot-options.py
+      - The .colight File Format: format.md
   - CLI: learn-more/cli.py
   - API:
       - Core: api/core.md
