@@ -34,5 +34,5 @@ site-build
 .vscode-test
 packages/colight-vscode/media/output-panel.js
 packages/colight-vscode/out
-.claude/settings.local.json
-.claude
+.claude/*
+!.claude/skills/
