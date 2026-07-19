@@ -26,6 +26,8 @@
 # ## Library Context
 # Colight is a library for interactive data visuals in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
 #
+# `colight.scene3d` renders declarative 3D scenes with WebGPU. Primitives: `PointCloud`, `Ellipsoid`, `Cuboid`, `LineBeams`, `LineSegments`, `Mesh` (triangle geometry with optional normals/vertex colors/UVs/texture), `ImagePlane`, `ImageProjection`, `CameraFrustum`, `GridHelper`, and `Group` (hierarchical position/quaternion/scale transforms over children). Components combine with `+` (optionally with a props dict, e.g. `{"defaultCamera": {...}}`) and compose with Plot layout items via `|` and `&`. Instances support `decorations=[deco(indices, color=..., alpha=..., scale=...)]`, automatic `hover_props` (color/alpha/scale/outline), `onHover`/`onClick` picking callbacks, and drag interactions via `on_drag` with `drag_constraint` (`drag_axis`, `drag_plane`, or the `DRAG_*` constants). `TranslateGizmo(position, on_drag=...)` provides a ready-made translation manipulator (prototype API).
+#
 # Layout components (Row, Column, Grid) allow flexible arrangement of elements and can be composed using & (Row) and | (Column) operators. HTML (via React) can be created using "hiccup in python", and tailwind css classes are supported.
 #
 # There is a "state" api across both Python and JavaScript. In Python one sets initial state by including `Plot.State({key: value})` as a layout item (can be anywhere), and `Plot.onChange({key: callback})` to invoke functions when state changes. These onChange Callbacks receive (widget, event) arguments where event contains `"value"`. In Python one reads state via `widget.key`, resets via `widget.key = foo`, set multiple values via `widget.update({key: value})` or pass `widget.update` any number of `[key, operation, payload]` lists where operation can be "append", "concat", "setAt", or "reset". In JavaScript one reads state via `$state.key`, write via `$state.key = foo`, and updates via `$state.update({key: value})` or pass $state.update any number of operations as in python, eg. `$state.update(["foo", "append", 1], ["bar", "concat", [1, 2]], ["baz", "setAt", [index, value]])`.
@@ -987,8 +989,8 @@ sizes = 0.01 + 0.02 * np.sin(t)
     | Scene(
         PointCloud(
             centers,
-            colors,
-            sizes,
+            colors=colors,
+            sizes=sizes,
             onHover=Plot.js("(i) => $state.update({hover_point: i})"),
             decorations=[
                 {
@@ -1026,7 +1028,7 @@ def generate_ellipsoid_frames(n_frames=60):
         np.array([[-0.5, 0, 0], [0.5, 0, 0]])[np.newaxis, :, :], n_frames, axis=0
     )  # Centers frames
     t = np.linspace(0, 2 * np.pi, n_frames)  # Time array
-    radii_frames = np.stack(
+    half_size_frames = np.stack(
         [
             np.stack(
                 [
@@ -1047,18 +1049,18 @@ def generate_ellipsoid_frames(n_frames=60):
         ],
         axis=1,
     )  # Radii frames
-    return centers_frames, radii_frames
+    return centers_frames, half_size_frames
 
 
 # Generate animation frames
-centers, radii = generate_ellipsoid_frames()
+centers, half_sizes = generate_ellipsoid_frames()
 
 # Create colors (gradient from red to blue)
 colors = np.stack([np.linspace(1, 0, 10), np.zeros(10), np.linspace(0, 1, 10)], axis=1)
 
 ellipsoids = Ellipsoid(
     centers=Plot.js("$state.centers[$state.frame]"),
-    radii=Plot.js("$state.radii[$state.frame]"),
+    half_sizes=Plot.js("$state.half_sizes[$state.frame]"),
     colors=Plot.js("$state.colors"),
 )
 
@@ -1072,7 +1074,9 @@ camera = {
         {
             "frame": 0,
             "centers": centers.reshape(60, -1),  # Flatten to (n_frames, n_ellipsoids*3)
-            "radii": radii.reshape(60, -1),  # Flatten to (n_frames, n_ellipsoids*3)
+            "half_sizes": half_sizes.reshape(
+                60, -1
+            ),  # Flatten to (n_frames, n_ellipsoids*3)
             "colors": colors.flatten(),  # Flatten to (n_ellipsoids*3,)
             "camera": {
                 "position": [1, 1, 0],  # Closer camera position

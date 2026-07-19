@@ -18,6 +18,7 @@ A "cell" is defined as:
 - Visual feedback with cell highlighting
 - Compatible with Jupyter notebooks and Python scripts using [Jupytext "light" format](https://jupytext.readthedocs.io/en/latest/formats-scripts.html#the-light-format)
 - Integrates with VS Code's Python Interactive Window
+- Alternatively, evaluates cells against a Colight eval server (`colight eval`, started and managed from the status bar) and renders results — including Colight visuals — in a built-in output panel
 
 ## Requirements
 

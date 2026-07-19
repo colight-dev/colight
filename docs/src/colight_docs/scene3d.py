@@ -73,7 +73,22 @@ scene_pc
 # %% [markdown]
 # ## Other Primitives
 #
-# Scene3D supports several primitive types: PointCloud, Ellipsoid, Cuboid, LineBeams, and BoundingBox.
+# Scene3D provides these primitives:
+#
+# - `PointCloud` — instanced points (squares oriented to face the camera)
+# - `Ellipsoid` — spheres/ellipsoids, solid or `fill_mode="MajorWireframe"`
+# - `Cuboid` — boxes with optional per-instance orientation quaternions
+# - `LineBeams` — connected beam segments (points sharing an `i` value form a polyline)
+# - `LineSegments` — independent segments given `starts` and `ends` arrays
+# - `Mesh` — arbitrary triangle meshes with optional normals, per-vertex colors, UVs, and textures
+# - `ImagePlane` — a textured quad displaying an image (numpy array or PIL image)
+# - `ImageProjection` — an image plane positioned in space from camera intrinsics/extrinsics
+# - `CameraFrustum` — wireframe camera frustum from intrinsics/extrinsics
+# - `GridHelper` — a reference grid of line segments
+# - `Group` — hierarchical transform (position/quaternion/scale) applied to child components
+# - `CustomPrimitive` — instances of a custom mesh type defined elsewhere in the scene
+#
+# The examples below overlay several of them in one scene.
 
 # %%
 
@@ -202,7 +217,7 @@ cloud = PointCloud(
     color=[0.5, 0.5, 0.5],  # Default gray color
     size=0.05,  # Default size
     decorations=[
-        # Make points 0-9 red, 3x size size
+        # Make points 0-9 red, 3x size
         deco(np.arange(10), color=[1.0, 0.0, 0.0], scale=3.0),
         # Make points 10-19 semi-transparent blue, 10x size
         deco(np.arange(10, 20), color=[0.0, 0.0, 1.0], alpha=0.5, scale=10.0),
@@ -250,3 +265,67 @@ cuboid_centers = np.array(
         ],
     )
 )
+
+# %% [markdown]
+
+# ## Meshes and Groups
+#
+# `Mesh` renders arbitrary triangle geometry (with optional normals, per-vertex
+# colors, UVs, and textures), and `Group` applies a transform — `position`,
+# `quaternion`, `scale` — to a list of child components, which may include
+# nested groups. Groups can also bubble up events from their children
+# (`on_hover`, `on_click`, `on_drag`) and apply `hover_props` or
+# `child_defaults`/`child_overrides` to all children at once.
+
+# %%
+from colight.scene3d import Group, GridHelper, Mesh
+
+triangle = Mesh(
+    positions=[[0, 0, 0], [1, 0, 0], [0.5, 1, 0]],
+    indices=[0, 1, 2],
+    center=[0, 0, 0],
+    color=[1, 0.5, 0],
+)
+
+(
+    Group(
+        [triangle, Cuboid(center=[1.2, 0.5, 0], half_size=0.2, color=[0, 0.7, 1])],
+        position=[0, 0, 0.5],
+        scale=0.8,
+        name="assembly",
+    )
+    + GridHelper(size=4, divisions=8)
+    + {
+        "defaultCamera": {
+            "position": [2.5, 2.5, 2.5],
+            "target": [0.5, 0.5, 0.5],
+            "up": [0, 0, 1],
+        }
+    }
+)
+
+# %% [markdown]
+
+# ## Hover and Drag Interactions
+#
+# Every primitive accepts interaction props:
+#
+# - `hover_props`: appearance applied automatically while an instance is hovered
+#   — `color`, `alpha`, `scale`, or `outline` (with `outline_color` /
+#   `outline_width`) for an outline overlay, with no state management required.
+# - `on_hover` / `on_click`: callbacks receiving the picked instance. Rich pick
+#   info (instance index, world position, component and group names) is
+#   available to click and drag handlers.
+# - `on_drag`, `on_drag_start`, `on_drag_end` with a `drag_constraint`:
+#   `drag_axis(direction, origin)` and `drag_plane(normal, origin)` build
+#   constraints, and the constants `DRAG_AXIS_X/Y/Z`, `DRAG_PLANE_XY/XZ/YZ`,
+#   `DRAG_SURFACE`, `DRAG_SCREEN`, and `DRAG_FREE` cover common cases.
+# - `picking_scale`: enlarges the picking hit area of thin geometry.
+# - `layer="overlay"`: renders a component in front of the scene, always
+#   visible — useful for handles and manipulators.
+#
+# `TranslateGizmo(position, on_drag=...)` composes these into a ready-made
+# translation gizmo with axis arrows, plane handles, and a center sphere
+# (prototype; API may change). See the `drag.py`, `gizmo.py`, `mesh.py`, and
+# `image_plane.py` notebooks in `examples/src/notebooks/` for full
+# interactive examples.

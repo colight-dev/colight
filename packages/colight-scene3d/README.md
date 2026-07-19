@@ -1,6 +1,6 @@
 # @colight/scene3d
 
-Standalone Scene3D WebGPU renderer from Colight.
+Standalone Scene3D WebGPU renderer from [Colight](https://github.com/colight-dev/colight). Declarative 3D scenes as plain component configs rendered into a React `<Scene>`.
 
 ## Install
 
@@ -46,12 +46,36 @@ export function Example() {
 }
 ```
 
+## Components
+
+- `PointCloud` — instanced camera-facing points
+- `Ellipsoid` — spheres/ellipsoids, solid or major-wireframe fill mode
+- `Cuboid` — boxes with optional per-instance quaternions
+- `LineBeams` — connected beam segments (polylines)
+- `LineSegments` — independent segments from `starts`/`ends`
+- `Mesh` — arbitrary triangle geometry with optional normals, vertex colors, UVs, and textures
+- `ImagePlane` / `ImageProjection` — textured image quads, optionally placed from camera intrinsics/extrinsics
+- `CameraFrustum` — wireframe frustum from intrinsics/extrinsics
+- `BoundingBox` — wireframe boxes
+- `GridHelper` — reference grid
+- `Group` — hierarchical transforms (position/quaternion/scale) over child components, with event bubbling and per-group style props
+- `deco` — per-instance decorations (color/alpha/scale overrides)
+
+Custom primitives can be defined via the declarative `PrimitiveSpec` interface.
+
+## Interaction
+
+- Picking: `onHover` / `onClick` receive rich pick info (instance index, world position, component/group names).
+- Hover styling: `hoverProps` applies color/alpha/scale or an outline overlay automatically, no state management required.
+- Dragging: `onDrag` / `onDragStart` / `onDragEnd` with `dragConstraint` — build constraints with `dragAxis` / `dragPlane` or use the `DRAG_AXIS_*` / `DRAG_PLANE_*` constants.
+- Gizmo: `createTranslateGizmo` builds a translation manipulator (prototype; API may change).
+
+## Utilities
+
+Also exported: camera defaults (`DEFAULT_CAMERA`) and types, `Vec3` math (`add`, `sub`, `cross`, `normalize`, ...), ray/plane intersection helpers, screen projection (`screenRay`, `projectToScreen`), pointer context helpers, group/quaternion utilities (`flattenGroups`, `quatFromAxisAngle`, ...), and canvas snapshot helpers for screenshots/PDF export. See `index.ts` type exports for the full surface.
+
 ## Notes
 
 - Requires a browser with WebGPU enabled.
 - `react` is a peer dependency.
 - For camera control, pass `camera`, `defaultCamera`, and `onCameraChange`.
-
-## API
-
-Exports: `Scene`, `PointCloud`, `Ellipsoid`, `Cuboid`, `LineBeams`, `deco`, `computeCanvasDimensions`, `DEFAULT_CAMERA`.
