@@ -57,6 +57,16 @@ colight run path/to/notebook.py --json
 # Inspect a visual's structure without rendering: components, array
 # schemas, state keys, and sanity warnings (NaN/Inf, empty arrays, ...)
 colight inspect path/to/plot.colight --json
+
+# Semantic diff of two visuals (.colight or .py): components added/removed,
+# per-array magnitude stats (max/mean |delta|, bounds drift), state keys,
+# warning delta. Exit 0 = identical within --epsilon, 1 = differences
+colight diff before.colight after.colight --json
+
+# Deterministic screenshot: fixed viewport + device-pixel-ratio, waits for
+# render completion; --check renders twice and byte-compares
+colight screenshot path/to/plot.colight --out shot.png --json
+colight screenshot notebook.py --block ID --out shot.png
 ```
 
 There is also `colight eval`, an eval server used by the VS Code extension.

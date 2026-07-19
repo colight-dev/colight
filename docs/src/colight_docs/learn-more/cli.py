@@ -154,8 +154,9 @@
 # %% [markdown]
 # ## Agent-facing commands
 #
-# Three subcommands expose the block structure and evaluation results as
-# structured data (add `--json` to any of them for machine-readable output):
+# These subcommands expose block structure, evaluation results, artifact
+# diffs and reproducible screenshots as structured data (add `--json` to any
+# of them for machine-readable output):
 #
 # ```bash
 # # Dump the block graph: stable ids, line ranges, provides/requires,
@@ -173,9 +174,27 @@
 # # zero-extent bounds, mismatched per-instance lengths)
 # colight inspect target.colight [--json]
 # colight inspect notebook.py [--json]
+#
+# # Semantic diff of two targets (.colight or .py, evaluated headlessly;
+# # visuals paired by position): components added/removed/type-changed,
+# # per-array dtype/shape changes and magnitude stats (max/mean |delta|,
+# # fraction changed beyond --epsilon, bounds drift), scalar value changes,
+# # state keys, buffer deltas, warnings introduced/resolved.
+# # Exit 0 = identical within epsilon, 1 = differences, 2 = error.
+# colight diff a.colight b.colight [--json] [--epsilon 1e-9]
+# colight diff old.py new.py [--json]
+#
+# # Deterministic screenshot via the same headless-Chrome path as
+# # `colight render`: fixed viewport and device-pixel-ratio, waits for
+# # render completion, renders at t=0 (no update entries applied).
+# # --check renders twice in fresh tabs and byte-compares (exit 1 on
+# # mismatch); JSON reports pixel size, sha256 and determinism.
+# colight screenshot target.colight --out shot.png [--json] [--check]
+# colight screenshot notebook.py --block ID --out shot.png
 # ```
 #
 # Block ids are short hashes of each block's own source, so they survive
 # edits to other blocks. `colight run` keeps its fingerprint records in
 # `.colight_cache/cli-run/` under the project root; `--block ID` restricts
-# detailed output to that block and its dependents.
+# detailed output to that block and its dependents. For `.py` targets,
+# `colight screenshot` defaults to the last visual the file produces.
