@@ -61,7 +61,7 @@ async function main() {
   // Copy widget assets before building
   copyWidgetAssets();
 
-  const ctx = await esbuild.context({
+  const extensionCtx = await esbuild.context({
     entryPoints: ["src/extension.ts"],
     bundle: true,
     format: "cjs",
@@ -77,11 +77,46 @@ async function main() {
       esbuildProblemMatcherPlugin,
     ],
   });
+
+  // Webview bundle loaded by the output panel (see src/outputPanel.ts).
+  // Source lives in the colight package; keep options in sync with the
+  // vscodePanelConfig in the repo-root esbuild.config.mjs.
+  const outputPanelCtx = await esbuild.context({
+    entryPoints: [
+      path.join(
+        __dirname,
+        "..",
+        "colight",
+        "src",
+        "js",
+        "vscode-panel",
+        "index.jsx",
+      ),
+    ],
+    bundle: true,
+    format: "iife",
+    minify: production,
+    sourcemap: !production,
+    platform: "browser",
+    outfile: path.join(__dirname, "media", "output-panel.js"),
+    loader: {
+      ".css": "text",
+    },
+    define: {
+      "process.env.NODE_ENV": JSON.stringify(
+        production ? "production" : "development",
+      ),
+    },
+    logLevel: "silent",
+    plugins: [esbuildProblemMatcherPlugin],
+  });
+
+  const contexts = [extensionCtx, outputPanelCtx];
   if (watch) {
-    await ctx.watch();
+    await Promise.all(contexts.map((ctx) => ctx.watch()));
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+    await Promise.all(contexts.map((ctx) => ctx.dispose()));
   }
 }
 
