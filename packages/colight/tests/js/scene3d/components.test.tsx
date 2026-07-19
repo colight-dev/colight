@@ -183,6 +183,33 @@ describe("Scene3D Components", () => {
       });
     });
 
+    it("should render point cloud impostors when requested", async () => {
+      const components: ComponentConfig[] = [
+        {
+          type: "PointCloud",
+          centers: new Float32Array([0, 0, 0]),
+          colors: new Float32Array([1, 0, 0]),
+          render_mode: "impostor",
+        },
+      ];
+
+      await act(async () => {
+        render(
+          <WrappedSceneInner
+            components={components}
+            containerWidth={800}
+            containerHeight={600}
+            onReady={vi.fn()}
+          />,
+        );
+      });
+
+      const createRenderPipeline = mockDevice.createRenderPipeline as Mock;
+      await waitFor(() => {
+        expect(createRenderPipeline).toHaveBeenCalled();
+      });
+    });
+
     it("should update when positions change", async () => {
       const initialComponents: ComponentConfig[] = [
         {
@@ -298,6 +325,36 @@ describe("Scene3D Components", () => {
           type: "Ellipsoid",
           centers: new Float32Array([0, 0, 0]),
           half_sizes: new Float32Array([1, 2, 1]),
+          render_mode: "impostor",
+        },
+      ];
+
+      await act(async () => {
+        render(
+          <WrappedSceneInner
+            components={components}
+            containerWidth={800}
+            containerHeight={600}
+            onReady={vi.fn()}
+          />,
+        );
+      });
+
+      const createRenderPipeline = mockDevice.createRenderPipeline as Mock;
+      await waitFor(() => {
+        expect(createRenderPipeline).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("Sphere", () => {
+    it("should render a sphere impostor when requested", async () => {
+      const components: ComponentConfig[] = [
+        {
+          type: "Sphere",
+          centers: new Float32Array([0, 0, 0]),
+          color: [1, 0, 0],
+          radius: 0.5,
           render_mode: "impostor",
         },
       ];

@@ -37,6 +37,7 @@ import {
   ellipsoidSpec,
   lineBeamsSpec,
   pointCloudSpec,
+  sphereSpec,
   buildPickingData,
   buildRenderData,
   createPrimitiveResourceKey,
@@ -152,6 +153,7 @@ const primitiveRegistry: Record<
   PrimitiveRegistryEntry
 > = {
   PointCloud: pointCloudSpec,
+  Sphere: sphereSpec,
   Ellipsoid: ellipsoidSpec,
   EllipsoidAxes: ellipsoidAxesSpec,
   Cuboid: cuboidSpec,

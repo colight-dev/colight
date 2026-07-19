@@ -4,13 +4,16 @@ import {
   billboardShaderProgram,
   ellipsoidImpostorShaderProgram,
   lineBeamShaderProgram,
+  pointCloudImpostorShaderProgram,
   rigidLitShaderProgram,
+  sphereImpostorShaderProgram,
 } from "../../../src/js/scene3d/shaders";
 import {
   cuboidSpec,
   ellipsoidSpec,
   lineBeamsSpec,
   pointCloudSpec,
+  sphereSpec,
 } from "../../../src/js/scene3d/components";
 
 describe("scene3d shader generation", () => {
@@ -69,10 +72,35 @@ describe("scene3d shader generation", () => {
     );
   });
 
+  it("builds sphere impostor shaders for lit and unlit variants", () => {
+    expect(sphereImpostorShaderProgram.renderVertex).toContain("safeRadius");
+    expect(sphereImpostorShaderProgram.fragment).toContain("calculateLighting");
+    expect(pointCloudImpostorShaderProgram.fragment).not.toContain(
+      "calculateLighting",
+    );
+    expect(pointCloudImpostorShaderProgram.fragment).toContain(
+      "intersectSphere",
+    );
+  });
+
   it("propagates generated buffer metadata into primitive specs", () => {
     const pointCloudMeshSpec = pointCloudSpec.resolveSpec({
       type: "PointCloud",
       centers: new Float32Array(),
+    });
+    const pointCloudImpostorSpec = pointCloudSpec.resolveSpec({
+      type: "PointCloud",
+      centers: new Float32Array(),
+      render_mode: "impostor",
+    });
+    const sphereMeshSpec = sphereSpec.resolveSpec({
+      type: "Sphere",
+      centers: new Float32Array(),
+    });
+    const sphereImpostorSpec = sphereSpec.resolveSpec({
+      type: "Sphere",
+      centers: new Float32Array(),
+      render_mode: "impostor",
     });
     const ellipsoidMeshSpec = ellipsoidSpec.resolveSpec({
       type: "Ellipsoid",
@@ -98,6 +126,17 @@ describe("scene3d shader generation", () => {
     expect(pointCloudMeshSpec.colorOffset).toBe(
       billboardShaderProgram.colorOffset,
     );
+    expect(pointCloudImpostorSpec.floatsPerInstance).toBe(
+      pointCloudImpostorShaderProgram.renderFloatsPerInstance,
+    );
+    expect(pointCloudImpostorSpec.resourceKey).toBe("PointCloud:impostor");
+    expect(sphereMeshSpec.floatsPerInstance).toBe(
+      rigidLitShaderProgram.renderFloatsPerInstance,
+    );
+    expect(sphereImpostorSpec.floatsPerInstance).toBe(
+      sphereImpostorShaderProgram.renderFloatsPerInstance,
+    );
+    expect(sphereImpostorSpec.resourceKey).toBe("Sphere:impostor");
     expect(ellipsoidMeshSpec.floatsPerInstance).toBe(
       rigidLitShaderProgram.renderFloatsPerInstance,
     );

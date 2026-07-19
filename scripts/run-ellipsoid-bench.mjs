@@ -5,16 +5,19 @@ import { access, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const defaultPort = 4173;
 const defaultTimeoutMs = 30 * 60 * 1000;
+const execFileAsync = promisify(execFile);
 
 function parseArgs(argv) {
   const options = {
+    browser: "chromium",
     headed: false,
     serveOnly: false,
     skipBuild: false,
@@ -41,6 +44,10 @@ function parseArgs(argv) {
 
     if (arg === "--headed") {
       options.headed = true;
+      continue;
+    }
+    if (arg === "--browser") {
+      options.browser = nextValue();
       continue;
     }
     if (arg === "--serve-only") {
@@ -106,6 +113,9 @@ function parseArgs(argv) {
   if (options.height != null && (!Number.isFinite(options.height) || options.height < 1)) {
     throw new Error(`Invalid --height value: ${options.height}`);
   }
+  if (options.browser !== "chromium" && options.browser !== "safari") {
+    throw new Error(`Invalid --browser value: ${options.browser}`);
+  }
   if (
     options.renderMode != null &&
     options.renderMode !== "mesh" &&
@@ -138,6 +148,144 @@ function runCommand(command, args) {
       );
     });
   });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function createRunOptions(options) {
+  const runOptions = {};
+  if (options.counts) {
+    runOptions.counts = options.counts
+      .split(",")
+      .map((part) => Number.parseInt(part.trim().replace(/_/g, ""), 10))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }
+  if (options.frames != null) runOptions.frameCount = options.frames;
+  if (options.width != null) runOptions.width = options.width;
+  if (options.height != null) runOptions.height = options.height;
+  if (options.renderMode) runOptions.renderMode = options.renderMode;
+  return runOptions;
+}
+
+async function runAppleScript(lines, args = []) {
+  const osaArgs = lines.flatMap((line) => ["-e", line]);
+  const { stdout } = await execFileAsync("osascript", [...osaArgs, ...args], {
+    cwd: repoRoot,
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+async function openSafariTab(url) {
+  await runAppleScript(
+    [
+      "on run argv",
+      "set targetURL to item 1 of argv",
+      'tell application "Safari"',
+      "activate",
+      "if (count windows) = 0 then",
+      'make new document with properties {URL:targetURL}',
+      "else",
+      "tell front window",
+      'set current tab to (make new tab with properties {URL:targetURL})',
+      "end tell",
+      "end if",
+      "end tell",
+      "end run",
+    ],
+    [url.toString()],
+  );
+}
+
+async function runSafariJavaScript(scriptSource) {
+  return await runAppleScript(
+    [
+      "on run argv",
+      "set scriptSource to item 1 of argv",
+      'tell application "Safari"',
+      "if (count windows) = 0 then error \"Safari has no open windows\"",
+      "set jsResult to do JavaScript scriptSource in current tab of front window",
+      "if jsResult is missing value then return \"\"",
+      "return jsResult as text",
+      "end tell",
+      "end run",
+    ],
+    [scriptSource],
+  );
+}
+
+async function waitForSafariBenchReady(timeoutMs) {
+  const startedAt = Date.now();
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const raw = await runSafariJavaScript(`(() => {
+        return JSON.stringify({
+          readyState: document.readyState,
+          hasBench: !!window.__COLIGHT_ELLIPSOID_BENCH__,
+        });
+      })()`);
+      const state = JSON.parse(raw || "{}");
+      if (state.readyState === "complete" && state.hasBench) {
+        return;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await delay(250);
+  }
+
+  throw lastError ?? new Error("Timed out waiting for Safari bench page to initialize");
+}
+
+async function startSafariBenchmark(runOptions) {
+  const runOptionsJson = JSON.stringify(runOptions);
+  await runSafariJavaScript(`(() => {
+    const bench = window.__COLIGHT_ELLIPSOID_BENCH__;
+    if (!bench) {
+      throw new Error("window.__COLIGHT_ELLIPSOID_BENCH__ is not available");
+    }
+
+    const nextRunOptions = ${runOptionsJson};
+
+    window.__COLIGHT_BENCH_AUTOMATION__ = {
+      startedAt: performance.now(),
+      options: nextRunOptions,
+    };
+
+    void bench.run(nextRunOptions);
+    return "started";
+  })()`);
+}
+
+async function waitForSafariBenchmarkState(timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const raw = await runSafariJavaScript(`(() => {
+      const bench = window.__COLIGHT_ELLIPSOID_BENCH__;
+      if (!bench) return "";
+      const state = bench.getState();
+      if (state.status === "completed" || state.status === "error") {
+        return JSON.stringify(state);
+      }
+      return "";
+    })()`);
+
+    if (raw) {
+      return JSON.parse(raw);
+    }
+
+    await delay(500);
+  }
+
+  throw new Error("Timed out waiting for Safari benchmark to finish");
 }
 
 async function ensureBuilt(skipBuild) {
@@ -272,9 +420,6 @@ async function startStaticServer(host, requestedPort) {
 function buildBenchUrl(origin, options) {
   const url = new URL("/experiments/ellipsoid-bench/", origin);
 
-  if (!options.serveOnly) {
-    url.searchParams.set("autorun", "1");
-  }
   if (options.counts) {
     url.searchParams.set("counts", options.counts);
   }
@@ -314,6 +459,28 @@ function formatResultRows(results) {
 }
 
 async function runBenchmark(url, options) {
+  const runOptions = createRunOptions(options);
+
+  if (options.browser === "safari") {
+    await openSafariTab(url);
+    await waitForSafariBenchReady(options.timeoutMs);
+    await startSafariBenchmark(runOptions);
+    const state = await waitForSafariBenchmarkState(options.timeoutMs);
+
+    console.log(`Benchmark status: ${state.status}`);
+    if (state.gpuInfo) {
+      console.log("GPU info:");
+      console.log(JSON.stringify(state.gpuInfo, null, 2));
+    }
+    if (state.results?.length) {
+      console.table(formatResultRows(state.results));
+    }
+    if (state.status === "error") {
+      throw new Error(state.error || "Benchmark failed");
+    }
+    return;
+  }
+
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({
     headless: !options.headed,
@@ -337,6 +504,18 @@ async function runBenchmark(url, options) {
 
   try {
     await page.goto(url.toString(), { waitUntil: "networkidle" });
+    await page.waitForFunction(
+      () => !!window.__COLIGHT_ELLIPSOID_BENCH__,
+      undefined,
+      { timeout: options.timeoutMs },
+    );
+    await page.evaluate((nextRunOptions) => {
+      const bench = window.__COLIGHT_ELLIPSOID_BENCH__;
+      if (!bench) {
+        throw new Error("window.__COLIGHT_ELLIPSOID_BENCH__ is not available");
+      }
+      void bench.run(nextRunOptions);
+    }, runOptions);
     const stateHandle = await page.waitForFunction(
       () => {
         const bench = window.__COLIGHT_ELLIPSOID_BENCH__;

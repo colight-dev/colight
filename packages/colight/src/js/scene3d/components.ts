@@ -3,8 +3,10 @@
 import {
   billboardShaderProgram,
   ellipsoidImpostorShaderProgram,
+  pointCloudImpostorShaderProgram,
   rigidLitShaderProgram,
   lineBeamShaderProgram,
+  sphereImpostorShaderProgram,
   GeneratedPrimitiveShaderProgram,
 } from "./shaders";
 
@@ -32,6 +34,8 @@ import {
 } from "./types";
 
 import { acopy } from "../utils";
+
+const IDENTITY_QUATERNION = [0, 0, 0, 1] as const;
 
 /** ===================== DECORATIONS + COMMON UTILS ===================== **/
 
@@ -593,6 +597,7 @@ export interface PointCloudComponentConfig extends BaseComponentConfig {
   centers: Float32Array;
   sizes?: Float32Array; // Per-point sizes
   size?: number; // Default size, defaults to 0.02
+  render_mode?: PrimitiveImplementationMode;
 }
 
 const pointCloudMeshImplementation =
@@ -613,6 +618,31 @@ const pointCloudMeshImplementation =
         indexData: new Uint16Array([0, 1, 2, 2, 1, 3]),
       });
     },
+  });
+
+const pointCloudImpostorImplementation =
+  defineShaderImplementation<PointCloudComponentConfig>({
+    mode: "impostor",
+    shaderProgram: pointCloudImpostorShaderProgram,
+    pipelineKey: "PointCloud:impostor",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    fillRenderGeometry(constants, elem, i, out, outIndex) {
+      const outOffset = outIndex * this.floatsPerInstance;
+      const size = constants.size || elem.sizes![i];
+
+      acopy(elem.centers, i * 3, out, outOffset, 3);
+      out[outOffset + 3] = size * 0.5;
+
+      fillColor(this, constants, elem, i, out, outOffset);
+      fillAlpha(this, constants, elem, i, out, outOffset);
+    },
+    applyDecorationScale(out, offset, scaleFactor) {
+      out[offset + 3] *= scaleFactor;
+    },
+    createGeometryResource: pointCloudMeshImplementation.createGeometryResource,
   });
 
 export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
@@ -647,6 +677,105 @@ export const pointCloudSpec = definePrimitive<PointCloudComponentConfig>({
   },
   implementations: {
     mesh: pointCloudMeshImplementation,
+    impostor: pointCloudImpostorImplementation,
+  },
+  resolveImplementation(elem) {
+    return elem.render_mode ?? "mesh";
+  },
+});
+
+/** ===================== SPHERE ===================== **/
+
+export interface SphereComponentConfig extends BaseComponentConfig {
+  type: "Sphere";
+  centers: Float32Array | number[];
+  radii?: Float32Array | number[];
+  radius?: number;
+  render_mode?: PrimitiveImplementationMode;
+}
+
+const sphereMeshImplementation =
+  defineShaderImplementation<SphereComponentConfig>({
+    mode: "mesh",
+    shaderProgram: rigidLitShaderProgram,
+    pipelineKey: "Sphere:mesh",
+    renderConfig: {
+      cullMode: "back",
+      topology: "triangle-list",
+    },
+    fillRenderGeometry(constants, elem, i, out, outIndex) {
+      const outOffset = outIndex * this.floatsPerInstance;
+      const radius = constants.radius ?? elem.radii![i];
+
+      acopy(elem.centers, i * 3, out, outOffset, 3);
+      out[outOffset + 3] = radius;
+      out[outOffset + 4] = radius;
+      out[outOffset + 5] = radius;
+      acopy(IDENTITY_QUATERNION, 0, out, outOffset + 6, 4);
+
+      fillColor(this, constants, elem, i, out, outOffset);
+      fillAlpha(this, constants, elem, i, out, outOffset);
+    },
+    applyDecorationScale(out, offset, scaleFactor) {
+      out[offset + 3] *= scaleFactor;
+      out[offset + 4] *= scaleFactor;
+      out[offset + 5] *= scaleFactor;
+    },
+    createGeometryResource(device, geometryOptions: Scene3DGeometryOptions) {
+      return createBuffers(
+        device,
+        createSphereGeometry(
+          geometryOptions.ellipsoidStacks,
+          geometryOptions.ellipsoidSlices,
+        ),
+      );
+    },
+  });
+
+const sphereImpostorImplementation =
+  defineShaderImplementation<SphereComponentConfig>({
+    mode: "impostor",
+    shaderProgram: sphereImpostorShaderProgram,
+    pipelineKey: "Sphere:impostor",
+    renderConfig: {
+      cullMode: "none",
+      topology: "triangle-list",
+    },
+    fillRenderGeometry(constants, elem, i, out, outIndex) {
+      const outOffset = outIndex * this.floatsPerInstance;
+
+      acopy(elem.centers, i * 3, out, outOffset, 3);
+      out[outOffset + 3] = constants.radius ?? elem.radii![i];
+
+      fillColor(this, constants, elem, i, out, outOffset);
+      fillAlpha(this, constants, elem, i, out, outOffset);
+    },
+    applyDecorationScale(out, offset, scaleFactor) {
+      out[offset + 3] *= scaleFactor;
+    },
+    createGeometryResource: pointCloudMeshImplementation.createGeometryResource,
+  });
+
+export const sphereSpec = definePrimitive<SphereComponentConfig>({
+  type: "Sphere",
+  defaults: {
+    radius: 0.5,
+  },
+
+  getElementCount(elem) {
+    return elem.centers.length / 3;
+  },
+
+  getCenters(elem) {
+    return elem.centers;
+  },
+
+  implementations: {
+    mesh: sphereMeshImplementation,
+    impostor: sphereImpostorImplementation,
+  },
+  resolveImplementation(elem) {
+    return elem.render_mode ?? "mesh";
   },
 });
 
@@ -957,6 +1086,7 @@ export const lineBeamsSpec = definePrimitive<LineBeamsComponentConfig>({
 
 export type ComponentConfig =
   | PointCloudComponentConfig
+  | SphereComponentConfig
   | EllipsoidComponentConfig
   | CuboidComponentConfig
   | LineBeamsComponentConfig;

@@ -267,6 +267,7 @@ export interface Decoration {
 }
 
 export interface ElementConstants {
+  radius?: number;
   half_size?: number[] | Float32Array | number;
   quaternion?: number[] | Float32Array;
   size?: number;

@@ -21,6 +21,7 @@ import {
   CuboidComponentConfig,
   EllipsoidComponentConfig,
   LineBeamsComponentConfig,
+  SphereComponentConfig,
 } from "./components";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
@@ -88,6 +89,20 @@ export function PointCloud(
   return {
     ...coerceFloat32Fields(props, ["centers", "colors", "sizes"]),
     type: "PointCloud",
+  };
+}
+
+/**
+ * Creates a sphere component configuration.
+ * @param props - Sphere configuration properties
+ * @returns {SphereComponentConfig} Configuration for rendering spheres in 3D space
+ */
+export function Sphere(
+  props: Omit<SphereComponentConfig, "type">,
+): SphereComponentConfig {
+  return {
+    ...coerceFloat32Fields(props, ["centers", "radii", "colors", "alphas"]),
+    type: "Sphere",
   };
 }
 

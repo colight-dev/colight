@@ -505,6 +505,158 @@ export const lineBeamShaderProgram = generatePrimitiveShaderProgram({
   shading: "lit",
 });
 
+const sphereImpostorVertCode = /*wgsl*/ `
+${cameraStruct}
+
+struct SphereImpostorVSOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec3<f32>,
+  @location(1) @interpolate(flat) alpha: f32,
+  @location(2) @interpolate(flat) center: vec3<f32>,
+  @location(3) @interpolate(flat) radius: f32,
+  @location(4) @interpolate(flat) pickID: f32
+};
+
+@vertex
+fn vs_main(
+  @location(0) localPos: vec3<f32>,
+  @location(1) _normal: vec3<f32>,
+  @location(2) center: vec3<f32>,
+  @location(3) radius: f32,
+  @location(4) color: vec3<f32>,
+  @location(5) alpha: f32,
+  @location(6) pickID: f32
+) -> SphereImpostorVSOut {
+  let safeRadius = max(radius, 0.000001);
+  let worldPos = center
+    + camera.cameraRight * (localPos.x * safeRadius * 2.0)
+    + camera.cameraUp * (localPos.y * safeRadius * 2.0);
+
+  var out: SphereImpostorVSOut;
+  out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
+  out.color = color;
+  out.alpha = alpha;
+  out.center = center;
+  out.radius = safeRadius;
+  out.pickID = pickID;
+  return out;
+}`;
+
+function createSphereImpostorFragmentCode(
+  shading: PrimitiveShadingModel,
+): string {
+  const colorExpr =
+    shading === "lit"
+      ? "calculateLighting(color, worldNormal, hitWorld)"
+      : "color";
+  const lightingCode =
+    shading === "lit"
+      ? `${lightingConstants}
+${lightingCalc}`
+      : "";
+
+  return /*wgsl*/ `
+${cameraStruct}
+${lightingCode}
+${pickIDEncoding}
+
+struct SphereImpostorFSOut {
+  @location(0) color: vec4<f32>,
+  @location(1) pick: vec4<f32>,
+  @builtin(frag_depth) depth: f32
+};
+
+fn cameraRayDirection(fragCoord: vec4<f32>) -> vec3<f32> {
+  let clipX =
+    ((fragCoord.x + 0.5) / camera.viewportSize.x) * 2.0 - 1.0;
+  let clipY =
+    1.0 - ((fragCoord.y + 0.5) / camera.viewportSize.y) * 2.0;
+  let viewX = clipX * camera.aspect * camera.tanHalfFov;
+  let viewY = clipY * camera.tanHalfFov;
+  return normalize(
+    camera.cameraForward + camera.cameraRight * viewX + camera.cameraUp * viewY
+  );
+}
+
+fn intersectSphere(
+  rayOrigin: vec3<f32>,
+  rayDir: vec3<f32>,
+  center: vec3<f32>,
+  radius: f32
+) -> vec4<f32> {
+  let offset = rayOrigin - center;
+  let safeRadius = max(radius, 0.000001);
+  let b = dot(offset, rayDir);
+  let c = dot(offset, offset) - safeRadius * safeRadius;
+  let discriminant = b * b - c;
+  if (discriminant < 0.0) {
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+  }
+
+  let sqrtDiscriminant = sqrt(discriminant);
+  var t = -b - sqrtDiscriminant;
+  if (t <= 0.0) {
+    t = -b + sqrtDiscriminant;
+  }
+
+  if (t <= 0.0) {
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+  }
+
+  let hitWorld = rayOrigin + rayDir * t;
+  return vec4<f32>(hitWorld, t);
+}
+
+@fragment
+fn fs_main(
+  @builtin(position) fragCoord: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec3<f32>,
+  @location(1) @interpolate(flat) alpha: f32,
+  @location(2) @interpolate(flat) center: vec3<f32>,
+  @location(3) @interpolate(flat) radius: f32,
+  @location(4) @interpolate(flat) pickID: f32
+) -> SphereImpostorFSOut {
+  let rayOrigin = camera.cameraPos;
+  let rayDir = cameraRayDirection(fragCoord);
+  let hit = intersectSphere(rayOrigin, rayDir, center, radius);
+  if (hit.w <= 0.0) {
+    discard;
+  }
+
+  let hitWorld = hit.xyz;
+  let worldNormal = normalize(hitWorld - center);
+  let clipPos = camera.mvp * vec4<f32>(hitWorld, 1.0);
+  let depth = clamp((clipPos.z / clipPos.w) * 0.5 + 0.5, 0.0, 1.0);
+
+  var out: SphereImpostorFSOut;
+  out.color = vec4<f32>(${colorExpr}, alpha);
+  out.pick = encodePickID(pickID);
+  out.depth = depth;
+  return out;
+}`;
+}
+
+function createSphereImpostorShaderProgram(
+  shading: PrimitiveShadingModel,
+): GeneratedPrimitiveShaderProgram {
+  return {
+    geometryLayout: POINT_CLOUD_GEOMETRY_LAYOUT,
+    renderLayout: billboardShaderProgram.renderLayout,
+    pickIDLayout: billboardShaderProgram.pickIDLayout,
+    renderVertex: sphereImpostorVertCode,
+    fragment: createSphereImpostorFragmentCode(shading),
+    renderFloatsPerInstance: billboardShaderProgram.renderFloatsPerInstance,
+    pickIDFloatsPerInstance: billboardShaderProgram.pickIDFloatsPerInstance,
+    colorOffset: billboardShaderProgram.colorOffset,
+    alphaOffset: billboardShaderProgram.alphaOffset,
+  };
+}
+
+export const sphereImpostorShaderProgram =
+  createSphereImpostorShaderProgram("lit");
+export const pointCloudImpostorShaderProgram =
+  createSphereImpostorShaderProgram("unlit");
+
 const ellipsoidImpostorVertCode = /*wgsl*/ `
 ${cameraStruct}
 

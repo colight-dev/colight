@@ -200,6 +200,7 @@ def PointCloud(
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all points
+    render_mode: str | None = None,  # Which renderer to use ("mesh" or "impostor")
     **kwargs: Any,
 ) -> SceneComponent:
     """Create a point cloud element.
@@ -212,6 +213,9 @@ def PointCloud(
         size: Default size for all points if sizes not provided
         alphas: Array of alpha values per point (optional)
         alpha: Default alpha value for all points if alphas not provided
+        render_mode: Which renderer to use. One of:
+            - "mesh": Current quad billboard point renderer
+            - "impostor": Analytic sphere impostor on the same top-level primitive
         **kwargs: Additional arguments like decorations, onHover, onClick
     """
     centers = flatten_array(centers, dtype=np.float32)
@@ -231,8 +235,60 @@ def PointCloud(
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     if alpha is not None:
         data["alpha"] = alpha
+    if render_mode is not None:
+        data["render_mode"] = render_mode
 
     return SceneComponent("PointCloud", data, **kwargs)
+
+
+def Sphere(
+    centers: ArrayLike,
+    radii: Optional[ArrayLike] = None,
+    radius: Optional[NumberLike] = None,
+    colors: Optional[ArrayLike] = None,
+    color: Optional[ArrayLike] = None,
+    alphas: Optional[ArrayLike] = None,
+    alpha: Optional[NumberLike] = None,
+    render_mode: str | None = None,  # Which renderer to use ("mesh" or "impostor")
+    **kwargs: Any,
+) -> SceneComponent:
+    """Create a sphere element.
+
+    Args:
+        centers: Nx3 array of sphere centers or flattened array
+        radii: N array of sphere radii or flattened array (optional)
+        radius: Default radius for all spheres if radii not provided
+        colors: Nx3 array of RGB colors or flattened array (optional)
+        color: Default RGB color [r,g,b] for all spheres if colors not provided
+        alphas: Array of alpha values per sphere (optional)
+        alpha: Default alpha value for all spheres if alphas not provided
+        render_mode: Which renderer to use. One of:
+            - "mesh": Tessellated sphere mesh
+            - "impostor": Analytic screen-space sphere impostor
+        **kwargs: Additional arguments like decorations, onHover, onClick
+    """
+    centers = flatten_array(centers, dtype=np.float32)
+    data: Dict[str, Any] = {"centers": centers}
+
+    if radii is not None:
+        data["radii"] = flatten_array(radii, dtype=np.float32)
+    elif radius is not None:
+        data["radius"] = radius
+
+    if colors is not None:
+        data["colors"] = flatten_array(colors, dtype=np.float32)
+    elif color is not None:
+        data["color"] = color
+
+    if alphas is not None:
+        data["alphas"] = flatten_array(alphas, dtype=np.float32)
+    elif alpha is not None:
+        data["alpha"] = alpha
+
+    if render_mode is not None:
+        data["render_mode"] = render_mode
+
+    return SceneComponent("Sphere", data, **kwargs)
 
 
 def Ellipsoid(
@@ -400,6 +456,7 @@ def LineBeams(
 __all__ = [
     "Scene",
     "PointCloud",
+    "Sphere",
     "Ellipsoid",
     "Cuboid",
     "LineBeams",
