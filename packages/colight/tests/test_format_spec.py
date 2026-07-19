@@ -75,8 +75,8 @@ def test_header_byte_layout(spec_file: Path):
 
     # Magic: "COLIGHT\x00"
     assert h["magic"] == b"COLIGHT\x00" == MAGIC_BYTES
-    # Version: uint64le == 1
-    assert h["version"] == 1 == CURRENT_VERSION
+    # Version: uint64le == 2
+    assert h["version"] == 2 == CURRENT_VERSION
     # JSON section immediately follows the 96-byte header
     assert h["json_offset"] == HEADER_SIZE == 96
     # Reserved bytes 56-95 are zero
@@ -159,11 +159,14 @@ def test_ndarray_envelopes_and_buffer_bytes(spec_file: Path):
 def test_entry_framing_and_update_entries(spec_file: Path):
     content = spec_file.read_bytes()
 
-    # Walk entries exactly as the spec prescribes:
-    # next entry starts at binary_offset + binary_length.
+    # Walk entries exactly as the spec prescribes: next entry starts at
+    # align8(binary_offset + binary_length).
     entries = []
     offset = 0
     while offset < len(content):
+        # Every entry starts at an 8-byte aligned absolute offset, so every
+        # buffer's absolute offset is 8-aligned too (zero-copy guarantee).
+        assert offset % 8 == 0
         h = _parse_header(content, offset)
         assert h["magic"] == MAGIC_BYTES
         assert h["version"] == CURRENT_VERSION
@@ -172,11 +175,22 @@ def test_entry_framing_and_update_entries(spec_file: Path):
                 offset + h["json_offset"] : offset + h["json_offset"] + h["json_length"]
             ]
         )
+        if "bufferLayout" in entry_json:
+            for buf_offset in entry_json["bufferLayout"]["offsets"]:
+                assert (offset + h["binary_offset"] + buf_offset) % 8 == 0
         entries.append((h, entry_json))
-        offset += h["binary_offset"] + h["binary_length"]
+        unpadded_end = offset + h["binary_offset"] + h["binary_length"]
+        offset += (h["binary_offset"] + h["binary_length"] + 7) & ~7
+        # The trailing entry padding is zeroed.
+        assert content[unpadded_end:offset] == b"\x00" * (offset - unpadded_end)
     # The walk must consume the file exactly, with no trailing bytes.
     assert offset == len(content)
     assert len(entries) == 3
+
+    # The alignment padding is real: the first entry ends with a 17-byte raw
+    # buffer, so its unpadded size is not a multiple of 8.
+    first = entries[0][0]
+    assert (first["binary_offset"] + first["binary_length"]) % 8 != 0
 
     # Entry roles: initial entry has no "updates" key; update entries do.
     assert "updates" not in entries[0][1]
@@ -203,6 +217,25 @@ def test_entry_framing_and_update_entries(spec_file: Path):
     assert len(update_entries) == 2
     assert update_entries[0]["data"]["state"]["zoom"] == 2.0
     assert bytes(update_entries[0]["buffers"][0]) == ARRAYS["uint8"].tobytes()
+
+
+def test_writer_normalizes_big_endian_arrays(tmp_path: Path):
+    """The wire format is little-endian: big-endian arrays are converted on write."""
+    big_endian = np.array([1.5, -2.0, 3.25], dtype=">f4")
+    path = tmp_path / "endian.colight"
+    json_data, buffers = to_json_with_state({"arr": big_endian})
+    create_file(json_data, buffers, path)
+
+    initial, parsed_buffers, _updates = parse_file(path)
+    assert initial is not None
+    envelope = initial["ast"]["arr"]
+    # dtype is the canonical name, never a byte-order-qualified string
+    assert envelope["dtype"] == "float32"
+    # bytes are little-endian
+    assert (
+        bytes(parsed_buffers[envelope["__buffer_index__"]])
+        == big_endian.astype("<f4").tobytes()
+    )
 
 
 def test_version_mismatch_errors_loudly(spec_file: Path):

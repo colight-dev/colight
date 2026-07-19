@@ -27,8 +27,8 @@ function createEntry(jsonData, version) {
 }
 
 describe("Colight format versioning", () => {
-  it("supports exactly version 1", () => {
-    expect(CURRENT_VERSION).toBe(1n);
+  it("supports exactly version 2", () => {
+    expect(CURRENT_VERSION).toBe(2n);
   });
 
   it("accepts the current version", () => {
@@ -50,6 +50,14 @@ describe("Colight format versioning", () => {
     const data = createEntry({ ast: null, state: {} }, 0n);
     expect(() => parseColightData(data)).toThrow(
       "Unsupported .colight file version: found 0",
+    );
+  });
+
+  it("rejects version 1 (pre-release; no back-compat window)", () => {
+    const data = createEntry({ ast: null, state: {} }, 1n);
+    expect(() => parseColightData(data)).toThrow(
+      `Unsupported .colight file version: found 1, ` +
+        `this reader supports version ${CURRENT_VERSION}`,
     );
   });
 });

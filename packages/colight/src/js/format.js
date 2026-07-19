@@ -10,7 +10,10 @@ import { decodeBase64ToUint8Array } from "./base64.js";
 // File format constants
 const MAGIC_BYTES = new TextEncoder().encode("COLIGHT\0");
 const HEADER_SIZE = 96;
-export const CURRENT_VERSION = 1n;
+export const CURRENT_VERSION = 2n;
+
+/** Round n up to the next multiple of 8. */
+const align8 = (n) => Math.ceil(n / 8) * 8;
 
 /**
  * Parse a single entry from the .colight data.
@@ -114,8 +117,9 @@ function parseEntry(data, offset) {
     }
   }
 
-  // Calculate total entry size
-  const entrySize = binaryOffset + binaryLength;
+  // Total entry size, including the trailing padding that keeps the next
+  // entry 8-byte aligned (and thus zero-copy typed-array views valid).
+  const entrySize = align8(binaryOffset + binaryLength);
 
   return {
     jsonData,
