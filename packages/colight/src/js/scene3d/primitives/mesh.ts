@@ -717,6 +717,8 @@ export function defineMesh(
   const spec = definePrimitive<MeshComponentConfig>({
     name,
 
+    extraProps: ["texture", "textureKey"],
+
     attributes: {
       position: attr.vec3("centers"),
       size: attr.vec3("scales", [1, 1, 1]),

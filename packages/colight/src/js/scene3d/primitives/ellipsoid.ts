@@ -78,6 +78,8 @@ export const ellipsoidSpec = definePrimitive<EllipsoidComponentConfig>({
 
   coerce: coerceEllipsoid,
 
+  extraProps: ["fill_mode"],
+
   attributes: {
     position: attr.vec3("centers"),
     size: attr.vec3("half_sizes", [0.5, 0.5, 0.5]),

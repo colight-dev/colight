@@ -8,15 +8,18 @@
  * 4. Scalar values are expanded (half_size: 0.5 → [0.5, 0.5, 0.5])
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { coerceToFloat32 } from "../../../src/js/scene3d/arrayUtils";
 
 // Import coercion helpers and specs using dynamic imports to avoid circular dependencies
-const { coerceFloat32Fields, resolveSingular, expandScalar } =
-  await import("../../../src/js/scene3d/primitives/define");
+const { coerceFloat32Fields, resolveSingular, expandScalar } = await import(
+  "../../../src/js/scene3d/primitives/define"
+);
 
 const { pointCloudSpec, ellipsoidSpec, cuboidSpec, boundingBoxSpec } =
   await import("../../../src/js/scene3d/components");
+
+const { compileScene } = await import("../../../src/js/scene3d/compiler");
 
 describe("coerceToFloat32", () => {
   it("returns a flat Float32Array unchanged", () => {
@@ -281,5 +284,112 @@ describe("primitive coerce functions", () => {
       expect(result.centers).toBeInstanceOf(Float32Array);
       expect(result.type).toBe("BoundingBox");
     });
+  });
+});
+
+// =============================================================================
+// Python boundary convention: multi-word data props are snake_case
+// =============================================================================
+
+describe("snake_case data props at the Python boundary", () => {
+  it("Ellipsoid consumes half_sizes and quaternions", () => {
+    const result = ellipsoidSpec.coerce!({
+      centers: [[0, 0, 0]],
+      half_sizes: [0.1, 0.2, 0.3],
+      quaternions: [1, 0, 0, 0],
+    });
+
+    expect(result.half_sizes).toEqual(new Float32Array([0.1, 0.2, 0.3]));
+    expect(result.quaternions).toEqual(new Float32Array([1, 0, 0, 0]));
+  });
+
+  it("Ellipsoid consumes fill_mode and switches to EllipsoidAxes", () => {
+    const result = ellipsoidSpec.coerce!({
+      centers: [[0, 0, 0]],
+      fill_mode: "MajorWireframe",
+    });
+
+    expect(result.type).toBe("EllipsoidAxes");
+  });
+
+  it("Cuboid consumes scalar half_size", () => {
+    const result = cuboidSpec.coerce!({
+      centers: [[0, 0, 0]],
+      half_size: 0.25,
+    });
+
+    expect(result.half_size).toEqual([0.25, 0.25, 0.25]);
+  });
+
+  it("boundingBoxSpec consumes half_size arrays", () => {
+    const result = boundingBoxSpec.coerce!({
+      centers: [[0, 0, 0]],
+      half_sizes: [1, 2, 3],
+    });
+
+    expect(result.half_sizes).toEqual(new Float32Array([1, 2, 3]));
+  });
+});
+
+// =============================================================================
+// Unknown props are LOUD (warn instead of silently dropping)
+// =============================================================================
+
+describe("unknown prop warnings", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("warns when a camelCased data prop reaches the compiler", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    compileScene([
+      {
+        type: "Ellipsoid",
+        centers: new Float32Array([0, 0, 0]),
+        halfSize: 0.1, // wrong spelling — data props are snake_case
+      } as any,
+    ]);
+
+    const messages = warn.mock.calls.map((call) => String(call[0]));
+    expect(
+      messages.some((m) => m.includes("Ellipsoid") && m.includes("halfSize")),
+    ).toBe(true);
+  });
+
+  it("does not warn for valid snake_case data and camelCase framework props", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    compileScene([
+      {
+        type: "Cuboid",
+        centers: new Float32Array([0, 0, 0]),
+        half_size: 0.25,
+        quaternions: new Float32Array([1, 0, 0, 0]),
+        hoverProps: { outline: true, outlineColor: [1, 0, 0] },
+        pickingScale: 2.0,
+        onHover: () => {},
+        decorations: [{ indexes: [0], outlineWidth: 3 }],
+      } as any,
+    ]);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("warns only once for the same unknown prop", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const component = {
+      type: "PointCloud",
+      centers: new Float32Array([0, 0, 0]),
+      pointSizes: [1, 2, 3],
+    } as any;
+    compileScene([component]);
+    compileScene([component]);
+
+    const matching = warn.mock.calls.filter((call) =>
+      String(call[0]).includes("pointSizes"),
+    );
+    expect(matching.length).toBe(1);
   });
 });

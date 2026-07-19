@@ -362,6 +362,9 @@ function fillPickingGeometry(
 export const ellipsoidAxesSpec = definePrimitive<EllipsoidAxesComponentConfig>({
   name: "EllipsoidAxes",
 
+  // Carried through from Ellipsoid coercion (fill_mode: "MajorWireframe")
+  extraProps: ["fill_mode"],
+
   // Schema used for constants computation (even though fill is custom)
   attributes: {
     position: attr.vec3("centers"),

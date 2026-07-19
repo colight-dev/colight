@@ -24,6 +24,13 @@ export interface PrimitiveSpec<ConfigType> {
   coerce?: (props: Record<string, any>) => Record<string, any>;
 
   /**
+   * Complete set of prop names this primitive accepts (data props in
+   * snake_case plus the shared framework props). Used by the compiler to
+   * warn loudly about unknown keys instead of silently dropping them.
+   */
+  knownProps?: Set<string>;
+
+  /**
    * Fields that should be coerced to typed arrays.
    * Used by Scene to normalize NdArrayView and regular arrays.
    */
@@ -303,6 +310,36 @@ export interface ElementConstants {
  * - "overlay": Renders in front of scene geometry, always visible
  */
 export type RenderLayer = "scene" | "overlay";
+
+/**
+ * Prop names shared by every primitive via BaseComponentConfig.
+ * Data props are snake_case (matching the Python API); framework props
+ * (callbacks, hover/outline styling, picking options) are camelCase.
+ * Used to build each spec's `knownProps` set for unknown-key warnings.
+ */
+export const BASE_COMPONENT_PROPS: readonly string[] = [
+  "type",
+  "constants",
+  "layer",
+  "colors",
+  "color",
+  "alphas",
+  "alpha",
+  "scales",
+  "scale",
+  "decorations",
+  "hoverProps",
+  "pickingScale",
+  "outline",
+  "outlineColor",
+  "outlineWidth",
+  "onHover",
+  "onClick",
+  "onDragStart",
+  "onDrag",
+  "onDragEnd",
+  "dragConstraint",
+];
 
 export interface BaseComponentConfig {
   constants?: ElementConstants;

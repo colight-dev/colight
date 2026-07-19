@@ -8,6 +8,7 @@
 
 import {
   BaseComponentConfig,
+  BASE_COMPONENT_PROPS,
   PrimitiveSpec,
   PipelineCacheEntry,
   GeometryResource,
@@ -243,6 +244,13 @@ export interface PrimitiveDefinition<Config extends BaseComponentConfig> {
    * Should return props with `type` field set.
    */
   coerce?: (props: Record<string, any>) => Record<string, any>;
+
+  /**
+   * Additional accepted prop names beyond the attribute schema and the
+   * shared BaseComponentConfig props (e.g. "fill_mode" for Ellipsoid).
+   * Used to build the spec's `knownProps` set for unknown-key warnings.
+   */
+  extraProps?: string[];
 
   /**
    * Attribute schema defining instance data.
@@ -1283,6 +1291,19 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     }
   }
 
+  // Complete set of accepted prop names: attribute sources (plural) and
+  // their singular forms, shared base props, and primitive-specific extras.
+  // The compiler warns about props outside this set instead of silently
+  // dropping them.
+  const knownProps = new Set<string>(BASE_COMPONENT_PROPS);
+  for (const attr of schema.attributes) {
+    knownProps.add(attr.def.source);
+    knownProps.add(attr.constKey);
+  }
+  for (const extra of def.extraProps ?? []) {
+    knownProps.add(extra);
+  }
+
   const arrayFieldSet = new Set<string>();
   for (const attr of schema.attributes) {
     arrayFieldSet.add(attr.def.source);
@@ -1298,6 +1319,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
   const spec: PrimitiveSpec<Config> = {
     type: def.name,
     coerce: def.coerce,
+    knownProps,
     instancesPerElement: def.instancesPerElement ?? 1,
 
     // Defaults for computeConstants compatibility
