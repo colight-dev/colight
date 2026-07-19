@@ -979,10 +979,15 @@ def inspect(target: pathlib.Path, as_json: bool):
     VISUAL = {"components": [{"path", "count", "instances"}],
               "arrays": [{"path", "dtype", "shape", "min"?, "max"?,
                           "nan"?, "inf"?}],
+              "legends"?: [{"component", "label"?, "cmap", "domain"?,
+                            "categorical", "categories"?}],
               "state_keys": [str], "synced_keys": [str],
               "listeners": [str], "py_listeners": [str],
               "buffers": {"count": int, "total_bytes": int}}
     WARNING = {"code": str, "path": str, "message": str}
+
+    ``legends`` reports what colormap-driven colors encode (components built
+    with ``color_by``), e.g. "colors encode Cu % over [0, 2.5] via viridis".
     """
     from colight.cli_tools import inspect_tools
 
@@ -1013,6 +1018,15 @@ def inspect(target: pathlib.Path, as_json: bool):
             click.echo(
                 f"  array {array['path']}: {array['dtype']} {array['shape']}{stats}"
             )
+        for legend in visual.get("legends", []):
+            parts = [f"legend {legend['cmap']}"]
+            if legend.get("domain") is not None:
+                parts.append(f"domain {legend['domain']}")
+            if legend.get("categories") is not None:
+                parts.append(f"{len(legend['categories'])} categories")
+            if legend.get("label"):
+                parts.append(f"encodes {legend['label']!r}")
+            click.echo(f"  {' '.join(parts)} on {legend['component']}")
         if visual["state_keys"]:
             click.echo(f"  state keys: {len(visual['state_keys'])}")
         if visual["listeners"] or visual["py_listeners"]:
@@ -1332,11 +1346,16 @@ def screenshot(
        "coverage"?: {"width": int, "height": int, "rect": {...},
          "components": [{"component", "type", "instances", "pixels",
                          "fraction"}],
-         "background": {"pixels": int, "fraction": float}}}
+         "background": {"pixels": int, "fraction": float}},
+       "legends"?: [{"component"?: int, "type"?: str, "label"?: str,
+                     "cmap": str, "domain"?: [lo, hi],
+                     "categorical": bool, "categories"?: [str]}]}
     (width/height are actual PNG pixel dimensions including any composed
     margin; rulers.spacing is CSS px between ticks, rulers.margin the
     composed band in PNG px — page coordinate = (png_px - margin) / dpr;
-    coverage fractions are of the scene canvas.)
+    coverage fractions are of the scene canvas; legends report what
+    colormap-driven colors encode, read from the same DOM legends visible
+    in the capture.)
     """
     from colight.cli_tools import daemon_client, scene_pick, screenshot_tools
 
