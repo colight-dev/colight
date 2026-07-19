@@ -318,6 +318,85 @@ describe("Widget", () => {
       expect($state.b).toBe(2); // 'b' is still based on the old value of 'a'
     });
 
+    describe("applyUpdateEntries", () => {
+      // A .colight update entry as parsed by format.js: {data, buffers},
+      // where data is the serialized update envelope.
+      const stateOnlyEntry = (state, buffers = []) => ({
+        data: {
+          ast: null,
+          state,
+          syncedKeys: [],
+          listeners: {},
+          imports: [],
+        },
+        buffers,
+      });
+
+      it("applies a state-only update entry (ast: null) without crashing", async () => {
+        // Regression: applyUpdateEntries used to pass ast (null) straight
+        // into normalizeUpdates, which called null.flatMap and threw.
+        const $state = await createTestStateStore({
+          state: { zoom: 1.0 },
+          updateEntries: [stateOnlyEntry({ zoom: 2.0 })],
+        });
+        // The update overwrites the existing key (not just backfills).
+        expect($state.zoom).toBe(2.0);
+      });
+
+      it("applies state-only updates to new and existing keys in order", async () => {
+        const $state = await createTestStateStore({
+          state: { a: 1 },
+          updateEntries: [
+            stateOnlyEntry({ a: 2, b: 10 }),
+            stateOnlyEntry({ a: 3 }),
+          ],
+        });
+        expect($state.a).toBe(3);
+        expect($state.b).toBe(10);
+      });
+
+      it("resolves buffer references in state-only update entries", async () => {
+        const values = new Float64Array([1.5, -2.5]);
+        const $state = await createTestStateStore({
+          state: {},
+          updateEntries: [
+            stateOnlyEntry(
+              {
+                arr: {
+                  __type__: "ndarray",
+                  data: null,
+                  dtype: "float64",
+                  shape: [2],
+                  __buffer_index__: 0,
+                },
+              },
+              [new DataView(values.buffer)],
+            ),
+          ],
+        });
+        expect(Array.from($state.arr)).toEqual([1.5, -2.5]);
+      });
+
+      it("still applies ast update operations from update entries", async () => {
+        const $state = await createTestStateStore({
+          state: { list: [1, 2] },
+          updateEntries: [
+            {
+              data: {
+                ast: [["list", "append", 3]],
+                state: {},
+                syncedKeys: [],
+                listeners: {},
+                imports: [],
+              },
+              buffers: [],
+            },
+          ],
+        });
+        expect($state.list).toEqual([1, 2, 3]);
+      });
+    });
+
     describe("deep property access", () => {
       it("should get deeply nested values", async () => {
         const $state = await createTestStateStore({
