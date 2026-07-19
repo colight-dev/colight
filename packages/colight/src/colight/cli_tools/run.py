@@ -96,14 +96,23 @@ def _match_previous(
     return matched
 
 
-def _plan_execution(pairs: List[Pair], matched: Dict[str, Dict[str, Any]]) -> Set[str]:
+def _plan_execution(
+    pairs: List[Pair], matched: Dict[str, Dict[str, Any]], force: bool = False
+) -> Set[str]:
     """Decide which blocks must execute.
 
     A block is skippable when its transitive cache key matches its previous
     record entry and that entry did not record an error (errors are never
     cacheable results). Skippable blocks still run when an executed
     downstream block (transitively) requires a symbol they provide, since a
-    fresh process has no namespace to reuse.
+    fresh process has no namespace to reuse. Blocks tagged with the
+    ``always-eval`` pragma are never skipped, and ``force`` re-executes
+    everything regardless of cache keys.
+
+    Args:
+        pairs: (block, stable id) pairs in document order.
+        matched: Stable id -> previous record entry.
+        force: Ignore cache keys entirely and execute every block.
 
     Returns:
         Set of stable ids that will execute.
@@ -119,7 +128,8 @@ def _plan_execution(pairs: List[Pair], matched: Dict[str, Dict[str, Any]]) -> Se
             prev is not None and prev.get("cache_key") == block.id and not prev_errored
         )
         must_run = (
-            not cache_stable
+            force
+            or not cache_stable
             or "always-eval" in block.tags.flags
             or bool(set(block.interface.provides) & needed_symbols)
         )
@@ -141,6 +151,7 @@ def _error_payload(result: ExecutionResult) -> Optional[Dict[str, Any]]:
 def run_file(
     file_path: pathlib.Path,
     focus_block: Optional[str] = None,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Execute a file's blocks and diff against the previous invocation.
 
@@ -149,6 +160,9 @@ def run_file(
         focus_block: Optional stable block id; full detail is reported only
             for that block and its transitive dependents (other blocks get
             one-line statuses).
+        force: Re-execute every block, ignoring the previous record's cache
+            keys; statuses are then reported relative to the stored
+            fingerprints (``ran:unchanged`` / ``ran:changed``).
 
     Returns:
         The ``colight run`` JSON payload (see the CLI ``--help`` for schema).
@@ -177,7 +191,7 @@ def run_file(
     previous = load_record(rec_path)
     prev_entries: List[Dict[str, Any]] = previous.get("blocks", []) if previous else []
     matched = _match_previous(pairs, prev_entries)
-    run_set = _plan_execution(pairs, matched)
+    run_set = _plan_execution(pairs, matched, force=force)
 
     executor = BlockExecutor()
     out_blocks: List[Dict[str, Any]] = []

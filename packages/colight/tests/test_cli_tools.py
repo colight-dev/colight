@@ -188,6 +188,54 @@ class TestRun:
         assert set(statuses(payload).values()) == {"error"}
         assert payload["ok"] is False
 
+    def test_always_eval_pragma_never_cached(self, project: pathlib.Path):
+        source = (
+            "x = 1\n"
+            "\n"
+            "# | pragma: always-eval\n"
+            "import random\n"
+            "value = random.random()\n"
+            "value\n"
+        )
+        path = write_fixture(project, source)
+        run_mod.run_file(path)
+        payload = run_mod.run_file(path)  # unchanged source
+        status = statuses(payload)
+        blocks = {b["id"]: b for b in payload["blocks"]}
+        always_id = [
+            info["id"]
+            for info in blocks_mod.describe_file(path)["blocks"]
+            if "always-eval" in info["pragma"]
+        ][0]
+        # The always-eval block must never report cached.
+        assert status[always_id] in ("ran:unchanged", "ran:changed")
+        assert blocks[always_id]["executed"] is True
+        # The untouched block stays cached.
+        other = [sid for sid in status if sid != always_id][0]
+        assert status[other] == "cached"
+
+    def test_force_reexecutes_everything(self, project: pathlib.Path):
+        path = write_fixture(project)
+        run_mod.run_file(path)
+        payload = run_mod.run_file(path, force=True)
+        assert all(b["executed"] is True for b in payload["blocks"])
+        # Same source, same results: statuses compare against stored
+        # fingerprints, so everything reports ran:unchanged.
+        assert set(statuses(payload).values()) == {"ran:unchanged"}
+        # A forced run after an edit reports the change.
+        write_fixture(project, FIXTURE.replace("z = 42", "z = 43"))
+        payload = run_mod.run_file(path, force=True)
+        assert "ran:changed" in statuses(payload).values()
+        assert "cached" not in statuses(payload).values()
+
+    def test_force_cli_flag(self, project: pathlib.Path):
+        path = write_fixture(project)
+        CliRunner().invoke(cli_main, ["run", str(path)])
+        result = CliRunner().invoke(cli_main, ["run", str(path), "--force", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert all(b["executed"] is True for b in payload["blocks"])
+
     def test_focus_block_restricts_detail(self, project: pathlib.Path):
         path = write_fixture(project)
         infos = blocks_mod.describe_file(path)["blocks"]

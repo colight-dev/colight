@@ -871,7 +871,14 @@ def blocks(input_path: pathlib.Path, as_json: bool):
     help="Restrict detail to this block id and its dependents "
     "(other blocks get one-line statuses).",
 )
-def run(input_path: pathlib.Path, as_json: bool, focus_block: Optional[str]):
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Re-execute every block, ignoring the previous record's cache keys.",
+)
+def run(
+    input_path: pathlib.Path, as_json: bool, focus_block: Optional[str], force: bool
+):
     """Headlessly execute FILE.py and diff against the previous invocation.
 
     A compact fingerprint record is persisted per file (in
@@ -879,7 +886,9 @@ def run(input_path: pathlib.Path, as_json: bool, focus_block: Optional[str]):
     report what changed. Blocks whose transitive cache key (own source +
     upstream sources + local import mtimes) is unchanged are skipped and
     reported as cached; they re-execute only when an executed downstream
-    block needs their symbols.
+    block needs their symbols. Blocks tagged `# | pragma: always-eval`
+    always re-execute; --force re-executes everything (statuses then
+    compare against the stored fingerprints).
 
     Exit code is nonzero if any block errored.
 
@@ -900,7 +909,7 @@ def run(input_path: pathlib.Path, as_json: bool, focus_block: Optional[str]):
     from colight.cli_tools import run as run_mod
 
     try:
-        payload = run_mod.run_file(input_path, focus_block=focus_block)
+        payload = run_mod.run_file(input_path, focus_block=focus_block, force=force)
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(2)
