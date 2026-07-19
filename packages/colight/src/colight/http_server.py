@@ -57,7 +57,8 @@ class ColightRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         """Handles GET requests by trying different serving strategies."""
         path = self.path.lstrip("/")
-        print(f"GET: {path}")
+        if self.server_instance.debug:
+            print(f"GET: {path}")
         if not path:  # If root path, try to serve index.html
             path = "index.html"
 

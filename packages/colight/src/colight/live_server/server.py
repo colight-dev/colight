@@ -125,7 +125,7 @@ class ApiMiddleware:
                         visual_store=self.visual_store,
                         incremental_executor=self.incremental_executor,
                     )
-                    json_content = generator.generate_json(source_file, None)
+                    json_content = generator.generate_json(source_file)
                     doc = json.loads(json_content)
 
                     response = Response(

@@ -269,6 +269,22 @@ def _component_warnings(component: _ComponentRecord) -> List[Dict[str, str]]:
     return []
 
 
+def collect_structure(data: Dict[str, Any], buffers: List[bytes]) -> _WalkState:
+    """Walk a visual's payload, collecting components and arrays.
+
+    Args:
+        data: The visual's JSON envelope (``ast``, ``state``, ...).
+        buffers: The visual's binary buffers.
+
+    Returns:
+        The populated walk state (components and array records in order).
+    """
+    state = _WalkState(buffers=buffers)
+    _walk({"ast": data.get("ast")}, "", None, state)
+    _walk({"state": data.get("state")}, "", None, state)
+    return state
+
+
 def inspect_visual_data(
     data: Dict[str, Any], buffers: List[bytes]
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -281,9 +297,7 @@ def inspect_visual_data(
     Returns:
         Tuple of (structure payload, warnings list).
     """
-    state = _WalkState(buffers=buffers)
-    _walk({"ast": data.get("ast")}, "", None, state)
-    _walk({"state": data.get("state")}, "", None, state)
+    state = collect_structure(data, buffers)
 
     component_counts: Dict[str, int] = {}
     component_instances: Dict[str, Optional[int]] = {}
@@ -361,8 +375,19 @@ def inspect_colight_file(file_path: pathlib.Path) -> Dict[str, Any]:
     }
 
 
-def inspect_python_file(file_path: pathlib.Path) -> Dict[str, Any]:
-    """Evaluate a ``.py`` file and inspect every visual it produces."""
+def evaluate_python_visuals(
+    file_path: pathlib.Path,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Evaluate a ``.py`` file headlessly and collect the visuals it produces.
+
+    Args:
+        file_path: Path to a notebook-style ``.py`` file.
+
+    Returns:
+        Tuple of (visuals, errors). Each visual dict has ``block`` (stable
+        id), ``lines``, ``data`` (JSON envelope) and ``buffers``; each error
+        dict has ``block``, ``lines`` and a structured ``error``.
+    """
     file_path = file_path.resolve()
     document = parse_colight_file(file_path)
     pairs = blocks_mod.assign_stable_ids(document)
@@ -386,11 +411,22 @@ def inspect_python_file(file_path: pathlib.Path) -> Dict[str, Any]:
         if result.colight_bytes is None:
             continue
         data, buffers = summaries.parse_colight_bytes(result.colight_bytes)
-        payload, warnings = inspect_visual_data(data, buffers)
+        visuals.append({"block": sid, "lines": lines, "data": data, "buffers": buffers})
+    return visuals, errors
+
+
+def inspect_python_file(file_path: pathlib.Path) -> Dict[str, Any]:
+    """Evaluate a ``.py`` file and inspect every visual it produces."""
+    file_path = file_path.resolve()
+    produced, errors = evaluate_python_visuals(file_path)
+
+    visuals: List[Dict[str, Any]] = []
+    for item in produced:
+        payload, warnings = inspect_visual_data(item["data"], item["buffers"])
         visuals.append(
             {
-                "block": sid,
-                "lines": lines,
+                "block": item["block"],
+                "lines": item["lines"],
                 "visual": payload,
                 "warnings": warnings,
             }

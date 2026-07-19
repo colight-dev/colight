@@ -146,18 +146,24 @@ def _replace_volatile_ids(node: Any, mapping: Dict[str, str]) -> Any:
     return node
 
 
-def canonicalize_visual_json(data: Dict[str, Any]) -> str:
-    """Canonicalize a visual's JSON payload for fingerprinting.
+def canonicalize_visual_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Canonicalize a visual's JSON payload (as data, not text).
 
     Drops per-run identifiers (top-level ``id``, ``bufferLayout``) and maps
     generated uuid state keys / widget ids to stable placeholders assigned in
-    traversal order.
+    traversal order. Buffer index references are left untouched.
     """
     trimmed = {k: v for k, v in data.items() if k not in ("id", "bufferLayout")}
     mapping: Dict[str, str] = {}
     _collect_volatile_ids(trimmed, mapping)
-    canonical = _replace_volatile_ids(trimmed, mapping)
-    return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return _replace_volatile_ids(trimmed, mapping)
+
+
+def canonicalize_visual_json(data: Dict[str, Any]) -> str:
+    """Canonicalize a visual's JSON payload for fingerprinting."""
+    return json.dumps(
+        canonicalize_visual_data(data), sort_keys=True, separators=(",", ":")
+    )
 
 
 def visual_fingerprint(colight_bytes: bytes) -> str:
@@ -255,6 +261,7 @@ def result_fingerprint(result: ExecutionResult) -> str:
 
 __all__ = [
     "array_stats",
+    "canonicalize_visual_data",
     "canonicalize_visual_json",
     "iter_component_paths",
     "parse_colight_bytes",
