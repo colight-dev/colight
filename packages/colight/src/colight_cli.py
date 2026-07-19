@@ -2,11 +2,13 @@
 
 import asyncio
 import base64
+import json
 import pathlib
 import subprocess
+import sys
 import tempfile
 import webbrowser
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -807,6 +809,238 @@ def eval_server(
     except KeyboardInterrupt:
         click.echo("\nStopping eval server...")
         server.stop()
+
+
+def _echo_json(payload: Dict[str, Any]) -> None:
+    click.echo(json.dumps(payload, indent=1))
+
+
+def _format_ids(ids: List[str]) -> str:
+    return ",".join(ids) if ids else "-"
+
+
+@main.command()
+@click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+def blocks(input_path: pathlib.Path, as_json: bool):
+    """Dump the block graph of a notebook-style .py FILE.
+
+    Blocks are the blank-line-separated units of a colight file. Each block
+    gets a stable id (short hash of its own source, suffixed -N for
+    duplicates) that survives edits to other blocks.
+
+    \b
+    JSON schema:
+      {"file": str, "pragma": [str], "blocks": [
+        {"id": str, "cache_key": str, "lines": [start, end],
+         "kind": "prose"|"code"|"both",
+         "provides": [str], "requires": [str],
+         "depends_on": [block id], "dependents": [block id],
+         "pragma": [str], "ends_with_expression": bool}]}
+    """
+    from colight.cli_tools import blocks as blocks_mod
+
+    payload = blocks_mod.describe_file(input_path)
+    if as_json:
+        _echo_json(payload)
+        return
+
+    click.echo(f"{payload['file']} — {len(payload['blocks'])} blocks")
+    if payload["pragma"]:
+        click.echo(f"file pragma: {' '.join(payload['pragma'])}")
+    header = f"{'ID':<15} {'LINES':<9} {'KIND':<6} {'PROVIDES':<24} {'REQUIRES':<24} {'DEPS':<20} TAGS"
+    click.echo(header)
+    for block in payload["blocks"]:
+        lines = f"{block['lines'][0]}-{block['lines'][1]}"
+        click.echo(
+            f"{block['id']:<15} {lines:<9} {block['kind']:<6} "
+            f"{_format_ids(block['provides']):<24} "
+            f"{_format_ids(block['requires']):<24} "
+            f"{_format_ids(block['depends_on']):<20} "
+            f"{' '.join(block['pragma']) or '-'}"
+        )
+
+
+@main.command()
+@click.argument("input_path", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--block",
+    "focus_block",
+    type=str,
+    help="Restrict detail to this block id and its dependents "
+    "(other blocks get one-line statuses).",
+)
+def run(input_path: pathlib.Path, as_json: bool, focus_block: Optional[str]):
+    """Headlessly execute FILE.py and diff against the previous invocation.
+
+    A compact fingerprint record is persisted per file (in
+    .colight_cache/cli-run/ under the project root) so consecutive runs
+    report what changed. Blocks whose transitive cache key (own source +
+    upstream sources + local import mtimes) is unchanged are skipped and
+    reported as cached; they re-execute only when an executed downstream
+    block needs their symbols.
+
+    Exit code is nonzero if any block errored.
+
+    \b
+    Statuses: cached | ran:unchanged | ran:changed | new | removed | error
+    ("ran:changed" = result fingerprint differs from the previous run).
+
+    \b
+    JSON schema:
+      {"file": str, "ok": bool, "errors": int, "blocks": [
+        {"id": str, "lines": [start, end], "status": str, "executed": bool,
+         "duration_ms": int?, "summary": {...}?, "stdout": str?,
+         "error": {"type": str, "message": str,
+                   "frames": [{"file", "line", "in", "code"}]}?}]}
+    Summaries are token-frugal: arrays report dtype/shape/min/max, visuals
+    report component types + counts, scalars report truncated reprs.
+    """
+    from colight.cli_tools import run as run_mod
+
+    try:
+        payload = run_mod.run_file(input_path, focus_block=focus_block)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+    else:
+        click.echo(f"{payload['file']}")
+        for block in payload["blocks"]:
+            lines = block.get("lines")
+            lines_str = f"{lines[0]}-{lines[1]}" if lines else "-"
+            summary = block.get("summary") or {}
+            if block["status"] == "error":
+                error = block.get("error") or {}
+                detail = f"{error.get('type')}: {error.get('message')}"
+            elif summary.get("kind") == "visual":
+                parts = [
+                    f"{c['path']}×{c['count']}" for c in summary.get("components", [])
+                ]
+                detail = (
+                    f"visual [{', '.join(parts)}]"
+                    if parts
+                    else f"visual ({summary.get('size', 0)} bytes)"
+                )
+            elif summary.get("kind") == "array":
+                detail = f"array {summary.get('dtype')} {summary.get('shape')}"
+            elif "repr" in summary:
+                detail = summary["repr"]
+            else:
+                detail = summary.get("kind", "")
+            duration = f" [{block['duration_ms']}ms]" if "duration_ms" in block else ""
+            click.echo(
+                f"{block['status']:<14} {block['id']:<15} {lines_str:<9} "
+                f"{detail}{duration}"
+            )
+        if not payload["ok"]:
+            click.echo(f"{payload['errors']} block(s) errored", err=True)
+
+    if not payload["ok"]:
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("target", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+def inspect(target: pathlib.Path, as_json: bool):
+    """Inspect the structure of a visual without rendering it.
+
+    TARGET is a .colight artifact (parsed directly) or a .py file (evaluated
+    headlessly; every produced visual is inspected). Reports component
+    structure, per-array schema (dtype/shape/min/max), state keys and
+    callbacks, plus sanity warnings: empty arrays, NaN/Inf values, all
+    alphas ~0, degenerate (zero-extent) bounds, and mismatched per-instance
+    attribute lengths.
+
+    \b
+    JSON schema (.colight):
+      {"file": str, "kind": "colight", "updates": int,
+       "visual": VISUAL, "warnings": [WARNING]}
+    JSON schema (.py):
+      {"file": str, "kind": "py", "visuals": [
+        {"block": str, "lines": [start, end],
+         "visual": VISUAL, "warnings": [WARNING]}],
+       "errors": [{"block", "lines", "error"}]?}
+    VISUAL = {"components": [{"path", "count", "instances"}],
+              "arrays": [{"path", "dtype", "shape", "min"?, "max"?,
+                          "nan"?, "inf"?}],
+              "state_keys": [str], "synced_keys": [str],
+              "listeners": [str], "py_listeners": [str],
+              "buffers": {"count": int, "total_bytes": int}}
+    WARNING = {"code": str, "path": str, "message": str}
+    """
+    from colight.cli_tools import inspect_tools
+
+    try:
+        payload = inspect_tools.inspect_target(target)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+        return
+
+    def echo_visual(visual: Dict[str, Any], warnings: List[Dict[str, str]]) -> None:
+        for component in visual["components"]:
+            instances = (
+                f" ({component['instances']} instances)"
+                if component.get("instances") is not None
+                else ""
+            )
+            click.echo(
+                f"  component {component['path']}×{component['count']}{instances}"
+            )
+        for array in visual["arrays"]:
+            stats = ""
+            if "min" in array:
+                stats = f" min={array['min']:.4g} max={array['max']:.4g}"
+            click.echo(
+                f"  array {array['path']}: {array['dtype']} {array['shape']}{stats}"
+            )
+        if visual["state_keys"]:
+            click.echo(f"  state keys: {len(visual['state_keys'])}")
+        if visual["listeners"] or visual["py_listeners"]:
+            click.echo(
+                f"  callbacks: listeners={visual['listeners']} "
+                f"py_listeners={visual['py_listeners']}"
+            )
+        click.echo(
+            f"  buffers: {visual['buffers']['count']} "
+            f"({visual['buffers']['total_bytes']} bytes)"
+        )
+        for warning in warnings:
+            click.echo(
+                f"  WARNING [{warning['code']}] {warning['path']}: {warning['message']}"
+            )
+
+    click.echo(payload["file"])
+    if payload["kind"] == "colight":
+        if "error" in payload:
+            click.echo(f"Error: {payload['error']['message']}", err=True)
+            sys.exit(1)
+        if payload["updates"]:
+            click.echo(f"  update entries: {payload['updates']}")
+        echo_visual(payload["visual"], payload["warnings"])
+    else:
+        for item in payload["visuals"]:
+            click.echo(
+                f"block {item['block']} (lines {item['lines'][0]}-{item['lines'][1]}):"
+            )
+            echo_visual(item["visual"], item["warnings"])
+        if not payload["visuals"]:
+            click.echo("  no visuals produced")
+        for error_item in payload.get("errors", []):
+            error = error_item["error"]
+            click.echo(
+                f"block {error_item['block']} errored: "
+                f"{error.get('type')}: {error.get('message')}",
+                err=True,
+            )
 
 
 if __name__ == "__main__":
