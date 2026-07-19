@@ -642,7 +642,10 @@ class ChromeContext:
                 "y": 0,
                 "width": self.width,
                 "height": self.height,
-                "scale": self.scale,
+                # Device scale factor (set via Page.setDeviceMetricsOverride)
+                # already multiplies the output size; a clip scale other than
+                # 1 would apply self.scale twice.
+                "scale": 1,
             },
         }
 
