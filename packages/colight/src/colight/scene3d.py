@@ -169,19 +169,50 @@ def deco(
     return decoration  # type: ignore
 
 
-def _snake_to_camel(name: str) -> str:
-    """Convert snake_case to camelCase."""
-    parts = name.split("_")
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+# Props consumed as camelCase by the JS scene3d framework layer (interaction
+# callbacks, hover/outline styling, caching keys, render options, and helper
+# props). ONLY these keys are renamed at the Python->JS boundary. Everything
+# else -- the data props (centers, half_sizes, fill_mode, ...) -- crosses the
+# boundary unchanged in snake_case: the JS coercion layer consumes snake_case
+# keys and warns about keys it does not recognize.
+_JS_PROP_NAMES = {
+    # Interaction & framework props (BaseComponentConfig / GroupConfig)
+    "on_hover": "onHover",
+    "on_click": "onClick",
+    "on_drag": "onDrag",
+    "on_drag_start": "onDragStart",
+    "on_drag_end": "onDragEnd",
+    "drag_constraint": "dragConstraint",
+    "hover_props": "hoverProps",
+    "picking_scale": "pickingScale",
+    "outline_color": "outlineColor",
+    "outline_width": "outlineWidth",
+    "child_defaults": "childDefaults",
+    "child_overrides": "childOverrides",
+    # Caching / render options
+    "image_key": "imageKey",
+    "texture_key": "textureKey",
+    "geometry_key": "geometryKey",
+    "cull_mode": "cullMode",
+    # Helper props (GridHelper / CameraFrustum / ImageProjection)
+    "center_color": "centerColor",
+    "line_width": "lineWidth",
+    "show_frustum": "showFrustum",
+    "frustum_color": "frustumColor",
+}
 
 
 def _convert_to_js(obj: Any) -> Any:
-    """Recursively convert dict keys from snake_case to camelCase."""
+    """Recursively rename framework props to their JS (camelCase) names.
+
+    Data props are passed through unchanged; the JS side consumes them in
+    snake_case and warns loudly about unknown keys.
+    """
     if isinstance(obj, SceneComponent):
         # Convert SceneComponent to a config object with type and props
         return {"type": obj.type, **_convert_to_js(obj.props)}
     if isinstance(obj, dict):
-        return {_snake_to_camel(k): _convert_to_js(v) for k, v in obj.items()}
+        return {_JS_PROP_NAMES.get(k, k): _convert_to_js(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_convert_to_js(item) for item in obj]
     return obj
@@ -826,34 +857,9 @@ def Group(
             return list(value)
         return value
 
-    def _coerce_hover_props(props: HoverProps | Dict[str, Any]) -> Dict[str, Any]:
-        """Convert hover_props keys from snake_case to camelCase."""
-        result: Dict[str, Any] = {}
-        for key, value in props.items():
-            if key == "outline_color":
-                result["outlineColor"] = value
-            elif key == "outline_width":
-                result["outlineWidth"] = value
-            else:
-                result[key] = value
-        return result
-
-    def _coerce_child_props(props: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert child_props keys from snake_case to camelCase."""
-        result = {}
-        for key, value in props.items():
-            if key == "hover_props":
-                result["hoverProps"] = _coerce_hover_props(value)
-            elif key == "outline_color":
-                result["outlineColor"] = value
-            elif key == "outline_width":
-                result["outlineWidth"] = value
-            elif key == "picking_scale":
-                result["pickingScale"] = value
-            else:
-                result[key] = value
-        return result
-
+    # Snake_case framework keys (hover_props, on_hover, child_defaults, ...)
+    # are renamed to their JS names centrally by _convert_to_js at
+    # serialization time.
     data: Dict[str, Any] = {"children": children}
 
     if position is not None:
@@ -865,23 +871,23 @@ def Group(
     if name is not None:
         data["name"] = name
     if child_defaults is not None:
-        data["childDefaults"] = _coerce_child_props(child_defaults)
+        data["child_defaults"] = child_defaults
     if child_overrides is not None:
-        data["childOverrides"] = _coerce_child_props(child_overrides)
+        data["child_overrides"] = child_overrides
     if hover_props is not None:
-        data["hoverProps"] = _coerce_hover_props(hover_props)
+        data["hover_props"] = hover_props
     if on_hover is not None:
-        data["onHover"] = on_hover
+        data["on_hover"] = on_hover
     if on_click is not None:
-        data["onClick"] = on_click
+        data["on_click"] = on_click
     if on_drag is not None:
-        data["onDrag"] = on_drag
+        data["on_drag"] = on_drag
     if on_drag_start is not None:
-        data["onDragStart"] = on_drag_start
+        data["on_drag_start"] = on_drag_start
     if on_drag_end is not None:
-        data["onDragEnd"] = on_drag_end
+        data["on_drag_end"] = on_drag_end
     if drag_constraint is not None:
-        data["dragConstraint"] = drag_constraint
+        data["drag_constraint"] = drag_constraint
 
     return SceneComponent("Group", data)
 
