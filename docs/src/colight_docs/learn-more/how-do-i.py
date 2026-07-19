@@ -32,7 +32,7 @@ my_plot + Plot.hideAxis() & my_plot + Plot.hideAxis(y=True)
 # - In a mark use `Plot.constantly(<label>)` for a color value like `fill` or `stroke`. The `<label>`, a string, is how you will refer to this color and it will show up in the legend.
 # - Then use `Plot.colorMap({<label>: <color>})` to specify a color for that label.
 # - Include `Plot.colorLegend()` to show the legend.
-# See the [color](./color.html) page for more details.
+# See the [color](./color.py) page for more details.
 
 # %%
 (
