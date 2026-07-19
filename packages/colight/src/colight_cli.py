@@ -1043,5 +1043,139 @@ def inspect(target: pathlib.Path, as_json: bool):
             )
 
 
+@main.command()
+@click.argument("target_a", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.argument("target_b", type=click.Path(exists=True, path_type=pathlib.Path))
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option(
+    "--epsilon",
+    type=float,
+    default=1e-9,
+    show_default=True,
+    help="Elementwise threshold below which numeric changes count as identical.",
+)
+def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon: float):
+    """Semantic diff of two visuals — change magnitude without rendering.
+
+    TARGET_A and TARGET_B are each a .colight artifact or a .py file
+    (evaluated headlessly; visuals are paired by position). Reports
+    components added/removed/type-changed, per-array shape/dtype changes and
+    magnitude stats (max/mean |delta|, fraction changed beyond epsilon,
+    bounds drift), scalar value changes, state-key changes, buffer deltas
+    and warnings introduced/resolved.
+
+    Exit code: 0 identical (within epsilon), 1 differences found, 2 error.
+
+    \b
+    JSON schema:
+      {"a": TARGET, "b": TARGET, "epsilon": float, "identical": bool,
+       "pairs": [{"index": int, "a_block"?: str, "b_block"?: str,
+         "identical": bool,
+         "components": {"added": [{"path", "type"}], "removed": [...],
+                        "changed": [{"path", "from", "to"}]},
+         "arrays": {"added": [{"path", "dtype", "shape"}], "removed": [...],
+           "changed": [{"path", "dtype"?: [a, b], "shape"?: [a, b],
+                        "max_abs_delta"?, "mean_abs_delta"?,
+                        "changed_fraction"?, "nan_mismatch"?,
+                        "bounds"?: {"from": [min, max], "to": [min, max]}}]},
+         "values": {"added": [path], "removed": [path],
+                    "changed": [{"path", "from", "to"}]},
+         "state": {"added": [key], "removed": [key], "changed": [key]},
+         "buffers": {"count": [a, b], "total_bytes": [a, b]},
+         "warnings": {"introduced": [WARNING], "resolved": [WARNING]}}],
+       "unpaired"?: {"a": [...], "b": [...]},
+       "summary": {"arrays_changed": int, "max_abs_delta"?: float,
+                   "max_abs_delta_path"?: str}}
+      TARGET = {"file": str, "kind": "colight"|"py", "visuals": int,
+                "updates"?: int, "errors"?: [...]}
+    """
+    from colight.cli_tools import diff_tools
+
+    try:
+        payload = diff_tools.diff_targets(target_a, target_b, epsilon=epsilon)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if as_json:
+        _echo_json(payload)
+    else:
+        click.echo(f"A: {payload['a']['file']} ({payload['a']['visuals']} visual(s))")
+        click.echo(f"B: {payload['b']['file']} ({payload['b']['visuals']} visual(s))")
+        for pair in payload["pairs"]:
+            if pair["identical"]:
+                continue
+            label = f"pair {pair['index']}"
+            if "a_block" in pair or "b_block" in pair:
+                label += f" [{pair.get('a_block', '?')} -> {pair.get('b_block', '?')}]"
+            click.echo(f"{label}:")
+            components = pair["components"]
+            for item in components["changed"]:
+                click.echo(
+                    f"  component {item['path']}: {item['from']} -> {item['to']}"
+                )
+            for item in components["removed"]:
+                click.echo(f"  component removed {item['path']}")
+            for item in components["added"]:
+                click.echo(f"  component added {item['path']}")
+            for item in pair["arrays"]["changed"]:
+                detail_parts = []
+                if "dtype" in item:
+                    detail_parts.append(f"dtype {item['dtype'][0]}->{item['dtype'][1]}")
+                if "shape" in item:
+                    detail_parts.append(f"shape {item['shape'][0]}->{item['shape'][1]}")
+                if "max_abs_delta" in item:
+                    detail_parts.append(
+                        f"max |Δ| {item['max_abs_delta']:.4g} "
+                        f"mean {item['mean_abs_delta']:.4g} "
+                        f"changed {item['changed_fraction']:.1%}"
+                    )
+                if "bounds" in item:
+                    detail_parts.append(
+                        f"bounds {item['bounds']['from']} -> {item['bounds']['to']}"
+                    )
+                click.echo(f"  array {item['path']}: {'; '.join(detail_parts)}")
+            for item in pair["arrays"]["removed"]:
+                click.echo(f"  array removed {item['path']}")
+            for item in pair["arrays"]["added"]:
+                click.echo(f"  array added {item['path']}")
+            for item in pair["values"]["changed"]:
+                click.echo(f"  value {item['path']}: {item['from']} -> {item['to']}")
+            state = pair["state"]
+            for kind in ("added", "removed", "changed"):
+                if state[kind]:
+                    click.echo(f"  state {kind}: {', '.join(state[kind])}")
+            counts = pair["buffers"]["count"]
+            total = pair["buffers"]["total_bytes"]
+            if counts[0] != counts[1] or total[0] != total[1]:
+                click.echo(
+                    f"  buffers: {counts[0]} -> {counts[1]} "
+                    f"({total[0]} -> {total[1]} bytes)"
+                )
+            for warning in pair["warnings"]["introduced"]:
+                click.echo(
+                    f"  warning introduced [{warning['code']}] {warning['path']}: "
+                    f"{warning['message']}"
+                )
+            for warning in pair["warnings"]["resolved"]:
+                click.echo(f"  warning resolved [{warning['code']}] {warning['path']}")
+        unpaired = payload.get("unpaired")
+        if unpaired:
+            for side, items in unpaired.items():
+                for item in items:
+                    click.echo(f"  visual only in {side.upper()}: {item}")
+        for side in ("a", "b"):
+            for error_item in payload[side].get("errors", []):
+                error = error_item["error"]
+                click.echo(
+                    f"  error in {side.upper()} block {error_item['block']}: "
+                    f"{error.get('type')}: {error.get('message')}",
+                    err=True,
+                )
+        click.echo(diff_tools.verdict_line(payload))
+
+    sys.exit(0 if payload["identical"] else 1)
+
+
 if __name__ == "__main__":
     main()
