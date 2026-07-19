@@ -74,6 +74,17 @@ colight screenshot path/to/plot.colight --out shot.png --json
 colight screenshot notebook.py --block ID --out shot.png
 colight screenshot scene.py --out closeup.png --frame "Ellipsoid:0-4"
 
+# Machine-legible screenshots (composed post-capture; render untouched):
+# --rulers adds big labeled coordinate rulers in the exact page-pixel
+# space pick-at consumes (read a coordinate off the ruler, pass it to
+# pick-at); --views composes a labeled contact sheet of camera presets
+# (one 2x2 grid costs an agent fewer image tiles than four images);
+# --max-edge N sizes the render so the PNG long edge is exactly N,
+# avoiding a second lossy resampling for agents with a known input size
+colight screenshot scene.py --out rulers.png --rulers
+colight screenshot scene.py --out sheet.png --views front,top,side,iso
+colight screenshot scene.py --out native.png --max-edge 1092
+
 # Scene3d pick queries (GPU pick buffer; every query re-renders):
 # pick-at = what is at point X,Y (ranked hits + dereferenced values);
 # pick-where = where does a selection land (bbox/centroid/visibility;

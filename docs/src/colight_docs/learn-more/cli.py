@@ -202,6 +202,29 @@
 # colight screenshot notebook.py --block ID --out shot.png
 # colight screenshot scene.py --out closeup.png --frame "Ellipsoid:0-4"
 #
+# # Machine-legible screenshots. All composition happens post-capture in
+# # Python — the render itself is untouched and stays byte-deterministic
+# # (--check always compares the underlying renders).
+# # --rulers expands the canvas with a labeled coordinate margin band
+# # (big high-contrast labels + faint gridlines) in the exact page-pixel
+# # space pick-at consumes: read a coordinate off the ruler, pass it
+# # straight to pick-at instead of guessing from a downscaled view. In
+# # the composed PNG, page coordinate v sits at pixel margin + v*dpr
+# # (JSON reports rulers: {spacing, margin}).
+# # --views renders one labeled contact sheet from camera presets fit to
+# # the scene bounds (front, back, left, right, side, top, bottom, iso;
+# # scene3d only; JSON reports per-view cameras). Agents pay per image
+# # tile: one 2x2 grid can beat four separate images. Rulers are
+# # single-view only — combining --rulers with --views is an error.
+# # --frame with --views frames that selection from every preset.
+# # --max-edge N scales the viewport (preserving aspect from
+# # --width/--height, or the measured content aspect) so the PNG's long
+# # edge is exactly N px — agents that know their harness's native input
+# # size avoid a second lossy resampling.
+# colight screenshot scene.py --out rulers.png --rulers [--json]
+# colight screenshot scene.py --out sheet.png --views front,top,side,iso
+# colight screenshot scene.py --out native.png --max-edge 1092
+#
 # # What is at point X,Y? Re-renders the target and queries the GPU pick
 # # buffer (scene3d only; every query re-renders — nothing is persisted).
 # # Coordinates are CSS pixels of the rendered page, origin top-left,
