@@ -7,9 +7,10 @@ entries applied (render at t=0 — animated state stays at its initial
 values), and an optional double-render byte-hash check.
 """
 
+import contextlib
 import hashlib
 import pathlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Protocol, Tuple
 
 from colight.screenshots import StudioContext
 
@@ -18,6 +19,55 @@ from . import targets
 DEFAULT_WIDTH = 800
 DEFAULT_DPR = 1.0
 DEFAULT_READY_TIMEOUT = 30.0
+
+
+class SceneLike(Protocol):
+    """A loaded, render-ready visual (fresh tab or daemon warm scene)."""
+
+    @property
+    def studio(self) -> StudioContext: ...
+
+    def capture(self) -> Tuple[bytes, int, int]: ...
+
+    def mark_mutated(self) -> None:
+        """Flag that the loaded scene is about to be mutated (camera framing,
+        highlight decorations, ...) so a caching provider reloads it before
+        the next reuse. No-op for single-use sessions."""
+        ...
+
+
+class SceneSource(Protocol):
+    """Provides loaded scenes for one resolved target visual.
+
+    The direct implementation (:class:`DirectSceneSource`) resolves the
+    target once and loads it into a fresh render session per ``scene()``
+    call; the daemon's implementation may serve an already-loaded warm
+    scene instead. ``fresh=True`` demands a genuinely independent render
+    (used by ``screenshot --check``).
+    """
+
+    @property
+    def block_id(self) -> Optional[str]: ...
+
+    def scene(
+        self, fresh: bool = False
+    ) -> "contextlib.AbstractContextManager[SceneLike]": ...
+
+
+def load_visual(
+    studio: StudioContext,
+    data: Dict[str, Any],
+    buffers: List[bytes],
+    width: int,
+    height: Optional[int],
+) -> None:
+    """Load one visual into a studio, resetting the viewport first.
+
+    A previous render's measure pass may have resized the viewport; this
+    matches what a fresh context applies before loading.
+    """
+    studio.set_size(width=width, height=height or width)
+    studio.load_plot(data=data, buffers=buffers, measure=height is None)
 
 
 def resolve_visual(
@@ -79,11 +129,13 @@ class RenderSession:
         dpr: float = DEFAULT_DPR,
         debug: bool = False,
         ready_timeout: Optional[float] = DEFAULT_READY_TIMEOUT,
+        chrome_port: Optional[int] = None,
     ) -> None:
         self._width = width
         self._dpr = dpr
         self._debug = debug
         self._ready_timeout = ready_timeout
+        self._chrome_port = chrome_port
         self._studio: Optional[StudioContext] = None
 
     def __enter__(self) -> "RenderSession":
@@ -128,13 +180,13 @@ class RenderSession:
                 ready_timeout=self._ready_timeout,
                 reuse=True,
                 keep_alive=1.0,
+                port=self._chrome_port,
             )
             self._studio.start()
-        studio = self._studio
-        # Reset the viewport: a previous render's measure pass may have
-        # resized it. Matches what a fresh context applies before loading.
-        studio.set_size(width=self._width, height=height or self._width)
-        studio.load_plot(data=data, buffers=buffers, measure=height is None)
+        load_visual(self._studio, data, buffers, self._width, height)
+
+    def mark_mutated(self) -> None:
+        """No-op: a RenderSession's scene is never reused across requests."""
 
     def capture(self) -> Tuple[bytes, int, int]:
         """Capture the loaded visual as PNG.
@@ -199,18 +251,51 @@ def render_png(
         return session.render(data, buffers, height=height)
 
 
-def _render_once(
-    data: Dict[str, Any],
-    buffers: List[bytes],
-    width: int,
-    height: Optional[int],
-    dpr: float,
-    debug: bool,
-    ready_timeout: Optional[float],
-    frame: Optional[str],
-    want_coverage: bool,
+class DirectSceneSource:
+    """Scene source that resolves a target once and renders it in fresh tabs.
+
+    This is the direct (non-daemon) implementation of :class:`SceneSource`:
+    every ``scene()`` call opens a fresh render session, exactly like the
+    pre-daemon CLI did.
+    """
+
+    def __init__(
+        self,
+        target: pathlib.Path,
+        block: Optional[str] = None,
+        width: int = DEFAULT_WIDTH,
+        height: Optional[int] = None,
+        dpr: float = DEFAULT_DPR,
+        debug: bool = False,
+        ready_timeout: Optional[float] = DEFAULT_READY_TIMEOUT,
+    ) -> None:
+        self._data, self._buffers, self._block_id = resolve_visual(target, block)
+        self._width = width
+        self._height = height
+        self._dpr = dpr
+        self._debug = debug
+        self._ready_timeout = ready_timeout
+
+    @property
+    def block_id(self) -> Optional[str]:
+        return self._block_id
+
+    @contextlib.contextmanager
+    def scene(self, fresh: bool = False) -> Iterator[SceneLike]:
+        with RenderSession(
+            width=self._width,
+            dpr=self._dpr,
+            debug=self._debug,
+            ready_timeout=self._ready_timeout,
+        ) as session:
+            session.load(self._data, self._buffers, height=self._height)
+            yield session
+
+
+def _capture_scene(
+    scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
-    """Render one visual (optionally camera-framed) and gather scene extras.
+    """Capture a loaded scene (optionally camera-framed) and gather extras.
 
     Returns:
         Tuple of (png bytes, pixel width, pixel height, extras) where
@@ -220,40 +305,90 @@ def _render_once(
     from . import scene_pick
 
     extras: Dict[str, Any] = {}
-    with RenderSession(
-        width=width, dpr=dpr, debug=debug, ready_timeout=ready_timeout
-    ) as session:
-        session.load(data, buffers, height=height)
-
-        is_scene = False
-        if frame is not None or want_coverage:
-            is_scene = scene_pick.scene_count(session.studio) > 0
-        if frame is not None:
-            if not is_scene:
-                raise ValueError(
-                    "--frame requires a scene3d visual "
-                    "(target's visual contains no scene3d scene)"
-                )
-            selector, ranges = scene_pick.parse_frame_selector(frame)
-            snapshot = scene_pick.take_snapshot(session.studio)
-            resolved = scene_pick.resolve_component(snapshot.components, selector)
-            camera = scene_pick.frame_selection(
-                session.studio, resolved["component"], ranges
+    is_scene = False
+    if frame is not None or want_coverage:
+        is_scene = scene_pick.scene_count(scene.studio) > 0
+    if frame is not None:
+        if not is_scene:
+            raise ValueError(
+                "--frame requires a scene3d visual "
+                "(target's visual contains no scene3d scene)"
             )
-            extras["frame"] = {
-                "component": resolved["component"],
-                "type": resolved["type"],
-                "camera": camera,
-            }
-            if ranges:
-                extras["frame"]["instances"] = [list(pair) for pair in ranges]
+        selector, ranges = scene_pick.parse_frame_selector(frame)
+        snapshot = scene_pick.take_snapshot(scene.studio)
+        resolved = scene_pick.resolve_component(snapshot.components, selector)
+        # Framing moves the scene camera: a caching provider must reload
+        # this scene before serving it again.
+        scene.mark_mutated()
+        camera = scene_pick.frame_selection(scene.studio, resolved["component"], ranges)
+        extras["frame"] = {
+            "component": resolved["component"],
+            "type": resolved["type"],
+            "camera": camera,
+        }
+        if ranges:
+            extras["frame"]["instances"] = [list(pair) for pair in ranges]
 
-        png, pixel_width, pixel_height = session.capture()
+    png, pixel_width, pixel_height = scene.capture()
 
-        if want_coverage and is_scene:
-            snapshot = scene_pick.take_snapshot(session.studio)
-            extras["coverage"] = scene_pick.coverage_payload(snapshot)
-        return png, pixel_width, pixel_height, extras
+    if want_coverage and is_scene:
+        snapshot = scene_pick.take_snapshot(scene.studio)
+        extras["coverage"] = scene_pick.coverage_payload(snapshot)
+    return png, pixel_width, pixel_height, extras
+
+
+def screenshot_source(
+    source: SceneSource,
+    target_label: str,
+    out: pathlib.Path,
+    dpr: float = DEFAULT_DPR,
+    check: bool = False,
+    frame: Optional[str] = None,
+    out_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Screenshot an already-resolved scene source (shared CLI/daemon core).
+
+    Args:
+        source: Scene source (direct or daemon-backed).
+        target_label: Target path string for the payload.
+        out: Output PNG path (parent dirs are created).
+        dpr: Device pixel ratio (reported in the payload).
+        check: Render twice (second render fresh) and byte-compare.
+        frame: Scene3d selection to fit the camera on before capture.
+        out_label: Payload ``out`` value (defaults to ``str(out)``).
+
+    Returns:
+        The ``colight screenshot`` payload (see :func:`screenshot_target`).
+    """
+    with source.scene() as scene:
+        png, pixel_width, pixel_height, extras = _capture_scene(
+            scene, frame=frame, want_coverage=True
+        )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(png)
+
+    payload: Dict[str, Any] = {
+        "target": target_label,
+        "out": out_label or str(out),
+        "width": pixel_width,
+        "height": pixel_height,
+        "dpr": dpr,
+        "sha256": hashlib.sha256(png).hexdigest(),
+    }
+    payload.update(extras)
+    if source.block_id is not None:
+        payload["block"] = source.block_id
+    if check:
+        # Intentionally a fresh, independent render: the determinism claim
+        # is about independent renders, not renders sharing a tab.
+        with source.scene(fresh=True) as scene:
+            png_recheck, _w, _h, _extras = _capture_scene(
+                scene, frame=frame, want_coverage=False
+            )
+        payload["deterministic"] = png_recheck == png
+        if not payload["deterministic"]:
+            payload["sha256_recheck"] = hashlib.sha256(png_recheck).hexdigest()
+    return payload
 
 
 def screenshot_target(
@@ -293,58 +428,31 @@ def screenshot_target(
         and ``deterministic`` (only when ``check`` is set;
         ``sha256_recheck`` is added when the two renders differ).
     """
-    data, buffers, block_id = resolve_visual(target, block)
-    png, pixel_width, pixel_height, extras = _render_once(
-        data,
-        buffers,
+    source = DirectSceneSource(
+        target,
+        block=block,
         width=width,
         height=height,
         dpr=dpr,
         debug=debug,
         ready_timeout=ready_timeout,
-        frame=frame,
-        want_coverage=True,
     )
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(png)
-
-    payload: Dict[str, Any] = {
-        "target": str(target),
-        "out": str(out),
-        "width": pixel_width,
-        "height": pixel_height,
-        "dpr": dpr,
-        "sha256": hashlib.sha256(png).hexdigest(),
-    }
-    payload.update(extras)
-    if block_id is not None:
-        payload["block"] = block_id
-    if check:
-        # Intentionally a second fresh session: the determinism claim is
-        # about independent renders, not renders sharing a tab.
-        png_recheck, _w, _h, _extras = _render_once(
-            data,
-            buffers,
-            width=width,
-            height=height,
-            dpr=dpr,
-            debug=debug,
-            ready_timeout=ready_timeout,
-            frame=frame,
-            want_coverage=False,
-        )
-        payload["deterministic"] = png_recheck == png
-        if not payload["deterministic"]:
-            payload["sha256_recheck"] = hashlib.sha256(png_recheck).hexdigest()
-    return payload
+    return screenshot_source(
+        source, str(target), out, dpr=dpr, check=check, frame=frame
+    )
 
 
 __all__ = [
     "DEFAULT_DPR",
     "DEFAULT_READY_TIMEOUT",
     "DEFAULT_WIDTH",
+    "DirectSceneSource",
     "RenderSession",
+    "SceneLike",
+    "SceneSource",
+    "load_visual",
     "render_png",
     "resolve_visual",
+    "screenshot_source",
     "screenshot_target",
 ]

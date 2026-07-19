@@ -22,7 +22,7 @@ convention of keeping committed test fixtures/baselines under ``tests``
 import hashlib
 import json
 import pathlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import colight.env as env
 import colight.format as colight_format
@@ -39,6 +39,39 @@ MAX_CHANGED_PATHS = 10
 
 DEFAULT_SCREENSHOT_WIDTH = 800
 DEFAULT_SCREENSHOT_DPR = 1.0
+
+
+class RenderSessionLike(Protocol):
+    """What the screenshot layer needs from a render session.
+
+    Satisfied by :class:`screenshot_tools.RenderSession` (local Chrome) and
+    by the daemon client's remote session (renders on the daemon's pooled
+    Chrome).
+    """
+
+    def __enter__(self) -> "RenderSessionLike": ...
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
+
+    def render(
+        self,
+        data: Dict[str, Any],
+        buffers: List[bytes],
+        height: Optional[int] = None,
+    ) -> Tuple[bytes, int, int]: ...
+
+
+SessionFactory = Callable[[int, float], RenderSessionLike]
+"""Callable of (width, dpr) producing a render session.
+
+When a factory is supplied by the caller, the local Chrome/JS-bundle
+availability probe (:func:`pixels_unavailable_reason`) is skipped — the
+caller vouches that the factory can render (e.g. via the colight daemon).
+"""
+
+
+def _local_session_factory(width: int, dpr: float) -> RenderSessionLike:
+    return screenshot_tools.RenderSession(width=width, dpr=dpr)
 
 
 class VerifyError(ValueError):
@@ -118,7 +151,7 @@ def _structure_hash(artifact: bytes) -> str:
 
 
 def _render_screenshot(
-    session: "screenshot_tools.RenderSession", visual: Dict[str, Any]
+    session: RenderSessionLike, visual: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Deterministic screenshot layer for a visual (sha256 + dimensions)."""
     png, pixel_width, pixel_height = session.render(
@@ -207,7 +240,7 @@ def _load_manifest(directory: pathlib.Path) -> Optional[Dict[str, Any]]:
 
 def _compute_entries(
     visuals: List[Dict[str, Any]],
-    session: Optional["screenshot_tools.RenderSession"],
+    session: Optional[RenderSessionLike],
 ) -> List[Dict[str, Any]]:
     """Current-state golden entries (artifact bytes and payloads in-memory).
 
@@ -239,6 +272,7 @@ def verify_target(
     goldens_root: Optional[pathlib.Path] = None,
     pixels: bool = True,
     epsilon: float = diff_tools.DEFAULT_EPSILON,
+    session_factory: Optional[SessionFactory] = None,
 ) -> Dict[str, Any]:
     """Verify a target against its stored goldens.
 
@@ -249,6 +283,9 @@ def verify_target(
         pixels: Also verify the screenshot layer (auto-skipped with a
             warning when Chrome or the JS bundle is unavailable).
         epsilon: Numeric threshold for the semantic diff on mismatch.
+        session_factory: Render-session provider for the screenshot layer
+            (default: local headless Chrome; the daemon client passes a
+            remote session and thereby skips the local availability probe).
 
     Returns:
         Per-target payload with ``status`` (``match`` | ``mismatch`` |
@@ -276,7 +313,9 @@ def verify_target(
     width = stored_shot.get("width", DEFAULT_SCREENSHOT_WIDTH)
     dpr = stored_shot.get("dpr", DEFAULT_SCREENSHOT_DPR)
 
-    reason = pixels_unavailable_reason() if pixels else None
+    reason = (
+        pixels_unavailable_reason() if (pixels and session_factory is None) else None
+    )
     check_pixels = pixels and reason is None
     if pixels and reason is not None:
         warnings.append(f"pixels skipped: {reason}")
@@ -285,10 +324,11 @@ def verify_target(
 
     blocks_out: List[Dict[str, Any]] = []
     mismatched = False
+    factory = session_factory or _local_session_factory
     # One shared render session per target: the Chrome tab, HTTP server and
     # JS bundle load are paid once, not per visual. Opened lazily on the
     # first screenshot; a no-op to close if pixels were never rendered.
-    with screenshot_tools.RenderSession(width=width, dpr=dpr) as session:
+    with factory(width, dpr) as session:
         for visual, golden in pairs:
             entry: Dict[str, Any] = {"id": visual["id"]}
             if "lines" in visual:
@@ -368,6 +408,7 @@ def update_target(
     goldens_root: Optional[pathlib.Path] = None,
     pixels: bool = True,
     epsilon: float = diff_tools.DEFAULT_EPSILON,
+    session_factory: Optional[SessionFactory] = None,
 ) -> Dict[str, Any]:
     """Write/refresh a target's goldens, reporting changes vs the previous set.
 
@@ -377,6 +418,8 @@ def update_target(
         pixels: Also store the screenshot layer (auto-skipped with a warning
             when Chrome or the JS bundle is unavailable).
         epsilon: Numeric threshold for the reported diff summaries.
+        session_factory: Render-session provider for the screenshot layer
+            (default: local headless Chrome).
 
     Returns:
         Per-target payload; block statuses are ``added`` | ``updated`` |
@@ -401,7 +444,9 @@ def update_target(
         ]
         return payload
 
-    reason = pixels_unavailable_reason() if pixels else None
+    reason = (
+        pixels_unavailable_reason() if (pixels and session_factory is None) else None
+    )
     check_pixels = pixels and reason is None
     if pixels and reason is not None:
         warnings.append(f"pixels skipped: {reason}")
@@ -411,7 +456,8 @@ def update_target(
     width = prev_shot.get("width", DEFAULT_SCREENSHOT_WIDTH)
     dpr = prev_shot.get("dpr", DEFAULT_SCREENSHOT_DPR)
 
-    with screenshot_tools.RenderSession(width=width, dpr=dpr) as session:
+    factory = session_factory or _local_session_factory
+    with factory(width, dpr) as session:
         entries = _compute_entries(visuals, session if check_pixels else None)
     pairs, orphaned = _pair_with_goldens(entries, (previous or {}).get("blocks", []))
 
@@ -495,6 +541,7 @@ def run_verify(
     update: bool = False,
     pixels: bool = True,
     epsilon: float = diff_tools.DEFAULT_EPSILON,
+    session_factory: Optional[SessionFactory] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Verify (or update goldens for) a list of targets.
 
@@ -534,6 +581,7 @@ def run_verify(
                         goldens_root=goldens_root,
                         pixels=pixels,
                         epsilon=epsilon,
+                        session_factory=session_factory,
                     )
                 )
             else:
@@ -543,6 +591,7 @@ def run_verify(
                         goldens_root=goldens_root,
                         pixels=pixels,
                         epsilon=epsilon,
+                        session_factory=session_factory,
                     )
                 )
         except VerifyError as e:
@@ -573,6 +622,8 @@ def run_verify(
 __all__ = [
     "DEFAULT_SCREENSHOT_DPR",
     "DEFAULT_SCREENSHOT_WIDTH",
+    "RenderSessionLike",
+    "SessionFactory",
     "VerifyError",
     "default_goldens_root",
     "golden_dir",

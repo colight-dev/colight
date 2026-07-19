@@ -24,6 +24,8 @@ import numpy as np
 
 from colight.screenshots import StudioContext
 
+from . import screenshot_tools
+
 DEFAULT_RADIUS = 6
 MAX_DEREFERENCED_HITS = 8
 
@@ -511,23 +513,60 @@ def selection_metrics(
 # ========== Command implementations ==========
 
 
-def _render_scene_target(
-    session: Any,
-    target: pathlib.Path,
-    block: Optional[str],
-    height: Optional[int],
-) -> Tuple[Optional[str], StudioContext]:
-    """Resolve, load and ready-wait a target; assert it is scene3d.
+def pick_at_source(
+    source: "screenshot_tools.SceneSource",
+    target_label: str,
+    x: float,
+    y: float,
+    radius: float = DEFAULT_RADIUS,
+) -> Dict[str, Any]:
+    """Pick hits around a point on an already-resolved scene source.
 
-    Returns:
-        Tuple of (block id or None, studio context).
+    Shared CLI/daemon core of :func:`pick_at_target`.
     """
-    from . import screenshot_tools
+    with source.scene() as scene:
+        studio = scene.studio
+        require_scene(studio)
+        snapshot = take_snapshot(studio)
+        hits = hits_at(snapshot, x, y, radius)
+        for hit in hits[:MAX_DEREFERENCED_HITS]:
+            hit["values"] = instance_values(studio, hit["component"], hit["instance"])
 
-    data, buffers, block_id = screenshot_tools.resolve_visual(target, block)
-    session.load(data, buffers, height=height)
-    require_scene(session.studio)
-    return block_id, session.studio
+        cx, cy = _page_to_device(snapshot, x, y)
+        device_radius = radius * snapshot.dpr
+        x0 = max(0, int(math.floor(cx - device_radius)))
+        x1 = min(snapshot.width - 1, int(math.ceil(cx + device_radius)))
+        y0 = max(0, int(math.floor(cy - device_radius)))
+        y1 = min(snapshot.height - 1, int(math.ceil(cy + device_radius)))
+        background_share = 1.0
+        if x0 <= x1 and y0 <= y1:
+            ys, xs = np.mgrid[y0 : y1 + 1, x0 : x1 + 1]
+            disc = np.hypot(xs + 0.5 - cx, ys + 0.5 - cy) <= device_radius
+            if disc.any():
+                ids = snapshot.ids[y0 : y1 + 1, x0 : x1 + 1]
+                background_share = round(
+                    float(((ids == 0) & disc).sum() / disc.sum()), 4
+                )
+
+        payload: Dict[str, Any] = {
+            "target": target_label,
+            "x": x,
+            "y": y,
+            "radius": radius,
+            "scene": {
+                "rect": snapshot.rect,
+                "width": snapshot.width,
+                "height": snapshot.height,
+                "dpr": snapshot.dpr,
+            },
+            "hits": hits,
+            "background_share": background_share,
+        }
+        if snapshot.scenes > 1:
+            payload["scene"]["scenes"] = snapshot.scenes
+        if source.block_id is not None:
+            payload["block"] = source.block_id
+        return payload
 
 
 def pick_at_target(
@@ -554,51 +593,70 @@ def pick_at_target(
         the top hits carry dereferenced ``values``) and
         ``background_share``.
     """
-    from . import screenshot_tools
+    source = screenshot_tools.DirectSceneSource(
+        target,
+        block=block,
+        width=width,
+        height=height,
+        dpr=dpr,
+        debug=debug,
+        ready_timeout=ready_timeout,
+    )
+    return pick_at_source(source, str(target), x, y, radius=radius)
 
-    with screenshot_tools.RenderSession(
-        width=width, dpr=dpr, debug=debug, ready_timeout=ready_timeout
-    ) as session:
-        block_id, studio = _render_scene_target(session, target, block, height)
-        snapshot = take_snapshot(studio)
-        hits = hits_at(snapshot, x, y, radius)
-        for hit in hits[:MAX_DEREFERENCED_HITS]:
-            hit["values"] = instance_values(studio, hit["component"], hit["instance"])
 
-        cx, cy = _page_to_device(snapshot, x, y)
-        device_radius = radius * snapshot.dpr
-        x0 = max(0, int(math.floor(cx - device_radius)))
-        x1 = min(snapshot.width - 1, int(math.ceil(cx + device_radius)))
-        y0 = max(0, int(math.floor(cy - device_radius)))
-        y1 = min(snapshot.height - 1, int(math.ceil(cy + device_radius)))
-        background_share = 1.0
-        if x0 <= x1 and y0 <= y1:
-            ys, xs = np.mgrid[y0 : y1 + 1, x0 : x1 + 1]
-            disc = np.hypot(xs + 0.5 - cx, ys + 0.5 - cy) <= device_radius
-            if disc.any():
-                ids = snapshot.ids[y0 : y1 + 1, x0 : x1 + 1]
-                background_share = round(
-                    float(((ids == 0) & disc).sum() / disc.sum()), 4
-                )
+def pick_where_source(
+    source: "screenshot_tools.SceneSource",
+    target_label: str,
+    component_selector: str,
+    instances: Optional[InstanceRanges] = None,
+    out: Optional[pathlib.Path] = None,
+    out_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Selection -> screen truth on an already-resolved scene source.
+
+    Shared CLI/daemon core of :func:`pick_where_target`.
+    """
+    with source.scene() as scene:
+        studio = scene.studio
+        require_scene(studio)
+        full = take_snapshot(studio)
+        resolved = resolve_component(full.components, component_selector)
+        component = resolved["component"]
+        entry = legend_entry(full, component)
+        solo = take_snapshot(studio, component=component, instances=instances)
+        metrics = selection_metrics(full, solo, entry, instances)
 
         payload: Dict[str, Any] = {
-            "target": str(target),
-            "x": x,
-            "y": y,
-            "radius": radius,
+            "target": target_label,
+            "component": component,
+            "type": entry["type"],
+            "instances": [[start, end] for start, end in instances]
+            if instances
+            else "all",
             "scene": {
-                "rect": snapshot.rect,
-                "width": snapshot.width,
-                "height": snapshot.height,
-                "dpr": snapshot.dpr,
+                "rect": full.rect,
+                "width": full.width,
+                "height": full.height,
+                "dpr": full.dpr,
             },
-            "hits": hits,
-            "background_share": background_share,
+            **metrics,
         }
-        if snapshot.scenes > 1:
-            payload["scene"]["scenes"] = snapshot.scenes
-        if block_id is not None:
-            payload["block"] = block_id
+        if source.block_id is not None:
+            payload["block"] = source.block_id
+
+        if out is not None:
+            # Highlight decorations mutate the loaded scene; a caching
+            # provider must reload it before serving it again (the explicit
+            # clear below restores this render, but the conservative marking
+            # keeps warm reuse byte-honest even if a capture fails midway).
+            scene.mark_mutated()
+            highlight_selection(studio, component, instances)
+            png, _w, _h = scene.capture()
+            clear_highlight(studio)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(png)
+            payload["out"] = out_label or str(out)
         return payload
 
 
@@ -621,45 +679,22 @@ def pick_where_target(
         ``instances``, the metrics from :func:`selection_metrics`, the
         ``scene`` rect, and ``out`` when an overlay PNG was written.
     """
-    from . import screenshot_tools
-
-    with screenshot_tools.RenderSession(
-        width=width, dpr=dpr, debug=debug, ready_timeout=ready_timeout
-    ) as session:
-        block_id, studio = _render_scene_target(session, target, block, height)
-        full = take_snapshot(studio)
-        resolved = resolve_component(full.components, component_selector)
-        component = resolved["component"]
-        entry = legend_entry(full, component)
-        solo = take_snapshot(studio, component=component, instances=instances)
-        metrics = selection_metrics(full, solo, entry, instances)
-
-        payload: Dict[str, Any] = {
-            "target": str(target),
-            "component": component,
-            "type": entry["type"],
-            "instances": [[start, end] for start, end in instances]
-            if instances
-            else "all",
-            "scene": {
-                "rect": full.rect,
-                "width": full.width,
-                "height": full.height,
-                "dpr": full.dpr,
-            },
-            **metrics,
-        }
-        if block_id is not None:
-            payload["block"] = block_id
-
-        if out is not None:
-            highlight_selection(studio, component, instances)
-            png, _w, _h = session.capture()
-            clear_highlight(studio)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(png)
-            payload["out"] = str(out)
-        return payload
+    source = screenshot_tools.DirectSceneSource(
+        target,
+        block=block,
+        width=width,
+        height=height,
+        dpr=dpr,
+        debug=debug,
+        ready_timeout=ready_timeout,
+    )
+    return pick_where_source(
+        source,
+        str(target),
+        component_selector,
+        instances=instances,
+        out=out,
+    )
 
 
 __all__ = [
@@ -675,7 +710,9 @@ __all__ = [
     "legend_entry",
     "parse_frame_selector",
     "parse_instance_ranges",
+    "pick_at_source",
     "pick_at_target",
+    "pick_where_source",
     "pick_where_target",
     "require_scene",
     "resolve_component",
