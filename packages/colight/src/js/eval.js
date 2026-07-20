@@ -273,16 +273,29 @@ export function collectBuffers(data) {
 export function replaceBuffers(data, buffers) {
   function traverse(value) {
     if (value && typeof value === "object") {
+      // Only descend into plain objects and arrays. DataViews, typed arrays
+      // and other host objects are data leaves — copying them field-by-field
+      // (Object.entries) would silently turn them into {} and drop the bytes.
+      if (Array.isArray(value)) {
+        return value.map(traverse);
+      }
+      if (value.constructor !== Object) {
+        return value;
+      }
       if (
         value.__type__ === "ndarray" &&
         value.__buffer_index__ !== undefined
       ) {
-        value.data = buffers[value.__buffer_index__];
-        delete value.__buffer_index__;
-        return value;
-      }
-      if (Array.isArray(value)) {
-        return value.map(traverse);
+        // Resolve into a CLONE, not the shared parsed node: an update entry's
+        // envelope may be handed to replaceBuffers more than once (e.g. a
+        // TimelineScrubber that re-derives ops on every scrub position).
+        // Mutating the original would delete __buffer_index__ and strand
+        // later re-resolutions.
+        return {
+          ...value,
+          data: buffers[value.__buffer_index__],
+          __buffer_index__: undefined,
+        };
       }
       const result = {};
       for (const [key, val] of Object.entries(value)) {

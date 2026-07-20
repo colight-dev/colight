@@ -64,6 +64,64 @@ function normalizeUpdates(updates) {
 }
 
 /**
+ * Reduce a .colight update entry to the update operations it applies, mirroring
+ * the render CLI / applyUpdateEntries semantics (see docs format.md §3.6):
+ *
+ *   - a dict `ast` ({key: value}) or list of [key, op, payload] ops is applied
+ *     as-is,
+ *   - otherwise a non-empty `state` map is applied as per-key resets.
+ *
+ * Returns `[[key, op, payload], ...]` (buffers NOT yet resolved) or [] when the
+ * entry carries a fresh AST (a re-render, which the scrubber cannot recompute
+ * incrementally — such entries fall back to the built-in forward apply).
+ *
+ * @param {{data: object}} entry - one parsed update entry
+ * @returns {Array<[string, string, any]>}
+ */
+export function updateEntryOps(entry) {
+  const data = entry?.data ?? {};
+  const ast = data.ast;
+  if (ast != null) {
+    // A fresh AST (dict/list that is not an update payload) is not a state
+    // patch — the caller handles that case; here we only reduce patch forms.
+    if (Array.isArray(ast) || ast.constructor === Object) {
+      return normalizeUpdates(Array.isArray(ast) ? ast : [ast]);
+    }
+    return [];
+  }
+  const state = data.state;
+  if (state && Object.keys(state).length > 0) {
+    return normalizeUpdates([state]);
+  }
+  return [];
+}
+
+/**
+ * Compute the flat list of update operations that move state from its initial
+ * value to the value after applying the first `k` update entries.
+ *
+ * Buffers are resolved per-entry (each entry's refs index into its own
+ * buffers). Later entries override earlier ones for the same key, so the
+ * scrubber can recompute any position from the initial state in one pass — no
+ * snapshot infrastructure, correct for hundreds of entries.
+ *
+ * @param {Array<{data: object, buffers: any[]}>} entries
+ * @param {number} k - number of entries to apply (0 = initial state)
+ * @returns {Array<[string, string, any]>} normalized ops with buffers resolved
+ */
+export function computeStepUpdates(entries, k) {
+  const ops = [];
+  const count = Math.max(0, Math.min(k, entries.length));
+  for (let i = 0; i < count; i++) {
+    const entry = entries[i];
+    const entryOps = updateEntryOps(entry);
+    if (!entryOps.length) continue;
+    ops.push(...replaceBuffers(entryOps, entry.buffers || []));
+  }
+  return ops;
+}
+
+/**
  * Gets a deeply nested value from the state store using dot notation.
  *
  * Traverses nested objects/arrays by splitting the property path on dots.
@@ -194,6 +252,15 @@ export async function createStateStore(data) {
   // Track the current transaction depth and accumulated updates
   let updateDepth = 0;
   let transactionUpdates = null;
+
+  // Timeline-scrubber state (see TimelineScrubber). The baseline is the
+  // initial value of every key any update entry touches, captured once so the
+  // scrubber can rewind to any step by resetting + replaying entries 0..k.
+  // These live in the closure, not on the proxy (whose `set` trap would treat
+  // them as state keys).
+  let timelineBaseline = null;
+  let timelinePrepared = false;
+  let initialStateSnapshot = null;
 
   function notifyPython(updates) {
     if (!experimental || !updates) return;
@@ -340,19 +407,28 @@ export async function createStateStore(data) {
 
       applyUpdateEntries: async (entries) => {
         if (!entries) return;
-        for (const { data } of entries) {
-          await $state.__updateEnvironment(data);
+        for (const { data, buffers } of entries) {
+          // Resolve buffer refs in the entry's `state` against THIS entry's
+          // buffers before backfill — otherwise __backfill would store raw
+          // {__buffer_index__} envelopes that later evaluate against the wrong
+          // (store) buffers.
+          await $state.__updateEnvironment({
+            ...data,
+            state: data.state
+              ? replaceBuffers(data.state, buffers || [])
+              : data.state,
+          });
         }
         mobx.runInAction(() => {
-          entries.forEach(({ data, buffers }) => {
-            if (data.ast != null) {
-              // ast is a list of update operations to apply.
-              $state.updateWithBuffers(data.ast, buffers);
-            } else if (data.state && Object.keys(data.state).length > 0) {
-              // State-only update (ast: null): the state values overwrite
-              // existing keys (matching the render CLI) — the __backfill in
-              // __updateEnvironment above only adds keys that are new.
-              $state.updateWithBuffers([data.state], buffers);
+          entries.forEach((entry) => {
+            // updateEntryOps handles all patch forms uniformly: a dict `ast`
+            // ({key: value}, produced by state-update artifacts like ARC
+            // replays), a list of [key, op, payload] ops, or a state-only
+            // (ast: null) entry — each applied as resets that overwrite
+            // existing keys (matching the render CLI).
+            const ops = updateEntryOps(entry);
+            if (ops.length) {
+              $state.updateWithBuffers(ops, entry.buffers || []);
             }
           });
         });
@@ -362,6 +438,52 @@ export async function createStateStore(data) {
         updates = applyUpdates(normalizeUpdates(updates));
         notifyPython(updates);
       },
+
+      // Run the async environment setup (imports/backfill/listeners) for a
+      // list of update entries ONCE, then snapshot the initial value of every
+      // key they touch (using the pre-update snapshot when available, else the
+      // current value). After this, applyUpdateEntriesUpTo is synchronous.
+      prepareUpdateEntries: async (entries) => {
+        if (!entries || timelinePrepared) return;
+        timelinePrepared = true;
+        for (const { data, buffers } of entries) {
+          // Backfill new keys / load imports without applying patches: the
+          // envelope carries no nested updateEntries, so this only sets up env.
+          await $state.__updateEnvironment({
+            ...data,
+            state: data.state
+              ? replaceBuffers(data.state, buffers || [])
+              : data.state,
+            updateEntries: undefined,
+          });
+        }
+        const snapshot = initialStateSnapshot || {};
+        const baseline = {};
+        for (const entry of entries) {
+          for (const [key] of updateEntryOps(entry)) {
+            if (!(key in baseline)) {
+              baseline[key] =
+                key in snapshot ? snapshot[key] : stateMap.get(key);
+            }
+          }
+        }
+        timelineBaseline = baseline;
+      },
+
+      // Set state to initial + first `k` update entries. Rewinds by resetting
+      // the touched keys to their captured baseline, then replays entries
+      // 0..k in one action (recompute-from-scratch; correct and cheap for
+      // hundreds of entries).
+      applyUpdateEntriesUpTo: (entries, k) => {
+        const baseline = timelineBaseline || {};
+        mobx.runInAction(() => {
+          for (const [key, value] of Object.entries(baseline)) {
+            stateMap.set(key, value);
+          }
+          const ops = computeStepUpdates(entries, k);
+          if (ops.length) applyUpdates(ops);
+        });
+      },
     },
     {
       ...stateHandler,
@@ -370,9 +492,108 @@ export async function createStateStore(data) {
     },
   );
 
+  // Snapshot the initial state values BEFORE any update entries are applied,
+  // so a TimelineScrubber can rewind to step 0. __updateEnvironment below then
+  // applies the entries as usual (final frame on load); the scrubber, once
+  // mounted, resets to whichever step the user selects.
+  initialStateSnapshot = {};
+  for (const key of stateMap.keys()) {
+    initialStateSnapshot[key] = stateMap.get(key);
+  }
+
   await $state.__updateEnvironment(data);
 
   return $state;
+}
+
+/**
+ * Timeline scrubber for a .colight artifact that carries update entries
+ * (a replay/episode). Renders a step slider (0..N), play/pause and a step
+ * count; each position applies update entries 0..k on top of the initial
+ * state. Recomputes from the initial state on every scrub — no snapshots.
+ *
+ * This is chrome around the visual driving which UPDATE ENTRIES are applied.
+ * It is independent of any in-AST Plot.Slider (animateBy autoplay), which
+ * drives its own state key within whatever entry is currently applied.
+ */
+function TimelineScrubber({ $state, updateEntries }) {
+  const total = updateEntries.length;
+  const [step, setStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await $state.prepareUpdateEntries(updateEntries);
+      if (!cancelled) setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [$state, updateEntries]);
+
+  useEffect(() => {
+    if (ready) $state.applyUpdateEntriesUpTo(updateEntries, step);
+  }, [ready, step, $state, updateEntries]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => {
+      setStep((prev) => {
+        if (prev >= total) {
+          setIsPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 1000 / 8);
+    return () => clearInterval(id);
+  }, [isPlaying, total]);
+
+  const togglePlay = useCallback(() => {
+    setIsPlaying((prev) => {
+      // Restart from the beginning if we're at the end.
+      if (!prev && step >= total) setStep(0);
+      return !prev;
+    });
+  }, [step, total]);
+
+  return (
+    <div
+      className={tw(
+        "flex items-center gap-2 my-2 text-xs text-gray-700 select-none",
+      )}
+      data-testid="timeline-scrubber"
+    >
+      <button
+        type="button"
+        onClick={togglePlay}
+        className={tw(
+          "px-2 py-0.5 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer",
+        )}
+        aria-label={isPlaying ? "Pause" : "Play"}
+      >
+        {isPlaying ? "❚❚" : "▶"}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={total}
+        step={1}
+        value={step}
+        onChange={(e) => {
+          setIsPlaying(false);
+          setStep(Number(e.target.value));
+        }}
+        className={tw("flex-1 outline-none cursor-pointer")}
+        aria-label="Timeline step"
+      />
+      <span className={tw("font-mono tabular-nums whitespace-nowrap")}>
+        {step} / {total}
+      </span>
+    </div>
+  );
 }
 
 export function StateProvider(data) {
@@ -426,6 +647,9 @@ export function StateProvider(data) {
   return (
     <$StateContext.Provider value={$state}>
       <api.Node value={currentAst} />
+      {data.updateEntries && data.updateEntries.length > 0 && (
+        <TimelineScrubber $state={$state} updateEntries={data.updateEntries} />
+      )}
     </$StateContext.Provider>
   );
 }
@@ -611,6 +835,11 @@ export const render = async (element, data, id) => {
   root.render(<DraggableViewer data={{ ...data, id }} />);
 };
 
-export { parseColightData, parseColightScript, DraggableViewer };
+export {
+  parseColightData,
+  parseColightScript,
+  DraggableViewer,
+  TimelineScrubber,
+};
 
 globals.colight.render = render;
