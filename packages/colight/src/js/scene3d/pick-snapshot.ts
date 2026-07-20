@@ -219,13 +219,49 @@ export function computeSelectionBounds(
     ? Math.max(...transform.scale.map((s: number) => Math.abs(s)))
     : 1;
 
+  // Meshes carry a local geometry AABB: a single instance at its center can
+  // span the whole scene, so the per-instance radius heuristic misses it.
+  // Expand each instance center by the geometry's local half-extent instead.
+  const localBounds = (spec as any).localBounds as Bounds3 | undefined;
+
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   let any = false;
   for (let i = 0; i < elementCount; i++) {
     if (!inRanges(i, ranges)) continue;
     any = true;
-    const center = applyTransform(readVec3At(centers, i), transform);
+    const rawCenter = readVec3At(centers, i);
+    if (localBounds) {
+      // Per-instance uniform scale (mesh ``scale``/``scales``), then group.
+      const comp = component as any;
+      const instScale =
+        comp.scales && comp.scales.length > i
+          ? comp.scales[i]
+          : typeof comp.scale === "number"
+            ? comp.scale
+            : 1;
+      // Add the local bbox (offset by the raw instance center), transformed
+      // by the group transform. Using both bbox extremes captures the extent
+      // even when the instance center is at the origin.
+      for (const bx of [localBounds.min[0], localBounds.max[0]]) {
+        for (const by of [localBounds.min[1], localBounds.max[1]]) {
+          for (const bz of [localBounds.min[2], localBounds.max[2]]) {
+            const local: Vec3 = [
+              rawCenter[0] + bx * instScale,
+              rawCenter[1] + by * instScale,
+              rawCenter[2] + bz * instScale,
+            ];
+            const world = applyTransform(local, transform);
+            for (let axis = 0; axis < 3; axis++) {
+              min[axis] = Math.min(min[axis], world[axis]);
+              max[axis] = Math.max(max[axis], world[axis]);
+            }
+          }
+        }
+      }
+      continue;
+    }
+    const center = applyTransform(rawCenter, transform);
     const radius = elementRadius(component, spec, i) * maxScale;
     for (let axis = 0; axis < 3; axis++) {
       min[axis] = Math.min(min[axis], center[axis] - radius);
@@ -295,10 +331,34 @@ export function describeInstance(
     return undefined;
   };
 
+  // Decorations override per-instance color/alpha/scale for matching indexes
+  // (last matching decoration wins, mirroring buildRenderData). Read them so
+  // the reported values match what is actually drawn — a mesh decorated to
+  // 25% alpha must report alpha 0.25, not 1.
+  let decoColor: number[] | undefined;
+  let decoAlpha: number | undefined;
+  let decoScale: number | undefined;
+  const decorations = comp.decorations as
+    | Array<{
+        indexes?: number[];
+        color?: number[];
+        alpha?: number;
+        scale?: number;
+      }>
+    | undefined;
+  if (Array.isArray(decorations)) {
+    for (const deco of decorations) {
+      if (!deco?.indexes || !deco.indexes.includes(index)) continue;
+      if (deco.color !== undefined) decoColor = Array.from(deco.color);
+      if (deco.alpha !== undefined) decoAlpha = deco.alpha;
+      if (deco.scale !== undefined) decoScale = deco.scale;
+    }
+  }
+
   const color = vec3Field("colors", "color");
-  values.color = color ?? defaults.color ?? [0.5, 0.5, 0.5];
+  values.color = decoColor ?? color ?? defaults.color ?? [0.5, 0.5, 0.5];
   const alpha = scalarField("alphas", "alpha");
-  values.alpha = alpha ?? defaults.alpha ?? 1.0;
+  values.alpha = decoAlpha ?? alpha ?? defaults.alpha ?? 1.0;
 
   const halfSize = vec3Field("half_sizes", "half_size");
   if (halfSize !== undefined) values.half_size = halfSize;
@@ -312,7 +372,8 @@ export function describeInstance(
   else if (typeof defaults.size === "number") values.size = defaults.size;
 
   const scale = scalarField("scales", "scale");
-  if (scale !== undefined) values.scale = scale;
+  if (decoScale !== undefined) values.scale = decoScale;
+  else if (scale !== undefined) values.scale = scale;
 
   if (comp.quaternions && comp.quaternions.length >= (index + 1) * 4) {
     values.quaternion = Array.from(

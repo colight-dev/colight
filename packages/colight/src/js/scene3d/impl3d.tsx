@@ -426,6 +426,14 @@ export interface SceneImplProps {
 
   /** Optional registry of group handlers for event bubbling */
   groupRegistry?: GroupRegistry;
+
+  /** World-space offset positions were pre-shifted by in Python (Scene
+   * origin). Metadata only: reporting adds it back so dereferenced positions
+   * are in the caller's coordinate space. Does not affect rendering. */
+  origin?: [number, number, number];
+
+  /** RGB clear color [r,g,b] (0-1) behind the geometry. Default opaque black. */
+  background?: [number, number, number];
 }
 
 function initGeometryResources(
@@ -583,18 +591,20 @@ function encodeScenePass({
   depthTexture,
   renderObjects,
   uniformBindGroup,
+  clearColor,
 }: {
   commandEncoder: GPUCommandEncoder;
   targetView: GPUTextureView;
   depthTexture: GPUTexture | null;
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
+  clearColor?: { r: number; g: number; b: number; a: number };
 }) {
   const pass = commandEncoder.beginRenderPass({
     colorAttachments: [
       {
         view: targetView,
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        clearValue: clearColor ?? { r: 0, g: 0, b: 0, a: 1 },
         loadOp: "clear",
         storeOp: "store",
       },
@@ -763,6 +773,8 @@ export function SceneImpl({
   readyState = NOOP_READY_STATE,
   primitiveSpecs,
   groupRegistry,
+  origin,
+  background,
 }: SceneImplProps) {
   // Merge default registry with custom specs
   const primitiveRegistry = useMemo(() => {
@@ -873,6 +885,31 @@ export function SceneImpl({
     activeCameraRef.current = nextCamera;
     return nextCamera;
   }, [controlledCamera, internalCamera]);
+
+  // Clear color (behind geometry) derived from the scene `background` prop.
+  // Held in a ref so the render callback (which has a large dep list) picks
+  // up changes without being rebuilt.
+  const clearColorRef = useRef<{ r: number; g: number; b: number; a: number }>({
+    r: 0,
+    g: 0,
+    b: 0,
+    a: 1,
+  });
+  useEffect(() => {
+    clearColorRef.current = background
+      ? { r: background[0], g: background[1], b: background[2], a: 1 }
+      : { r: 0, g: 0, b: 0, a: 1 };
+    requestRender("background-change");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [background?.[0], background?.[1], background?.[2]]);
+
+  // Scene origin (world-space offset positions were pre-shifted by). Held in a
+  // ref for the snapshot/pick API, which adds it back to dereferenced
+  // positions so the CLI reports coordinates in the caller's space.
+  const originRef = useRef<[number, number, number] | undefined>(origin);
+  useEffect(() => {
+    originRef.current = origin;
+  }, [origin]);
 
   const handleCameraUpdate = useCallback(
     (updateFn: (camera: CameraState) => CameraState) => {
@@ -2232,6 +2269,7 @@ export function SceneImpl({
           depthTexture,
           renderObjects: sortedRenderObjects,
           uniformBindGroup,
+          clearColor: clearColorRef.current,
         });
 
         const outlineReady = !!(
@@ -2628,6 +2666,7 @@ export function SceneImpl({
       camera: activeCameraRef.current
         ? createCameraParams(activeCameraRef.current)
         : null,
+      origin: originRef.current ?? null,
       components: comps.map((comp, index) => ({
         component: index,
         type: comp.type,
@@ -2716,7 +2755,18 @@ export function SceneImpl({
     if (!spec) return null;
     const count = spec.getElementCount(component);
     if (instanceIdx < 0 || instanceIdx >= count) return null;
-    return describeInstance(component, spec, instanceIdx);
+    const values = describeInstance(component, spec, instanceIdx);
+    // The scene `origin` shifted all positions in Python; add it back so the
+    // dereferenced position is in the caller's original coordinate space.
+    const o = originRef.current;
+    if (o && Array.isArray(values.center)) {
+      values.center = [
+        (values.center[0] as number) + o[0],
+        (values.center[1] as number) + o[1],
+        (values.center[2] as number) + o[2],
+      ];
+    }
+    return values;
   }
 
   async function snapshotFrameOnSelection(
@@ -3496,6 +3546,57 @@ export function SceneImpl({
     createOrUpdateOutlineTextures,
     anyOutlineEnabled,
     renderFrame,
+  ]);
+
+  // Auto-fit: when the user supplied no camera, fit the view to the scene's
+  // world-space bounds on first render (and whenever the component set
+  // changes while still uncontrolled). This makes far-from-unit-scale scenes
+  // (a 3 km deposit, a UTM tile) render correctly out of the box instead of
+  // pure black under the unit-scale DEFAULT_CAMERA near/far. Deterministic:
+  // the same components + viewport always yield the same fitted camera, so
+  // `screenshot --check` stays byte-identical. An explicit defaultCamera or
+  // controlled camera skips this entirely.
+  const userCameraProvided = !!(controlledCamera || defaultCamera);
+  const autoFitSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (userCameraProvided) return;
+    if (!isReady || !gpuRef.current) return;
+    if (!components.length) return;
+    if (!containerWidth || !containerHeight) return;
+
+    // Only refit when the component set actually changes (identity of the
+    // compiled array), not on every camera nudge from user interaction.
+    const signature = `${components.length}:${containerWidth}x${containerHeight}`;
+    if (autoFitSignatureRef.current === signature) return;
+
+    let bounds: Bounds3 | null = null;
+    for (const comp of components) {
+      const spec = primitiveRegistry[comp.type];
+      if (!spec) continue;
+      bounds = unionBounds(
+        bounds,
+        computeSelectionBounds(comp, spec, transforms),
+      );
+    }
+    if (!bounds) return;
+
+    autoFitSignatureRef.current = signature;
+    const fitted = fitCameraToBounds(
+      createCameraParams(activeCameraRef.current ?? createCameraState(null)),
+      bounds,
+      containerWidth / containerHeight,
+    );
+    const fittedState = createCameraState(fitted);
+    activeCameraRef.current = fittedState;
+    setInternalCamera(fittedState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isReady,
+    components,
+    transforms,
+    containerWidth,
+    containerHeight,
+    userCameraProvided,
   ]);
 
   // Render when camera, components, or transforms change

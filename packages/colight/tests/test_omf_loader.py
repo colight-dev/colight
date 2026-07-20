@@ -75,22 +75,41 @@ def test_elements_grouped_by_kind(omf_path: str) -> None:
     assert list(project.volumes) == ["blocks"]
 
 
-def test_recentering(omf_path: str) -> None:
+def test_world_coordinates_and_center(omf_path: str) -> None:
     project = load_omf(omf_path)
     lo, hi = project.bounds()
-    # Bounds of point/line/surface vertices are symmetric only if the volume
-    # is included in the recentering midpoint, so just check the invariant:
-    # recentred geometry + center reproduces the original coordinates.
-    raw = load_omf(omf_path, recenter=False)
+    # Geometry stays in true world coordinates (no loader re-centering); the
+    # collar vertices are exactly the input coordinates.
     np.testing.assert_allclose(
-        project.points["collars"].vertices + project.center,
-        raw.points["collars"].vertices,
+        project.points["collars"].vertices,
+        [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 4.0]],
     )
-    np.testing.assert_allclose(
-        project.volumes["blocks"].corner + project.center,
-        raw.volumes["blocks"].corner,
-    )
+    # ``center`` is the suggested Scene origin: the midpoint of the full
+    # project bounds (all elements, including the block-model volume, so it
+    # differs from bounds() which only spans point/line/surface vertices).
+    assert np.all(np.isfinite(project.center))
+    assert project.center.shape == (3,)
     assert np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))
+
+
+def test_scene_origin_roundtrip(omf_path: str) -> None:
+    """Scene(origin=project.center) shifts serialized positions to ~0; adding
+    the origin back reproduces the original world coordinates (what pick-at
+    reports)."""
+    from colight import scene3d
+    from colight.cli_tools.structure import collect_structure
+    from colight.widget import to_json_with_state
+
+    project = load_omf(omf_path)
+    collars = project.points["collars"]
+    scene = scene3d.Scene(collars.point_cloud(), origin=project.center)
+    data, buffers = to_json_with_state(scene)
+    arrays = {
+        r.key: r for r in collect_structure(data, buffers).arrays if r.values is not None
+    }
+    shifted = np.asarray(arrays["centers"].values).reshape(-1, 3)
+    world = shifted + project.center
+    np.testing.assert_allclose(world, collars.vertices, atol=1e-2)
 
 
 def test_line_starts_ends(omf_path: str) -> None:
@@ -102,7 +121,7 @@ def test_line_starts_ends(omf_path: str) -> None:
 
 
 def test_grid_ordering_and_centers(omf_path: str) -> None:
-    volume = load_omf(omf_path, recenter=False).volumes["blocks"]
+    volume = load_omf(omf_path).volumes["blocks"]
     assert volume.shape == (2, 2, 2)
     grid = volume.grid("grade")
     # OMF v1 cell data is C-ordered over (nu, nv, nw): w varies fastest.

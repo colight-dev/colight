@@ -381,7 +381,15 @@ def _capture_scene(
 
     if want_coverage and is_scene:
         snapshot = scene_pick.take_snapshot(scene.studio)
-        extras["coverage"] = scene_pick.coverage_payload(snapshot)
+        coverage = scene_pick.coverage_payload(snapshot)
+        extras["coverage"] = coverage
+        # Pixel-side "lost scene" diagnostic: a nearly-empty frame usually
+        # means the geometry fell outside the camera frustum (bad near/far,
+        # unfitted camera) or is fully transparent. Warn so blank renders
+        # self-diagnose instead of looking like a working empty scene.
+        warnings = scene_pick.coverage_warnings(coverage)
+        if warnings:
+            extras.setdefault("warnings", []).extend(warnings)
     return png, pixel_width, pixel_height, extras
 
 

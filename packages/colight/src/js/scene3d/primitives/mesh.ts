@@ -754,6 +754,26 @@ export function defineMesh(
       : undefined,
   });
 
+  // Local-space bounding box of the mesh geometry, so scene bounds / camera
+  // auto-fit can account for the vertex extent (a mesh is one instance at its
+  // center, but its geometry can span the whole scene — the per-instance
+  // radius heuristic would miss it entirely).
+  const positions = sampleGeo.positions;
+  if (positions && positions.length >= 3) {
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i + 2 < positions.length; i += 3) {
+      for (let a = 0; a < 3; a++) {
+        const v = positions[i + a] as number;
+        if (v < min[a]) min[a] = v;
+        if (v > max[a]) max[a] = v;
+      }
+    }
+    if (Number.isFinite(min[0])) {
+      (spec as any).localBounds = { min, max };
+    }
+  }
+
   // Textured meshes batch by texture (like ImagePlane)
   if (hasTexture) {
     spec.getBatchKey = (elem) => {

@@ -260,6 +260,88 @@ describe("describeInstance", () => {
     // Ellipsoid spec default half_size
     expect(values.half_size).toEqual([0.5, 0.5, 0.5]);
   });
+
+  it("reports decoration-overridden alpha/color/scale for matching indexes", () => {
+    // A mesh decorated to 25% alpha must report alpha 0.25, not the base 1.
+    const component = {
+      type: "Ellipsoid",
+      centers: new Float32Array([0, 0, 0, 1, 1, 1]),
+      color: [1, 1, 1],
+      alpha: 1.0,
+      decorations: [
+        { indexes: [0], alpha: 0.25, color: [1, 0, 0], scale: 2 },
+      ],
+    } as unknown as ComponentConfig;
+
+    const decorated = describeInstance(component, ellipsoidSpec, 0);
+    // Fails without the fix: alpha reported as 1 (base), ignoring the deco.
+    expect(decorated.alpha).toBeCloseTo(0.25);
+    expect(decorated.color).toEqual([1, 0, 0]);
+    expect(decorated.scale).toBe(2);
+
+    // A non-decorated instance keeps the base values.
+    const plain = describeInstance(component, ellipsoidSpec, 1);
+    expect(plain.alpha).toBe(1);
+    expect(plain.color).toEqual([1, 1, 1]);
+  });
+});
+
+describe("auto-fit determinism (fitCameraToBounds over scene bounds)", () => {
+  // The auto-fit default fits the same camera every time for a given scene +
+  // viewport, so `screenshot --check` stays byte-identical. This exercises the
+  // exact composition impl3d uses: unionBounds over computeSelectionBounds,
+  // then fitCameraToBounds from the default camera template.
+  const templateCamera = {
+    position: [2, 2, 2] as [number, number, number],
+    target: [0, 0, 0] as [number, number, number],
+    up: [0, 1, 0] as [number, number, number],
+    fov: 45,
+    near: 0.001,
+    far: 100,
+  };
+
+  const utmScene: ComponentConfig[] = [
+    {
+      type: "PointCloud",
+      centers: new Float32Array([0, 0, 0, 3000, 3000, 300]),
+    } as unknown as ComponentConfig,
+    {
+      type: "Cuboid",
+      centers: new Float32Array([1500, 1500, 150]),
+      half_size: [50, 50, 50],
+    } as unknown as ComponentConfig,
+  ];
+
+  const fitScene = (aspect: number) => {
+    let bounds = null as ReturnType<typeof unionBounds>;
+    const specs = { PointCloud: pointCloudSpec, Cuboid: cuboidSpec } as Record<
+      string,
+      typeof cuboidSpec
+    >;
+    for (const comp of utmScene) {
+      bounds = unionBounds(
+        bounds,
+        computeSelectionBounds(comp, specs[comp.type], [IDENTITY_GPU_TRANSFORM]),
+      );
+    }
+    return fitCameraToBounds(templateCamera, bounds!, aspect);
+  };
+
+  it("produces the identical camera on repeated fits", () => {
+    const a = fitScene(1.5);
+    const b = fitScene(1.5);
+    expect(b).toEqual(a);
+  });
+
+  it("brackets a kilometre-scale scene in near/far (not black under unit far)", () => {
+    const fitted = fitScene(1.5);
+    // The unit-scale DEFAULT_CAMERA far (100) can't contain a 3 km scene; the
+    // fitted far must exceed the scene diameter so it renders.
+    const diameter = Math.hypot(3000, 3000, 300);
+    expect(fitted.far).toBeGreaterThan(diameter);
+    expect(fitted.near).toBeGreaterThan(0);
+    expect(fitted.near).toBeLessThan(fitted.far);
+  });
 });
 
 describe("fitCameraToBounds", () => {
