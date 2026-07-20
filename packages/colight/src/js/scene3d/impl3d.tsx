@@ -889,6 +889,14 @@ export function SceneImpl({
   // Clear color (behind geometry) derived from the scene `background` prop.
   // Held in a ref so the render callback (which has a large dep list) picks
   // up changes without being rebuilt.
+  //
+  // NOTE: this drives the WebGPU render-pass clearValue, which is what the
+  // live browser presents. Headless `colight screenshot` (CDP
+  // Page.captureScreenshot over a premultiplied WebGPU canvas) does not
+  // capture cleared-but-undrawn regions faithfully -- they come back as the
+  // black page -- so a custom background is currently visible in the live
+  // view but not in screenshots. Fixing that means switching the screenshot
+  // capture to a GPU pixel readback, which is out of scope here.
   const clearColorRef = useRef<{ r: number; g: number; b: number; a: number }>({
     r: 0,
     g: 0,
