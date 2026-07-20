@@ -14,6 +14,7 @@ import {
   packID,
   createVertexBufferLayout,
   cameraStruct,
+  clipPlanesStruct,
   lightingConstants,
   lightingCalc,
   pickingVSOut,
@@ -348,6 +349,7 @@ fn vs_main(
 
 const fragmentShader = /*wgsl*/ `
 ${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 
@@ -358,6 +360,7 @@ fn fs_main(
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let litColor = calculateLighting(color, normal, worldPos);
   return vec4<f32>(litColor, alpha);
 }`;
@@ -392,6 +395,7 @@ fn vs_main(
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
   return out;
 }`;
 

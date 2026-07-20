@@ -202,6 +202,57 @@ def _find_cameras(node: Any) -> List[Dict[str, Any]]:
     return cameras
 
 
+def _clip_plane_warnings(
+    state: WalkState, data: Dict[str, Any]
+) -> List[Dict[str, str]]:
+    """Warn when section / clipping planes exclude the entire scene bounds.
+
+    Fires only for numeric offsets (a ``$state``-driven sweep is checked at
+    render time via ``screenshot --json``). Positions and offsets are both in
+    the origin-shifted space, so the comparison is direct.
+    """
+    planes = _find_clip_planes(data)
+    if not planes:
+        return []
+    bounds = _scene_point_bounds(state)
+    if bounds is None:
+        return []
+    lo, hi = bounds
+    corners = np.array(
+        [
+            [
+                lo[0] if not xi else hi[0],
+                lo[1] if not yi else hi[1],
+                lo[2] if not zi else hi[2],
+            ]
+            for xi in (0, 1)
+            for yi in (0, 1)
+            for zi in (0, 1)
+        ],
+        dtype=np.float64,
+    )
+    for plane in planes:
+        offset = plane.get("offset")
+        normal = plane.get("normal")
+        if not isinstance(offset, (int, float)) or isinstance(offset, bool):
+            continue
+        if not isinstance(normal, (list, tuple)) or len(normal) != 3:
+            continue
+        n = np.asarray(normal, dtype=np.float64)
+        # Every corner clipped (dot(corner, n) - offset > 0) => nothing renders.
+        if np.all(corners @ n - float(offset) > 0):
+            return [
+                {
+                    "code": "section-excludes-scene",
+                    "message": (
+                        "clip_planes exclude the entire scene bounds — "
+                        "nothing renders; widen the section offset"
+                    ),
+                }
+            ]
+    return []
+
+
 def _camera_frustum_warnings(
     state: WalkState, data: Dict[str, Any]
 ) -> List[Dict[str, str]]:
@@ -290,6 +341,7 @@ def structure_warnings(
         warnings.extend(_component_warnings(component))
     if data is not None:
         warnings.extend(_camera_frustum_warnings(state, data))
+        warnings.extend(_clip_plane_warnings(state, data))
     return warnings
 
 
@@ -337,6 +389,58 @@ def filter_payload(
 
     entry["min"] = _num(filter_by.get("min"))
     entry["max"] = _num(filter_by.get("max"))
+    return entry
+
+
+def _find_clip_planes(node: Any) -> List[Dict[str, Any]]:
+    """Collect scene-level ``clipPlanes`` arrays anywhere in a payload.
+
+    Scene(clip_planes=...) serializes to a ``clipPlanes`` prop on the scene3d
+    node. Returned as a flat list of ``{"normal", "offset"}`` (offsets that are
+    unresolved ``$state`` refs stay as their serialized dict — reported as a
+    ``state_key`` below).
+    """
+    planes: List[Dict[str, Any]] = []
+
+    def visit(n: Any) -> None:
+        if isinstance(n, dict):
+            cp = n.get("clipPlanes")
+            if isinstance(cp, list):
+                planes.extend(p for p in cp if isinstance(p, dict))
+            for v in n.values():
+                visit(v)
+        elif isinstance(n, list):
+            for item in n:
+                visit(item)
+
+    visit(node)
+    return planes
+
+
+def _js_source_repr(value: Any) -> Optional[str]:
+    """The raw JS source of a serialized ``Plot.js`` expression, else None."""
+    if isinstance(value, dict) and value.get("__type__") == "js_source":
+        src = value.get("value")
+        return src if isinstance(src, str) else None
+    return None
+
+
+def clip_plane_payload(plane: Dict[str, Any]) -> Dict[str, Any]:
+    """Machine-readable entry for one section / clipping plane.
+
+    ``{"normal": [nx,ny,nz], "offset"?, "state_key"?}``: a numeric offset is
+    reported directly; an offset driven by ``$state`` (a serialized ``Plot.js``
+    expression) is reported as ``state_key`` (its JS source) with ``offset``
+    omitted, so an agent knows the section is state-driven.
+    """
+    entry: Dict[str, Any] = {"normal": plane.get("normal")}
+    offset = plane.get("offset")
+    if isinstance(offset, (int, float)) and not isinstance(offset, bool):
+        entry["offset"] = offset
+    else:
+        state_key = _js_source_repr(offset)
+        if state_key is not None:
+            entry["state_key"] = state_key
     return entry
 
 
@@ -445,6 +549,9 @@ def inspect_visual_data(
     ]
     if filters:
         payload["filters"] = filters
+    clip_planes = [clip_plane_payload(p) for p in _find_clip_planes(data)]
+    if clip_planes:
+        payload["clip_planes"] = clip_planes
     state_selections = state_dict.get("selections")
     if isinstance(state_selections, dict) and state_selections:
         selections = selections_payload(state_selections)

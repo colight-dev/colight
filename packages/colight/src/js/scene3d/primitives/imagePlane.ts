@@ -10,6 +10,7 @@ import {
   definePrimitive,
   attr,
   cameraStruct,
+  clipPlanesStruct,
   groupTransformStruct,
   applyGroupTransformFn,
   pickingVSOut,
@@ -137,6 +138,7 @@ struct VSOut {
   @location(0) uv: vec2<f32>,
   @location(1) color: vec3<f32>,
   @location(2) alpha: f32,
+  @location(3) worldPos: vec3<f32>,
 };
 
 @vertex
@@ -172,10 +174,12 @@ fn vs_main(
   out.uv = vec2<f32>(localPos.x + 0.5, 0.5 - localPos.y);
   out.color = color;
   out.alpha = alpha;
+  out.worldPos = worldPos;
   return out;
 }`;
 
 const imagePlaneFragCode = /*wgsl*/ `
+${clipPlanesStruct}
 @group(1) @binding(0) var imageSampler: sampler;
 @group(1) @binding(1) var imageTexture: texture_2d<f32>;
 
@@ -183,8 +187,10 @@ const imagePlaneFragCode = /*wgsl*/ `
 fn fs_main(
   @location(0) uv: vec2<f32>,
   @location(1) color: vec3<f32>,
-  @location(2) alpha: f32
+  @location(2) alpha: f32,
+  @location(3) worldPos: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let tex = textureSample(imageTexture, imageSampler, uv);
   return vec4<f32>(tex.rgb * color, tex.a * alpha);
 }`;
@@ -227,6 +233,7 @@ fn vs_main(
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
   return out;
 }`;
 

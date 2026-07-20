@@ -211,8 +211,13 @@
 # # mismatch); JSON reports pixel size, sha256 and determinism.
 # # Scene3d targets also report `coverage` in --json (fraction of canvas
 # # pixels per component, read from the GPU pick buffer), any active
-# # `filters` ({component, label?, min, max}) and named `selections`
-# # ({name, component, count, predicate}), and accept
+# # `filters` ({component, label?, min, max}), named `selections`
+# # ({name, component, count, predicate}), and any active section
+# # `clip_planes` ({normal, offset} — or {normal, state_key} for a
+# # $state-driven sweep) so an agent knows the view is sectioned; a
+# # `section-excludes-scene` warning fires when the planes clip away the
+# # whole scene. `inspect` reports the same `clip_planes` at the data
+# # layer. Screenshot also accepts
 # # --frame "C[:A-B]" (component index or type name, optional inclusive
 # # instance ranges) — or --frame NAME (a named $state.selections entry) —
 # # to fit the camera on a selection before capture — the zoom loop:
