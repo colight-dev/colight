@@ -1,4 +1,4 @@
-from typing import Any, Dict, Literal, Optional, Sequence, TypedDict, Union
+from typing import Any, Dict, Literal, Mapping, Optional, Sequence, TypedDict, Union
 
 import numpy as np
 
@@ -180,7 +180,7 @@ def _apply_color_by(
 
 def _apply_color_channels(
     data: Dict[str, Any],
-    color_channels: Optional[Dict[str, Any]],
+    color_channels: Optional[Mapping[str, Any]],
     active_channel: Optional[Union[str, JSExpr]],
     legend: Union[bool, str] = True,
 ) -> None:
@@ -1108,7 +1108,7 @@ def PointCloud(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all points
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-point colors
-    color_channels: Optional[Dict[str, ColorChannel]] = None,  # Switchable channels
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
     active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,  # Default size for all points
@@ -1189,7 +1189,7 @@ def Ellipsoid(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
-    color_channels: Optional[Dict[str, ColorChannel]] = None,  # Switchable channels
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
     active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
@@ -1283,7 +1283,7 @@ def Cuboid(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
-    color_channels: Optional[Dict[str, ColorChannel]] = None,  # Switchable channels
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
     active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
@@ -1364,7 +1364,7 @@ def LineBeams(
     size: Optional[NumberLike] = None,  # Default size for all beams
     colors: Optional[ArrayLike] = None,  # Per-line colors
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-line colors
-    color_channels: Optional[Dict[str, ColorChannel]] = None,  # Switchable channels
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
     active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
@@ -1435,7 +1435,7 @@ def LineSegments(
     size: Optional[NumberLike] = None,
     colors: Optional[ArrayLike] = None,
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-segment colors
-    color_channels: Optional[Dict[str, ColorChannel]] = None,  # Switchable channels
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
     active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,

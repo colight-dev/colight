@@ -105,7 +105,9 @@ def test_scene_origin_roundtrip(omf_path: str) -> None:
     scene = scene3d.Scene(collars.point_cloud(), origin=project.center)
     data, buffers = to_json_with_state(scene)
     arrays = {
-        r.key: r for r in collect_structure(data, buffers).arrays if r.values is not None
+        r.key: r
+        for r in collect_structure(data, buffers).arrays
+        if r.values is not None
     }
     shifted = np.asarray(arrays["centers"].values).reshape(-1, 3)
     world = shifted + project.center
@@ -168,3 +170,35 @@ def test_component_builders(omf_path: str) -> None:
     assert cuboids.props["half_size"] == [1.0, 1.0, 1.0]
     # Domain anchors at the cutoff so legends read like the cutoff slider.
     assert cuboids.props["color_by"]["domain"] == [5.0, 7.0]
+
+
+def test_line_segments_channels(omf_path: str) -> None:
+    import colight.plot as Plot
+
+    lines = project = load_omf(omf_path).line_sets["holes"]
+    grade_class = lines.binned_categorical(
+        "grade",
+        edges=[0.3, 0.7],
+        labels=["low", "mid", "high"],
+        colors=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    )
+    # grade = [0.1, 0.5, 0.9] -> codes 0 (low), 1 (mid), 2 (high).
+    np.testing.assert_allclose(grade_class["values"], [0, 1, 2])
+    assert [c["label"] for c in grade_class["categories"]] == ["low", "mid", "high"]
+
+    comp = lines.line_segments_channels(
+        channels={
+            "Grade": {"attribute": "grade", "cmap": "viridis", "domain": (0, 1)},
+            "Grade class": grade_class,
+        },
+        active_channel=Plot.js("$state.color_channel"),
+        size=5.0,
+    )
+    props = comp.props
+    assert set(props["color_channels"]) == {"Grade", "Grade class"}
+    # Per-segment values expand 1:1 with segments (same path as color_by).
+    assert props["color_channels"]["Grade"]["count"] == 3
+    assert props["color_channels"]["Grade class"]["colorizer"]["kind"] == "categorical"
+
+    with pytest.raises(ValueError, match="edges"):
+        lines.binned_categorical("grade", edges=[0.5], labels=["a", "b", "c"])

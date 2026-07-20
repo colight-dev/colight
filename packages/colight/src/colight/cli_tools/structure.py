@@ -54,6 +54,10 @@ class ComponentRecord:
     # declared filter_by (see colight/scene3d.py). The `values` buffer is
     # dropped; only the reportable thresholds are kept.
     filter_by: Optional[Dict[str, Any]] = None
+    # Switchable color channels ({active, channels: [{name, label, kind}]})
+    # when the component declared color_channels. The per-channel value arrays
+    # and LUTs are dropped; only the discoverable channel roster is kept.
+    color_channels: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -161,6 +165,30 @@ def _walk(node: Any, path: str, key: Optional[str], state: WalkState) -> None:
                     state.stack[-1].filter_by = {
                         key: val for key, val in v.items() if key != "values"
                     }
+                continue
+            # color_channels is switchable-coloring metadata: record the
+            # discoverable channel roster (name/label/kind) on the enclosing
+            # component and don't descend (per-channel `values`/`lut` buffers
+            # would otherwise pollute the array records).
+            if k == "color_channels" and isinstance(v, dict) and v:
+                if state.stack:
+                    roster = []
+                    for name, chan in v.items():
+                        if not isinstance(chan, dict):
+                            continue
+                        colorizer = chan.get("colorizer") or {}
+                        roster.append(
+                            {
+                                "name": name,
+                                "label": chan.get("label", name),
+                                "kind": colorizer.get("kind", "continuous"),
+                            }
+                        )
+                    state.stack[-1].color_channels = {"channels": roster}
+                continue
+            if k == "active_channel" and isinstance(v, str):
+                if state.stack and state.stack[-1].color_channels is not None:
+                    state.stack[-1].color_channels["active"] = v
                 continue
             _walk(v, f"{path}.{k}" if path else k, k, state)
     elif isinstance(node, list):
