@@ -105,7 +105,9 @@ def test_scene_origin_roundtrip(omf_path: str) -> None:
     scene = scene3d.Scene(collars.point_cloud(), origin=project.center)
     data, buffers = to_json_with_state(scene)
     arrays = {
-        r.key: r for r in collect_structure(data, buffers).arrays if r.values is not None
+        r.key: r
+        for r in collect_structure(data, buffers).arrays
+        if r.values is not None
     }
     shifted = np.asarray(arrays["centers"].values).reshape(-1, 3)
     world = shifted + project.center
@@ -157,6 +159,21 @@ def test_component_builders(omf_path: str) -> None:
     assert meta["cmap"] == "viridis"
     assert meta["label"] == "grade"
     assert meta["domain"] == [0.1, 0.9]
+
+    # size_by maps a per-segment attribute to per-segment radii (thickness),
+    # rescaled from the attribute domain onto size_range and expanded exactly
+    # like per-segment colors (one value per segment).
+    sized = project.line_sets["holes"].line_segments(
+        size_by="grade", size_range=(0.02, 0.2)
+    )
+    assert sized.type == "LineSegments"
+    grades = project.line_sets["holes"].segment_attributes["grade"]  # [0.1,0.5,0.9]
+    radii = np.asarray(sized.props["sizes"]).reshape(-1)
+    assert radii.shape == (grades.shape[0],)
+    # Min grade -> min radius, max grade -> max radius, monotone in between.
+    np.testing.assert_allclose(radii[0], 0.02, atol=1e-6)
+    np.testing.assert_allclose(radii[-1], 0.2, atol=1e-6)
+    assert radii[0] < radii[1] < radii[2]
 
     mesh = project.surfaces["topo"].mesh(color=[1, 0, 0])
     assert mesh.type == "Mesh"

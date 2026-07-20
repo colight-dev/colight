@@ -1379,7 +1379,9 @@ def LineBeams(
         colors: Array of RGB colors per line (optional)
         color_by: Colormap spec {values, cmap, domain, label, ...} mapping
             scalar values to per-line colors (see ColorBy); adds a legend
-        sizes: Array of sizes per line (optional)
+        sizes: Per-line radii (thickness), one value per line index (the 4th
+            component of each point). Every segment of a line shares its line's
+            size; for per-segment thickness use ``LineSegments`` with ``sizes``.
         alpha: Default alpha value for all beams if alphas not provided
         alphas: Array of alpha values per line (optional)
         layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
@@ -1448,7 +1450,10 @@ def LineSegments(
         colors: Array of RGB colors per segment (optional)
         color_by: Colormap spec {values, cmap, domain, label, ...} mapping
             scalar values to per-segment colors (see ColorBy); adds a legend
-        sizes: Array of sizes per segment (optional)
+        sizes: Per-segment radii (thickness), one value per segment. Expands
+            identically to per-segment ``colors`` — index ``i`` styles segment
+            ``i`` (e.g. structural intensity -> drillhole thickness). Falls back
+            to ``size`` (a scalar for every segment) then the 0.02 default.
         alpha: Default alpha value for all segments if alphas not provided
         alphas: Array of alpha values per segment (optional)
         layer: Render layer - "scene" (default) or "overlay"
