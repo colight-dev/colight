@@ -146,3 +146,50 @@ base_count = int((grades >= BASE_CUTOFF).sum())
 # to 1.0 % hides all but the 106,780 highest-grade cells with no server round
 # trip. The high-grade core sits inside the Early Diorite volume, which is what
 # the geology surfaces in the overview scene suggest.
+
+# ## Section view: slicing the deposit
+#
+# A block-model shell is still a solid mass; to *read* the grade distribution a
+# geologist cuts a section through it. `Scene(clip_planes=...)` slices the whole
+# scene with a half-space plane — every layer (blocks, drillholes, topo) is cut
+# in both the render AND pick passes, so the exposed interior is visible and
+# `pick-at` reports the block the section reveals, not the outer shell.
+#
+# The plane offset is origin-relative (the same post-`origin` space the shader
+# uses), so a `$state` slider sweeps the cut north-to-south with no re-upload —
+# only the clip-plane uniform changes. We derive the sweep range from the block
+# model's northing (Y) extent, origin-relative.
+
+block_centers = block_model.cell_centers()  # (N, 3) world coords
+y_world = block_centers[:, 1]
+y_lo = float(y_world.min() - ORIGIN[1])
+y_hi = float(y_world.max() - ORIGIN[1])
+Y_MID = round((y_lo + y_hi) / 2.0, 1)
+
+(
+    scene3d.Scene(
+        drillholes.line_segments(color=[0.55, 0.55, 0.58], size=4.0),
+        block_layer,
+        topo.mesh(
+            color=[0.82, 0.76, 0.65],
+            decorations=[scene3d.deco([0], alpha=0.2)],
+        ),
+        origin=ORIGIN,
+        # Keep the half-space south of the cut (northing <= section_y); sweeping
+        # section_y walks the exposed face across the deposit.
+        clip_planes=[{"normal": [0, 1, 0], "offset": Plot.js("$state.section_y")}],
+    )
+    | Plot.Slider(
+        "section_y",
+        init=Y_MID,
+        range=[round(y_lo, 1), round(y_hi, 1)],
+        step=10.0,
+        label=Plot.js("`Section (northing): ${$state.section_y.toFixed(0)} m`"),
+    )
+)
+
+# Sliding `section_y` from the mid-deposit toward the north exposes deeper
+# cross-sections of the grade shell — the high-grade core and its drillhole
+# support read directly off the cut face. Because clipping is per-fragment, the
+# cut passes THROUGH blocks (hollow shells show on the section, v1 does not
+# cap-fill), and pick-at on the exposed face reports the interior block.
