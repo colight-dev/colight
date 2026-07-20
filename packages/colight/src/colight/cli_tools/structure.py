@@ -50,6 +50,10 @@ class ComponentRecord:
     # Colormap legend spec ({cmap, domain, label, categorical, ...}) when
     # the component was colored via color_by (see colight/colormaps.py).
     color_by: Optional[Dict[str, Any]] = None
+    # Per-instance filter spec ({min, max, label, ...}) when the component
+    # declared filter_by (see colight/scene3d.py). The `values` buffer is
+    # dropped; only the reportable thresholds are kept.
+    filter_by: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -148,6 +152,15 @@ def _walk(node: Any, path: str, key: Optional[str], state: WalkState) -> None:
             if k == "color_by" and isinstance(v, dict) and "cmap" in v:
                 if state.stack:
                     state.stack[-1].color_by = v
+                continue
+            # filter_by is per-instance filter metadata: record min/max/label on
+            # the enclosing component and don't descend (its `values` buffer
+            # would otherwise pollute the array records).
+            if k == "filter_by" and isinstance(v, dict) and "values" in v:
+                if state.stack:
+                    state.stack[-1].filter_by = {
+                        key: val for key, val in v.items() if key != "values"
+                    }
                 continue
             _walk(v, f"{path}.{k}" if path else k, k, state)
     elif isinstance(node, list):

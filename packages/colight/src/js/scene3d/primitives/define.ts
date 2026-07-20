@@ -667,13 +667,17 @@ function generateVertexShader(
   // Per-instance filter collapse
   let _fp = filterParams[u32(filterIndex)];
   var _filterPass = true;
-  if (_fp.active > 0.5) {
+  if (_fp.isActive > 0.5) {
     let _fv = filterValue;
     _filterPass = (_fv == _fv) && (_fv >= _fp.minVal) && (_fv <= _fp.maxVal);
   }`;
+  // A zero clip position (w=0, all components 0) is degenerate: the
+  // perspective divide discards it and it produces no fragments. Using a
+  // literal 0/0 division instead would be a WGSL const-eval error, so we
+  // assign the zero vector directly.
   const filterCollapsePosition = `
   if (!_filterPass) {
-    out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0) / 0.0;
+    out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
   }`;
 
   // Build return statement

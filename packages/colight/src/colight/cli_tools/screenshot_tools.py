@@ -336,6 +336,28 @@ def collect_dom_legends(studio: StudioContext) -> List[Dict[str, Any]]:
     return result if isinstance(result, list) else []
 
 
+# Collects active per-instance filters from the rendered DOM. Each scene emits
+# a hidden marker carrying its compiled filters (with resolved min/max), so the
+# report reflects exactly what was rendered — filtered-out instances really are
+# hidden and unpickable in the captured pixels.
+_FILTERS_QUERY = (
+    "Array.from(document.querySelectorAll('[data-colight-filters]'))"
+    ".flatMap((el) => JSON.parse(el.getAttribute('data-colight-filters')))"
+)
+
+
+def collect_dom_filters(studio: StudioContext) -> List[Dict[str, Any]]:
+    """Active per-instance filters present in the rendered page.
+
+    Returns:
+        One entry per active filter: ``{"component", "type", "label"?, "min",
+        "max"}`` where min/max are the resolved inclusive thresholds
+        (``null`` when unbounded).
+    """
+    result = studio.evaluate(_FILTERS_QUERY)
+    return result if isinstance(result, list) else []
+
+
 def _capture_scene(
     scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
@@ -378,6 +400,10 @@ def _capture_scene(
     legends = collect_dom_legends(scene.studio)
     if legends:
         extras["legends"] = legends
+
+    filters = collect_dom_filters(scene.studio)
+    if filters:
+        extras["filters"] = filters
 
     if want_coverage and is_scene:
         snapshot = scene_pick.take_snapshot(scene.studio)

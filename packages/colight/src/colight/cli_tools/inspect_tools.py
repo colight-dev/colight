@@ -316,6 +316,30 @@ def legend_payload(
     return entry
 
 
+def filter_payload(
+    filter_by: Dict[str, Any], component: Optional[str] = None
+) -> Dict[str, Any]:
+    """Machine-readable entry for a component's active ``filter_by``.
+
+    Reports what the view is filtered by so agents know instances may be
+    hidden: ``{"component"?, "label"?, "min", "max"}``. ``min``/``max`` are the
+    inclusive thresholds; a value that is a ``$state`` reference (unresolved
+    ``JSCall``/``JSRef`` dict) is reported as ``None`` (unbounded/dynamic).
+    """
+    entry: Dict[str, Any] = {}
+    if component is not None:
+        entry["component"] = component
+    if "label" in filter_by:
+        entry["label"] = filter_by["label"]
+
+    def _num(v: Any) -> Optional[float]:
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    entry["min"] = _num(filter_by.get("min"))
+    entry["max"] = _num(filter_by.get("max"))
+    return entry
+
+
 def inspect_visual_data(
     data: Dict[str, Any], buffers: List[bytes]
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -384,6 +408,13 @@ def inspect_visual_data(
     ]
     if legends:
         payload["legends"] = legends
+    filters = [
+        filter_payload(component.filter_by, component=component.path)
+        for component in state.components
+        if component.filter_by is not None
+    ]
+    if filters:
+        payload["filters"] = filters
     return payload, warnings
 
 

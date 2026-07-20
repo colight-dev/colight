@@ -651,6 +651,7 @@ function SceneInner({
     groupRegistry,
     transforms,
     filterParams,
+    filters,
   } = useMemo(() => {
     // Collect raw components from children or prop
     const rawComponents = componentsProp
@@ -756,6 +757,15 @@ function SceneInner({
             background={background}
           />
           <SceneLegends entries={legendEntries} />
+          {filters.length > 0 && (
+            // Hidden marker carrying the scene's active per-instance filters
+            // (resolved min/max) so `colight screenshot --json` can report what
+            // the view is filtered by, mirroring the legend DOM marker.
+            <div
+              data-colight-filters={JSON.stringify(filters)}
+              style={{ display: "none" }}
+            />
+          )}
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu
             showFps={showFps}

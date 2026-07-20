@@ -155,6 +155,52 @@ def _apply_color_by(
     data["color_by"] = meta
 
 
+class FilterBy(TypedDict, total=False):
+    """Per-instance threshold filter for instanced primitives.
+
+    Instances whose scalar ``values`` fall outside ``[min, max]`` are hidden
+    (collapsed in the vertex shader and made unpickable). ``NaN`` values are
+    always hidden. ``values`` is required; ``min``/``max`` default to unbounded.
+
+    ``values`` is uploaded once as a per-instance attribute; ``min``/``max``
+    live in a small per-component uniform, so a threshold change (e.g. a
+    ``Plot.js("$state.cutoff")`` slider) updates only the uniform and does not
+    re-upload the instance data. ``min``/``max`` may be literals or ``$state``
+    references (``Plot.js(...)``).
+    """
+
+    values: ArrayLike  # per-instance scalar values
+    min: Optional[NumberLike]  # inclusive lower bound (default: unbounded)
+    max: Optional[NumberLike]  # inclusive upper bound (default: unbounded)
+    label: str  # what the filter encodes (for inspect / screenshot --json)
+
+
+def _normalize_filter_by(
+    filter_by: Optional[Union[FilterBy, Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """Normalize a ``filter_by`` spec for the JS boundary.
+
+    Flattens ``values`` to a float32 array and passes ``min``/``max``/``label``
+    through unchanged (``min``/``max`` may be numbers or ``$state`` JSExprs).
+
+    Raises:
+        ValueError: When ``values`` is missing.
+    """
+    if filter_by is None:
+        return None
+    spec = dict(filter_by)
+    if spec.get("values") is None:
+        raise ValueError("filter_by requires 'values'")
+    out: Dict[str, Any] = {"values": flatten_array(spec["values"], dtype=np.float32)}
+    if spec.get("min") is not None:
+        out["min"] = spec["min"]
+    if spec.get("max") is not None:
+        out["max"] = spec["max"]
+    if spec.get("label") is not None:
+        out["label"] = spec["label"]
+    return out
+
+
 class Decoration(TypedDict, total=False):
     indexes: ArrayLike
     color: Optional[ArrayLike]  # [r,g,b]
@@ -647,6 +693,7 @@ def PointCloud(
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all points
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -694,6 +741,9 @@ def PointCloud(
     if alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -721,6 +771,7 @@ def Ellipsoid(
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
     | None = None,  # How the shape is drawn ("Solid" or "MajorWireframe")
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -781,6 +832,9 @@ def Ellipsoid(
     if fill_mode is not None:
         data["fill_mode"] = fill_mode
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -806,6 +860,7 @@ def Cuboid(
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -860,6 +915,9 @@ def Cuboid(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -881,6 +939,7 @@ def LineBeams(
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -923,6 +982,9 @@ def LineBeams(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -945,6 +1007,7 @@ def LineSegments(
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     alphas: Optional[ArrayLike] = None,
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -989,6 +1052,9 @@ def LineSegments(
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     elif alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer

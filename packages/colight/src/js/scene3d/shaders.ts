@@ -62,7 +62,7 @@ export const filterParamsStruct = /*wgsl*/ `
 struct FilterParams {
   minVal: f32,
   maxVal: f32,
-  active: f32,
+  isActive: f32,
   _pad: f32,
 };
 @group(0) @binding(2) var<storage, read> filterParams: array<FilterParams>;`;
