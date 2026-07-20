@@ -26,6 +26,16 @@ import numpy as np
 
 DEFAULT_NAN_COLOR: Tuple[float, float, float] = (0.5, 0.5, 0.5)
 
+# The default fallback swatch for categorical values that match no declared
+# category (and for NaN): a neutral mid-grey. Overridable per spec.
+DEFAULT_FALLBACK_COLOR: Tuple[float, float, float] = (0.5, 0.5, 0.5)
+DEFAULT_FALLBACK_LABEL = "unmapped"
+
+# Number of RGB entries in a channel LUT shipped to JS for client-side
+# recoloring of continuous channels (JS samples this instead of reimplementing
+# the ramp interpolation).
+LUT_SIZE = 256
+
 # Continuous ramps: 17 evenly spaced RGB anchors over [0, 1], sampled from
 # the matplotlib colormaps of the same name (endpoints exact).
 CONTINUOUS_CMAPS: Dict[str, np.ndarray] = {
@@ -326,6 +336,124 @@ def colormap_metadata(
     return meta
 
 
+def continuous_lut(cmap: str, size: int = LUT_SIZE) -> np.ndarray:
+    """Sample a continuous ramp into a ``(size, 3)`` float32 RGB lookup table.
+
+    JS uses this to recolor a continuous channel client-side without
+    reimplementing the ramp interpolation: it maps a value into ``[0, 1]``
+    over the channel's domain, scales to ``size - 1``, and reads the LUT.
+
+    Args:
+        cmap: Continuous colormap name.
+        size: Number of LUT entries (default :data:`LUT_SIZE`).
+
+    Returns:
+        ``(size, 3)`` float32 RGB in ``[0, 1]``.
+
+    Raises:
+        ValueError: When ``cmap`` is categorical or unknown.
+    """
+    if is_categorical(cmap):
+        raise ValueError(f"continuous_lut requires a continuous colormap, got {cmap!r}")
+    t = np.linspace(0.0, 1.0, size)
+    return apply_colormap(t, cmap=cmap, domain=(0.0, 1.0)).astype(np.float32)
+
+
+def _auto_palette_colors(count: int, palette: str = "tab10") -> np.ndarray:
+    """``count`` swatches cycled from a named categorical palette."""
+    swatches = CATEGORICAL_CMAPS[palette.lower()]
+    return swatches[np.arange(count) % len(swatches)]
+
+
+def resolve_categorical(
+    values: Any,
+    categories: Sequence[Dict[str, Any]],
+    fallback: Optional[Dict[str, Any]] = None,
+    palette: str = "tab10",
+    label: Optional[str] = None,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Resolve declared categories into per-instance colors + legend metadata.
+
+    This is the xmi id-maps idiom (lithology/vein codes -> ints, e.g.
+    "0 = not logged"): each category declares a ``value`` (the code), a
+    ``label`` (domain meaning), and an optional ``color``. Values matching no
+    declared category, and NaN, get the ``fallback`` swatch.
+
+    Args:
+        values: 1D array of category codes (ints, or floats; NaN allowed).
+        categories: List of ``{value, label, color?}`` dicts. ``color`` is
+            optional — unspecified colors are auto-assigned from ``palette``
+            (colorblind-reasonable), in declaration order.
+        fallback: ``{label?, color?}`` for unmatched/NaN values (default
+            mid-grey, labeled "unmapped").
+        palette: Categorical palette name for auto-assigned colors.
+        label: What the categories encode (legend title).
+
+    Returns:
+        Tuple of ((N, 3) float32 RGB colors, categorical metadata dict with a
+        ``categories`` table of ``{value, label, color}`` and a ``fallback``
+        entry — the machine-readable legend agents map colors to meaning with).
+
+    Raises:
+        ValueError: Malformed ``categories`` (missing ``value``/``label``).
+    """
+    if not categories:
+        raise ValueError("categorical color_by requires a non-empty 'categories' list")
+
+    # Auto-assign colors for categories that did not declare one.
+    auto_needed = [i for i, c in enumerate(categories) if c.get("color") is None]
+    auto_colors = _auto_palette_colors(len(auto_needed), palette)
+    auto_index = {orig: auto_colors[k] for k, orig in enumerate(auto_needed)}
+
+    table: List[Dict[str, Any]] = []
+    lookup: Dict[int, np.ndarray] = {}
+    for i, cat in enumerate(categories):
+        if "value" not in cat:
+            raise ValueError(f"category {cat!r} missing required 'value'")
+        if "label" not in cat:
+            raise ValueError(f"category {cat!r} missing required 'label'")
+        code = int(cat["value"])
+        color = cat.get("color")
+        rgb = (
+            np.asarray(color, dtype=np.float64) if color is not None else auto_index[i]
+        )
+        lookup[code] = rgb
+        table.append(
+            {
+                "value": code,
+                "label": str(cat["label"]),
+                "color": [round(float(c), 6) for c in rgb],
+            }
+        )
+
+    fb = dict(fallback or {})
+    fb_color = np.asarray(fb.get("color", DEFAULT_FALLBACK_COLOR), dtype=np.float64)
+    fb_label = str(fb.get("label", DEFAULT_FALLBACK_LABEL))
+
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim != 1:
+        raise ValueError(f"categorical values must be 1D, got shape {array.shape}")
+    rgb = np.empty((array.shape[0], 3), dtype=np.float64)
+    rgb[:] = fb_color
+    finite = np.isfinite(array)
+    codes = np.where(finite, array, 0).astype(np.int64)
+    for code, color in lookup.items():
+        rgb[finite & (codes == code)] = color
+
+    meta: Dict[str, Any] = {
+        "cmap": "categorical",
+        "categorical": True,
+        "categories": table,
+        "fallback": {
+            "label": fb_label,
+            "color": [round(float(c), 6) for c in fb_color],
+        },
+    }
+    if label is not None:
+        meta["label"] = str(label)
+    return rgb.astype(np.float32), meta
+
+
 ColorByInput = Union[Dict[str, Any], "Any"]
 
 
@@ -348,16 +476,37 @@ def resolve_color_by(color_by: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, An
     if "values" not in spec:
         raise ValueError("color_by requires a 'values' array")
     values = np.asarray(spec.pop("values"), dtype=np.float64)
-    cmap = str(spec.pop("cmap", "viridis"))
+    cmap = spec.pop("cmap", None)
     domain = spec.pop("domain", None)
     label = spec.pop("label", None)
     categories = spec.pop("categories", None)
+    fallback = spec.pop("fallback", None)
+    palette = spec.pop("palette", "tab10")
     nan_color = spec.pop("nan_color", DEFAULT_NAN_COLOR)
     if spec:
         raise ValueError(
-            f"unknown color_by keys: {sorted(spec)} "
-            "(accepted: values, cmap, domain, label, categories, nan_color)"
+            f"unknown color_by keys: {sorted(spec)} (accepted: values, cmap, "
+            "domain, label, categories, fallback, palette, nan_color)"
         )
+
+    # Declared-category mode: ``categories`` is a list of {value, label,
+    # color?} dicts (the xmi id-maps idiom). This is the first-class
+    # categorical path — arbitrary value codes, per-category labels/colors,
+    # and a fallback slot for unmatched/NaN values.
+    if _is_category_table(categories):
+        if domain is not None:
+            raise ValueError("domain applies to continuous colormaps only")
+        return resolve_categorical(
+            values,
+            categories,  # type: ignore[arg-type]
+            fallback=fallback,
+            palette=palette,
+            label=label,
+        )
+
+    # Legacy/ordinal path: a named cmap (continuous ramp or ordinal
+    # categorical palette), with optional ``categories`` as display strings.
+    cmap = str(cmap or "viridis")
     colors = apply_colormap(values, cmap=cmap, domain=domain, nan_color=nan_color)
     if not is_categorical(cmap):
         domain = resolve_domain(values, domain)
@@ -365,14 +514,78 @@ def resolve_color_by(color_by: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, An
     return colors, meta
 
 
+def _is_category_table(categories: Any) -> bool:
+    """Whether ``categories`` is a declared-category table (list of dicts)."""
+    return (
+        isinstance(categories, (list, tuple))
+        and len(categories) > 0
+        and isinstance(categories[0], dict)
+    )
+
+
+def resolve_channel(
+    channel: Dict[str, Any],
+) -> Tuple[np.ndarray, Dict[str, Any], Dict[str, Any]]:
+    """Resolve one named color channel into colors, legend meta, and a
+    client-side colorizer payload.
+
+    A channel is a ``color_by``-shaped spec ({values, cmap/categories,
+    domain, label, ...}). This resolves the same colors Python would bake for
+    a single ``color_by`` (so the initial render and non-JS paths are
+    correct) AND emits a compact ``colorizer`` that lets JS recolor from the
+    raw ``values`` when this channel becomes active — a 256-entry RGB LUT for
+    continuous channels, or the resolved category table for categorical.
+
+    Args:
+        channel: A ``color_by``-shaped dict.
+
+    Returns:
+        ``(colors, legend, colorizer)``:
+          - ``colors``: (N, 3) float32 RGB for the active render.
+          - ``legend``: the legend metadata (as :func:`resolve_color_by`).
+          - ``colorizer``: JSON-safe dict JS applies to ``values``. Continuous:
+            ``{kind: "continuous", lut, domain}``. Categorical:
+            ``{kind: "categorical", categories, fallback}``.
+
+    Raises:
+        ValueError: Missing ``values`` or malformed spec.
+    """
+    colors, legend = resolve_color_by(channel)
+    if legend.get("categorical"):
+        colorizer: Dict[str, Any] = {"kind": "categorical"}
+        if "categories" in legend and _is_category_table(legend["categories"]):
+            colorizer["categories"] = legend["categories"]
+            colorizer["fallback"] = legend.get("fallback")
+        else:
+            # Ordinal palette categorical (cmap="tab10", categories=[str]).
+            colorizer["colors"] = legend.get("colors", [])
+            colorizer["nan_color"] = [round(float(c), 6) for c in DEFAULT_NAN_COLOR]
+    else:
+        cmap = str(channel.get("cmap", "viridis"))
+        lut = continuous_lut(cmap)
+        colorizer = {
+            "kind": "continuous",
+            "lut": [[round(float(c), 6) for c in row] for row in lut],
+            "domain": legend.get("domain"),
+            "nan_color": [round(float(c), 6) for c in DEFAULT_NAN_COLOR],
+        }
+    return colors, legend, colorizer
+
+
 __all__ = [
     "CATEGORICAL_CMAPS",
     "CONTINUOUS_CMAPS",
+    "DEFAULT_FALLBACK_COLOR",
+    "DEFAULT_FALLBACK_LABEL",
     "DEFAULT_NAN_COLOR",
+    "LUT_SIZE",
     "apply_colormap",
     "colormap_metadata",
     "colormap_stops",
+    "continuous_lut",
     "is_categorical",
+    "resolve_categorical",
+    "resolve_channel",
     "resolve_color_by",
     "resolve_domain",
 ]

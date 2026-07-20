@@ -24,6 +24,7 @@ import {
   hasAnyGroups,
 } from "./groups";
 import { GPUTransform, IDENTITY_GPU_TRANSFORM } from "./gpu-transforms";
+import { applyActiveChannel } from "./colorize";
 import {
   GridHelper,
   GridHelperProps,
@@ -438,6 +439,15 @@ export function compileScene(
   let primitiveSpecs: Record<string, PrimitiveSpec<any>> | undefined;
   if (inlineSpecs || normalizedUserSpecs) {
     primitiveSpecs = { ...normalizedUserSpecs, ...inlineSpecs };
+  }
+
+  // 6.5. Recolor components carrying switchable color channels: apply the
+  //    active channel's colorizer to its values, rewriting `colors` + the
+  //    active `color_by` legend. A later switch (new active_channel) makes the
+  //    component differ only in colors/color_by, so the render path re-uploads
+  //    the colors buffer without rebuilding geometry.
+  for (const component of resolvedComponents) {
+    applyActiveChannel(component as any);
   }
 
   // 7. Resolve per-instance filters into filterParams slots + per-component

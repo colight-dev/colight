@@ -11,6 +11,7 @@
  */
 
 import { ComponentConfig, PrimitiveSpec } from "./components";
+import { channelValueAt, ColorChannels } from "./colorize";
 import { GPUTransform } from "./gpu-transforms";
 import { unpackID } from "./picking";
 import { rotateVector } from "./quaternion";
@@ -385,6 +386,19 @@ export function describeInstance(
 
   const groupPath = comp._groupPath as string[] | undefined;
   if (groupPath?.length) values.groupPath = groupPath;
+
+  // The full data row: every color channel's value for this instance
+  // (categorical channels reported as their label). ParaView/Leapfrog's
+  // "click a block, see the data row" — agent-native.
+  const channels = comp.color_channels as ColorChannels | undefined;
+  if (channels) {
+    const row: Record<string, number | string | null> = {};
+    for (const name of Object.keys(channels)) {
+      row[name] = channelValueAt(channels[name], index);
+    }
+    values.channels = row;
+    if (comp._activeChannel) values.activeChannel = comp._activeChannel;
+  }
 
   return values;
 }
