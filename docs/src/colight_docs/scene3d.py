@@ -302,6 +302,51 @@ _grades = np.array([0.1, 0.4, 0.6, 0.9], dtype=np.float32)
 )
 
 # %% [markdown]
+# ## Section / clipping planes (`Scene(clip_planes=...)`)
+#
+# `clip_planes` slices the **whole scene** with one or more half-space planes so
+# interior structure becomes visible — the section view a geologist reads a
+# block model or drillhole set through. Unlike `filter_by` (a per-instance mask),
+# a clip plane cuts *through* geometry per-fragment, so it exposes the inside of
+# solid shells. Each plane keeps the half-space `dot(p, normal) <= offset`;
+# multiple planes intersect. Give a plane as `{"normal": n, "offset": d}` or the
+# anchored `{"normal": n, "point": [x, y, z]}` form (the point is converted to an
+# offset, respecting `Scene(origin=...)` — prefer it for geographic scenes).
+#
+# The plane offset lives in a scene-level uniform, so `offset` (or a `point`
+# component) may be a `Plot.js("$state...")` reference and a slider sweeps the
+# section client-side with no re-upload. Clipping applies in the **pick pass**
+# too: `pick-at` on the exposed cut face reports the interior instance behind the
+# section, not the outer shell. `inspect` / `screenshot --json` report the active
+# `clip_planes` (`{normal, offset}` or `{normal, state_key}`), and both warn with
+# `section-excludes-scene` if the planes clip away the entire scene. Up to 8
+# planes; v1 does not cap/fill the cut surface (hollow shells show on the
+# section).
+
+# %%
+_section_centers = np.array(
+    [[x, y, z] for x in (-2, 0, 2) for y in (-2, 0, 2) for z in (-2, 0, 2)],
+    dtype=np.float32,
+)
+(
+    Scene(
+        Cuboid(centers=_section_centers, half_size=0.4, color=[0.2, 0.6, 0.9]),
+        # Keep everything below the sweeping plane (northing <= section_y).
+        clip_planes=[{"normal": [0, 1, 0], "offset": Plot.js("$state.section_y")}],
+    )
+    | Plot.Slider("section_y", init=0.0, range=[-3.0, 3.0], step=0.5, label="section")
+    | Plot.initialState({"section_y": 0.0})
+    | {
+        "defaultCamera": {
+            "position": [8, 8, 8],
+            "target": [0, 0, 0],
+            "up": [0, 1, 0],
+            "fov": 45,
+        }
+    }
+)
+
+# %% [markdown]
 
 # ## Named selections (`Selection`)
 #

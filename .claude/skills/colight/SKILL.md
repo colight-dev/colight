@@ -74,6 +74,17 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
   hit's `selections: [names]`, and `pick-where --selection NAME` /
   `screenshot --frame NAME` resolve the name. Human clicks
   (`scene3d.toggle_selection`) and agent predicates converge on the same object.
+- **Section / clipping planes (`Scene(clip_planes=...)`).** A scene-level cut that
+  slices the _whole_ scene with a half-space plane (`{normal, offset}`, or the
+  origin-aware `{normal, point}` form) so interior structure shows — the section
+  view for block models / drillholes. Unlike `filter_by`, it cuts _through_
+  geometry, and clipping applies in the pick pass too: `pick-at` on the exposed
+  cut face reports the interior instance behind the section, not the outer shell.
+  `offset` may be a `Plot.js("$state...")` ref so a slider sweeps the section with
+  no re-upload. Read active `clip_planes` (`{normal, offset}` or `{normal,
+state_key}`) from `inspect`/`screenshot --json` to know the view is sectioned; a
+  `section-excludes-scene` warning fires if the planes clip away everything (blank
+  render). Max 8 planes; v1 does not cap/fill the cut (hollow shells show).
 - **Did my change do what I intended?** `colight diff old.py new.py` (or two artifacts)
   before reaching for pixels.
 - **Need to see it?** `colight screenshot`, then Read the PNG. Screenshots are
