@@ -557,6 +557,148 @@ def _translate_layer(layer: Any, origin: np.ndarray) -> Any:
     return layer
 
 
+# =============================================================================
+# Section / clipping planes
+# =============================================================================
+
+# Fixed-size uniform array on the GPU (see clipPlanesStruct in shaders.ts). More
+# than this many planes cannot be uploaded, so we raise loudly rather than
+# silently drop.
+MAX_CLIP_PLANES = 8
+
+
+class ClipPlane(TypedDict, total=False):
+    """A scene-level section / clipping plane.
+
+    A fragment at world position ``p`` is KEPT where
+    ``dot(p, normal) <= offset`` and discarded otherwise; multiple planes
+    intersect (a fragment must pass every plane). Give the plane either as
+    ``normal`` + ``offset`` or the anchored ``normal`` + ``point`` form.
+    """
+
+    normal: ArrayLike  # plane normal [nx, ny, nz] (normalized internally)
+    offset: NumberLike  # signed distance along normal; may be a $state ref
+    point: ArrayLike  # a point the plane passes through (anchored form)
+
+
+def _is_js_expr(value: Any) -> bool:
+    return isinstance(value, JSExpr)
+
+
+def _normalize_clip_planes(
+    clip_planes: Optional[Sequence[Union[ClipPlane, Dict[str, Any]]]],
+    origin: Optional[np.ndarray],
+) -> Optional[list]:
+    """Normalize ``clip_planes`` into ``[{normal, offset}, ...]`` for the JS boundary.
+
+    - ``normal`` is normalized to unit length (a zero normal is an error).
+    - The anchored ``point`` form is converted to an ``offset`` AFTER the origin
+      re-centering: positions are shifted by ``-origin`` at serialization time,
+      so a plane through world point ``P`` becomes ``offset = dot(P - origin,
+      normal)`` in the shifted space the shader sees. The direct ``offset`` form
+      is already given in that post-origin space (offsets are origin-relative).
+    - ``offset`` (or ``point`` components) may be ``$state`` refs (``Plot.js``)
+      for a slider-driven section sweep. A state-ref ``offset`` passes through
+      unchanged; a ``point`` with any state-ref component is converted to a
+      ``Plot.js`` dot-product expression so the sweep still tracks state.
+
+    Raises:
+        ValueError: on too many planes, a missing/zero normal, or a plane that
+            supplies neither ``offset`` nor ``point``.
+    """
+    if clip_planes is None:
+        return None
+    planes = list(clip_planes)
+    if len(planes) == 0:
+        return None
+    if len(planes) > MAX_CLIP_PLANES:
+        raise ValueError(
+            f"Scene supports at most {MAX_CLIP_PLANES} clip_planes, "
+            f"got {len(planes)}. Reduce the number of section planes."
+        )
+
+    out: list = []
+    origin_vec = None if origin is None else np.asarray(origin, dtype=np.float64)
+    for i, plane in enumerate(planes):
+        if "normal" not in plane:
+            raise ValueError(f"clip_planes[{i}] requires a 'normal'")
+        normal = np.asarray(plane["normal"], dtype=np.float64).reshape(-1)
+        if normal.shape[0] != 3:
+            raise ValueError(f"clip_planes[{i}] 'normal' must have 3 components")
+        norm = float(np.linalg.norm(normal))
+        if norm == 0.0:
+            raise ValueError(f"clip_planes[{i}] 'normal' must be non-zero")
+        unit = (normal / norm).tolist()
+
+        raw_offset = plane.get("offset")
+        raw_point = plane.get("point")
+        has_offset = raw_offset is not None
+        has_point = raw_point is not None
+        if has_offset and has_point:
+            raise ValueError(
+                f"clip_planes[{i}] must specify either 'offset' or 'point', not both"
+            )
+
+        offset: Any
+        if has_offset:
+            # Offset is already in the post-origin (origin-relative) space; pass
+            # scalars and $state refs through unchanged.
+            offset = raw_offset
+        elif has_point:
+            point = raw_point
+            point_is_ref = _is_js_expr(point) or (
+                isinstance(point, (list, tuple)) and any(_is_js_expr(c) for c in point)
+            )
+            if point_is_ref:
+                # A state-driven anchor: emit dot((point - origin), normal) as a
+                # JS expression so the section still tracks state on the client.
+                ox, oy, oz = (
+                    (0.0, 0.0, 0.0)
+                    if origin_vec is None
+                    else (
+                        float(origin_vec[0]),
+                        float(origin_vec[1]),
+                        float(origin_vec[2]),
+                    )
+                )
+                nx, ny, nz = unit
+                px, py, pz = point  # type: ignore[misc]
+                offset = Plot.js(
+                    f"(($p) => ($p[0]-({ox}))*({nx}) + ($p[1]-({oy}))*({ny}) "
+                    f"+ ($p[2]-({oz}))*({nz}))([{_js_scalar(px)}, "
+                    f"{_js_scalar(py)}, {_js_scalar(pz)}])"
+                )
+            else:
+                pt = np.asarray(point, dtype=np.float64).reshape(-1)
+                if pt.shape[0] != 3:
+                    raise ValueError(f"clip_planes[{i}] 'point' must have 3 components")
+                shifted = pt if origin_vec is None else pt - origin_vec
+                offset = float(np.dot(shifted, unit))
+        else:
+            raise ValueError(f"clip_planes[{i}] requires either 'offset' or 'point'")
+
+        out.append({"normal": unit, "offset": offset})
+    return out
+
+
+def _js_scalar(value: Any) -> str:
+    """Render a clip-plane point component as inline JS (number or Plot.js code).
+
+    A ``point`` component may be a literal number or a ``Plot.js(...)`` state
+    ref. For the latter we inline the expression's raw source (wrapped in
+    parens) so the surrounding dot-product expression evaluates against live
+    ``$state``.
+    """
+    if _is_js_expr(value):
+        code = getattr(value, "code", None)
+        if code is None:
+            raise ValueError(
+                "clip_planes 'point' state refs must be Plot.js(...) expressions"
+            )
+        return f"({code})"
+    return repr(float(value))
+
+
 class Scene(Plot.LayoutItem):
     """A 3D scene visual component using WebGPU.
 
@@ -582,6 +724,7 @@ class Scene(Plot.LayoutItem):
         *layers: Union[SceneComponent, Dict[str, Any], JSExpr],
         origin: Optional[Sequence[float]] = None,
         background: Optional[Sequence[float]] = None,
+        clip_planes: Optional[Sequence[Union[ClipPlane, Dict[str, Any]]]] = None,
         primitive_specs: Optional[Dict[str, Dict[str, Any]]] = None,
         meshes: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -604,6 +747,19 @@ class Scene(Plot.LayoutItem):
                 the WebGPU render pass. Defaults to opaque black. This is the
                 canvas clear color *behind* the geometry; DOM overlays drawn
                 over the canvas (legends, FPS) keep their own styling.
+            clip_planes: Optional scene-level section / clipping planes. Each is
+                ``{"normal": [nx, ny, nz], "offset": d}`` (keep the half-space
+                ``dot(p, normal) <= d``) or the anchored
+                ``{"normal": n, "point": [x, y, z]}`` form (converted to an
+                offset that respects ``origin``). ``offset`` or ``point``
+                components may be ``Plot.js("$state...")`` refs to drive a
+                section-sweep slider. Planes apply to ALL components in both the
+                render and pick passes; interior structure behind the cut
+                becomes visible AND pickable. Max 8 planes. Hollow shells are
+                visible on the cut (v1 does not cap/fill the section surface).
+                For geographic scenes with an ``origin``, prefer the ``point``
+                form — it converts the anchor into the origin-shifted space
+                automatically.
             primitive_specs: Dictionary of custom primitive definitions.
             meshes: Deprecated alias for primitive_specs.
         """
@@ -613,6 +769,10 @@ class Scene(Plot.LayoutItem):
             np.asarray(origin, dtype=np.float64) if origin is not None else None
         )
         self.background = list(background) if background is not None else None
+        # Normalize eagerly so validation errors (bad normal, >8 planes) surface
+        # at construction, not deep in the JS boundary. Point->offset conversion
+        # uses origin, matching the -origin re-centering applied to positions.
+        self.clip_planes = _normalize_clip_planes(clip_planes, self.origin)
         if meshes and primitive_specs:
             merged_specs = {**meshes, **primitive_specs}
         else:
@@ -621,12 +781,16 @@ class Scene(Plot.LayoutItem):
         super().__init__()
 
     def _scene_kwargs(self) -> Dict[str, Any]:
-        """Scene-level kwargs (origin/background) preserved across + combines."""
+        """Scene-level kwargs (origin/background/clip_planes) preserved across +."""
         kwargs: Dict[str, Any] = {}
         if self.origin is not None:
             kwargs["origin"] = self.origin
         if self.background is not None:
             kwargs["background"] = self.background
+        if self.clip_planes is not None:
+            # Already normalized ({normal, offset}); re-normalization on the
+            # receiving Scene is idempotent (unit normal, scalar/ref offset).
+            kwargs["clip_planes"] = self.clip_planes
         return kwargs
 
     def __add__(self, other: Union[SceneComponent, "Scene", Dict[str, Any]]) -> "Scene":
@@ -669,6 +833,11 @@ class Scene(Plot.LayoutItem):
             props["origin"] = self.origin.tolist()
         if self.background is not None:
             props["background"] = self.background
+        if self.clip_planes is not None:
+            # camelCase for the JS boundary. Offsets that are Plot.js state refs
+            # serialize through their own for_json (js_source), so a slider
+            # sweep re-resolves on every state change — the light render path.
+            props["clipPlanes"] = self.clip_planes
         # Named selections are resident in $state.selections (see Selection /
         # select). Passing a live reference lets the JS side re-resolve them on
         # every state change (Python or human click), and it costs nothing when
