@@ -48,6 +48,41 @@ def _color_by_spec(
     return spec
 
 
+def _scale_to_range(
+    values: np.ndarray,
+    out_range: Tuple[float, float],
+    domain: Optional[Sequence[float]] = None,
+) -> np.ndarray:
+    """Linearly rescale ``values`` from ``domain`` onto ``out_range``.
+
+    Used to turn a scalar segment attribute (e.g. structural intensity) into a
+    per-segment radius. ``domain`` defaults to the values' finite min/max; a
+    degenerate (zero-width) domain maps everything to the low end of the range.
+
+    Args:
+        values: 1-D scalar array.
+        out_range: ``(lo, hi)`` target range for the radii.
+        domain: ``(min, max)`` source range; None derives it from the data.
+
+    Returns:
+        A float32 array the same length as ``values``, clipped to ``out_range``.
+    """
+    vals = np.asarray(values, dtype=np.float64).reshape(-1)
+    lo_out, hi_out = float(out_range[0]), float(out_range[1])
+    if domain is not None:
+        lo_in, hi_in = float(domain[0]), float(domain[1])
+    else:
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            return np.full(vals.shape, lo_out, dtype=np.float32)
+        lo_in, hi_in = float(finite.min()), float(finite.max())
+    span = hi_in - lo_in
+    if span == 0.0:
+        return np.full(vals.shape, lo_out, dtype=np.float32)
+    t = np.clip((vals - lo_in) / span, 0.0, 1.0)
+    return (lo_out + t * (hi_out - lo_out)).astype(np.float32)
+
+
 @dataclass
 class OMFPointSet:
     """An OMF point set (e.g. drillhole collars) in world coordinates."""
@@ -91,9 +126,17 @@ class OMFLineSet:
         cmap: str = "viridis",
         domain: Optional[Sequence[float]] = None,
         label: Optional[str] = None,
+        size_by: Optional[str] = None,
+        size_range: Tuple[float, float] = (0.01, 0.1),
+        size_domain: Optional[Sequence[float]] = None,
         **kwargs: Any,
     ) -> scene3d.SceneComponent:
         """Build a scene3d LineSegments component.
+
+        Segment attributes expand per-segment: the M segments come from the M
+        ``(start, end)`` endpoint pairs, so a length-M attribute maps one value
+        to each segment. This is the drillhole case — colour a trace by grade
+        AND thicken it by structural intensity, both per interval.
 
         Args:
             color_by: Name of a segment attribute to color by (mapped
@@ -101,6 +144,15 @@ class OMFLineSet:
             cmap: Colormap name (see :mod:`colight.colormaps`).
             domain: Colormap (min, max); None derives it from the values.
             label: Legend label; defaults to the attribute name.
+            size_by: Name of a segment attribute to map to per-segment radius
+                (thickness). Values are linearly rescaled from ``size_domain``
+                (default: the attribute's min/max) onto ``size_range``, then
+                passed as ``scene3d.LineSegments(sizes=...)`` — one radius per
+                segment, expanded exactly like per-segment colors.
+            size_range: ``(min_radius, max_radius)`` the ``size_by`` values map
+                onto. Defaults to ``(0.01, 0.1)``.
+            size_domain: ``(min, max)`` value range for the ``size_by`` rescale;
+                None derives it from the attribute values.
             **kwargs: Forwarded to ``scene3d.LineSegments`` (size, color, ...).
         """
         if color_by is not None:
@@ -108,6 +160,13 @@ class OMFLineSet:
             kwargs.setdefault(
                 "color_by",
                 _color_by_spec(values, cmap, domain, label or color_by),
+            )
+        if size_by is not None:
+            kwargs.setdefault(
+                "sizes",
+                _scale_to_range(
+                    self.segment_attributes[size_by], size_range, size_domain
+                ),
             )
         return scene3d.LineSegments(
             starts=self.starts.astype(np.float32),
