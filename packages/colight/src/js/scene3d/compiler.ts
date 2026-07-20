@@ -33,7 +33,12 @@ import {
   ImageProjectionProps,
 } from "./helpers";
 import { resolveInlineMeshes, InlineMeshComponentConfig } from "./inlineMesh";
-import { normalizePrimitiveSpecs, PrimitiveSpecMap } from "./coercion";
+import {
+  normalizePrimitiveSpecs,
+  PrimitiveSpecMap,
+  coerceToFloat32,
+} from "./coercion";
+import { applySelections, Selections, SelectionReport } from "./selections";
 
 // =============================================================================
 // Types
@@ -62,6 +67,48 @@ export interface CompiledScene {
   groupRegistry: GroupRegistry | undefined;
   /** Merged primitive specs (user-provided + inline meshes) */
   primitiveSpecs: Record<string, PrimitiveSpec<any>> | undefined;
+  /**
+   * Per-slot filter thresholds packed for the filterParams storage buffer.
+   * Slot 0 is always inactive (components without a filter reference it).
+   * Each slot is 4 floats: [minVal, maxVal, active, _pad]. Components with a
+   * filter get a unique slot recorded in their `_filterIndex`.
+   */
+  filterParams: Float32Array;
+  /** Active filters for agent-facing reporting (inspect / screenshot --json). */
+  filters: ActiveFilter[];
+  /**
+   * Resolved named selections (from `$state.selections`): their instance
+   * membership + reporting metadata. Empty when no selections are declared.
+   */
+  selections: SelectionReport[];
+}
+
+/** One active per-instance filter, for machine-readable reporting. */
+export interface ActiveFilter {
+  /** Component index in the compiled scene. */
+  component: number;
+  /** Primitive type, e.g. "Cuboid". */
+  type: string;
+  /** Optional human label from filter_by.label. */
+  label?: string;
+  /** Inclusive lower threshold, or null if unbounded. */
+  min: number | null;
+  /** Inclusive upper threshold, or null if unbounded. */
+  max: number | null;
+}
+
+/** Floats per filterParams slot: minVal, maxVal, active, pad (16-byte aligned). */
+export const FLOATS_PER_FILTER = 4;
+
+/**
+ * Raw filter spec attached to a component as `filter_by`.
+ * min/max are literals (state refs are resolved to numbers before reaching JS).
+ */
+interface FilterBy {
+  values: Float32Array | number[];
+  min?: number | null;
+  max?: number | null;
+  label?: string;
 }
 
 // =============================================================================
@@ -350,6 +397,7 @@ function filterValidComponents(
 export function compileScene(
   rawComponents: RawComponent[],
   userSpecs?: PrimitiveSpecMap,
+  selections?: Selections,
 ): CompiledScene {
   // 1. Expand helpers
   const expanded = expandHelpers(rawComponents);
@@ -392,12 +440,88 @@ export function compileScene(
     primitiveSpecs = { ...normalizedUserSpecs, ...inlineSpecs };
   }
 
+  // 7. Resolve per-instance filters into filterParams slots + per-component
+  //    _filterIndex / _filterValues, and collect active-filter reporting.
+  const { filterParams, filters } = resolveFilters(resolvedComponents);
+
+  // 8. Resolve named selections (from $state.selections) into per-instance
+  //    decorations on their target components, reusing the same mask logic as
+  //    filters. Returns membership + reporting metadata.
+  const specFor = (component: ComponentConfig) =>
+    (primitiveSpecs && primitiveSpecs[component.type]) ||
+    PRIMITIVE_SPECS[component.type];
+  const selectionReports = applySelections(
+    resolvedComponents,
+    selections,
+    (component) => {
+      const spec = specFor(component);
+      return spec ? spec.getElementCount(component) : 0;
+    },
+  );
+
   return {
     components: resolvedComponents,
     transforms,
     groupRegistry,
     primitiveSpecs,
+    filterParams,
+    filters,
+    selections: selectionReports,
   };
+}
+
+/**
+ * Resolves each component's `filter_by` spec into:
+ * - a `filterParams` storage-buffer array (slot 0 = inactive, one slot per
+ *   filtered component) that carries the min/max thresholds;
+ * - per-component `_filterIndex` (which slot to read) and `_filterValues` (the
+ *   per-instance scalar attribute, uploaded once as instance data);
+ * - an `ActiveFilter[]` for agent-facing reporting.
+ *
+ * Because the large per-instance `values` live in `_filterValues` (instance
+ * data) while the thresholds live in `filterParams`, a threshold-only change
+ * (e.g. a $state slider) rewrites only the tiny filterParams buffer.
+ */
+function resolveFilters(components: ComponentConfig[]): {
+  filterParams: Float32Array;
+  filters: ActiveFilter[];
+} {
+  // Slot 0 is the shared inactive slot: [min=0, max=0, active=0, pad=0].
+  const slots: number[] = [0, 0, 0, 0];
+  const filters: ActiveFilter[] = [];
+
+  components.forEach((comp, componentIdx) => {
+    const filterBy = (comp as any).filter_by as FilterBy | undefined;
+    // Components without a filter reference slot 0 (inactive).
+    (comp as any)._filterIndex = 0;
+    if (!filterBy || filterBy.values == null) return;
+
+    const values = coerceToFloat32(filterBy.values);
+    const min = filterBy.min ?? null;
+    const max = filterBy.max ?? null;
+
+    // Attach the per-instance scalar attribute the shader tests.
+    (comp as any)._filterValues = values;
+
+    const slotIndex = slots.length / FLOATS_PER_FILTER;
+    (comp as any)._filterIndex = slotIndex;
+    slots.push(
+      min == null ? -Infinity : min,
+      max == null ? Infinity : max,
+      1, // active
+      0, // pad
+    );
+
+    filters.push({
+      component: componentIdx,
+      type: comp.type,
+      label: filterBy.label,
+      min,
+      max,
+    });
+  });
+
+  return { filterParams: new Float32Array(slots), filters };
 }
 
 // =============================================================================

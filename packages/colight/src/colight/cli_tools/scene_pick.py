@@ -17,7 +17,7 @@ import base64
 import json
 import math
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -149,6 +149,48 @@ def resolve_component(
     raise ValueError(f"no component with index {index} (components: {known})")
 
 
+def _instances_to_ranges(instances: Sequence[int]) -> InstanceRanges:
+    """Collapse a sorted-or-unsorted instance index list into inclusive ranges."""
+    if not instances:
+        return []
+    ordered = sorted(set(int(i) for i in instances))
+    ranges: InstanceRanges = []
+    start = prev = ordered[0]
+    for i in ordered[1:]:
+        if i == prev + 1:
+            prev = i
+            continue
+        ranges.append((start, prev))
+        start = prev = i
+    ranges.append((start, prev))
+    return ranges
+
+
+def resolve_selection(
+    selections: Sequence[Dict[str, Any]], name: str
+) -> Tuple[int, InstanceRanges]:
+    """Resolve a named selection to its component index + instance ranges.
+
+    Args:
+        selections: Selection summaries from the scene info (each with
+            ``name``, ``component``, ``instances``).
+        name: The selection name to resolve.
+
+    Returns:
+        ``(component_index, instance_ranges)`` for the named selection.
+
+    Raises:
+        ValueError: When no selection has that name.
+    """
+    known = ", ".join(s.get("name", "?") for s in selections) or "none"
+    for sel in selections:
+        if sel.get("name") == name:
+            return int(sel["component"]), _instances_to_ranges(
+                sel.get("instances") or []
+            )
+    raise ValueError(f"no selection named {name!r} (selections: {known})")
+
+
 @dataclass
 class SceneSnapshot:
     """Full-frame pick readback for one scene.
@@ -175,6 +217,10 @@ class SceneSnapshot:
     scenes: int
     components: List[Dict[str, Any]]
     camera: Optional[Dict[str, Any]]
+    # Named selections resolved on the client: {name, component, type, count,
+    # predicate, instances}. Used to resolve --selection / --frame NAME and to
+    # report pick-at membership.
+    selections: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _api_call(
@@ -264,6 +310,7 @@ def take_snapshot(
         scenes=int(payload.get("scenes") or 1),
         components=scene.get("components") or [],
         camera=scene.get("camera"),
+        selections=scene.get("selections") or [],
     )
 
 
@@ -650,6 +697,24 @@ def pick_at_source(
         snapshot = take_snapshot(studio)
         hits = hits_at(snapshot, x, y, radius)
 
+        # Selection membership: which named selections contain each hit, so a
+        # human click and an agent predicate converge on the same referent.
+        snapshot_selections = getattr(snapshot, "selections", []) or []
+
+        def _memberships(component: int, instance: int) -> List[str]:
+            names = [
+                s["name"]
+                for s in snapshot_selections
+                if s.get("component") == component
+                and instance in (s.get("instances") or [])
+            ]
+            return names
+
+        for hit in hits:
+            names = _memberships(hit["component"], hit["instance"])
+            if names:
+                hit["selections"] = names
+
         occluders: List[Dict[str, Any]] = []
         if min_alpha is not None:
             # Need alpha for every hit to split occluders from real hits;
@@ -751,29 +816,35 @@ def pick_at_target(
         debug=debug,
         ready_timeout=ready_timeout,
     )
-    return pick_at_source(
-        source, str(target), x, y, radius=radius, min_alpha=min_alpha
-    )
+    return pick_at_source(source, str(target), x, y, radius=radius, min_alpha=min_alpha)
 
 
 def pick_where_source(
     source: "screenshot_tools.SceneSource",
     target_label: str,
-    component_selector: str,
+    component_selector: Optional[str] = None,
     instances: Optional[InstanceRanges] = None,
     out: Optional[pathlib.Path] = None,
     out_label: Optional[str] = None,
+    selection: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Selection -> screen truth on an already-resolved scene source.
 
-    Shared CLI/daemon core of :func:`pick_where_target`.
+    Shared CLI/daemon core of :func:`pick_where_target`. Either a
+    ``component_selector`` (index/type, with optional ``instances``) or a named
+    ``selection`` (resolved to component + instances) identifies the target.
     """
     with source.scene() as scene:
         studio = scene.studio
         require_scene(studio)
         full = take_snapshot(studio)
-        resolved = resolve_component(full.components, component_selector)
-        component = resolved["component"]
+        if selection is not None:
+            component, instances = resolve_selection(full.selections, selection)
+        else:
+            if component_selector is None:
+                raise ValueError("pick-where requires --component or --selection")
+            resolved = resolve_component(full.components, component_selector)
+            component = resolved["component"]
         entry = legend_entry(full, component)
         solo = take_snapshot(studio, component=component, instances=instances)
         metrics = selection_metrics(full, solo, entry, instances)
@@ -813,7 +884,7 @@ def pick_where_source(
 
 def pick_where_target(
     target: pathlib.Path,
-    component_selector: str,
+    component_selector: Optional[str] = None,
     instances: Optional[InstanceRanges] = None,
     out: Optional[pathlib.Path] = None,
     block: Optional[str] = None,
@@ -822,6 +893,7 @@ def pick_where_target(
     dpr: float = 1.0,
     debug: bool = False,
     ready_timeout: Optional[float] = 30.0,
+    selection: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Re-render TARGET and report where a selection lands on screen.
 
@@ -845,6 +917,7 @@ def pick_where_target(
         component_selector,
         instances=instances,
         out=out,
+        selection=selection,
     )
 
 
@@ -871,6 +944,7 @@ __all__ = [
     "pick_where_target",
     "require_scene",
     "resolve_component",
+    "resolve_selection",
     "scene_count",
     "selection_mask",
     "selection_metrics",

@@ -336,6 +336,48 @@ def collect_dom_legends(studio: StudioContext) -> List[Dict[str, Any]]:
     return result if isinstance(result, list) else []
 
 
+# Collects active per-instance filters from the rendered DOM. Each scene emits
+# a hidden marker carrying its compiled filters (with resolved min/max), so the
+# report reflects exactly what was rendered — filtered-out instances really are
+# hidden and unpickable in the captured pixels.
+_FILTERS_QUERY = (
+    "Array.from(document.querySelectorAll('[data-colight-filters]'))"
+    ".flatMap((el) => JSON.parse(el.getAttribute('data-colight-filters')))"
+)
+
+
+def collect_dom_filters(studio: StudioContext) -> List[Dict[str, Any]]:
+    """Active per-instance filters present in the rendered page.
+
+    Returns:
+        One entry per active filter: ``{"component", "type", "label"?, "min",
+        "max"}`` where min/max are the resolved inclusive thresholds
+        (``null`` when unbounded).
+    """
+    result = studio.evaluate(_FILTERS_QUERY)
+    return result if isinstance(result, list) else []
+
+
+# Collects named selections from the rendered DOM. Each scene emits a hidden
+# marker carrying its resolved selections (name, component, count, predicate),
+# so screenshot --json reports the shared named referents present in the view.
+_SELECTIONS_QUERY = (
+    "Array.from(document.querySelectorAll('[data-colight-selections]'))"
+    ".flatMap((el) => JSON.parse(el.getAttribute('data-colight-selections')))"
+)
+
+
+def collect_dom_selections(studio: StudioContext) -> List[Dict[str, Any]]:
+    """Named selections present in the rendered page.
+
+    Returns:
+        One entry per selection: ``{"name", "component", "type", "count",
+        "predicate"}``.
+    """
+    result = studio.evaluate(_SELECTIONS_QUERY)
+    return result if isinstance(result, list) else []
+
+
 def _capture_scene(
     scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
@@ -360,7 +402,20 @@ def _capture_scene(
             )
         selector, ranges = scene_pick.parse_frame_selector(frame)
         snapshot = scene_pick.take_snapshot(scene.studio)
-        resolved = scene_pick.resolve_component(snapshot.components, selector)
+        # --frame NAME may name a selection (shared referent) or a component.
+        # Try selections first when no explicit instance ranges were given.
+        selection_names = {s.get("name") for s in snapshot.selections}
+        frame_selection_name = None
+        if ranges is None and selector in selection_names:
+            component_idx, ranges = scene_pick.resolve_selection(
+                snapshot.selections, selector
+            )
+            resolved = scene_pick.resolve_component(
+                snapshot.components, str(component_idx)
+            )
+            frame_selection_name = selector
+        else:
+            resolved = scene_pick.resolve_component(snapshot.components, selector)
         # Framing moves the scene camera: a caching provider must reload
         # this scene before serving it again.
         scene.mark_mutated()
@@ -370,6 +425,8 @@ def _capture_scene(
             "type": resolved["type"],
             "camera": camera,
         }
+        if frame_selection_name is not None:
+            extras["frame"]["selection"] = frame_selection_name
         if ranges:
             extras["frame"]["instances"] = [list(pair) for pair in ranges]
 
@@ -378,6 +435,14 @@ def _capture_scene(
     legends = collect_dom_legends(scene.studio)
     if legends:
         extras["legends"] = legends
+
+    filters = collect_dom_filters(scene.studio)
+    if filters:
+        extras["filters"] = filters
+
+    selections = collect_dom_selections(scene.studio)
+    if selections:
+        extras["selections"] = selections
 
     if want_coverage and is_scene:
         snapshot = scene_pick.take_snapshot(scene.studio)

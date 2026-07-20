@@ -212,6 +212,61 @@ class OMFGridVolume:
         kwargs.setdefault("half_size", half.tolist())
         return scene3d.Cuboid(centers=centers.astype(np.float32), **kwargs)
 
+    def cuboids_filter_by(
+        self,
+        color_by: str,
+        min: Any,
+        base_cutoff: Optional[float] = None,
+        stride: int = 1,
+        cmap: str = "viridis",
+        domain: Optional[Sequence[float]] = None,
+        label: Optional[str] = None,
+        **kwargs: Any,
+    ) -> scene3d.SceneComponent:
+        """Build ONE Cuboid layer whose visible cells are chosen at render time.
+
+        Unlike :meth:`cuboids` (which bakes a fixed cutoff into the geometry),
+        this uploads every surviving cell once and attaches a per-instance
+        ``filter_by`` so a ``$state`` slider raises/lowers the grade cutoff
+        client-side with no Python round-trip and no re-upload.
+
+        Args:
+            color_by: Cell attribute to color by and filter on.
+            min: The ``filter_by`` lower threshold — typically a
+                ``Plot.js("$state.cutoff")`` reference (or a literal).
+            base_cutoff: Keep only cells with ``value >= base_cutoff`` in the
+                uploaded set (bounds the payload). None uploads all cells.
+            stride: Subsample the grid (every ``stride``-th cell per axis).
+            cmap: Colormap name.
+            domain: Colormap (min, max); defaults to (base_cutoff, max value).
+            label: Legend / filter label; defaults to the attribute name.
+            **kwargs: Forwarded to ``scene3d.Cuboid``.
+
+        Returns:
+            A single Cuboid component carrying all cells + a ``filter_by``.
+        """
+        centers, values = self.filtered_cells(
+            color_by, cutoff=base_cutoff, stride=stride
+        )
+        half = np.array([t[0] for t in self.tensors], dtype=np.float32) / 2.0
+        if domain is None and values.size:
+            lo = (
+                float(base_cutoff)
+                if base_cutoff is not None
+                else float(np.nanmin(values))
+            )
+            domain = (lo, float(np.nanmax(values)))
+        kwargs.setdefault(
+            "color_by",
+            _color_by_spec(values, cmap, domain, label or color_by),
+        )
+        kwargs.setdefault("half_size", half.tolist())
+        return scene3d.Cuboid(
+            centers=centers.astype(np.float32),
+            filter_by={"values": values, "min": min, "label": label or color_by},
+            **kwargs,
+        )
+
     def filtered_cells(
         self,
         key: str,

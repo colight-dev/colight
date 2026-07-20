@@ -155,6 +155,52 @@ def _apply_color_by(
     data["color_by"] = meta
 
 
+class FilterBy(TypedDict, total=False):
+    """Per-instance threshold filter for instanced primitives.
+
+    Instances whose scalar ``values`` fall outside ``[min, max]`` are hidden
+    (collapsed in the vertex shader and made unpickable). ``NaN`` values are
+    always hidden. ``values`` is required; ``min``/``max`` default to unbounded.
+
+    ``values`` is uploaded once as a per-instance attribute; ``min``/``max``
+    live in a small per-component uniform, so a threshold change (e.g. a
+    ``Plot.js("$state.cutoff")`` slider) updates only the uniform and does not
+    re-upload the instance data. ``min``/``max`` may be literals or ``$state``
+    references (``Plot.js(...)``).
+    """
+
+    values: ArrayLike  # per-instance scalar values
+    min: Optional[NumberLike]  # inclusive lower bound (default: unbounded)
+    max: Optional[NumberLike]  # inclusive upper bound (default: unbounded)
+    label: str  # what the filter encodes (for inspect / screenshot --json)
+
+
+def _normalize_filter_by(
+    filter_by: Optional[Union[FilterBy, Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """Normalize a ``filter_by`` spec for the JS boundary.
+
+    Flattens ``values`` to a float32 array and passes ``min``/``max``/``label``
+    through unchanged (``min``/``max`` may be numbers or ``$state`` JSExprs).
+
+    Raises:
+        ValueError: When ``values`` is missing.
+    """
+    if filter_by is None:
+        return None
+    spec = dict(filter_by)
+    if spec.get("values") is None:
+        raise ValueError("filter_by requires 'values'")
+    out: Dict[str, Any] = {"values": flatten_array(spec["values"], dtype=np.float32)}
+    if spec.get("min") is not None:
+        out["min"] = spec["min"]
+    if spec.get("max") is not None:
+        out["max"] = spec["max"]
+    if spec.get("label") is not None:
+        out["label"] = spec["label"]
+    return out
+
+
 class Decoration(TypedDict, total=False):
     indexes: ArrayLike
     color: Optional[ArrayLike]  # [r,g,b]
@@ -623,7 +669,145 @@ class Scene(Plot.LayoutItem):
             props["origin"] = self.origin.tolist()
         if self.background is not None:
             props["background"] = self.background
+        # Named selections are resident in $state.selections (see Selection /
+        # select). Passing a live reference lets the JS side re-resolve them on
+        # every state change (Python or human click), and it costs nothing when
+        # no selections are set (undefined resolves to no-op).
+        props["selections"] = Plot.js("$state.selections")
         return [Plot.JSRef("scene3d.Scene"), props]
+
+
+# =============================================================================
+# Named selections
+# =============================================================================
+
+
+class SelectionStyle(TypedDict, total=False):
+    """Highlight style applied to a named selection's instances."""
+
+    color: ArrayLike  # [r,g,b]
+    alpha: NumberLike
+    scale: NumberLike
+    outline: bool
+    outline_color: ArrayLike  # [r,g,b]
+    outline_width: NumberLike
+
+
+def Selection(
+    name: str,
+    component: int,
+    *,
+    instances: Optional[Sequence[int]] = None,
+    values: Optional[ArrayLike] = None,
+    values_ref: Optional[str] = None,
+    min: Optional[NumberLike] = None,
+    max: Optional[NumberLike] = None,
+    style: Optional[Union[SelectionStyle, str]] = None,
+) -> Dict[str, Any]:
+    """Define a named selection over one scene component.
+
+    A selection is a NAMED per-instance mask — the same abstraction as
+    ``filter_by`` — consumed as a highlight decoration plus addressability: it
+    is a *shared referent* that both a human (via clicks) and an agent (via
+    predicates, ``pick-where --selection NAME``, ``screenshot --frame NAME``)
+    can name in conversation. Selections live in ``$state.selections`` (seed
+    them with :func:`select`), so they sync Python<->JS and persist into
+    ``.colight`` artifacts.
+
+    The mask is either an explicit ``instances`` list, or a threshold predicate:
+    ``values`` (inline scalars) or ``values_ref`` (a per-instance attribute name
+    on the component) tested against ``[min, max]``.
+
+    Args:
+        name: Stable selection name (the shared referent).
+        component: Compiled-component index the selection targets.
+        instances: Explicit instance indices to select.
+        values: Inline per-instance scalar values for a threshold predicate.
+        values_ref: Name of a per-instance attribute to read values from.
+        min: Inclusive lower threshold for the predicate.
+        max: Inclusive upper threshold for the predicate.
+        style: Highlight style dict, or ``"default"`` for the built-in
+            highlight. Defaults to the built-in highlight.
+
+    Returns:
+        ``(name, spec)`` where ``spec`` is the ``$state.selections[name]``
+        entry. Pass the results to :func:`select` to seed state.
+    """
+    source: Dict[str, Any]
+    if instances is not None:
+        source = {"instances": [int(i) for i in instances]}
+    elif values is not None or values_ref is not None:
+        source = {}
+        if values is not None:
+            source["values"] = flatten_array(values, dtype=np.float32)
+        if values_ref is not None:
+            source["values_ref"] = values_ref
+        if min is not None:
+            source["min"] = min
+        if max is not None:
+            source["max"] = max
+    else:
+        raise ValueError(
+            "Selection requires either 'instances' or 'values'/'values_ref'"
+        )
+
+    spec: Dict[str, Any] = {"component": int(component), "source": source}
+    if style is not None:
+        spec["style"] = _convert_to_js(style) if isinstance(style, dict) else style
+    return {name: spec}
+
+
+def select(*selections: Dict[str, Any]) -> Any:
+    """Seed ``$state.selections`` with one or more :func:`Selection` specs.
+
+    Returns a ``Plot.initialState`` marker (synced) that makes the selections
+    resident, shared state. Combine it with a scene:
+
+        >>> scene | select(Selection("hi", 0, instances=[1, 2]))
+
+    Args:
+        *selections: Dicts returned by :func:`Selection` (each ``{name: spec}``).
+
+    Returns:
+        A ``Plot.initialState`` layout marker seeding ``$state.selections``.
+    """
+    merged: Dict[str, Any] = {}
+    for sel in selections:
+        merged.update(sel)
+    return Plot.initialState({"selections": merged}, sync=True)
+
+
+def toggle_selection(name: str, component: int) -> Any:
+    """An ``on_click`` handler that toggles the picked instance in a selection.
+
+    Human clicks and agent predicates converge on the same named object: a
+    click adds (or removes) the picked instance to ``$state.selections[name]``
+    (creating an ``instances`` selection if absent). Attach it to a component:
+
+        >>> Cuboid(centers=..., on_click=toggle_selection("hi", 0))
+
+    Args:
+        name: Selection name to toggle membership in.
+        component: Component index the selection targets.
+
+    Returns:
+        A ``Plot.js`` click handler expression.
+    """
+    return Plot.js(
+        """(e) => {
+  const sels = {...($state.selections || {})};
+  const cur = sels[%1] || {component: %2, source: {instances: []}};
+  const src = cur.source || {instances: []};
+  const list = (src.instances || []).slice();
+  const i = e.instanceIndex;
+  const at = list.indexOf(i);
+  if (at >= 0) { list.splice(at, 1); } else { list.push(i); }
+  sels[%1] = {...cur, component: %2, source: {...src, instances: list}};
+  $state.selections = sels;
+}""",
+        name,
+        component,
+    )
 
 
 def coerce_index_array(arr: Any) -> Any:
@@ -647,6 +831,7 @@ def PointCloud(
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all points
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -694,6 +879,9 @@ def PointCloud(
     if alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -721,6 +909,7 @@ def Ellipsoid(
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
     | None = None,  # How the shape is drawn ("Solid" or "MajorWireframe")
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -781,6 +970,9 @@ def Ellipsoid(
     if fill_mode is not None:
         data["fill_mode"] = fill_mode
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -806,6 +998,7 @@ def Cuboid(
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -860,6 +1053,9 @@ def Cuboid(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -881,6 +1077,7 @@ def LineBeams(
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -923,6 +1120,9 @@ def LineBeams(
     elif alpha is not None:
         data["alpha"] = alpha
 
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
+
     if layer is not None:
         data["layer"] = layer
 
@@ -945,6 +1145,7 @@ def LineSegments(
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     alphas: Optional[ArrayLike] = None,
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -989,6 +1190,9 @@ def LineSegments(
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     elif alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer

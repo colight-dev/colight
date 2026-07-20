@@ -100,26 +100,33 @@ scene3d.Scene(
 #
 # The block model holds estimated Cu grade for 1,689,600 ten-metre cells.
 # Rendering all of them as cuboids is possible but heavy; a grade *cutoff*
-# is also how a geologist actually reads a block model. There is no
-# client-side attribute filter in Scene3D, so each cutoff shell is
-# precomputed in Python and the slider toggles between them.
+# is also how a geologist actually reads a block model.
+#
+# Scene3D's per-instance `filter_by` makes this ONE layer: every cell above a
+# base 0.5 % floor is uploaded once, and the slider drives `filter_by.min`
+# (`$state.cutoff`) so the shell shrinks *client-side* as the cutoff rises —
+# no Python round-trip, no re-upload, and filtered-out cells become unpickable
+# (so `pick-where` / coverage report the visible shell honestly). This
+# replaces the previous three baked `Plot.cond` shells (0.5 / 0.7 / 1.0),
+# cutting the payload to a single ~6.6 MB cuboid layer.
 
-CUTOFFS = [0.5, 0.7, 1.0]
+BASE_CUTOFF = 0.5
 
-block_layers = [
-    Plot.cond(
-        Plot.js(f"$state.cutoff_idx === {i}"),
-        block_model.cuboids("CU_pct", cutoff=c, domain=(0.0, 2.0), label="Cu %"),
-    )
-    for i, c in enumerate(CUTOFFS)
-]
+block_layer = block_model.cuboids_filter_by(
+    "CU_pct",
+    min=Plot.js("$state.cutoff"),
+    base_cutoff=BASE_CUTOFF,
+    domain=(0.0, 2.0),
+    label="Cu %",
+)
 
-counts = [int((block_model.cell_attributes["CU_pct"] >= c).sum()) for c in CUTOFFS]
+grades = block_model.cell_attributes["CU_pct"]
+base_count = int((grades >= BASE_CUTOFF).sum())
 
 (
     scene3d.Scene(
         drillholes.line_segments(color=[0.55, 0.55, 0.58], size=4.0),
-        *block_layers,
+        block_layer,
         topo.mesh(
             color=[0.82, 0.76, 0.65],
             decorations=[scene3d.deco([0], alpha=0.2)],
@@ -127,17 +134,15 @@ counts = [int((block_model.cell_attributes["CU_pct"] >= c).sum()) for c in CUTOF
         origin=ORIGIN,
     )
     | Plot.Slider(
-        "cutoff_idx",
-        init=2,
-        range=[0, len(CUTOFFS) - 1],
-        label=Plot.js(
-            "`Cu cutoff: ${%1[$state.cutoff_idx]} % (${%2[$state.cutoff_idx].toLocaleString()} blocks)`",
-            CUTOFFS,
-            counts,
-        ),
+        "cutoff",
+        init=1.0,
+        range=[BASE_CUTOFF, 2.0],
+        step=0.05,
+        label=Plot.js("`Cu cutoff: ${$state.cutoff.toFixed(2)} %`"),
     )
 )
 
-# At a 0.5 % cutoff the shell holds 274,780 blocks; at 1.0 %, 106,780. The
-# high-grade core sits inside the Early Diorite volume, which is what the
-# geology surfaces in the overview scene suggest.
+# The uploaded shell holds 274,780 blocks (grade >= 0.5 %). Sliding the cutoff
+# to 1.0 % hides all but the 106,780 highest-grade cells with no server round
+# trip. The high-grade core sits inside the Early Diorite volume, which is what
+# the geology surfaces in the overview scene suggest.

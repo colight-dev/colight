@@ -81,6 +81,44 @@ export function deepEqualModuloTypedArrays(a: any, b: any): boolean {
 }
 
 /**
+ * Keys that carry filter *thresholds* (not per-instance data). Two compiled
+ * scenes that differ only in these are handled by the light filterParams-only
+ * render path, so the large instance buffers are never re-uploaded.
+ */
+const FILTER_THRESHOLD_KEYS = new Set(["filter_by", "_filterIndex"]);
+
+/**
+ * Deep-equal two component arrays while ignoring per-component filter
+ * *thresholds* (`filter_by`, `_filterIndex`). The per-instance filter values
+ * (`_filterValues`) are NOT ignored: if those differ, the instance data really
+ * changed and the heavy rebuild path is required.
+ *
+ * Returns true when the only difference between the two component lists is the
+ * filter thresholds — the signal to take the cheap uniform-only render path.
+ */
+export function componentsEqualIgnoringFilter(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    const ca = a[i];
+    const cb = b[i];
+    if (ca === cb) continue;
+    if (!ca || !cb || typeof ca !== "object" || typeof cb !== "object") {
+      if (ca !== cb) return false;
+      continue;
+    }
+    const keys = new Set([...Object.keys(ca), ...Object.keys(cb)]);
+    for (const key of keys) {
+      if (FILTER_THRESHOLD_KEYS.has(key)) continue;
+      if (!deepEqualModuloTypedArrays(ca[key], cb[key])) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Copy n elements from source array starting at sourceI to out array starting at outI.
  */
 export function acopy(

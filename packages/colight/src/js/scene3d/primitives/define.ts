@@ -444,8 +444,14 @@ export interface ProcessedSchema {
 function processSchema(
   attributes: Record<string, AttributeDef>,
 ): ProcessedSchema {
-  // Auto-inject transformIndex for GPU group transforms
-  // This is added to every primitive for consistency
+  // Auto-inject transformIndex for GPU group transforms and filterIndex for
+  // per-instance filtering. Both are added to every primitive for consistency.
+  //
+  // - transformIndex looks up the group world transform in the transforms buffer.
+  // - filterValue is the per-instance scalar the threshold predicate tests. It is
+  //   uploaded once as instance data; the min/max thresholds live in a small
+  //   filterParams storage buffer indexed by filterIndex, so a threshold change
+  //   (e.g. a $state slider) rewrites only that tiny buffer, never instance data.
   const augmentedAttributes: Record<string, AttributeDef> = {
     ...attributes,
     transformIndex: {
@@ -453,6 +459,21 @@ function processSchema(
       source: "_transformIndex",
       default: 0,
       picking: true, // Need same transform for picking geometry
+    },
+    filterValue: {
+      type: "f32",
+      // Per-instance scalar array on the component (set by the compiler from
+      // the user's filter_by.values). NaN default => "no filter value"
+      // sentinel; ignored when the component's filterParams slot is inactive.
+      source: "_filterValues",
+      default: Number.NaN,
+      picking: true, // Filtered-out instances must be unpickable too
+    },
+    filterIndex: {
+      type: "f32",
+      source: "_filterIndex",
+      default: 0,
+      picking: true, // Same filter thresholds for picking geometry
     },
   };
 
@@ -589,6 +610,7 @@ import { quaternionShaderFunctions } from "../quaternion";
 import {
   cameraStruct,
   groupTransformStruct,
+  filterParamsStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
@@ -635,18 +657,41 @@ function generateVertexShader(
   // Generate transform code based on transform type
   const transformCode = generateTransformCode(def.transform, attrs);
 
+  // Per-instance filtering: collapse (send to a degenerate NaN clip position,
+  // which the rasterizer discards) any instance whose filterValue falls outside
+  // its component's [min, max] threshold, or whose filterValue is NaN. Thresholds
+  // live in the filterParams storage buffer indexed by filterIndex; instance data
+  // is untouched when only the thresholds change. Applied identically to the
+  // render and picking passes so filtered-out instances are also unpickable.
+  const filterCollapseCode = `
+  // Per-instance filter collapse
+  let _fp = filterParams[u32(filterIndex)];
+  var _filterPass = true;
+  if (_fp.isActive > 0.5) {
+    let _fv = filterValue;
+    _filterPass = (_fv == _fv) && (_fv >= _fp.minVal) && (_fv <= _fp.maxVal);
+  }`;
+  // A zero clip position (w=0, all components 0) is degenerate: the
+  // perspective divide discards it and it produces no fragments. Using a
+  // literal 0/0 division instead would be a WGSL const-eval error, so we
+  // assign the zero vector directly.
+  const filterCollapsePosition = `
+  if (!_filterPass) {
+    out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }`;
+
   // Build return statement
   const returnStmt = forPicking
     ? `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;
+  out.pickID = pickID;${filterCollapsePosition}
   return out;`
     : `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.color = color;
   out.alpha = alpha;
   out.worldPos = worldPos;
-  out.normal = worldNormal;
+  out.normal = worldNormal;${filterCollapsePosition}
   return out;`;
 
   // Include quaternion functions - always needed for group transforms
@@ -654,6 +699,7 @@ function generateVertexShader(
 
   return `${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${vsOut}
 ${quaternionCode}
 ${applyGroupTransformFn}
@@ -662,6 +708,7 @@ ${applyGroupTransformFn}
 fn vs_main(
   ${inputs.join(",\n  ")}
 ) -> VSOut {
+${filterCollapseCode}
 ${transformCode}
   ${returnStmt}
 }`;

@@ -3,11 +3,13 @@
 # Scene3D builds on the same data and composition paradigms as Colight Plot but adds support for WebGPU–powered 3D primitives.
 #
 # %%
+import colight.plot as Plot
 from colight.scene3d import (
     Cuboid,
     Ellipsoid,
     LineBeams,
     PointCloud,
+    Scene,
     deco,
 )
 import numpy as np
@@ -240,7 +242,6 @@ beams = LineBeams(
 # The `deco()` function takes an array of indices to decorate and the desired appearance properties.
 
 # %%
-import colight.plot as Plot
 from colight.scene3d import PointCloud
 import numpy as np
 
@@ -259,6 +260,79 @@ cloud = PointCloud(
 )
 
 cloud
+
+# %% [markdown]
+
+# ## Filtering instances (`filter_by`)
+#
+# `filter_by` hides instances whose per-instance scalar `values` fall outside a
+# `[min, max]` threshold. It works on every instanced primitive (`PointCloud`,
+# `Ellipsoid`, `Cuboid`, `LineSegments`, `LineBeams`). The essential property:
+# `values` uploads **once** as instance data, while `min`/`max` live in a small
+# per-component uniform — so `min`/`max` may be `Plot.js("$state.cutoff")`
+# state references and a slider re-thresholds the scene client-side without
+# re-uploading the (potentially large) instance data. `NaN` values are always
+# hidden.
+#
+# Filtered-out instances are collapsed in the vertex shader and are also
+# **unpickable**, so `pick-at` / `pick-where` / coverage report the visible
+# instances honestly. `colight inspect` and `screenshot --json` report the
+# active filters as `{component, label?, min, max}`.
+
+# %%
+from colight.scene3d import Cuboid
+
+_grades = np.array([0.1, 0.4, 0.6, 0.9], dtype=np.float32)
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.2, 0.6, 0.9],
+            # Only cells at/above the slider cutoff stay visible.
+            filter_by={
+                "values": _grades,
+                "min": Plot.js("$state.cutoff"),
+                "label": "grade",
+            },
+        )
+    )
+    | Plot.Slider("cutoff", init=0.0, range=[0.0, 1.0], step=0.05, label="cutoff")
+    | Plot.initialState({"cutoff": 0.0})
+)
+
+# %% [markdown]
+
+# ## Named selections (`Selection`)
+#
+# A **selection** is the same per-instance mask as a filter, but *named* and
+# consumed differently: it highlights its instances (via the decoration system)
+# and becomes a **shared referent** that both a human (clicking) and an agent
+# (predicates, `pick-where --selection NAME`, `screenshot --frame NAME`) can
+# name in conversation. Selections live in `$state.selections`, so they sync
+# Python↔JS and persist into `.colight` artifacts.
+#
+# Build a selection with `scene3d.Selection(name, component, ...)` — either an
+# explicit `instances=[...]` list or a threshold predicate
+# (`values`/`values_ref` + `min`/`max`) — and seed it into state with
+# `scene3d.select(...)`. `scene3d.toggle_selection(name, component)` is an
+# `on_click` handler that adds/removes the picked instance, so human clicks and
+# agent predicates converge on the same named object.
+
+# %%
+from colight import scene3d
+
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.3, 0.3, 0.6],
+            on_click=scene3d.toggle_selection("picked", 0),
+        )
+    )
+    | scene3d.select(scene3d.Selection("picked", 0, instances=[1, 3]))
+)
 
 # %% [markdown]
 
