@@ -86,8 +86,18 @@
 # Opens a `.colight` file in the browser by generating a self-contained HTML
 # page (the viewer script and data are inlined).
 #
+# When the file carries **update entries** (a replay/episode artifact — an
+# initial state plus one appended entry per step), the viewer shows a
+# **timeline scrubber** under the visual: a step slider (0..N), play/pause and
+# a step count. Each position recomputes the state from the initial entry plus
+# updates 0..k, so you can scrub any replay without rebuilding one by hand. The
+# scrubber only appears when update entries exist; it is independent of any
+# in-visual `Plot.Slider` autoplay (`animateBy`), which continues to drive its
+# own state key within whichever step is applied.
+#
 # ```bash
 # colight view plot.colight
+# colight view replay.colight        # shows the timeline scrubber
 # colight view plot.colight -o plot.html --no-open
 # ```
 #
@@ -180,11 +190,18 @@
 #
 # # Semantic diff of two targets (.colight or .py, evaluated headlessly;
 # # visuals paired by position): components added/removed/type-changed,
-# # per-array dtype/shape changes and magnitude stats (max/mean |delta|,
-# # fraction changed beyond --epsilon, bounds drift), scalar value changes,
-# # state keys, buffer deltas, warnings introduced/resolved.
+# # per-array dtype/shape changes and magnitude stats (changed-element
+# # count/fraction, max/mean |delta| beyond --epsilon, bounds drift),
+# # scalar value changes, state keys, buffer deltas, warnings.
+# # Integer ("categorical") arrays lead with the changed count/fraction and
+# # demote |delta| (a label of 3 vs 1 is no closer than 3 vs 15).
+# # Artifacts with UPDATE ENTRIES (replay/episode files) also get a per-step
+# # diff: updates are aligned by index and each pair diffed, reporting the
+# # first diverging update, how many differ, and a trailing length mismatch
+# # ("first divergence at update 3; 42/80 updates differ").
 # # Exit 0 = identical within epsilon, 1 = differences, 2 = error.
 # colight diff a.colight b.colight [--json] [--epsilon 1e-9]
+# colight diff runA.colight runB.colight  # per-step replay divergence
 # colight diff old.py new.py [--json]
 #
 # # Deterministic screenshot via the same headless-Chrome path as

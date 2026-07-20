@@ -62,9 +62,12 @@ colight run path/to/notebook.py --force
 colight inspect path/to/plot.colight --json
 
 # Semantic diff of two visuals (.colight or .py): components added/removed,
-# per-array magnitude stats (max/mean |delta|, bounds drift), state keys,
-# warning delta. Exit 0 = identical within --epsilon, 1 = differences
+# per-array stats (changed count/fraction — integer grids lead with these —
+# plus max/mean |delta|, bounds drift), state keys, warning delta. Artifacts
+# with update entries diff per-step (first diverging update + how many differ).
+# Exit 0 = identical within --epsilon, 1 = differences
 colight diff before.colight after.colight --json
+colight diff runA.colight runB.colight        # per-step replay divergence
 
 # Deterministic screenshot: fixed viewport + device-pixel-ratio, waits for
 # render completion; --check renders twice and byte-compares.

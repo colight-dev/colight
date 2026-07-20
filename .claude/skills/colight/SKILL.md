@@ -43,7 +43,10 @@ colight blocks FILE.py --json        # block graph: ids, line ranges, provides/d
 colight inspect TARGET --json        # structure without pixels: components, array
                                      # schemas, state keys + sanity warnings
 colight diff A B --json              # semantic diff (.py or .colight): per-array
-                                     # max/mean |delta|, changed fraction, bounds drift
+                                     # changed count/fraction (integer grids lead with
+                                     # these), max/mean |delta|, bounds drift. Artifacts
+                                     # with update entries diff per-step (aligned by
+                                     # index): first diverging update + how many differ
 colight screenshot TARGET --out x.png --json   # deterministic pixels; --check verifies
                                                # byte-identical double-render
 ```
