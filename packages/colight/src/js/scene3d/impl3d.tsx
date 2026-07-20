@@ -107,6 +107,7 @@ import {
 } from "./drag";
 import { buildPickInfo } from "./pick-info";
 import { screenRay } from "./project";
+import { resolveAnnotations } from "./annotations";
 import {
   OutlineConfig,
   OutlineTarget,
@@ -410,6 +411,14 @@ export interface SceneImplProps {
    * can resolve selection names to component + instances.
    */
   selections?: import("./selections").SelectionReport[];
+
+  /**
+   * Named annotation callouts resident in `$state.annotations`. Exposed through
+   * the snapshot API so pick-at reports instance-anchored membership and
+   * inspect / screenshot --json report each callout's resolved world position
+   * and projected screen position (in pick-at pixel space).
+   */
+  annotations?: import("./annotations").Annotations;
 
   /**
    * Scene-level section / clipping planes. Each plane is
@@ -796,6 +805,7 @@ export function SceneImpl({
   filterParams,
   clipPlanes,
   selections: selectionReports,
+  annotations,
   containerWidth,
   containerHeight,
   style,
@@ -956,6 +966,16 @@ export function SceneImpl({
   useEffect(() => {
     originRef.current = origin;
   }, [origin]);
+
+  // Named annotation callouts, held in a ref so the snapshot API can project
+  // them with the live camera each time getInfo() is called (pick-at /
+  // screenshot --json read the projected screen positions).
+  const annotationsRef = useRef<
+    import("./annotations").Annotations | undefined
+  >(annotations);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
 
   const handleCameraUpdate = useCallback(
     (updateFn: (camera: CameraState) => CameraState) => {
@@ -2822,7 +2842,45 @@ export function SceneImpl({
         predicate: s.predicate,
         instances: s.indexes,
       })),
+      // Named annotation callouts, projected with the live camera. Screen
+      // positions are page CSS pixels (pick-at pixel space): the canvas-local
+      // projection is offset by the canvas rect's page origin.
+      annotations: snapshotAnnotations(comps, rect),
     };
+  }
+
+  /** Resolves + projects the scene's annotations for the snapshot report.
+   * Screen positions are in page pick-at pixel space (canvas rect applied). */
+  function snapshotAnnotations(
+    comps: ComponentConfig[],
+    rect: DOMRect | undefined,
+  ) {
+    const camera = activeCameraRef.current;
+    const cssRect =
+      rect && rect.width > 0 && rect.height > 0
+        ? { width: rect.width, height: rect.height }
+        : null;
+    const resolved = resolveAnnotations(
+      annotationsRef.current,
+      comps,
+      (component) => primitiveRegistry[component.type],
+      transforms,
+      camera,
+      cssRect,
+      originRef.current ?? null,
+    );
+    return resolved.map((a) => ({
+      name: a.name,
+      text: a.text,
+      anchor: a.anchor,
+      world: a.world,
+      // Offset canvas-local CSS into page CSS (pick-at) space.
+      screen:
+        a.screen && rect
+          ? { x: a.screen.x + rect.left, y: a.screen.y + rect.top }
+          : a.screen,
+      visible: a.visible,
+    }));
   }
 
   async function snapshotPickBuffer(options?: {

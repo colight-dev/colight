@@ -50,7 +50,9 @@ import { GroupConfig, GroupRegistry } from "./groups";
 import { GPUTransform } from "./gpu-transforms";
 import { compileScene, RawComponent } from "./compiler";
 import { Selections } from "./selections";
-import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
+import { Annotations } from "./annotations";
+import { AnnotationsOverlay } from "./annotationsOverlay";
+import { CameraParams, DEFAULT_CAMERA, createCameraState } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
@@ -346,6 +348,10 @@ interface SceneProps {
   /** Named selections resident in $state.selections (name -> {component,
    * source, style}). Resolved to per-instance decorations + addressability. */
   selections?: Selections;
+  /** Named annotation callouts resident in $state.annotations (name ->
+   * {text, anchor, style}). Rendered as a DOM overlay (marker + leader +
+   * label) projected by the current camera. */
+  annotations?: Annotations;
   /** Scene-level section / clipping planes. Each `{normal, offset}` keeps the
    * half-space `dot(worldPos, normal) <= offset`; planes intersect. Offsets may
    * be $state-driven for a section-sweep slider. Max 8. */
@@ -416,6 +422,8 @@ interface SceneLayersProps {
   background?: [number, number, number];
   /** Named selections resident in $state.selections. */
   selections?: Selections;
+  /** Named annotation callouts resident in $state.annotations. */
+  annotations?: Annotations;
   /** Scene-level section / clipping planes. */
   clipPlanes?: ClipPlane[];
 }
@@ -548,6 +556,7 @@ export function Scene(props: SceneLayersProps | SceneProps) {
         origin={props.origin}
         background={props.background}
         selections={props.selections}
+        annotations={props.annotations}
         clipPlanes={props.clipPlanes}
       />
     );
@@ -569,6 +578,7 @@ function SceneFromLayers({
   origin,
   background,
   selections,
+  annotations,
   clipPlanes,
 }: SceneLayersProps) {
   // Collect layers and extract scene props
@@ -598,6 +608,7 @@ function SceneFromLayers({
       origin={origin ?? sceneProps.origin}
       background={background ?? sceneProps.background}
       selections={selections ?? sceneProps.selections}
+      annotations={annotations ?? sceneProps.annotations}
       clipPlanes={clipPlanes ?? sceneProps.clipPlanes}
       readyState={readyState}
     />
@@ -650,6 +661,7 @@ function SceneInner({
   origin,
   background,
   selections: selectionsProp,
+  annotations,
   clipPlanes,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
@@ -658,6 +670,14 @@ function SceneInner({
     ...defaultCamera,
     ...camera,
   });
+
+  // Live camera params, mirrored into state so the annotation overlay
+  // re-projects anchors on every camera change (orbit/pan/zoom/frame). The
+  // controlled `camera` prop wins when present; otherwise it tracks the
+  // internal camera as it moves.
+  const [liveCamera, setLiveCamera] = useState<CameraParams>(
+    () => ({ ...DEFAULT_CAMERA, ...defaultCamera, ...camera }) as CameraParams,
+  );
 
   // Memoize ready callback
   const onReady = useMemo(
@@ -717,9 +737,31 @@ function SceneInner({
   const cameraChangeCallback = useCallback(
     (cam: CameraParams) => {
       internalCameraRef.current = cam;
+      setLiveCamera(cam);
       onCameraChange?.(cam);
     },
     [onCameraChange],
+  );
+
+  // When the camera is controlled from outside (the `camera` prop), the
+  // interactive callback above never fires; keep the overlay in sync with the
+  // controlled value directly.
+  useEffect(() => {
+    if (camera) setLiveCamera(camera);
+  }, [camera]);
+
+  // Resolved annotation callouts for this render: the overlay projects them
+  // with the live camera, and a hidden marker mirrors them for screenshot
+  // --json / inspect. Only computed when annotations are actually present.
+  const annotationCamera = useMemo(
+    () => createCameraState(liveCamera),
+    [liveCamera],
+  );
+  const specFor = useCallback(
+    (component: ComponentConfig) =>
+      (mergedSpecs && mergedSpecs[component.type]) ||
+      (defaultPrimitiveRegistry as any)[component.type],
+    [mergedSpecs],
   );
 
   const dimensions = useMemo(
@@ -785,6 +827,7 @@ function SceneInner({
             transforms={transforms}
             filterParams={filterParams}
             selections={selections}
+            annotations={annotations}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}
@@ -803,6 +846,27 @@ function SceneInner({
             clipPlanes={clipPlanes}
           />
           <SceneLegends entries={legendEntries} />
+          {annotations && Object.keys(annotations).length > 0 && (
+            // Named annotation callouts: a DOM overlay (marker + leader +
+            // label) projected by the live camera, captured by the same
+            // full-page screenshot path as the legend. It also emits a hidden
+            // data-colight-annotations marker so screenshot --json can report
+            // each callout's resolved world + projected screen position.
+            <AnnotationsOverlay
+              annotations={annotations}
+              components={components}
+              specFor={specFor}
+              transforms={transforms}
+              camera={annotationCamera}
+              rect={{
+                left: 0,
+                top: 0,
+                width: dimensions.width,
+                height: dimensions.height,
+              }}
+              origin={origin}
+            />
+          )}
           {filters.length > 0 && (
             // Hidden marker carrying the scene's active per-instance filters
             // (resolved min/max) so `colight screenshot --json` can report what
