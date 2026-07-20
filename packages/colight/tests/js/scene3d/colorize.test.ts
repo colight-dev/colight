@@ -7,6 +7,7 @@ import {
   ColorChannel,
   ColorChannels,
 } from "../../../src/js/scene3d/colorize";
+import { compileScene } from "../../../src/js/scene3d/compiler";
 
 // A 2-entry LUT: black -> white. domain [0, 10].
 const continuousChannel: ColorChannel = {
@@ -122,5 +123,59 @@ describe("applyActiveChannel", () => {
   it("is a no-op without color_channels", () => {
     const component: any = { type: "Cuboid", colors: new Float32Array([1]) };
     expect(applyActiveChannel(component)).toBeNull();
+  });
+});
+
+describe("channel switch seam (no geometry rebuild)", () => {
+  const rawFor = (active: string) => [
+    {
+      type: "PointCloud",
+      centers: new Float32Array([0, 0, 0, 1, 0, 0]),
+      color_channels: {
+        CU_pct: {
+          ...continuousChannel,
+          values: [0, 10],
+          count: 2,
+        },
+        Lithology: {
+          ...categoricalChannel,
+          values: [0, 1],
+          count: 2,
+        },
+      },
+      active_channel: active,
+    },
+  ];
+
+  it("a channel switch changes ONLY colors/color_by, not geometry", () => {
+    const a = compileScene(rawFor("CU_pct") as any).components;
+    const b = compileScene(rawFor("Lithology") as any).components;
+
+    // The switch actually recolored (colors differ).
+    expect(Array.from(a[0].colors as Float32Array)).not.toEqual(
+      Array.from(b[0].colors as Float32Array),
+    );
+    expect((a[0] as any)._activeChannel).toBe("CU_pct");
+    expect((b[0] as any)._activeChannel).toBe("Lithology");
+
+    // Geometry (centers) is byte-identical: a switch re-uploads the colors
+    // buffer but never rebuilds instance/geometry data.
+    expect(Array.from(a[0].centers as Float32Array)).toEqual(
+      Array.from(b[0].centers as Float32Array),
+    );
+
+    // Every prop other than colors/color_by/_activeChannel is deeply equal —
+    // the seam a switch crosses is exactly the colors buffer.
+    const keys = new Set([...Object.keys(a[0]), ...Object.keys(b[0])]);
+    const IGNORE = new Set([
+      "colors",
+      "color_by",
+      "_activeChannel",
+      "active_channel",
+    ]);
+    for (const k of keys) {
+      if (IGNORE.has(k)) continue;
+      expect((a[0] as any)[k], `prop ${k} changed`).toEqual((b[0] as any)[k]);
+    }
   });
 });

@@ -62,7 +62,20 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
   camera auto-fits in float32-safe space.
 - **What do the colors mean?** Read `legends` from `inspect`/`screenshot --json`
   (`{component, label, cmap, domain, categorical}` for every `color_by`-colored
-  component) instead of guessing color meanings from pixels.
+  component) instead of guessing color meanings from pixels. Categorical
+  `color_by` (a `categories: [{value, label, color}]` table, plus a `fallback`
+  slot for unmatched/`NaN`) reports its label→color mapping there — no need to
+  eyeball swatches.
+- **Switchable color channels (`color_channels`).** A component may ship several
+  named color channels and an `active_channel` (often a
+  `Plot.js("$state.color_channel")` ref) — the ParaView color-by dropdown, made
+  client-side: switching recolors in-browser (only the colors buffer re-uploads,
+  no geometry rebuild, no re-export). Discover them in `inspect`/`screenshot
+--json` under `color_channels` (`{component, active, channels: [{name, label,
+kind}]}`), then switch by setting that `$state` key. `pick-at` on such a
+  component returns the **full data row** for the picked instance —
+  `values.channels: {"CU_pct": 0.83, "Lithology": "Dacite"}` (categorical
+  channels as labels) — the "click a block, read its attributes" affordance.
 - **Filters vs selections (both are per-instance masks).** A `filter_by`
   (`{values, min, max}`) changes _what is visible and pickable_ — filtered-out
   instances are collapsed and unpickable, so `pick-where`/coverage counts move
