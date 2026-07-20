@@ -699,10 +699,12 @@ def pick_at_source(
 
         # Selection membership: which named selections contain each hit, so a
         # human click and an agent predicate converge on the same referent.
+        snapshot_selections = getattr(snapshot, "selections", []) or []
+
         def _memberships(component: int, instance: int) -> List[str]:
             names = [
                 s["name"]
-                for s in snapshot.selections
+                for s in snapshot_selections
                 if s.get("component") == component
                 and instance in (s.get("instances") or [])
             ]
