@@ -221,6 +221,10 @@ class SceneSnapshot:
     # predicate, instances}. Used to resolve --selection / --frame NAME and to
     # report pick-at membership.
     selections: List[Dict[str, Any]] = field(default_factory=list)
+    # Named annotation callouts projected on the client: {name, text, anchor,
+    # world, screen (page pick-at pixels), visible}. Used to report annotation
+    # screen positions (screenshot --json) and pick-at membership.
+    annotations: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _api_call(
@@ -311,6 +315,7 @@ def take_snapshot(
         components=scene.get("components") or [],
         camera=scene.get("camera"),
         selections=scene.get("selections") or [],
+        annotations=scene.get("annotations") or [],
     )
 
 
@@ -710,10 +715,30 @@ def pick_at_source(
             ]
             return names
 
+        # Annotation membership: instance-anchored callouts on the hit instance
+        # (position anchors don't belong to an instance, so they never match).
+        snapshot_annotations = getattr(snapshot, "annotations", []) or []
+
+        def _annotation_memberships(component: int, instance: int) -> List[str]:
+            names: List[str] = []
+            for a in snapshot_annotations:
+                anchor = a.get("anchor") or {}
+                if (
+                    anchor.get("component") == component
+                    and anchor.get("instance") == instance
+                ):
+                    names.append(a["name"])
+            return names
+
         for hit in hits:
             names = _memberships(hit["component"], hit["instance"])
             if names:
                 hit["selections"] = names
+            annotation_names = _annotation_memberships(
+                hit["component"], hit["instance"]
+            )
+            if annotation_names:
+                hit["annotations"] = annotation_names
 
         occluders: List[Dict[str, Any]] = []
         if min_alpha is not None:

@@ -474,6 +474,28 @@ def selections_payload(state_selections: Dict[str, Any]) -> List[Dict[str, Any]]
     return entries
 
 
+def annotations_payload(state_annotations: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Machine-readable entries for annotation callouts in ``$state.annotations``.
+
+    Each entry is ``{"name", "text", "anchor"}`` where ``anchor`` is either
+    ``{"position": [x, y, z]}`` (world coords, as given) or
+    ``{"component", "instance"}``. Annotations are shared named referents that
+    survive into ``.colight`` artifacts as state; the resolved world position and
+    projected screen position are added by the renderer-backed
+    ``screenshot --json`` / ``pick-at`` path (they need the live camera).
+    """
+    entries: List[Dict[str, Any]] = []
+    for name, spec in state_annotations.items():
+        if not isinstance(spec, dict):
+            continue
+        entry: Dict[str, Any] = {"name": name, "text": spec.get("text")}
+        anchor = spec.get("anchor")
+        if isinstance(anchor, dict):
+            entry["anchor"] = anchor
+        entries.append(entry)
+    return entries
+
+
 def inspect_visual_data(
     data: Dict[str, Any], buffers: List[bytes]
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -557,6 +579,11 @@ def inspect_visual_data(
         selections = selections_payload(state_selections)
         if selections:
             payload["selections"] = selections
+    state_annotations = state_dict.get("annotations")
+    if isinstance(state_annotations, dict) and state_annotations:
+        annotations = annotations_payload(state_annotations)
+        if annotations:
+            payload["annotations"] = annotations
     return payload, warnings
 
 

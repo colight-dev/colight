@@ -422,6 +422,29 @@ def collect_dom_clip_planes(
     return planes, warnings
 
 
+# Collects named annotation callouts from the rendered scene. Unlike the
+# selection/legend markers (read from static DOM attributes), annotations carry
+# a live-camera projection, so they are read from the scene3d snapshot API's
+# getInfo (the same projection pick-at uses) — the screen positions are in page
+# pick-at pixel space. Each entry: {name, text, anchor, world, screen, visible}.
+_ANNOTATIONS_QUERY = (
+    "(window.colight && window.colight.scene3d) "
+    "? window.colight.scene3d.info().flatMap((s) => s.annotations || []) : []"
+)
+
+
+def collect_annotations(studio: StudioContext) -> List[Dict[str, Any]]:
+    """Named annotation callouts present in the rendered scene(s).
+
+    Returns:
+        One entry per callout: ``{"name", "text", "anchor", "world", "screen",
+        "visible"}`` — ``screen`` is the projected position in page pick-at
+        pixel space (or ``null`` when the anchor is behind the camera).
+    """
+    result = studio.evaluate(_ANNOTATIONS_QUERY)
+    return result if isinstance(result, list) else []
+
+
 def _capture_scene(
     scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
@@ -487,6 +510,10 @@ def _capture_scene(
     selections = collect_dom_selections(scene.studio)
     if selections:
         extras["selections"] = selections
+
+    annotations = collect_annotations(scene.studio)
+    if annotations:
+        extras["annotations"] = annotations
 
     clip_planes, clip_warnings = collect_dom_clip_planes(scene.studio)
     if clip_planes:
@@ -749,6 +776,7 @@ __all__ = [
     "RenderSession",
     "SceneLike",
     "SceneSource",
+    "collect_annotations",
     "collect_dom_legends",
     "fit_max_edge",
     "load_visual",
