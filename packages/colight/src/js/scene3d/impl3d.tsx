@@ -78,6 +78,11 @@ import { unpackID } from "./picking";
 import { GroupRegistry } from "./groups";
 import { LIGHTING, outlineVertCode, outlineFragCode } from "./shaders";
 import {
+  packClipPlanes,
+  CLIP_PLANES_BUFFER_SIZE,
+  ClipPlane,
+} from "./clipPlanes";
+import {
   BufferInfo,
   GeometryResources,
   GeometryResource,
@@ -405,6 +410,16 @@ export interface SceneImplProps {
    * can resolve selection names to component + instances.
    */
   selections?: import("./selections").SelectionReport[];
+
+  /**
+   * Scene-level section / clipping planes. Each plane is
+   * `{ normal: [nx,ny,nz], offset }`: a fragment is KEPT where
+   * `dot(worldPos, normal) <= offset` for EVERY plane (intersection of kept
+   * half-spaces). Applies to ALL components in render AND pick passes via the
+   * shared clipPlanes uniform. A $state offset change re-evaluates to the same
+   * components with new plane values, so it takes the light render path (a
+   * uniform write, no instance re-upload). Max 8 planes. */
+  clipPlanes?: ClipPlane[];
 
   /** Width of the container in pixels */
   containerWidth: number;
@@ -779,6 +794,7 @@ export function SceneImpl({
   components,
   transforms = [IDENTITY_GPU_TRANSFORM],
   filterParams,
+  clipPlanes,
   selections: selectionReports,
   containerWidth,
   containerHeight,
@@ -862,6 +878,7 @@ export function SceneImpl({
     bindGroupLayout: GPUBindGroupLayout;
     transformsBuffer: GPUBuffer;
     filterParamsBuffer: GPUBuffer;
+    clipPlanesBuffer: GPUBuffer;
     staleTransformsBuffers: GPUBuffer[];
     staleDynamicBuffers: Array<
       Pick<DynamicBuffers, "renderBuffer" | "pickingBuffer">
@@ -1342,6 +1359,14 @@ export function SceneImpl({
             visibility: GPUShaderStage.VERTEX,
             buffer: { type: "read-only-storage" },
           },
+          {
+            // Scene-level section / clipping planes (see clipPlanesStruct).
+            // Read in the FRAGMENT stage (discard); every generated and custom
+            // fragment shader calls applyClipPlanes.
+            binding: 3,
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: "uniform" },
+          },
         ],
       });
 
@@ -1367,12 +1392,22 @@ export function SceneImpl({
         label: "Filter params buffer",
       });
 
+      // Scene-level section / clipping planes. Fixed size (count + 8 * vec4),
+      // so it never resizes — only its contents are rewritten (the light path
+      // a $state offset change flows through).
+      const clipPlanesBuffer = device.createBuffer({
+        size: CLIP_PLANES_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: "Clip planes buffer",
+      });
+
       const uniformBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
         entries: [
           { binding: 0, resource: { buffer: uniformBuffer } },
           { binding: 1, resource: { buffer: transformsBuffer } },
           { binding: 2, resource: { buffer: filterParamsBuffer } },
+          { binding: 3, resource: { buffer: clipPlanesBuffer } },
         ],
       });
 
@@ -1390,6 +1425,7 @@ export function SceneImpl({
         bindGroupLayout,
         transformsBuffer,
         filterParamsBuffer,
+        clipPlanesBuffer,
         staleTransformsBuffers: [],
         staleDynamicBuffers: [],
         depthTexture: null,
@@ -2309,6 +2345,10 @@ export function SceneImpl({
               binding: 2,
               resource: { buffer: gpuRef.current.filterParamsBuffer },
             },
+            {
+              binding: 3,
+              resource: { buffer: gpuRef.current.clipPlanesBuffer },
+            },
           ],
         });
       }
@@ -2329,6 +2369,18 @@ export function SceneImpl({
         filterData.buffer,
         filterData.byteOffset,
         filterData.byteLength,
+      );
+
+      // Scene-level clip planes: a small fixed-size uniform. Writing it here
+      // (never re-uploading instance buffers) is the light path a $state
+      // section offset flows through — packClipPlanes throws loudly above 8.
+      const clipPlanesData = packClipPlanes(clipPlanes);
+      device.queue.writeBuffer(
+        gpuRef.current.clipPlanesBuffer,
+        0,
+        clipPlanesData.buffer,
+        clipPlanesData.byteOffset,
+        clipPlanesData.byteLength,
       );
 
       try {
@@ -3731,9 +3783,11 @@ export function SceneImpl({
       ) {
         requestRender("camera changed");
       } else {
-        // Transforms may have changed even if components are deeply equal
-        // (e.g., group position changed). Re-render to upload new transforms.
-        requestRender("transforms changed");
+        // Transforms or clip planes may have changed even if components are
+        // deeply equal (e.g., a $state section offset). Re-render to upload the
+        // new transforms / clip-plane uniform — a light path, no instance
+        // re-upload.
+        requestRender("transforms or clip planes changed");
       }
     }
   }, [
@@ -3741,6 +3795,7 @@ export function SceneImpl({
     components,
     transforms,
     filterParams,
+    clipPlanes,
     controlledCamera,
     internalCamera,
   ]);

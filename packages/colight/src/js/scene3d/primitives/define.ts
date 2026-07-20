@@ -35,6 +35,7 @@ export {
   createVertexBufferLayout,
   cameraStruct,
   groupTransformStruct,
+  clipPlanesStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
@@ -611,6 +612,7 @@ import {
   cameraStruct,
   groupTransformStruct,
   filterParamsStruct,
+  clipPlanesStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
@@ -640,11 +642,14 @@ function generateVertexShader(
     inputs.push(`@location(${2 + attrs.length}) pickID: f32`);
   }
 
-  // Build VSOut struct
+  // Build VSOut struct. The picking VSOut carries worldPos (location 1) so the
+  // picking fragment shader can apply scene clip planes (discard behind a
+  // section), keeping pick-at / pick-where truthful for sectioned views.
   const vsOut = forPicking
     ? `struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
 };`
     : `struct VSOut {
   @builtin(position) position: vec4<f32>,
@@ -684,7 +689,8 @@ function generateVertexShader(
   const returnStmt = forPicking
     ? `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
-  out.pickID = pickID;${filterCollapsePosition}
+  out.pickID = pickID;
+  out.worldPos = worldPos;${filterCollapsePosition}
   return out;`
     : `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
@@ -843,6 +849,7 @@ function generateFragmentShader(
 
   if (isLit) {
     return `${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 
@@ -853,17 +860,21 @@ fn fs_main(
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let litColor = calculateLighting(color, normal, worldPos);
   return vec4<f32>(litColor, alpha);
 }`;
   } else {
-    return `@fragment
+    return `${clipPlanesStruct}
+
+@fragment
 fn fs_main(
   @location(0) color: vec3<f32>,
   @location(1) alpha: f32,
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   return vec4<f32>(color, alpha);
 }`;
   }

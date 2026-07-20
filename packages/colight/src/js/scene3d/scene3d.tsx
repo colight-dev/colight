@@ -18,6 +18,7 @@ import React, {
   useRef,
 } from "react";
 import { SceneImpl } from "./impl3d";
+import { ClipPlane } from "./clipPlanes";
 import {
   ComponentConfig,
   PointCloudComponentConfig,
@@ -344,6 +345,10 @@ interface SceneProps {
   /** Named selections resident in $state.selections (name -> {component,
    * source, style}). Resolved to per-instance decorations + addressability. */
   selections?: Selections;
+  /** Scene-level section / clipping planes. Each `{normal, offset}` keeps the
+   * half-space `dot(worldPos, normal) <= offset`; planes intersect. Offsets may
+   * be $state-driven for a section-sweep slider. Max 8. */
+  clipPlanes?: ClipPlane[];
 }
 
 interface DevMenuProps {
@@ -410,6 +415,8 @@ interface SceneLayersProps {
   background?: [number, number, number];
   /** Named selections resident in $state.selections. */
   selections?: Selections;
+  /** Scene-level section / clipping planes. */
+  clipPlanes?: ClipPlane[];
 }
 
 /**
@@ -540,6 +547,7 @@ export function Scene(props: SceneLayersProps | SceneProps) {
         origin={props.origin}
         background={props.background}
         selections={props.selections}
+        clipPlanes={props.clipPlanes}
       />
     );
   }
@@ -560,6 +568,7 @@ function SceneFromLayers({
   origin,
   background,
   selections,
+  clipPlanes,
 }: SceneLayersProps) {
   // Collect layers and extract scene props
   // Note: No filtering here - the compiler in SceneInner handles helper expansion
@@ -588,6 +597,7 @@ function SceneFromLayers({
       origin={origin ?? sceneProps.origin}
       background={background ?? sceneProps.background}
       selections={selections ?? sceneProps.selections}
+      clipPlanes={clipPlanes ?? sceneProps.clipPlanes}
       readyState={readyState}
     />
   );
@@ -639,6 +649,7 @@ function SceneInner({
   origin,
   background,
   selections: selectionsProp,
+  clipPlanes,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -767,6 +778,7 @@ function SceneInner({
             groupRegistry={groupRegistry}
             origin={origin}
             background={background}
+            clipPlanes={clipPlanes}
           />
           <SceneLegends entries={legendEntries} />
           {filters.length > 0 && (
@@ -790,6 +802,21 @@ function SceneInner({
                   type: s.type,
                   count: s.count,
                   predicate: s.predicate,
+                })),
+              )}
+              style={{ display: "none" }}
+            />
+          )}
+          {clipPlanes && clipPlanes.length > 0 && (
+            // Hidden marker carrying the scene's active section / clipping
+            // planes (normal + resolved offset) so `colight screenshot --json`
+            // can report that the view is sectioned, mirroring the filters
+            // marker. Offsets are the live (state-resolved) values.
+            <div
+              data-colight-clip-planes={JSON.stringify(
+                clipPlanes.map((p) => ({
+                  normal: p.normal,
+                  offset: p.offset,
                 })),
               )}
               style={{ display: "none" }}

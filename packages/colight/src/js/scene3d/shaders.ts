@@ -67,6 +67,38 @@ struct FilterParams {
 };
 @group(0) @binding(2) var<storage, read> filterParams: array<FilterParams>;`;
 
+// Scene-level section / clipping planes. Planes are per-scene (not per-
+// component), so they live in a small dedicated uniform at group(0) binding 3
+// alongside the camera — NO storage-buffer indexing (unlike filterParams).
+//
+// Layout (matches packClipPlanes in impl3d): `count` in the .x of the header
+// vec4, then up to MAX_CLIP_PLANES planes each packed as vec4(normal.xyz,
+// offset). A fragment is KEPT where dot(worldPos, normal) - offset <= 0 for
+// EVERY active plane (intersection of kept half-spaces).
+//
+// `applyClipPlanes` is called from every fragment shader (render AND pick) with
+// the interpolated world position; it discards clipped fragments. Clipping is
+// per-fragment, cutting THROUGH instances — the pick pass discards identically
+// so a hit "behind the section" reports the newly exposed interior instance.
+export const MAX_CLIP_PLANES = 8;
+export const clipPlanesStruct = /*wgsl*/ `
+struct ClipPlanes {
+  header: vec4<f32>,               // .x = active plane count
+  planes: array<vec4<f32>, ${MAX_CLIP_PLANES}>,  // xyz = normal, w = offset
+};
+@group(0) @binding(3) var<uniform> clipPlanes : ClipPlanes;
+
+fn applyClipPlanes(worldPos: vec3<f32>) {
+  let n = u32(clipPlanes.header.x);
+  for (var i = 0u; i < n; i = i + 1u) {
+    let p = clipPlanes.planes[i];
+    // Keep dot(worldPos, normal) <= offset; discard the far half-space.
+    if (dot(worldPos, p.xyz) - p.w > 0.0) {
+      discard;
+    }
+  }
+}`;
+
 // Helper function to apply group transforms
 export const applyGroupTransformFn = /*wgsl*/ `
 fn applyGroupTransform(pos: vec3<f32>, idx: u32) -> vec3<f32> {
@@ -114,11 +146,14 @@ struct VSOut {
   @location(3) normal: vec3<f32>
 };`;
 
-// Standardize VSOut struct for picking
+// Standardize VSOut struct for picking. Carries worldPos (location 1) so the
+// picking fragment shader can apply scene clip planes and discard clipped
+// fragments — keeping pick-at / pick-where truthful for sectioned views.
 export const pickingVSOut = /*wgsl*/ `
 struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
 };`;
 
 export const billboardVertCode = /*wgsl*/ `
@@ -462,8 +497,14 @@ fn vs_main(
 }`;
 
 export const pickingFragCode = /*wgsl*/ `
+${clipPlanesStruct}
+
 @fragment
-fn fs_pick(@location(0) pickID: f32)-> @location(0) vec4<f32> {
+fn fs_pick(
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
+)-> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let iID = u32(pickID);
   let r = f32(iID & 255u)/255.0;
   let g = f32((iID>>8)&255u)/255.0;

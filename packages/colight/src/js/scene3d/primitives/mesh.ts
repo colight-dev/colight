@@ -15,6 +15,7 @@ import {
   attr,
   createVertexBufferLayout,
   cameraStruct,
+  clipPlanesStruct,
   groupTransformStruct,
   applyGroupTransformFn,
   lightingConstants,
@@ -467,7 +468,8 @@ function generateMeshVertexShader(
   if (forPicking) {
     vsOut = `struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
 };`;
   } else if (hasTexture) {
     vsOut = `struct VSOut {
@@ -516,6 +518,7 @@ function generateMeshVertexShader(
     returnStmt = `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;
   return out;`;
   } else if (hasTexture) {
     returnStmt = `var out: VSOut;
@@ -606,6 +609,7 @@ function generateMeshFragmentShader(
   let baseAlpha = alpha;`;
 
     return `${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 ${textureBindings}
@@ -613,6 +617,7 @@ ${textureBindings}
 fn fs_main(
   ${fragInputs}
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   ${colorCalc}
   let litColor = calculateLighting(baseColor, normal, worldPos);
   return vec4<f32>(litColor, baseAlpha);
@@ -623,11 +628,13 @@ fn fs_main(
   return vec4<f32>(tex.rgb * color, tex.a * alpha);`
       : `return vec4<f32>(color, alpha);`;
 
-    return `${textureBindings}
+    return `${clipPlanesStruct}
+${textureBindings}
 @fragment
 fn fs_main(
   ${fragInputs}
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   ${colorCalc}
 }`;
   }
