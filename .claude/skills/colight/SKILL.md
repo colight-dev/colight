@@ -63,6 +63,17 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
 - **What do the colors mean?** Read `legends` from `inspect`/`screenshot --json`
   (`{component, label, cmap, domain, categorical}` for every `color_by`-colored
   component) instead of guessing color meanings from pixels.
+- **Filters vs selections (both are per-instance masks).** A `filter_by`
+  (`{values, min, max}`) changes _what is visible and pickable_ — filtered-out
+  instances are collapsed and unpickable, so `pick-where`/coverage counts move
+  with the threshold; read active `filters` (`{component, label?, min, max}`)
+  from `inspect`/`screenshot --json` to know the view is filtered. A **selection**
+  is a _shared named referent_: named per-instance masks resident in
+  `$state.selections` that highlight their instances and are addressable by name
+  — read `selections` from `inspect`/`screenshot --json`, `pick-at` reports each
+  hit's `selections: [names]`, and `pick-where --selection NAME` /
+  `screenshot --frame NAME` resolve the name. Human clicks
+  (`scene3d.toggle_selection`) and agent predicates converge on the same object.
 - **Did my change do what I intended?** `colight diff old.py new.py` (or two artifacts)
   before reaching for pixels.
 - **Need to see it?** `colight screenshot`, then Read the PNG. Screenshots are
@@ -91,10 +102,13 @@ colight pick-where scene.py --component C \
     [--instances A-B] [--out overlay.png] --json # 3. selection → screen truth: bbox,
                                                  #    centroid, visibility (visible px /
                                                  #    unoccluded footprint); --out draws
-                                                 #    the selection highlighted
+                                                 #    the selection highlighted.
+                                                 #    Or --selection NAME to address a
+                                                 #    named $state.selections entry.
 colight screenshot scene.py --out zoom.png \
-    --frame "C[:A-B]" --json                     # 4. zoom: camera fit to the selection;
-                                                 #    its coverage fraction increases
+    --frame "C[:A-B]" --json                     # 4. zoom: camera fit to the selection
+                                                 #    (--frame NAME also resolves a named
+                                                 #    selection); coverage fraction rises
 ```
 
 - **Recommended flow**: `screenshot --rulers` → Read the PNG and take X,Y straight from

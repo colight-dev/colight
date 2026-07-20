@@ -210,14 +210,17 @@
 # # --check renders twice in fresh tabs and byte-compares (exit 1 on
 # # mismatch); JSON reports pixel size, sha256 and determinism.
 # # Scene3d targets also report `coverage` in --json (fraction of canvas
-# # pixels per component, read from the GPU pick buffer) and accept
+# # pixels per component, read from the GPU pick buffer), any active
+# # `filters` ({component, label?, min, max}) and named `selections`
+# # ({name, component, count, predicate}), and accept
 # # --frame "C[:A-B]" (component index or type name, optional inclusive
-# # instance ranges) to fit the camera on a selection before capture —
-# # the zoom loop: coverage tells you a component is tiny, --frame gets
-# # you a close-up.
+# # instance ranges) — or --frame NAME (a named $state.selections entry) —
+# # to fit the camera on a selection before capture — the zoom loop:
+# # coverage tells you a component is tiny, --frame gets you a close-up.
 # colight screenshot target.colight --out shot.png [--json] [--check]
 # colight screenshot notebook.py --block ID --out shot.png
 # colight screenshot scene.py --out closeup.png --frame "Ellipsoid:0-4"
+# colight screenshot scene.py --out closeup.png --frame sel-hi
 #
 # # Machine-legible screenshots. All composition happens post-capture in
 # # Python — the render itself is untouched and stays byte-deterministic
@@ -271,6 +274,9 @@
 # # 2 = error.
 # colight pick-where scene.py --component Ellipsoid [--instances 0-4]
 # colight pick-where scene.py --component 0 --out overlay.png [--json]
+# # Or address a NAMED selection ($state.selections) instead of a raw
+# # component/instances — resolves to the selection's component + instances:
+# colight pick-where scene.py --selection sel-hi [--json]
 #
 # # Golden verification. A golden pins three layers per visual-producing
 # # block: the .colight artifact bytes, the canonicalized-structure hash
