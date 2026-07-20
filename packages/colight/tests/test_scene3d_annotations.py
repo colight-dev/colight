@@ -315,6 +315,10 @@ def test_annotation_position_anchor_lands_on_origin_shifted_geometry(tmp_path):
     assert utm["screen"] is not None
     assert 0 <= utm["screen"]["x"] <= 400
     assert 0 <= utm["screen"]["y"] <= 400
+    # The reported world is in the caller's ORIGINAL coordinate space (origin
+    # added back), matching pick-at's dereference convention — not the shifted
+    # render space.
+    assert utm["world"][0] == pytest.approx(445000.0, abs=1e-3)
 
 
 def test_pick_at_reports_annotation_membership(scene_file):

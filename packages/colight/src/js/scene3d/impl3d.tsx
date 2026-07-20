@@ -2869,11 +2869,19 @@ export function SceneImpl({
       cssRect,
       originRef.current ?? null,
     );
+    // The scene `origin` shifted all rendered positions; add it back to the
+    // reported world so callers see coordinates in their ORIGINAL space, the
+    // same convention as pick-at's dereferenced positions. (Projection above
+    // uses the shifted world, matching the rendered geometry.)
+    const o = originRef.current;
     return resolved.map((a) => ({
       name: a.name,
       text: a.text,
       anchor: a.anchor,
-      world: a.world,
+      world:
+        a.world && o
+          ? [a.world[0] + o[0], a.world[1] + o[1], a.world[2] + o[2]]
+          : a.world,
       // Offset canvas-local CSS into page CSS (pick-at) space.
       screen:
         a.screen && rect
