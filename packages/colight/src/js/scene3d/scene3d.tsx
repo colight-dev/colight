@@ -206,9 +206,11 @@ export function LineSegments(
 /** Mesh - renders custom geometry using inline vertex/index data. */
 export function Mesh(props: MeshProps): InlineMeshComponentConfig {
   const { center, centers, ...rest } = props;
+  // A plain world-space mesh needs no instancing; default to a single
+  // instance at the origin so callers don't have to pass center={[0,0,0]}.
   return {
     ...rest,
-    centers: centers ?? (center ? [center] : undefined),
+    centers: centers ?? [center ?? [0, 0, 0]],
     type: "Mesh",
   } as InlineMeshComponentConfig;
 }
@@ -330,6 +332,14 @@ interface SceneProps {
   readyState?: ReadyState;
   /** Optional map of custom primitive specifications or mesh definitions */
   primitiveSpecs?: PrimitiveSpecMap;
+  /** World-space offset subtracted from positions in Python (see
+   * Scene(origin=...)). Positions arrive pre-shifted; this value is metadata
+   * only — the agent pick API adds it back so dereferenced positions are in
+   * the caller's original coordinate space. It does NOT affect rendering. */
+  origin?: [number, number, number];
+  /** RGB clear color [r,g,b] (0-1) for the WebGPU render pass behind the
+   * geometry. Defaults to opaque black. */
+  background?: [number, number, number];
 }
 
 interface DevMenuProps {
@@ -390,6 +400,10 @@ interface SceneLayersProps {
   layers: any[];
   primitiveSpecs?: PrimitiveSpecMap;
   readyState?: ReadyState;
+  /** World-space offset positions were pre-shifted by (Scene origin). */
+  origin?: [number, number, number];
+  /** RGB clear color [r,g,b] (0-1) behind the geometry. */
+  background?: [number, number, number];
 }
 
 /**
@@ -517,6 +531,8 @@ export function Scene(props: SceneLayersProps | SceneProps) {
         layers={props.layers}
         primitiveSpecs={props.primitiveSpecs}
         readyState={props.readyState}
+        origin={props.origin}
+        background={props.background}
       />
     );
   }
@@ -534,6 +550,8 @@ function SceneFromLayers({
   layers,
   primitiveSpecs,
   readyState,
+  origin,
+  background,
 }: SceneLayersProps) {
   // Collect layers and extract scene props
   // Note: No filtering here - the compiler in SceneInner handles helper expansion
@@ -559,6 +577,8 @@ function SceneFromLayers({
       components={components}
       primitiveSpecs={mergedPrimitiveSpecs}
       {...sceneProps}
+      origin={origin ?? sceneProps.origin}
+      background={background ?? sceneProps.background}
       readyState={readyState}
     />
   );
@@ -607,6 +627,8 @@ function SceneInner({
   controls = [],
   readyState = NOOP_READY_STATE,
   primitiveSpecs,
+  origin,
+  background,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -728,6 +750,8 @@ function SceneInner({
             readyState={readyState}
             primitiveSpecs={mergedSpecs}
             groupRegistry={groupRegistry}
+            origin={origin}
+            background={background}
           />
           <SceneLegends entries={legendEntries} />
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}

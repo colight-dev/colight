@@ -3,10 +3,12 @@
 Requires the optional ``omf`` dependency (``pip install colight[geo]``).
 
 OMF projects use real-world (often UTM) coordinates in the hundreds of
-kilometres, which exceed float32 precision on the GPU. ``load_omf`` therefore
-re-centers all geometry about the midpoint of the project bounds by default;
-the subtracted offset is kept on ``OMFProject.center`` so values can be mapped
-back to world coordinates.
+kilometres, which exceed float32 precision on the GPU. ``load_omf`` keeps
+geometry in those true world coordinates and returns the bounds midpoint on
+``OMFProject.center``; pass it as ``scene3d.Scene(origin=project.center)`` and
+the shift into float32-safe range happens once, at the Scene serialization
+boundary (``pick-at`` adds it back, so reported positions stay in world
+coordinates).
 
 Element mapping:
 
@@ -48,10 +50,10 @@ def _color_by_spec(
 
 @dataclass
 class OMFPointSet:
-    """A recentred OMF point set (e.g. drillhole collars)."""
+    """An OMF point set (e.g. drillhole collars) in world coordinates."""
 
     name: str
-    vertices: np.ndarray  # (N, 3) float64, recentred
+    vertices: np.ndarray  # (N, 3) float64, world coordinates
     attributes: Dict[str, np.ndarray] = field(default_factory=dict)
 
     def point_cloud(self, **kwargs: Any) -> scene3d.SceneComponent:
@@ -65,10 +67,10 @@ class OMFPointSet:
 
 @dataclass
 class OMFLineSet:
-    """A recentred OMF line set (e.g. drillhole traces with assay data)."""
+    """An OMF line set (drillhole traces with assay data) in world coordinates."""
 
     name: str
-    vertices: np.ndarray  # (N, 3) float64, recentred
+    vertices: np.ndarray  # (N, 3) float64, world coordinates
     segments: np.ndarray  # (M, 2) int vertex indices
     vertex_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
     segment_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
@@ -116,10 +118,10 @@ class OMFLineSet:
 
 @dataclass
 class OMFSurface:
-    """A recentred OMF triangulated surface (topography, geology wireframes)."""
+    """An OMF triangulated surface (topography, geology) in world coordinates."""
 
     name: str
-    vertices: np.ndarray  # (N, 3) float64, recentred
+    vertices: np.ndarray  # (N, 3) float64, world coordinates
     triangles: np.ndarray  # (M, 3) int vertex indices
     vertex_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
 
@@ -132,10 +134,8 @@ class OMFSurface:
                 "none" since geological surfaces are viewed from both sides.
         """
         kwargs.setdefault("cull_mode", "none")
-        # scene3d.Mesh is instance-based and requires at least one center;
-        # geometry is already in scene coordinates, so instance at the origin.
-        if "centers" not in kwargs:
-            kwargs.setdefault("center", [0.0, 0.0, 0.0])
+        # Geometry is already in scene coordinates; scene3d.Mesh defaults to a
+        # single instance at the origin, so no center is needed.
         return scene3d.Mesh(
             positions=self.vertices.astype(np.float32),
             indices=self.triangles.astype(np.uint32),
@@ -145,14 +145,14 @@ class OMFSurface:
 
 @dataclass
 class OMFGridVolume:
-    """A recentred OMF regular-grid block model.
+    """An OMF regular-grid block model in world coordinates.
 
     Cell attribute arrays are stored flat in OMF order: C-contiguous over
     ``(nu, nv, nw)``, i.e. the w (z) index varies fastest.
     """
 
     name: str
-    corner: np.ndarray  # (3,) recentred min corner of the grid
+    corner: np.ndarray  # (3,) world-coordinate min corner of the grid
     axes: np.ndarray  # (3, 3) rows = axis_u, axis_v, axis_w unit vectors
     tensors: Tuple[np.ndarray, np.ndarray, np.ndarray]  # cell widths along u, v, w
     cell_attributes: Dict[str, np.ndarray] = field(default_factory=dict)
@@ -245,17 +245,25 @@ class OMFGridVolume:
 
 @dataclass
 class OMFProject:
-    """An OMF project with all element geometry recentred about ``center``."""
+    """An OMF project in true world coordinates.
+
+    Geometry keeps its original (often UTM) coordinates. ``center`` is the
+    midpoint of the project bounds — the recommended value to pass to
+    ``scene3d.Scene(origin=project.center)`` so positions are shifted into
+    float32-safe range at the single serialization boundary (see the Scene
+    ``origin`` prop). ``pick-at`` adds it back, so dereferenced positions come
+    out in true world coordinates.
+    """
 
     name: str
-    center: np.ndarray  # (3,) world-coordinate offset subtracted from geometry
+    center: np.ndarray  # (3,) bounds midpoint; use as Scene(origin=...)
     points: Dict[str, OMFPointSet] = field(default_factory=dict)
     line_sets: Dict[str, OMFLineSet] = field(default_factory=dict)
     surfaces: Dict[str, OMFSurface] = field(default_factory=dict)
     volumes: Dict[str, OMFGridVolume] = field(default_factory=dict)
 
     def bounds(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Return (min, max) recentred bounds over all point/line/surface vertices."""
+        """Return (min, max) world-coordinate bounds over point/line/surface vertices."""
         stacks = [
             e.vertices
             for group in (self.points, self.line_sets, self.surfaces)
@@ -274,14 +282,16 @@ def _attribute_arrays(element: Any, location: str) -> Dict[str, np.ndarray]:
     return out
 
 
-def load_omf(path: PathLike, recenter: bool = True) -> OMFProject:
-    """Load an OMF v1 file into recentred numpy-backed element records.
+def load_omf(path: PathLike) -> OMFProject:
+    """Load an OMF v1 file into numpy-backed element records (world coords).
+
+    Geometry keeps its original coordinates; the bounds midpoint is returned
+    on ``OMFProject.center`` for use as ``scene3d.Scene(origin=...)``. Shifting
+    happens once, at the Scene serialization boundary — no loader-side
+    re-centering.
 
     Args:
         path: Path to a ``.omf`` file (OMF v1).
-        recenter: Subtract the midpoint of the project bounds from all
-            geometry so coordinates are small enough for float32 GPU buffers.
-            The offset is stored on ``OMFProject.center``.
 
     Returns:
         An :class:`OMFProject` with elements grouped by type, keyed by name.
@@ -364,15 +374,9 @@ def load_omf(path: PathLike, recenter: bool = True) -> OMFProject:
         # Other geometry kinds (e.g. VolumeGridGeometry variants we don't
         # know) are skipped; Wolfpass only contains the four above.
 
-    center = (lo + hi) / 2.0 if recenter else np.zeros(3)
-    for point_set in points.values():
-        point_set.vertices = point_set.vertices - center
-    for line_set in line_sets.values():
-        line_set.vertices = line_set.vertices - center
-    for surface in surfaces.values():
-        surface.vertices = surface.vertices - center
-    for volume in volumes.values():
-        volume.corner = volume.corner - center
+    # Geometry stays in world coordinates; ``center`` is the suggested Scene
+    # origin (bounds midpoint), applied once at the Scene boundary.
+    center = (lo + hi) / 2.0 if np.all(np.isfinite(lo)) else np.zeros(3)
 
     return OMFProject(
         name=project.name,

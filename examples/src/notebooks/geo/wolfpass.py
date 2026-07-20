@@ -23,10 +23,14 @@ OMF_PATH = os.environ.get("WOLFPASS_OMF", str(Path(__file__).parent / "wolfpass.
 
 project = load_omf(OMF_PATH)
 
-# Coordinates in the file are UTM-scale (x ~445,000 m). `load_omf` re-centers
-# everything about the midpoint of the project bounds so positions fit
-# comfortably in the float32 buffers the GPU uses; the offset is kept in
-# `project.center` for mapping back to world coordinates.
+# Coordinates in the file are UTM-scale (x ~445,000 m), which exceed float32
+# GPU precision. `load_omf` keeps the geometry in those true world coordinates
+# and hands back the bounds midpoint on `project.center`; passing it as
+# `Scene(origin=project.center)` shifts every position into float32-safe range
+# once, at the serialization boundary. `pick-at` adds the offset back, so
+# reported positions come out in world coordinates.
+
+ORIGIN = project.center
 
 collars = project.points["collar"]
 drillholes = project.line_sets["wolfpass_WP_assay"]
@@ -43,24 +47,13 @@ GEOLOGY_COLORS = {
     "Basement": [0.55, 0.55, 0.58],
 }
 
-# Scene3D's camera defaults (near=0.001, far=100) assume unit-scale scenes;
-# a deposit is ~3 km across, so the clip planes must be set explicitly.
-CAMERA = {
-    "defaultCamera": {
-        "position": [3600, -3400, 2800],
-        "target": [0, 0, -200],
-        "up": [0, 0, 1],
-        "fov": 45,
-        "near": 5.0,
-        "far": 50000.0,
-    }
-}
-
 # ## Overview: topography, geology and drillholes
 #
 # The classic project overview — semi-transparent topography draped over the
 # deposit, the five modeled geology volumes as solid surfaces, drillhole
-# traces fanning out beneath the collars.
+# traces fanning out beneath the collars. No hand-tuned camera: with no
+# explicit camera the scene auto-fits its own bounds (near/far derived from
+# the deposit's extent), so a ~3 km scene frames correctly out of the box.
 #
 # Note the layer order: Scene3D composites transparency in layer order
 # (there is no cross-component depth sort), so the transparent topography
@@ -77,7 +70,7 @@ overview = scene3d.Scene(
         color=[0.82, 0.76, 0.65],
         decorations=[scene3d.deco([0], alpha=0.35)],
     ),
-    CAMERA,
+    origin=ORIGIN,
 )
 
 overview
@@ -100,7 +93,7 @@ scene3d.Scene(
         color=[0.82, 0.76, 0.65],
         decorations=[scene3d.deco([0], alpha=0.25)],
     ),
-    CAMERA,
+    origin=ORIGIN,
 )
 
 # ## Block model above cutoff
@@ -131,7 +124,7 @@ counts = [int((block_model.cell_attributes["CU_pct"] >= c).sum()) for c in CUTOF
             color=[0.82, 0.76, 0.65],
             decorations=[scene3d.deco([0], alpha=0.2)],
         ),
-        CAMERA,
+        origin=ORIGIN,
     )
     | Plot.Slider(
         "cutoff_idx",

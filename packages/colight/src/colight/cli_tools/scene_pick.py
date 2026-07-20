@@ -440,6 +440,39 @@ def coverage_payload(snapshot: SceneSnapshot) -> Dict[str, Any]:
     return payload
 
 
+# Background fraction at/above which a single-view render is flagged as a
+# likely "lost scene" (geometry outside the frustum or fully transparent).
+MOSTLY_BACKGROUND_FRACTION = 0.99
+
+
+def coverage_warnings(coverage: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Warnings derived from a coverage payload (pixel-side, GPU-free).
+
+    Args:
+        coverage: A payload from :func:`coverage_payload`.
+
+    Returns:
+        A list of ``{code, path, message}`` warnings (empty when healthy).
+        Emits ``mostly-background`` when the background fraction is
+        pathologically high, mirroring ``colight inspect``'s data-side
+        blank-scene warnings.
+    """
+    warnings: List[Dict[str, str]] = []
+    fraction = float(coverage.get("background", {}).get("fraction", 0.0))
+    if fraction >= MOSTLY_BACKGROUND_FRACTION:
+        warnings.append(
+            {
+                "code": "mostly-background",
+                "path": "scene",
+                "message": (
+                    f"scene renders {fraction:.1%} background — geometry may be "
+                    "outside the camera frustum or fully transparent"
+                ),
+            }
+        )
+    return warnings
+
+
 def _page_to_device(snapshot: SceneSnapshot, x: float, y: float) -> Tuple[float, float]:
     """Page CSS coordinates -> pick-buffer device pixels."""
     return (
@@ -583,24 +616,60 @@ def selection_metrics(
 # ========== Command implementations ==========
 
 
+def _hit_alpha(values: Dict[str, Any]) -> float:
+    """Effective alpha of a dereferenced hit (defaults to opaque)."""
+    alpha = values.get("alpha", 1.0)
+    try:
+        return float(alpha)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def pick_at_source(
     source: "screenshot_tools.SceneSource",
     target_label: str,
     x: float,
     y: float,
     radius: float = DEFAULT_RADIUS,
+    min_alpha: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Pick hits around a point on an already-resolved scene source.
 
     Shared CLI/daemon core of :func:`pick_at_target`.
+
+    Args:
+        min_alpha: When set, hits whose (decoration-aware) alpha is below
+            this threshold are treated as transparent occluders: they are
+            removed from ``hits`` and reported in an ``occluders`` list
+            instead, so the agent can pick the opaque geometry behind a
+            transparent surface while still knowing something was in front.
     """
     with source.scene() as scene:
         studio = scene.studio
         require_scene(studio)
         snapshot = take_snapshot(studio)
         hits = hits_at(snapshot, x, y, radius)
-        for hit in hits[:MAX_DEREFERENCED_HITS]:
-            hit["values"] = instance_values(studio, hit["component"], hit["instance"])
+
+        occluders: List[Dict[str, Any]] = []
+        if min_alpha is not None:
+            # Need alpha for every hit to split occluders from real hits;
+            # dereference all (a query disc yields a handful of hits).
+            for hit in hits:
+                hit["values"] = instance_values(
+                    studio, hit["component"], hit["instance"]
+                )
+            kept: List[Dict[str, Any]] = []
+            for hit in hits:
+                if _hit_alpha(hit["values"]) < min_alpha:
+                    occluders.append(hit)
+                else:
+                    kept.append(hit)
+            hits = kept
+        else:
+            for hit in hits[:MAX_DEREFERENCED_HITS]:
+                hit["values"] = instance_values(
+                    studio, hit["component"], hit["instance"]
+                )
 
         cx, cy = _page_to_device(snapshot, x, y)
         device_radius = radius * snapshot.dpr
@@ -632,6 +701,9 @@ def pick_at_source(
             "hits": hits,
             "background_share": background_share,
         }
+        if min_alpha is not None:
+            payload["min_alpha"] = min_alpha
+            payload["occluders"] = occluders
         if snapshot.scenes > 1:
             payload["scene"]["scenes"] = snapshot.scenes
         if source.block_id is not None:
@@ -650,6 +722,7 @@ def pick_at_target(
     dpr: float = 1.0,
     debug: bool = False,
     ready_timeout: Optional[float] = 30.0,
+    min_alpha: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Re-render TARGET and report ranked pick hits around a point.
 
@@ -657,11 +730,17 @@ def pick_at_target(
     space as a ``colight screenshot`` PNG at the same --width/--height and
     dpr 1.
 
+    Args:
+        min_alpha: Skip hits with alpha below this threshold, reporting them
+            under ``occluders`` instead so agents can pick opaque geometry
+            behind transparent surfaces.
+
     Returns:
         Payload with ``target``, ``block``?, ``x``/``y``/``radius``,
         ``scene`` ({rect, width, height, dpr, scenes?}), ``hits`` (ranked;
-        the top hits carry dereferenced ``values``) and
-        ``background_share``.
+        the top hits carry dereferenced ``values``), ``background_share``,
+        and (with ``min_alpha``) ``min_alpha`` + ``occluders`` (the skipped
+        transparent hits, each with its dereferenced ``values``).
     """
     source = screenshot_tools.DirectSceneSource(
         target,
@@ -672,7 +751,9 @@ def pick_at_target(
         debug=debug,
         ready_timeout=ready_timeout,
     )
-    return pick_at_source(source, str(target), x, y, radius=radius)
+    return pick_at_source(
+        source, str(target), x, y, radius=radius, min_alpha=min_alpha
+    )
 
 
 def pick_where_source(
@@ -774,6 +855,7 @@ __all__ = [
     "clear_highlight",
     "component_mask",
     "coverage_payload",
+    "coverage_warnings",
     "frame_selection",
     "frame_view",
     "highlight_selection",

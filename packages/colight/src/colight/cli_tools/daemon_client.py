@@ -359,11 +359,15 @@ def try_pick_at(
     dpr: float,
     debug: bool,
     ready_timeout: Optional[float],
+    min_alpha: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """Route ``colight pick-at`` through a discovered daemon (None = direct)."""
     info = discover_for_target(target)
     if info is None:
         return None
+    extra: Dict[str, Any] = {"x": x, "y": y, "radius": radius}
+    if min_alpha is not None:
+        extra["min_alpha"] = min_alpha
     try:
         return _scene_request(
             info,
@@ -375,7 +379,7 @@ def try_pick_at(
             dpr,
             debug,
             ready_timeout,
-            {"x": x, "y": y, "radius": radius},
+            extra,
         )
     except DaemonUnavailable:
         return None

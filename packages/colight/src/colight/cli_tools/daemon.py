@@ -416,12 +416,14 @@ def _handle_screenshot(server: "DaemonServer", body: Dict[str, Any]) -> Dict[str
 
 def _handle_pick_at(server: "DaemonServer", body: Dict[str, Any]) -> Dict[str, Any]:
     source = _ServiceSceneSource(server.scenes, body)
+    raw_min_alpha = body.get("min_alpha")
     return scene_pick.pick_at_source(
         source,
         body["target"],
         float(body["x"]),
         float(body["y"]),
         radius=float(body.get("radius", scene_pick.DEFAULT_RADIUS)),
+        min_alpha=float(raw_min_alpha) if raw_min_alpha is not None else None,
     )
 
 

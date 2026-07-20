@@ -341,6 +341,90 @@ def flatten_layers(layers):
     return flattened
 
 
+# Position-typed component attributes: arrays of world-space coordinates that
+# must be translated by -origin when a scene declares an ``origin`` (see
+# ``Scene(origin=...)``). Everything else -- colors, sizes, quaternions, uvs --
+# is origin-invariant. ``points`` (LineBeams) packs [x,y,z,lineIndex] quads, so
+# only the first three of every four scalars are translated.
+#
+# NOTE: Mesh ``geometry.positions`` are deliberately NOT translated. A mesh
+# renders each vertex at ``center + R*S*vertex``; subtracting origin from the
+# instance ``centers`` alone shifts the whole composite by -origin exactly.
+# Shifting the geometry too would double-shift (the classic "scene renders
+# black because the fit lands nowhere near it" bug).
+_POSITION_ATTRS_STRIDE3 = ("centers", "starts", "ends")
+_POSITION_ATTRS_STRIDE4 = ("points",)
+
+
+def _translate_flat(arr: Any, origin: np.ndarray, stride: int) -> Any:
+    """Subtract ``origin`` from every position packed in a flat array.
+
+    Args:
+        arr: A flat float array (or nested list) of packed coordinates.
+        origin: (3,) offset to subtract from each x,y,z triple.
+        stride: 3 for plain xyz packing, 4 for [x,y,z,extra] packing (the
+            4th slot, e.g. LineBeams line index, is left untouched).
+
+    Returns:
+        A new float32 array with the offset applied, or ``arr`` unchanged
+        when it is not a translatable numeric array (e.g. a JSExpr).
+    """
+    if isinstance(arr, JSExpr):
+        return arr
+    values = np.asarray(arr, dtype=np.float32)
+    if values.ndim == 2 and values.shape[1] == stride:
+        flat = values.reshape(-1).copy()
+    elif values.ndim == 1 and values.size % stride == 0:
+        flat = values.copy()
+    else:
+        # Unexpected shape (e.g. a scalar or ragged input): leave untouched
+        # rather than corrupt the data.
+        return arr
+    flat = flat.reshape(-1, stride)
+    flat[:, 0:3] -= origin.astype(np.float32)
+    return flat.reshape(-1)
+
+
+def _translate_component_props(
+    props: Dict[str, Any], origin: np.ndarray
+) -> Dict[str, Any]:
+    """Return a copy of a component's props with positions shifted by -origin."""
+    out = dict(props)
+    for key in _POSITION_ATTRS_STRIDE3:
+        if key in out and out[key] is not None:
+            out[key] = _translate_flat(out[key], origin, 3)
+    for key in _POSITION_ATTRS_STRIDE4:
+        if key in out and out[key] is not None:
+            out[key] = _translate_flat(out[key], origin, 4)
+    # Mesh geometry vertices live under a nested ``geometry`` dict.
+    geometry = out.get("geometry")
+    if isinstance(geometry, dict) and geometry.get("positions") is not None:
+        geometry = dict(geometry)
+        geometry["positions"] = _translate_flat(geometry["positions"], origin, 3)
+        out["geometry"] = geometry
+    # Group children are nested components with their own position attrs; the
+    # group's own ``position`` offset is a world-space translation too.
+    if "children" in out and isinstance(out["children"], list):
+        out["children"] = [
+            _translate_layer(child, origin) for child in out["children"]
+        ]
+    if "position" in out and out["position"] is not None:
+        pos = np.asarray(out["position"], dtype=np.float64)
+        out["position"] = (pos - origin).tolist()
+    return out
+
+
+def _translate_layer(layer: Any, origin: np.ndarray) -> Any:
+    """Translate a single scene layer (component or nested config) by -origin."""
+    if isinstance(layer, SceneComponent):
+        return SceneComponent(
+            layer.type, _translate_component_props(layer.props, origin)
+        )
+    if isinstance(layer, dict) and "type" in layer:
+        return _translate_component_props(layer, origin)
+    return layer
+
+
 class Scene(Plot.LayoutItem):
     """A 3D scene visual component using WebGPU.
 
@@ -364,6 +448,8 @@ class Scene(Plot.LayoutItem):
     def __init__(
         self,
         *layers: Union[SceneComponent, Dict[str, Any], JSExpr],
+        origin: Optional[Sequence[float]] = None,
+        background: Optional[Sequence[float]] = None,
         primitive_specs: Optional[Dict[str, Dict[str, Any]]] = None,
         meshes: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -373,11 +459,28 @@ class Scene(Plot.LayoutItem):
             *layers: Scene components and optional properties.
                 Properties can include:
                 - controls: List of controls to show. Currently supports ['fps']
+            origin: Optional world-space offset ``[x, y, z]`` subtracted from
+                every position-typed attribute (centers/starts/ends/points/
+                positions and Group positions) at serialization time. Use it
+                for scenes whose coordinates are far from the origin (e.g.
+                UTM eastings ~445,000 m) so positions fit float32 GPU
+                precision. The offset travels as scene metadata; ``pick-at`` /
+                ``pick-where`` add it back so dereferenced positions are in
+                the caller's original coordinate space, and camera auto-fit
+                works in the shifted space transparently.
+            background: Optional RGB clear color ``[r, g, b]`` (each 0-1) for
+                the WebGPU render pass. Defaults to opaque black. This is the
+                canvas clear color *behind* the geometry; DOM overlays drawn
+                over the canvas (legends, FPS) keep their own styling.
             primitive_specs: Dictionary of custom primitive definitions.
             meshes: Deprecated alias for primitive_specs.
         """
 
         self.layers = flatten_layers(layers)
+        self.origin = (
+            np.asarray(origin, dtype=np.float64) if origin is not None else None
+        )
+        self.background = list(background) if background is not None else None
         if meshes and primitive_specs:
             merged_specs = {**meshes, **primitive_specs}
         else:
@@ -385,13 +488,25 @@ class Scene(Plot.LayoutItem):
         self.primitive_specs = merged_specs
         super().__init__()
 
+    def _scene_kwargs(self) -> Dict[str, Any]:
+        """Scene-level kwargs (origin/background) preserved across + combines."""
+        kwargs: Dict[str, Any] = {}
+        if self.origin is not None:
+            kwargs["origin"] = self.origin
+        if self.background is not None:
+            kwargs["background"] = self.background
+        return kwargs
+
     def __add__(self, other: Union[SceneComponent, "Scene", Dict[str, Any]]) -> "Scene":
         """Allow combining scenes with + operator."""
         new_specs = self.primitive_specs.copy() if self.primitive_specs else {}
         if isinstance(other, Scene) and other.primitive_specs:
             new_specs.update(other.primitive_specs)
 
-        kwargs = {}
+        kwargs = self._scene_kwargs()
+        if isinstance(other, Scene):
+            # The right-hand scene's origin/background win if it declares them.
+            kwargs.update(other._scene_kwargs())
         if new_specs:
             kwargs["primitive_specs"] = new_specs
 
@@ -402,19 +517,26 @@ class Scene(Plot.LayoutItem):
 
     def __radd__(self, other: Union[Dict[str, Any], JSExpr]) -> "Scene":
         """Allow combining scenes with + operator when dict or JSExpr is on the left."""
-        kwargs = {}
+        kwargs = self._scene_kwargs()
         if self.primitive_specs:
             kwargs["primitive_specs"] = self.primitive_specs
         return Scene(other, *self.layers, **kwargs)
 
     def for_json(self) -> Any:
         """Convert to JSON representation for JavaScript."""
+        layers = self.layers
+        if self.origin is not None:
+            layers = [_translate_layer(layer, self.origin) for layer in layers]
         components = [
-            e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
+            e.to_js_call() if isinstance(e, SceneComponent) else e for e in layers
         ]
         props: Dict[str, Any] = {"layers": components}
         if self.primitive_specs:
             props["primitiveSpecs"] = self.primitive_specs
+        if self.origin is not None:
+            props["origin"] = self.origin.tolist()
+        if self.background is not None:
+            props["background"] = self.background
         return [Plot.JSRef("scene3d.Scene"), props]
 
 
@@ -1047,10 +1169,9 @@ def Mesh(
         )
     """
     if centers is None:
-        if center is not None:
-            centers = [center]
-        else:
-            raise ValueError("Either 'centers' or 'center' must be provided")
+        # A plain world-space mesh needs no instancing; default to a single
+        # instance at the origin so callers don't have to pass center=[0,0,0].
+        centers = [center] if center is not None else [[0.0, 0.0, 0.0]]
 
     geometry: Dict[str, Any] = {
         "positions": flatten_array(positions, dtype=np.float32),

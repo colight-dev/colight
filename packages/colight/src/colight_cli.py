@@ -1492,6 +1492,16 @@ def screenshot(
     show_default=True,
     help="Sampling disc radius in CSS pixels.",
 )
+@click.option(
+    "--min-alpha",
+    type=float,
+    default=None,
+    help=(
+        "Skip hits with alpha below this threshold, reporting them under "
+        "'occluders' instead — pick opaque geometry behind transparent "
+        "surfaces while still learning what was in front."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 @click.option(
     "--block",
@@ -1534,6 +1544,7 @@ def pick_at(
     target: pathlib.Path,
     coords: str,
     radius: float,
+    min_alpha: Optional[float],
     as_json: bool,
     block: Optional[str],
     width: int,
@@ -1566,10 +1577,12 @@ def pick_at(
                  "distance": float, "pixels": int, "share": float,
                  "values"?: {"center": [x, y, z], "color"?, "alpha"?,
                              "half_size"?, "size"?, "quaternion"?, ...}}],
-       "background_share": float}
+       "background_share": float,
+       "min_alpha"?: float, "occluders"?: [<hit>, ...]}
     (distance in CSS px from the query point; share = fraction of the
     sampled disc covered by that instance; scene.rect maps page pixels to
-    the canvas.)
+    the canvas. With --min-alpha, transparent hits below the threshold are
+    moved from "hits" into "occluders".)
     """
     from colight.cli_tools import daemon_client, scene_pick
 
@@ -1595,6 +1608,7 @@ def pick_at(
                 dpr=dpr,
                 debug=debug,
                 ready_timeout=effective_timeout,
+                min_alpha=min_alpha,
             )
         if payload is None:
             payload = scene_pick.pick_at_target(
@@ -1608,6 +1622,7 @@ def pick_at(
                 dpr=dpr,
                 debug=debug,
                 ready_timeout=effective_timeout,
+                min_alpha=min_alpha,
             )
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)
@@ -1633,6 +1648,13 @@ def pick_at(
                 f"{hit['type']}[{hit['component']}] instance {hit['instance']}"
                 f"  dist={hit['distance']:g}px share={hit['share']:.1%}"
                 f"{center_text}"
+            )
+        for occ in payload.get("occluders") or []:
+            alpha = (occ.get("values") or {}).get("alpha")
+            alpha_text = f" alpha={alpha:.2g}" if isinstance(alpha, (int, float)) else ""
+            click.echo(
+                f"(occluder) {occ['type']}[{occ['component']}] "
+                f"instance {occ['instance']}{alpha_text}"
             )
 
     sys.exit(0 if payload["hits"] else 1)
