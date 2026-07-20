@@ -34,6 +34,9 @@ class LoadedTarget:
     visuals: List[Dict[str, Any]]
     errors: List[Dict[str, Any]] = field(default_factory=list)
     updates: int = 0
+    update_entries: List[Dict[str, Any]] = field(default_factory=list)
+    """Update entries (``.colight`` only), each ``{"data": envelope,
+    "buffers": [bytes]}``, in file order. Empty for ``.py`` targets."""
 
 
 def evaluate_python_visuals(
@@ -92,13 +95,18 @@ def load_target(file_path: pathlib.Path) -> LoadedTarget:
             ``.colight`` file has no initial state entry.
     """
     if file_path.suffix == ".colight":
-        data, buffers, updates = colight_format.parse_file(file_path)
+        # parse_file_with_updates keeps each update entry's own buffers, which
+        # the diff needs to resolve buffer refs inside update payloads.
+        data, buffers, update_entries = colight_format.parse_file_with_updates(
+            file_path
+        )
         if data is None:
             raise ValueError(f"file contains no initial state entry: {file_path}")
         return LoadedTarget(
             kind="colight",
             visuals=[{"data": data, "buffers": buffers}],
-            updates=len(updates),
+            updates=len(update_entries),
+            update_entries=update_entries,
         )
     if file_path.suffix == ".py":
         visuals, errors = evaluate_python_visuals(file_path)

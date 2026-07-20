@@ -57,6 +57,7 @@ def load_target(file_path: pathlib.Path) -> Dict[str, Any]:
     }
     if loaded.kind == "colight":
         out["updates"] = loaded.updates
+        out["update_entries"] = loaded.update_entries
     return out
 
 
@@ -118,9 +119,17 @@ def _diff_components(
 
 
 def _numeric_delta(
-    a: np.ndarray, b: np.ndarray, epsilon: float
+    a: np.ndarray, b: np.ndarray, epsilon: float, categorical: bool = False
 ) -> Optional[Dict[str, Any]]:
-    """Magnitude stats for two same-shape numeric arrays; None if within epsilon."""
+    """Magnitude stats for two same-shape numeric arrays; None if within epsilon.
+
+    Always reports ``changed_count`` and ``changed_fraction`` first — the
+    semantically meaningful signal, and the *only* meaningful one for
+    categorical integer grids (label indices, where a |Δ| of 3 vs 1 is
+    noise). ``max_abs_delta`` / ``mean_abs_delta`` follow. When
+    ``categorical`` (both operands integer dtype) the entry is tagged so the
+    human formatter demotes the magnitude stats entirely.
+    """
     av = np.atleast_1d(np.asarray(a, dtype=np.float64))
     bv = np.atleast_1d(np.asarray(b, dtype=np.float64))
     nan_a = np.isnan(av)
@@ -137,9 +146,13 @@ def _numeric_delta(
     if changed_count == 0:
         return None
     finite_deltas = delta[both_finite]
-    stats: Dict[str, Any] = {
-        "changed_fraction": round(changed_count / delta.size, 6),
-    }
+    # Dict insertion order is the reporting order: lead with the change
+    # count/fraction, then magnitude stats.
+    stats: Dict[str, Any] = {}
+    if categorical:
+        stats["categorical"] = True
+    stats["changed_count"] = changed_count
+    stats["changed_fraction"] = round(changed_count / delta.size, 6)
     if finite_deltas.size:
         stats["max_abs_delta"] = float(np.max(finite_deltas))
         stats["mean_abs_delta"] = float(np.mean(finite_deltas))
@@ -196,7 +209,12 @@ def _diff_arrays(
                 and not np.issubdtype(rec_b.values.dtype, np.complexfloating)
             )
             if same_shape_numeric and rec_a.values.size:
-                stats = _numeric_delta(rec_a.values, rec_b.values, epsilon)
+                categorical = np.issubdtype(
+                    rec_a.values.dtype, np.integer
+                ) and np.issubdtype(rec_b.values.dtype, np.integer)
+                stats = _numeric_delta(
+                    rec_a.values, rec_b.values, epsilon, categorical=categorical
+                )
                 if stats is not None:
                     entry.update(stats)
                     bounds_a = _bounds(rec_a.values)
@@ -491,6 +509,109 @@ def diff_visual_pair(
     return result
 
 
+# Per-step update diffs are capped in the JSON payload (the human view shows
+# even fewer); the count of differing steps is always exact.
+MAX_ITEMIZED_UPDATES = 40
+
+
+def _update_patch_payload(update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Reduce an update entry's envelope to the state patch it applies.
+
+    An update entry carries a full envelope (``ast``, ``state``, …). The
+    behaviourally meaningful content is the *effective state patch*:
+
+    - a dict ``ast`` (``{key: value}``) is a per-key ``reset`` patch,
+    - a list/AST ``ast`` is diffed as-is under ``ast`` (a re-render),
+    - the entry's own ``state`` map is merged underneath.
+
+    Returns a payload shaped like a visual (``{"ast": ..., "state": ...}``)
+    that the existing :func:`diff_visual_pair` machinery consumes, so update
+    steps get the same array / value / buffer diffing (and the same
+    categorical-aware array reporting) as initial entries.
+    """
+    ast = update_data.get("ast")
+    state = dict(update_data.get("state") or {})
+    if isinstance(ast, dict):
+        # State-patch form: fold the reset keys into the state map so they
+        # surface as state-key changes rather than an opaque AST diff.
+        state.update(ast)
+        return {"ast": None, "state": state}
+    # A list of update ops or a fresh AST: diff it verbatim.
+    return {"ast": ast, "state": state}
+
+
+def _diff_update_pair(
+    entry_a: Dict[str, Any], entry_b: Dict[str, Any], epsilon: float
+) -> Dict[str, Any]:
+    """Diff two aligned update entries (each ``{"data", "buffers"}``)."""
+    visual_a = {
+        "data": _update_patch_payload(entry_a["data"]),
+        "buffers": entry_a["buffers"],
+    }
+    visual_b = {
+        "data": _update_patch_payload(entry_b["data"]),
+        "buffers": entry_b["buffers"],
+    }
+    return diff_visual_pair(visual_a, visual_b, epsilon)
+
+
+def _diff_update_entries(
+    entries_a: List[Dict[str, Any]],
+    entries_b: List[Dict[str, Any]],
+    epsilon: float,
+) -> Optional[Dict[str, Any]]:
+    """Align update entries by index and semantically diff each aligned pair.
+
+    Returns None when neither side has update entries. Otherwise a payload:
+
+        {"count": [len_a, len_b], "aligned": min,
+         "updates_differing": N, "first_diverging_update": idx|null,
+         "steps": [{"index", ...per-pair diff...}, ...(capped)],
+         "steps_truncated"?: int,
+         "trailing"?: {"side": "a"|"b", "from": idx, "count": n}}
+    """
+    if not entries_a and not entries_b:
+        return None
+
+    aligned = min(len(entries_a), len(entries_b))
+    steps: List[Dict[str, Any]] = []
+    differing = 0
+    first_diverging: Optional[int] = None
+    for index in range(aligned):
+        pair = _diff_update_pair(entries_a[index], entries_b[index], epsilon)
+        if pair["identical"]:
+            continue
+        differing += 1
+        if first_diverging is None:
+            first_diverging = index
+        if len(steps) < MAX_ITEMIZED_UPDATES:
+            step_entry: Dict[str, Any] = {"index": index}
+            step_entry.update(pair)
+            steps.append(step_entry)
+
+    result: Dict[str, Any] = {
+        "count": [len(entries_a), len(entries_b)],
+        "aligned": aligned,
+        "updates_differing": differing,
+        "first_diverging_update": first_diverging,
+        "steps": steps,
+    }
+    hidden = differing - len(steps)
+    if hidden > 0:
+        result["steps_truncated"] = hidden
+
+    # A trailing length mismatch (one run ran longer) is reported explicitly:
+    # those steps have no counterpart to align against.
+    if len(entries_a) != len(entries_b):
+        longer = "a" if len(entries_a) > len(entries_b) else "b"
+        result["trailing"] = {
+            "side": longer,
+            "from": aligned,
+            "count": abs(len(entries_a) - len(entries_b)),
+        }
+    return result
+
+
 def _target_info(target: Dict[str, Any]) -> Dict[str, Any]:
     info: Dict[str, Any] = {
         "file": target["file"],
@@ -562,10 +683,23 @@ def diff_targets(
         summary["max_abs_delta"] = max_abs_delta
         summary["max_abs_delta_path"] = max_abs_delta_path
 
+    updates = _diff_update_entries(
+        target_a.get("update_entries", []),
+        target_b.get("update_entries", []),
+        epsilon,
+    )
+    updates_differ = False
+    if updates is not None:
+        summary["first_diverging_update"] = updates["first_diverging_update"]
+        summary["updates_differing"] = updates["updates_differing"]
+        summary["updates_aligned"] = updates["aligned"]
+        updates_differ = bool(updates["updates_differing"]) or "trailing" in updates
+
     identical = (
         all(pair["identical"] for pair in pairs)
         and not only_a
         and not only_b
+        and not updates_differ
         and not target_a["errors"]
         and not target_b["errors"]
     )
@@ -577,6 +711,8 @@ def diff_targets(
         "pairs": pairs,
         "summary": summary,
     }
+    if updates is not None:
+        payload["updates"] = updates
     if only_a or only_b:
         payload["unpaired"] = {"a": only_a, "b": only_b}
     return payload
@@ -617,6 +753,23 @@ def verdict_line(payload: Dict[str, Any]) -> str:
     )
     if state_changes:
         parts.append(f"{state_changes} state key change(s)")
+    updates = payload.get("updates")
+    if updates is not None:
+        aligned = updates["aligned"]
+        differing = updates["updates_differing"]
+        first = updates["first_diverging_update"]
+        if differing:
+            lead = (
+                f"first divergence at update {first}; "
+                f"{differing}/{aligned} updates differ"
+            )
+            parts.append(lead)
+        trailing = updates.get("trailing")
+        if trailing:
+            parts.append(
+                f"run {trailing['side'].upper()} has "
+                f"{trailing['count']} extra update(s) from index {trailing['from']}"
+            )
     unpaired = payload.get("unpaired")
     if unpaired:
         parts.append(

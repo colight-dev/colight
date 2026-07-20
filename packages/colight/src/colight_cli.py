@@ -1082,12 +1082,19 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
     TARGET_A and TARGET_B are each a .colight artifact or a .py file
     (evaluated headlessly; visuals are paired by position). Reports
     components added/removed/type-changed, per-array shape/dtype changes and
-    magnitude stats (max/mean |delta|, fraction changed beyond epsilon,
+    magnitude stats (changed-element count/fraction, max/mean |delta|,
     bounds drift), scalar value changes, state-key changes, buffer deltas
     and warnings introduced/resolved. Numeric leaf changes in nested JSON
     lists that differ only in list indices are aggregated into one
     array-style entry with a wildcarded path (e.g. "...args[1][*][0]") and
     a leaves changed/total count; itemized value lists are capped.
+
+    For integer-dtype ("categorical") arrays the change count/fraction leads
+    and the |delta| magnitudes are demoted (a label of 3 vs 1 is not "closer"
+    than 3 vs 15). When either target has update entries (a replay/episode
+    artifact), the updates are aligned by index (step k <-> step k) and each
+    aligned pair is diffed with the same machinery; a trailing length
+    mismatch (one run longer) is reported explicitly.
 
     Exit code: 0 identical (within epsilon), 1 differences found, 2 error.
 
@@ -1099,20 +1106,28 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
          "components": {"added": [{"path", "type"}], "removed": [...],
                         "changed": [{"path", "from", "to"}]},
          "arrays": {"added": [{"path", "dtype", "shape"}], "removed": [...],
-           "changed": [{"path", "dtype"?: [a, b], "shape"?: [a, b],
-                        "max_abs_delta"?, "mean_abs_delta"?,
-                        "changed_fraction"?, "nan_mismatch"?,
-                        "leaves"?: {"changed": int, "total": int},
-                        "bounds"?: {"from": [min, max], "to": [min, max]}}]},
+           "changed": [ARRAYDIFF]},
          "values": {"added": [path], "removed": [path],
                     "changed": [{"path", "from", "to"}],
                     "truncated"?: {"added"?, "removed"?, "changed"?: int}},
          "state": {"added": [key], "removed": [key], "changed": [key]},
          "buffers": {"count": [a, b], "total_bytes": [a, b]},
          "warnings": {"introduced": [WARNING], "resolved": [WARNING]}}],
+       "updates"?: {"count": [a, b], "aligned": int,
+         "updates_differing": int, "first_diverging_update": int|null,
+         "steps": [{"index": int, ...same shape as a pair...}],
+         "steps_truncated"?: int,
+         "trailing"?: {"side": "a"|"b", "from": int, "count": int}},
        "unpaired"?: {"a": [...], "b": [...]},
        "summary": {"arrays_changed": int, "max_abs_delta"?: float,
-                   "max_abs_delta_path"?: str}}
+                   "max_abs_delta_path"?: str,
+                   "first_diverging_update"?: int|null,
+                   "updates_differing"?: int, "updates_aligned"?: int}}
+      ARRAYDIFF = {"path", "dtype"?: [a, b], "shape"?: [a, b],
+                   "categorical"?: true, "changed_count"?, "changed_fraction"?,
+                   "max_abs_delta"?, "mean_abs_delta"?, "nan_mismatch"?,
+                   "leaves"?: {"changed": int, "total": int},
+                   "bounds"?: {"from": [min, max], "to": [min, max]}}
       TARGET = {"file": str, "kind": "colight"|"py", "visuals": int,
                 "updates"?: int, "errors"?: [...]}
     """
@@ -1151,12 +1166,20 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
                     detail_parts.append(f"dtype {item['dtype'][0]}->{item['dtype'][1]}")
                 if "shape" in item:
                     detail_parts.append(f"shape {item['shape'][0]}->{item['shape'][1]}")
-                if "max_abs_delta" in item:
-                    stats = (
-                        f"max |Δ| {item['max_abs_delta']:.4g} "
-                        f"mean {item['mean_abs_delta']:.4g} "
-                        f"changed {item['changed_fraction']:.1%}"
-                    )
+                if "changed_fraction" in item:
+                    if item.get("categorical"):
+                        # Categorical grids: lead with changed-element
+                        # count/fraction; |Δ| magnitudes are noise here.
+                        stats = (
+                            f"changed {item['changed_count']} "
+                            f"({item['changed_fraction']:.1%})"
+                        )
+                    else:
+                        stats = (
+                            f"max |Δ| {item['max_abs_delta']:.4g} "
+                            f"mean {item['mean_abs_delta']:.4g} "
+                            f"changed {item['changed_fraction']:.1%}"
+                        )
                     if "leaves" in item:
                         stats += (
                             f" ({item['leaves']['changed']}/"
@@ -1197,6 +1220,51 @@ def diff(target_a: pathlib.Path, target_b: pathlib.Path, as_json: bool, epsilon:
                 )
             for warning in pair["warnings"]["resolved"]:
                 click.echo(f"  warning resolved [{warning['code']}] {warning['path']}")
+        updates = payload.get("updates")
+        if updates is not None and (
+            updates["updates_differing"] or "trailing" in updates
+        ):
+            first = updates["first_diverging_update"]
+            click.echo(
+                f"updates: {updates['updates_differing']}/{updates['aligned']} "
+                f"differ (first at update {first})"
+            )
+            shown = 0
+            for step in updates["steps"]:
+                if shown >= 5:
+                    break
+                shown += 1
+                bits: List[str] = []
+                for array_item in step["arrays"]["changed"]:
+                    if array_item.get("categorical"):
+                        detail = (
+                            f"{array_item['changed_count']} cells "
+                            f"({array_item['changed_fraction']:.1%})"
+                        )
+                    elif "max_abs_delta" in array_item:
+                        detail = (
+                            f"{array_item['changed_fraction']:.1%} changed, "
+                            f"max |Δ| {array_item['max_abs_delta']:.4g}"
+                        )
+                    else:
+                        detail = "shape/dtype"
+                    bits.append(f"{array_item['path']} {detail}")
+                for value_item in step["values"]["changed"][:3]:
+                    bits.append(
+                        f"{value_item['path']} {value_item['from']}->{value_item['to']}"
+                    )
+                click.echo(f"  update {step['index']}: {'; '.join(bits) or 'differs'}")
+            hidden = updates.get("steps_truncated", 0) + max(
+                0, len(updates["steps"]) - shown
+            )
+            if hidden:
+                click.echo(f"  … {hidden} more differing update(s)")
+            trailing = updates.get("trailing")
+            if trailing:
+                click.echo(
+                    f"  run {trailing['side'].upper()}: {trailing['count']} extra "
+                    f"update(s) from index {trailing['from']} (no counterpart)"
+                )
         unpaired = payload.get("unpaired")
         if unpaired:
             for side, items in unpaired.items():

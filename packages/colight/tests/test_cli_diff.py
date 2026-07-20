@@ -193,6 +193,156 @@ class TestNumericDelta:
         assert stats["changed_fraction"] == pytest.approx(0.5)
 
 
+class TestCategoricalArrays:
+    """Integer-dtype arrays lead with changed count/fraction, demote |Δ|."""
+
+    def test_integer_array_is_categorical(self):
+        from colight.cli_tools.diff_tools import _numeric_delta
+
+        a = np.array([0, 1, 2, 3], dtype=np.int64)
+        b = np.array([0, 5, 2, 9], dtype=np.int64)
+        stats = _numeric_delta(a, b, 1e-9, categorical=True)
+        assert stats is not None
+        # Change count/fraction present and lead the payload.
+        assert stats["categorical"] is True
+        assert stats["changed_count"] == 2
+        assert stats["changed_fraction"] == pytest.approx(0.5)
+        keys = list(stats)
+        assert keys.index("changed_count") < keys.index("max_abs_delta")
+        # Magnitude stats retained but demoted.
+        assert stats["max_abs_delta"] == pytest.approx(6.0)
+
+    def test_float_array_not_categorical(self):
+        from colight.cli_tools.diff_tools import _numeric_delta
+
+        a = np.array([0.0, 1.0], dtype=np.float64)
+        b = np.array([0.0, 1.5], dtype=np.float64)
+        stats = _numeric_delta(a, b, 1e-9)
+        assert stats is not None
+        assert "categorical" not in stats
+        assert stats["changed_count"] == 1
+
+    def test_integer_artifact_diff_reports_categorical(self, tmp_path: pathlib.Path):
+        a = save_artifact(
+            tmp_path,
+            "a.colight",
+            Plot.State({"grid": np.array([0, 1, 2, 3], dtype=np.int64)}),
+        )
+        b = save_artifact(
+            tmp_path,
+            "b.colight",
+            Plot.State({"grid": np.array([0, 5, 2, 3], dtype=np.int64)}),
+        )
+        payload = diff_tools.diff_targets(a, b)
+        changed = payload["pairs"][0]["arrays"]["changed"]
+        entries = [e for e in changed if e["path"].endswith("grid")]
+        assert len(entries) == 1
+        assert entries[0]["categorical"] is True
+        assert entries[0]["changed_count"] == 1
+
+
+def _arc_fixtures() -> pathlib.Path:
+    from notebooks.arc_agi import trajectory as arc
+
+    return pathlib.Path(arc.__file__).parent / "fixtures"
+
+
+def _build_arc_artifacts(tmp_path: pathlib.Path):
+    """Build the two committed ls20 run artifacts (real multi-update files)."""
+    from notebooks.arc_agi.trajectory import build_artifact, load_fixture
+
+    fixtures = _arc_fixtures()
+    run_a = load_fixture(fixtures / "ls20-run-a.json.gz")
+    run_b = load_fixture(fixtures / "ls20-run-b.json.gz")
+    a = build_artifact(run_a, tmp_path / "ls20-run-a.colight")
+    b = build_artifact(run_b, tmp_path / "ls20-run-b.colight")
+    return a, b
+
+
+class TestUpdateEntryDiff:
+    """Aligned per-step diffing of .colight artifacts with update entries."""
+
+    def test_arc_fixture_runs_diverge(self, tmp_path: pathlib.Path):
+        """Acceptance: two REAL fixture-built runs must diff sensibly."""
+        a, b = _build_arc_artifacts(tmp_path)
+        payload = diff_tools.diff_targets(a, b)
+
+        # The study's bug: identical:true for behaviorally different runs.
+        assert payload["identical"] is False
+
+        updates = payload["updates"]
+        # 81 steps -> 80 update entries per run.
+        assert updates["count"] == [80, 80]
+        assert updates["aligned"] == 80
+        # Both runs share the RESET initial frame; they diverge from step 1
+        # (update index 0), where actions differ (ACTION2 vs ACTION1).
+        assert payload["pairs"][0]["identical"] is True
+        assert updates["first_diverging_update"] == 0
+        assert updates["updates_differing"] == 80
+
+        summary = payload["summary"]
+        assert summary["first_diverging_update"] == 0
+        assert summary["updates_differing"] == 80
+
+        # First differing step leads with a categorical pixel-grid change and
+        # a state action change - not a hollow magnitude stat.
+        step0 = updates["steps"][0]
+        assert step0["index"] == 0
+        pixel_entries = [
+            e for e in step0["arrays"]["changed"] if e["path"].endswith("pixels")
+        ]
+        assert pixel_entries and pixel_entries[0]["categorical"] is True
+        assert pixel_entries[0]["changed_count"] > 0
+        assert "action" in step0["state"]["changed"]
+
+    def test_identical_runs_report_identical(self, tmp_path: pathlib.Path):
+        from notebooks.arc_agi.trajectory import build_artifact, load_fixture
+
+        run = load_fixture(_arc_fixtures() / "ls20-run-a.json.gz")
+        a = build_artifact(run, tmp_path / "a.colight")
+        b = build_artifact(run, tmp_path / "b.colight")
+        payload = diff_tools.diff_targets(a, b)
+        assert payload["identical"] is True
+        assert payload["updates"]["updates_differing"] == 0
+        assert payload["updates"]["first_diverging_update"] is None
+
+    def test_trailing_length_mismatch_reported(self, tmp_path: pathlib.Path):
+        from colight import format as colight_format
+
+        base = save_artifact(tmp_path, "a.colight", Plot.State({"step": 0}))
+        b = tmp_path / "b.colight"
+        b.write_bytes(base.read_bytes())
+        # A has 2 updates, B has 4 - identical on the shared prefix.
+        colight_format.append_updates(base, [{"step": 1}, {"step": 2}])
+        colight_format.append_updates(
+            b, [{"step": 1}, {"step": 2}, {"step": 3}, {"step": 4}]
+        )
+
+        payload = diff_tools.diff_targets(base, b)
+        assert payload["identical"] is False
+        updates = payload["updates"]
+        assert updates["aligned"] == 2
+        assert updates["updates_differing"] == 0
+        assert updates["first_diverging_update"] is None
+        assert updates["trailing"] == {"side": "b", "from": 2, "count": 2}
+
+    def test_verdict_line_reports_first_divergence(self, tmp_path: pathlib.Path):
+        a, b = _build_arc_artifacts(tmp_path)
+        payload = diff_tools.diff_targets(a, b)
+        line = diff_tools.verdict_line(payload)
+        assert "first divergence at update 0" in line
+        assert "80/80 updates differ" in line
+
+    def test_cli_human_output_and_exit(self, tmp_path: pathlib.Path):
+        a, b = _build_arc_artifacts(tmp_path)
+        result = CliRunner().invoke(cli_main, ["diff", str(a), str(b)])
+        assert result.exit_code == 1
+        assert "updates:" in result.output
+        assert "first divergence at update 0" in result.output
+        # Per-step listing leads with cell counts for the categorical grid.
+        assert "cells" in result.output
+
+
 class TestLeafAggregation:
     """Nested-JSON-list changes collapse into one array-style entry."""
 
