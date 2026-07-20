@@ -843,6 +843,13 @@ class Scene(Plot.LayoutItem):
         # every state change (Python or human click), and it costs nothing when
         # no selections are set (undefined resolves to no-op).
         props["selections"] = Plot.js("$state.selections")
+        # Named annotation callouts are resident in $state.annotations (see
+        # Annotation / annotate). Like selections, a live reference lets the JS
+        # overlay re-resolve them on every state change and costs nothing when
+        # none are set. Position anchors are given in world (pre-origin) space;
+        # the overlay subtracts `origin` before projecting, matching the -origin
+        # shift already applied to the rendered geometry.
+        props["annotations"] = Plot.js("$state.annotations")
         return [Plot.JSRef("scene3d.Scene"), props]
 
 
@@ -977,6 +984,117 @@ def toggle_selection(name: str, component: int) -> Any:
         name,
         component,
     )
+
+
+# =============================================================================
+# Named annotation callouts
+# =============================================================================
+
+
+class AnnotationStyle(TypedDict, total=False):
+    """Small styling knobs for an annotation callout (sane defaults apply)."""
+
+    color: ArrayLike  # marker / leader / label accent color [r, g, b] (0-1)
+
+
+def Annotation(
+    name: str,
+    text: str,
+    *,
+    position: Optional[ArrayLike] = None,
+    component: Optional[int] = None,
+    instance: Optional[int] = None,
+    style: Optional[AnnotationStyle] = None,
+) -> Dict[str, Any]:
+    """Define a named text callout anchored in a scene's data space.
+
+    An annotation is a NAMED object resident in ``$state.annotations`` — the
+    same rationale as :func:`Selection`: state syncs Python<->JS, persists into
+    ``.colight`` artifacts, either party can mutate it, and the *name* is the
+    shared referent. It renders as a marker dot at its anchor, a thin leader
+    line, and a text label (a DOM overlay, so it appears in screenshots). It is
+    also machine-legible: ``inspect`` / ``screenshot --json`` report every
+    annotation's resolved world position and projected screen position (in
+    ``pick-at`` pixel space), and ``pick-at`` reports instance-anchored
+    annotations as membership on the hit instance.
+
+    The anchor is one of two forms:
+
+    - ``position=[x, y, z]``: WORLD coordinates (pre-origin-shift). When the
+        scene declares an ``origin``, the position is shifted by ``-origin`` at
+        serialization time exactly like every other position (see
+        ``Scene(origin=...)`` and clip-plane ``point`` handling), so a callout
+        placed on UTM-scale geometry lands on the geometry.
+    - ``component=C, instance=I``: anchors to the center of instance ``I`` of
+        compiled component ``C``; the center is resolved on the client from the
+        primitive registry (the same centers picking uses), so it tracks the
+        live geometry.
+
+    Args:
+        name: Stable annotation name (the shared referent).
+        text: The callout's free text.
+        position: World-space anchor ``[x, y, z]`` (mutually exclusive with the
+            instance anchor).
+        component: Compiled-component index for an instance anchor.
+        instance: Instance index within ``component`` for an instance anchor.
+        style: Optional ``{"color": [r, g, b]}`` accent for the callout.
+
+    Returns:
+        ``{name: spec}`` where ``spec`` is the ``$state.annotations[name]``
+        entry. Pass the result(s) to :func:`annotate` to seed state.
+
+    Raises:
+        ValueError: When neither/both anchor forms are given, or an instance
+            anchor is missing its ``instance``.
+    """
+    has_position = position is not None
+    has_instance = component is not None or instance is not None
+    if has_position and has_instance:
+        raise ValueError(
+            "Annotation takes either 'position' or 'component'/'instance', not both"
+        )
+    anchor: Dict[str, Any]
+    if has_position:
+        pos = np.asarray(position, dtype=np.float64).reshape(-1)
+        if pos.shape[0] != 3:
+            raise ValueError("Annotation 'position' must have 3 components")
+        anchor = {"position": pos.tolist()}
+    elif has_instance:
+        if component is None or instance is None:
+            raise ValueError(
+                "Annotation instance anchor requires both 'component' and 'instance'"
+            )
+        anchor = {"component": int(component), "instance": int(instance)}
+    else:
+        raise ValueError(
+            "Annotation requires either 'position' or 'component'/'instance'"
+        )
+
+    spec: Dict[str, Any] = {"text": str(text), "anchor": anchor}
+    if style is not None:
+        spec["style"] = _convert_to_js(style) if isinstance(style, dict) else style
+    return {name: spec}
+
+
+def annotate(*annotations: Dict[str, Any]) -> Any:
+    """Seed ``$state.annotations`` with one or more :func:`Annotation` specs.
+
+    Returns a ``Plot.initialState`` marker (synced) that makes the annotations
+    resident, shared state — mirroring :func:`select`. Combine it with a scene:
+
+        >>> scene | annotate(Annotation("note", "check twin hole",
+        ...                              component=0, instance=3))
+
+    Args:
+        *annotations: Dicts returned by :func:`Annotation` (each ``{name: spec}``).
+
+    Returns:
+        A ``Plot.initialState`` layout marker seeding ``$state.annotations``.
+    """
+    merged: Dict[str, Any] = {}
+    for ann in annotations:
+        merged.update(ann)
+    return Plot.initialState({"annotations": merged}, sync=True)
 
 
 def coerce_index_array(arr: Any) -> Any:
