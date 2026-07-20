@@ -9,7 +9,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { throttle, deepEqualModuloTypedArrays } from "./utils";
+import {
+  throttle,
+  deepEqualModuloTypedArrays,
+  componentsEqualIgnoringFilter,
+} from "./utils";
 import {
   useCanvasSnapshot,
   SceneSnapshotApi,
@@ -388,6 +392,13 @@ export interface SceneImplProps {
   /** Array of GPU transforms for group transform application */
   transforms: GPUTransform[];
 
+  /**
+   * Packed per-slot filter thresholds for the filterParams storage buffer
+   * (4 floats/slot: minVal, maxVal, active, pad). Slot 0 is inactive.
+   * Components reference a slot via their `_filterIndex`.
+   */
+  filterParams?: Float32Array;
+
   /** Width of the container in pixels */
   containerWidth: number;
 
@@ -760,6 +771,7 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
 export function SceneImpl({
   components,
   transforms = [IDENTITY_GPU_TRANSFORM],
+  filterParams,
   containerWidth,
   containerHeight,
   style,
@@ -841,6 +853,7 @@ export function SceneImpl({
     uniformBindGroup: GPUBindGroup;
     bindGroupLayout: GPUBindGroupLayout;
     transformsBuffer: GPUBuffer;
+    filterParamsBuffer: GPUBuffer;
     staleTransformsBuffers: GPUBuffer[];
     staleDynamicBuffers: Array<
       Pick<DynamicBuffers, "renderBuffer" | "pickingBuffer">
@@ -1315,6 +1328,12 @@ export function SceneImpl({
             visibility: GPUShaderStage.VERTEX,
             buffer: { type: "read-only-storage" },
           },
+          {
+            // Per-component filter thresholds (see filterParamsStruct)
+            binding: 2,
+            visibility: GPUShaderStage.VERTEX,
+            buffer: { type: "read-only-storage" },
+          },
         ],
       });
 
@@ -1333,11 +1352,19 @@ export function SceneImpl({
         label: "Group transforms buffer",
       });
 
+      // Per-component filter thresholds. Grows as needed; slot 0 is inactive.
+      const filterParamsBuffer = device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        label: "Filter params buffer",
+      });
+
       const uniformBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
         entries: [
           { binding: 0, resource: { buffer: uniformBuffer } },
           { binding: 1, resource: { buffer: transformsBuffer } },
+          { binding: 2, resource: { buffer: filterParamsBuffer } },
         ],
       });
 
@@ -1354,6 +1381,7 @@ export function SceneImpl({
         uniformBindGroup,
         bindGroupLayout,
         transformsBuffer,
+        filterParamsBuffer,
         staleTransformsBuffers: [],
         staleDynamicBuffers: [],
         depthTexture: null,
@@ -2225,24 +2253,54 @@ export function SceneImpl({
       const transformsData = packTransformsToBuffer(transforms);
       const requiredSize = transformsData.byteLength;
 
-      // Resize transforms buffer if needed
+      // Filter thresholds: default to a single inactive slot when none given.
+      // This is the cheap per-frame write that a $state threshold change flows
+      // through — the large per-instance filter values live in instance data
+      // and are not touched here.
+      const filterData =
+        filterParams && filterParams.length > 0
+          ? filterParams
+          : new Float32Array([0, 0, 0, 0]);
+      const requiredFilterSize = filterData.byteLength;
+
+      // Resize either storage buffer if needed, recreating the bind group so it
+      // always references the current buffers plus the filter params binding.
+      let bindGroupDirty = false;
       if (requiredSize > gpuRef.current.transformsBuffer.size) {
         gpuRef.current.staleTransformsBuffers.push(
           gpuRef.current.transformsBuffer,
         );
-        const newTransformsBuffer = device.createBuffer({
+        gpuRef.current.transformsBuffer = device.createBuffer({
           size: requiredSize,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
           label: "Group transforms buffer",
         });
-        gpuRef.current.transformsBuffer = newTransformsBuffer;
-
-        // Recreate bind group with new buffer
+        bindGroupDirty = true;
+      }
+      if (requiredFilterSize > gpuRef.current.filterParamsBuffer.size) {
+        gpuRef.current.staleTransformsBuffers.push(
+          gpuRef.current.filterParamsBuffer,
+        );
+        gpuRef.current.filterParamsBuffer = device.createBuffer({
+          size: requiredFilterSize,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+          label: "Filter params buffer",
+        });
+        bindGroupDirty = true;
+      }
+      if (bindGroupDirty) {
         gpuRef.current.uniformBindGroup = device.createBindGroup({
           layout: gpuRef.current.bindGroupLayout,
           entries: [
             { binding: 0, resource: { buffer: uniformBuffer } },
-            { binding: 1, resource: { buffer: newTransformsBuffer } },
+            {
+              binding: 1,
+              resource: { buffer: gpuRef.current.transformsBuffer },
+            },
+            {
+              binding: 2,
+              resource: { buffer: gpuRef.current.filterParamsBuffer },
+            },
           ],
         });
       }
@@ -2255,6 +2313,14 @@ export function SceneImpl({
         transformsData.buffer,
         transformsData.byteOffset,
         transformsData.byteLength,
+      );
+
+      device.queue.writeBuffer(
+        gpuRef.current.filterParamsBuffer,
+        0,
+        filterData.buffer,
+        filterData.byteOffset,
+        filterData.byteLength,
       );
 
       try {
@@ -2345,7 +2411,13 @@ export function SceneImpl({
       onFrameRendered?.(performance.now());
       onReady?.();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [
+      containerWidth,
+      containerHeight,
+      onFrameRendered,
+      components,
+      filterParams,
+    ],
   );
 
   function requestRender(label: string) {
@@ -3607,15 +3679,31 @@ export function SceneImpl({
     userCameraProvided,
   ]);
 
-  // Render when camera, components, or transforms change
+  // Render when camera, components, transforms, or filter thresholds change
   useEffect(() => {
     if (isReady && gpuRef.current) {
-      if (
-        !deepEqualModuloTypedArrays(
-          components,
-          gpuRef.current.renderedComponents,
-        )
-      ) {
+      const prevComponents = gpuRef.current.renderedComponents;
+      const componentsEqual = deepEqualModuloTypedArrays(
+        components,
+        prevComponents,
+      );
+      // A threshold-only change (e.g. a $state slider driving filter_by.min/max)
+      // re-evaluates the scene, producing a new components array that differs
+      // ONLY in filter_by. In that case we must NOT rebuild/re-upload the large
+      // per-instance buffers: only the tiny filterParams buffer changed. Detect
+      // that here and take the light render path (uniforms + filterParams only).
+      const filterOnlyChange =
+        !componentsEqual &&
+        prevComponents !== undefined &&
+        componentsEqualIgnoringFilter(components, prevComponents);
+
+      if (filterOnlyChange) {
+        // Adopt the new components (their _filterIndex/_filterValues are equal
+        // to the previous ones by construction) without rebuilding render
+        // objects, so the reused instance buffers are not re-uploaded.
+        gpuRef.current.renderedComponents = components;
+        requestRender("filter thresholds changed");
+      } else if (!componentsEqual) {
         renderFrame("components changed", activeCameraRef.current!, components);
       } else if (
         !deepEqualModuloTypedArrays(
@@ -3630,7 +3718,14 @@ export function SceneImpl({
         requestRender("transforms changed");
       }
     }
-  }, [isReady, components, transforms, controlledCamera, internalCamera]);
+  }, [
+    isReady,
+    components,
+    transforms,
+    filterParams,
+    controlledCamera,
+    internalCamera,
+  ]);
 
   // Wheel handling
   useEffect(() => {

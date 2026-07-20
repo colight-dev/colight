@@ -321,6 +321,7 @@ export const BASE_COMPONENT_PROPS: readonly string[] = [
   "type",
   "constants",
   "layer",
+  "filter_by",
   "colors",
   "color",
   "color_by",
@@ -344,6 +345,21 @@ export const BASE_COMPONENT_PROPS: readonly string[] = [
 
 export interface BaseComponentConfig {
   constants?: ElementConstants;
+
+  /**
+   * Per-instance filter: hide instances whose scalar `values` fall outside
+   * [min, max] (NaN values are always hidden). `values` is uploaded once as
+   * instance data; min/max live in a small per-component uniform slot, so a
+   * threshold change (e.g. a $state slider) does not re-upload instance data.
+   * Filtered-out instances are also unpickable. `min`/`max` are resolved to
+   * numbers before reaching JS.
+   */
+  filter_by?: {
+    values: Float32Array | number[];
+    min?: number | null;
+    max?: number | null;
+    label?: string;
+  };
 
   /**
    * Render layer for this component.

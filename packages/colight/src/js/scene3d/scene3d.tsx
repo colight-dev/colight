@@ -650,6 +650,7 @@ function SceneInner({
     primitiveSpecs: mergedSpecs,
     groupRegistry,
     transforms,
+    filterParams,
   } = useMemo(() => {
     // Collect raw components from children or prop
     const rawComponents = componentsProp
@@ -737,6 +738,7 @@ function SceneInner({
           <SceneImpl
             components={components}
             transforms={transforms}
+            filterParams={filterParams}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}

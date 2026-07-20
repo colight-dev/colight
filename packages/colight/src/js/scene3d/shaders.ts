@@ -55,6 +55,18 @@ struct GroupTransform {
 };
 @group(0) @binding(1) var<storage, read> transforms: array<GroupTransform>;`;
 
+// Per-component filter thresholds for per-instance filtering. Indexed by the
+// per-instance `filterIndex` attribute. `active` is 0 (no filter) or 1;
+// min/max are the inclusive threshold bounds. Kept 16-byte aligned (vec4).
+export const filterParamsStruct = /*wgsl*/ `
+struct FilterParams {
+  minVal: f32,
+  maxVal: f32,
+  active: f32,
+  _pad: f32,
+};
+@group(0) @binding(2) var<storage, read> filterParams: array<FilterParams>;`;
+
 // Helper function to apply group transforms
 export const applyGroupTransformFn = /*wgsl*/ `
 fn applyGroupTransform(pos: vec3<f32>, idx: u32) -> vec3<f32> {
