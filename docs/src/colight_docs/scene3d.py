@@ -71,6 +71,40 @@ scene_pc = point_cloud + {
 scene_pc
 
 # %% [markdown]
+# ## Camera auto-fit, scene origin, and background
+#
+# **Auto-fit.** When you don't provide a camera, the scene fits its own
+# world-space bounds on first render (deriving `near`/`far` from the scene
+# extent). A far-from-unit-scale scene — a 3 km deposit, a UTM tile — frames
+# correctly out of the box instead of rendering as empty background under the
+# default unit-scale camera. An explicit `"defaultCamera"` (as above) still
+# wins, and auto-fit is deterministic: the same scene yields the same camera,
+# so `colight screenshot --check` stays byte-identical.
+#
+# **`Scene(origin=[x, y, z])`.** For scenes whose coordinates are far from the
+# origin (e.g. UTM eastings ~445,000 m, which exceed float32 GPU precision),
+# pass an `origin`. Every position-typed attribute (`centers`, `starts`,
+# `ends`, `points`, and mesh geometry) is shifted by `-origin` at
+# serialization, so the GPU sees small, float32-safe coordinates. World-space
+# meshes are additionally re-centered — their geometry centroid is folded into
+# the instance center — so large vertex arrays never reach the GPU buffers.
+# The offset travels as scene metadata: `colight pick-at` / `pick-where` add it
+# back, so reported positions stay in your original coordinate space.
+#
+# ```python
+# scene3d.Scene(
+#     topo.mesh(color=[0.82, 0.76, 0.65]),
+#     drillholes.line_segments(color=[0.75, 0.75, 0.78]),
+#     origin=[445500.0, 493500.0, 2942.0],  # UTM midpoint
+# )
+# ```
+#
+# **`Scene(background=[r, g, b])`.** Sets the WebGPU clear color (each channel
+# 0–1) behind the geometry; it defaults to opaque black. This is the canvas
+# clear color — DOM overlays drawn over the canvas (legends, FPS) keep their
+# own styling.
+
+# %% [markdown]
 # ## Other Primitives
 #
 # Scene3D provides these primitives:

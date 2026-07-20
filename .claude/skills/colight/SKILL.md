@@ -52,7 +52,14 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
 ```
 
 - **Blank/empty scene?** `colight inspect` first — its warnings (NaN values, empty arrays,
-  alphas ≈ 0, degenerate bounds, length mismatches) catch most causes without rendering.
+  alphas ≈ 0, degenerate bounds, length mismatches, and a `camera-frustum` warning when an
+  explicit camera's near/far can't contain the scene) catch most causes without rendering.
+  Then `colight screenshot --json`: a scene rendering ≥99% background emits a
+  `mostly-background` warning ("geometry may be outside the camera frustum or fully
+  transparent") — the signal that an all-black render is genuinely wrong, not just dark
+  (identical before/after hashes alone can't tell consistently-broken from consistently-right).
+  For scene3d in far-from-origin coordinates (UTM etc.), pass `Scene(origin=...)` so the
+  camera auto-fits in float32-safe space.
 - **What do the colors mean?** Read `legends` from `inspect`/`screenshot --json`
   (`{component, label, cmap, domain, categorical}` for every `color_by`-colored
   component) instead of guessing color meanings from pixels.

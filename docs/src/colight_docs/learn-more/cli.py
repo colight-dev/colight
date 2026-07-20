@@ -250,7 +250,16 @@
 # # ranked by distance then coverage; top hits include the instance's
 # # dereferenced attribute values (center/color/size/... as rendered).
 # # Exit 0 = hit, 1 = no hit within radius, 2 = error (incl. non-scene3d).
+# # Reported alpha is decoration-aware (a decoration lowering an instance's
+# # alpha is reflected in the hit's `alpha`, not the base 1.0).
 # colight pick-at scene.py 240,180 [--radius 6] [--json]
+#
+# # --min-alpha T splits transparent occluders out of the hit list: hits
+# # whose (decoration-aware) alpha is below T are skipped as `hits` and
+# # reported in a separate `occluders` list, with `min_alpha` echoed. Use
+# # it to pick the first *solid* surface under a translucent overlay (e.g.
+# # a 35%-alpha topography draped over the geometry you actually want).
+# colight pick-at scene.py 240,180 --min-alpha 0.5 [--json]
 #
 # # Where does a selection land on screen? Reports visible pixel count,
 # # bbox and centroid (page CSS pixels) plus a visibility fraction:
