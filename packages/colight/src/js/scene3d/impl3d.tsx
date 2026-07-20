@@ -399,6 +399,13 @@ export interface SceneImplProps {
    */
   filterParams?: Float32Array;
 
+  /**
+   * Resolved named selections (membership + reporting), from the compiler.
+   * Exposed through the snapshot API so pick-at reports membership and the CLI
+   * can resolve selection names to component + instances.
+   */
+  selections?: import("./selections").SelectionReport[];
+
   /** Width of the container in pixels */
   containerWidth: number;
 
@@ -772,6 +779,7 @@ export function SceneImpl({
   components,
   transforms = [IDENTITY_GPU_TRANSFORM],
   filterParams,
+  selections: selectionReports,
   containerWidth,
   containerHeight,
   style,
@@ -2751,6 +2759,16 @@ export function SceneImpl({
         component: index,
         type: comp.type,
         count: primitiveRegistry[comp.type]?.getElementCount(comp) ?? 0,
+      })),
+      // Named selections (resolved membership) so the CLI can resolve a
+      // selection name to component + instances and report pick-at membership.
+      selections: (selectionReports ?? []).map((s) => ({
+        name: s.name,
+        component: s.component,
+        type: s.type,
+        count: s.count,
+        predicate: s.predicate,
+        instances: s.indexes,
       })),
     };
   }

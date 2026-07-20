@@ -38,6 +38,7 @@ import {
   PrimitiveSpecMap,
   coerceToFloat32,
 } from "./coercion";
+import { applySelections, Selections, SelectionReport } from "./selections";
 
 // =============================================================================
 // Types
@@ -75,6 +76,11 @@ export interface CompiledScene {
   filterParams: Float32Array;
   /** Active filters for agent-facing reporting (inspect / screenshot --json). */
   filters: ActiveFilter[];
+  /**
+   * Resolved named selections (from `$state.selections`): their instance
+   * membership + reporting metadata. Empty when no selections are declared.
+   */
+  selections: SelectionReport[];
 }
 
 /** One active per-instance filter, for machine-readable reporting. */
@@ -391,6 +397,7 @@ function filterValidComponents(
 export function compileScene(
   rawComponents: RawComponent[],
   userSpecs?: PrimitiveSpecMap,
+  selections?: Selections,
 ): CompiledScene {
   // 1. Expand helpers
   const expanded = expandHelpers(rawComponents);
@@ -437,6 +444,21 @@ export function compileScene(
   //    _filterIndex / _filterValues, and collect active-filter reporting.
   const { filterParams, filters } = resolveFilters(resolvedComponents);
 
+  // 8. Resolve named selections (from $state.selections) into per-instance
+  //    decorations on their target components, reusing the same mask logic as
+  //    filters. Returns membership + reporting metadata.
+  const specFor = (component: ComponentConfig) =>
+    (primitiveSpecs && primitiveSpecs[component.type]) ||
+    PRIMITIVE_SPECS[component.type];
+  const selectionReports = applySelections(
+    resolvedComponents,
+    selections,
+    (component) => {
+      const spec = specFor(component);
+      return spec ? spec.getElementCount(component) : 0;
+    },
+  );
+
   return {
     components: resolvedComponents,
     transforms,
@@ -444,6 +466,7 @@ export function compileScene(
     primitiveSpecs,
     filterParams,
     filters,
+    selections: selectionReports,
   };
 }
 

@@ -1719,7 +1719,9 @@ def pick_at(
             )
         for occ in payload.get("occluders") or []:
             alpha = (occ.get("values") or {}).get("alpha")
-            alpha_text = f" alpha={alpha:.2g}" if isinstance(alpha, (int, float)) else ""
+            alpha_text = (
+                f" alpha={alpha:.2g}" if isinstance(alpha, (int, float)) else ""
+            )
             click.echo(
                 f"(occluder) {occ['type']}[{occ['component']}] "
                 f"instance {occ['instance']}{alpha_text}"
@@ -1733,9 +1735,16 @@ def pick_at(
 @click.option(
     "--component",
     "component_selector",
-    required=True,
     type=str,
-    help="Component index or type name (as reported by coverage/pick-at).",
+    help="Component index or type name (as reported by coverage/pick-at). "
+    "Mutually exclusive with --selection.",
+)
+@click.option(
+    "--selection",
+    "selection_name",
+    type=str,
+    help="Named selection (from $state.selections) to query. Resolves to the "
+    "selection's component + instances. Mutually exclusive with --component.",
 )
 @click.option(
     "--instances",
@@ -1788,7 +1797,8 @@ def pick_at(
 @click.option("--debug", is_flag=True, help="Enable renderer debug logging.")
 def pick_where(
     target: pathlib.Path,
-    component_selector: str,
+    component_selector: Optional[str],
+    selection_name: Optional[str],
     instances: Optional[str],
     out: Optional[pathlib.Path],
     as_json: bool,
@@ -1831,6 +1841,10 @@ def pick_where(
     """
     from colight.cli_tools import daemon_client, scene_pick
 
+    if bool(component_selector) == bool(selection_name):
+        click.echo("Error: pass exactly one of --component or --selection", err=True)
+        sys.exit(2)
+
     effective_timeout = None if ready_timeout <= 0 else ready_timeout
     try:
         ranges = (
@@ -1839,7 +1853,10 @@ def pick_where(
             else None
         )
         payload = None
-        if not no_daemon:
+        # The daemon path only handles --component; --selection resolves names
+        # against live $state, so it takes the direct render path.
+        if not no_daemon and selection_name is None:
+            assert component_selector is not None  # guaranteed by mutual-excl. check
             payload = daemon_client.try_pick_where(
                 target,
                 component_selector,
@@ -1864,6 +1881,7 @@ def pick_where(
                 dpr=dpr,
                 debug=debug,
                 ready_timeout=effective_timeout,
+                selection=selection_name,
             )
     except (ValueError, FileNotFoundError, RuntimeError, TimeoutError) as e:
         click.echo(f"Error: {e}", err=True)

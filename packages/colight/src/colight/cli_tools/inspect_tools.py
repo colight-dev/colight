@@ -340,6 +340,36 @@ def filter_payload(
     return entry
 
 
+def selections_payload(state_selections: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Machine-readable entries for named selections in ``$state.selections``.
+
+    Each entry is ``{"name", "component", "count"|"predicate"}``: an explicit
+    instance list reports its ``count``; a threshold predicate reports
+    ``predicate: {"min"?, "max"?, "values_ref"?}`` (the count is data-dependent
+    and resolved on the client). Selections are shared named referents — a human
+    click and an agent predicate converge on the same object, and it survives
+    into ``.colight`` artifacts as state.
+    """
+    entries: List[Dict[str, Any]] = []
+    for name, spec in state_selections.items():
+        if not isinstance(spec, dict):
+            continue
+        entry: Dict[str, Any] = {"name": name, "component": spec.get("component")}
+        source = spec.get("source") or {}
+        if isinstance(source.get("instances"), list):
+            entry["count"] = len(source["instances"])
+        else:
+            predicate: Dict[str, Any] = {}
+            for key in ("min", "max", "values_ref"):
+                if source.get(key) is not None and not isinstance(
+                    source.get(key), dict
+                ):
+                    predicate[key] = source[key]
+            entry["predicate"] = predicate
+        entries.append(entry)
+    return entries
+
+
 def inspect_visual_data(
     data: Dict[str, Any], buffers: List[bytes]
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -415,6 +445,11 @@ def inspect_visual_data(
     ]
     if filters:
         payload["filters"] = filters
+    state_selections = state_dict.get("selections")
+    if isinstance(state_selections, dict) and state_selections:
+        selections = selections_payload(state_selections)
+        if selections:
+            payload["selections"] = selections
     return payload, warnings
 
 

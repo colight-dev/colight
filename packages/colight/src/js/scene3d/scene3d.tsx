@@ -47,6 +47,7 @@ import {
 import { GroupConfig, GroupRegistry } from "./groups";
 import { GPUTransform } from "./gpu-transforms";
 import { compileScene, RawComponent } from "./compiler";
+import { Selections } from "./selections";
 import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
 import { useContainerWidth } from "../utils";
 import { FPSCounter, useFPSCounter } from "./fps";
@@ -340,6 +341,9 @@ interface SceneProps {
   /** RGB clear color [r,g,b] (0-1) for the WebGPU render pass behind the
    * geometry. Defaults to opaque black. */
   background?: [number, number, number];
+  /** Named selections resident in $state.selections (name -> {component,
+   * source, style}). Resolved to per-instance decorations + addressability. */
+  selections?: Selections;
 }
 
 interface DevMenuProps {
@@ -404,6 +408,8 @@ interface SceneLayersProps {
   origin?: [number, number, number];
   /** RGB clear color [r,g,b] (0-1) behind the geometry. */
   background?: [number, number, number];
+  /** Named selections resident in $state.selections. */
+  selections?: Selections;
 }
 
 /**
@@ -533,6 +539,7 @@ export function Scene(props: SceneLayersProps | SceneProps) {
         readyState={props.readyState}
         origin={props.origin}
         background={props.background}
+        selections={props.selections}
       />
     );
   }
@@ -552,6 +559,7 @@ function SceneFromLayers({
   readyState,
   origin,
   background,
+  selections,
 }: SceneLayersProps) {
   // Collect layers and extract scene props
   // Note: No filtering here - the compiler in SceneInner handles helper expansion
@@ -579,6 +587,7 @@ function SceneFromLayers({
       {...sceneProps}
       origin={origin ?? sceneProps.origin}
       background={background ?? sceneProps.background}
+      selections={selections ?? sceneProps.selections}
       readyState={readyState}
     />
   );
@@ -629,6 +638,7 @@ function SceneInner({
   primitiveSpecs,
   origin,
   background,
+  selections: selectionsProp,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -652,6 +662,7 @@ function SceneInner({
     transforms,
     filterParams,
     filters,
+    selections,
   } = useMemo(() => {
     // Collect raw components from children or prop
     const rawComponents = componentsProp
@@ -659,8 +670,8 @@ function SceneInner({
       : (collectComponentsFromChildren(children) as RawComponent[]);
 
     // Run through unified compilation pipeline
-    return compileScene(rawComponents, primitiveSpecs);
-  }, [children, componentsProp, primitiveSpecs]);
+    return compileScene(rawComponents, primitiveSpecs, selectionsProp);
+  }, [children, componentsProp, primitiveSpecs, selectionsProp]);
 
   // Colormap legends: components carrying a color_by spec get a DOM
   // overlay legend docked over the canvas (indices match the compiled
@@ -740,6 +751,7 @@ function SceneInner({
             components={components}
             transforms={transforms}
             filterParams={filterParams}
+            selections={selections}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}
@@ -763,6 +775,23 @@ function SceneInner({
             // the view is filtered by, mirroring the legend DOM marker.
             <div
               data-colight-filters={JSON.stringify(filters)}
+              style={{ display: "none" }}
+            />
+          )}
+          {selections.length > 0 && (
+            // Hidden marker carrying the scene's named selections (name,
+            // component, count, predicate) so screenshot --json / inspect can
+            // report the shared referents present in the view.
+            <div
+              data-colight-selections={JSON.stringify(
+                selections.map((s) => ({
+                  name: s.name,
+                  component: s.component,
+                  type: s.type,
+                  count: s.count,
+                  predicate: s.predicate,
+                })),
+              )}
               style={{ display: "none" }}
             />
           )}

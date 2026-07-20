@@ -669,7 +669,145 @@ class Scene(Plot.LayoutItem):
             props["origin"] = self.origin.tolist()
         if self.background is not None:
             props["background"] = self.background
+        # Named selections are resident in $state.selections (see Selection /
+        # select). Passing a live reference lets the JS side re-resolve them on
+        # every state change (Python or human click), and it costs nothing when
+        # no selections are set (undefined resolves to no-op).
+        props["selections"] = Plot.js("$state.selections")
         return [Plot.JSRef("scene3d.Scene"), props]
+
+
+# =============================================================================
+# Named selections
+# =============================================================================
+
+
+class SelectionStyle(TypedDict, total=False):
+    """Highlight style applied to a named selection's instances."""
+
+    color: ArrayLike  # [r,g,b]
+    alpha: NumberLike
+    scale: NumberLike
+    outline: bool
+    outline_color: ArrayLike  # [r,g,b]
+    outline_width: NumberLike
+
+
+def Selection(
+    name: str,
+    component: int,
+    *,
+    instances: Optional[Sequence[int]] = None,
+    values: Optional[ArrayLike] = None,
+    values_ref: Optional[str] = None,
+    min: Optional[NumberLike] = None,
+    max: Optional[NumberLike] = None,
+    style: Optional[Union[SelectionStyle, str]] = None,
+) -> Dict[str, Any]:
+    """Define a named selection over one scene component.
+
+    A selection is a NAMED per-instance mask — the same abstraction as
+    ``filter_by`` — consumed as a highlight decoration plus addressability: it
+    is a *shared referent* that both a human (via clicks) and an agent (via
+    predicates, ``pick-where --selection NAME``, ``screenshot --frame NAME``)
+    can name in conversation. Selections live in ``$state.selections`` (seed
+    them with :func:`select`), so they sync Python<->JS and persist into
+    ``.colight`` artifacts.
+
+    The mask is either an explicit ``instances`` list, or a threshold predicate:
+    ``values`` (inline scalars) or ``values_ref`` (a per-instance attribute name
+    on the component) tested against ``[min, max]``.
+
+    Args:
+        name: Stable selection name (the shared referent).
+        component: Compiled-component index the selection targets.
+        instances: Explicit instance indices to select.
+        values: Inline per-instance scalar values for a threshold predicate.
+        values_ref: Name of a per-instance attribute to read values from.
+        min: Inclusive lower threshold for the predicate.
+        max: Inclusive upper threshold for the predicate.
+        style: Highlight style dict, or ``"default"`` for the built-in
+            highlight. Defaults to the built-in highlight.
+
+    Returns:
+        ``(name, spec)`` where ``spec`` is the ``$state.selections[name]``
+        entry. Pass the results to :func:`select` to seed state.
+    """
+    source: Dict[str, Any]
+    if instances is not None:
+        source = {"instances": [int(i) for i in instances]}
+    elif values is not None or values_ref is not None:
+        source = {}
+        if values is not None:
+            source["values"] = flatten_array(values, dtype=np.float32)
+        if values_ref is not None:
+            source["values_ref"] = values_ref
+        if min is not None:
+            source["min"] = min
+        if max is not None:
+            source["max"] = max
+    else:
+        raise ValueError(
+            "Selection requires either 'instances' or 'values'/'values_ref'"
+        )
+
+    spec: Dict[str, Any] = {"component": int(component), "source": source}
+    if style is not None:
+        spec["style"] = _convert_to_js(style) if isinstance(style, dict) else style
+    return {name: spec}
+
+
+def select(*selections: Dict[str, Any]) -> Any:
+    """Seed ``$state.selections`` with one or more :func:`Selection` specs.
+
+    Returns a ``Plot.initialState`` marker (synced) that makes the selections
+    resident, shared state. Combine it with a scene:
+
+        >>> scene | select(Selection("hi", 0, instances=[1, 2]))
+
+    Args:
+        *selections: Dicts returned by :func:`Selection` (each ``{name: spec}``).
+
+    Returns:
+        A ``Plot.initialState`` layout marker seeding ``$state.selections``.
+    """
+    merged: Dict[str, Any] = {}
+    for sel in selections:
+        merged.update(sel)
+    return Plot.initialState({"selections": merged}, sync=True)
+
+
+def toggle_selection(name: str, component: int) -> Any:
+    """An ``on_click`` handler that toggles the picked instance in a selection.
+
+    Human clicks and agent predicates converge on the same named object: a
+    click adds (or removes) the picked instance to ``$state.selections[name]``
+    (creating an ``instances`` selection if absent). Attach it to a component:
+
+        >>> Cuboid(centers=..., on_click=toggle_selection("hi", 0))
+
+    Args:
+        name: Selection name to toggle membership in.
+        component: Component index the selection targets.
+
+    Returns:
+        A ``Plot.js`` click handler expression.
+    """
+    return Plot.js(
+        """(e) => {
+  const sels = {...($state.selections || {})};
+  const cur = sels[%1] || {component: %2, source: {instances: []}};
+  const src = cur.source || {instances: []};
+  const list = (src.instances || []).slice();
+  const i = e.instanceIndex;
+  const at = list.indexOf(i);
+  if (at >= 0) { list.splice(at, 1); } else { list.push(i); }
+  sels[%1] = {...cur, component: %2, source: {...src, instances: list}};
+  $state.selections = sels;
+}""",
+        name,
+        component,
+    )
 
 
 def coerce_index_array(arr: Any) -> Any:
