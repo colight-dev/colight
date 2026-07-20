@@ -347,13 +347,97 @@ def flatten_layers(layers):
 # is origin-invariant. ``points`` (LineBeams) packs [x,y,z,lineIndex] quads, so
 # only the first three of every four scalars are translated.
 #
-# NOTE: Mesh ``geometry.positions`` are deliberately NOT translated. A mesh
-# renders each vertex at ``center + R*S*vertex``; subtracting origin from the
-# instance ``centers`` alone shifts the whole composite by -origin exactly.
-# Shifting the geometry too would double-shift (the classic "scene renders
-# black because the fit lands nowhere near it" bug).
+# Mesh geometry is handled specially (``_recenter_mesh_props``): a mesh renders
+# each vertex at ``center + R*(S*vertex)``, so simply subtracting origin from
+# the instance ``centers`` alone would leave the large-magnitude geometry
+# vertices (e.g. UTM eastings ~4.4e5) in float32 GPU buffers -- the precision
+# problem the origin is meant to solve. Instead we fold the geometry centroid
+# into the instance centers (leaving small local geometry) and then shift the
+# centers by -origin uniformly, exactly like every other position array. The
+# composite world position is unchanged; only the *representation* becomes
+# float32-safe.
 _POSITION_ATTRS_STRIDE3 = ("centers", "starts", "ends")
 _POSITION_ATTRS_STRIDE4 = ("points",)
+
+
+def _quat_rotate(quat: np.ndarray, vecs: np.ndarray) -> np.ndarray:
+    """Rotate row vectors by quaternion ``[w, x, y, z]`` (mesh convention).
+
+    Args:
+        quat: (4,) quaternion in ``[w, x, y, z]`` order (the mesh instance
+            convention; identity when absent).
+        vecs: (N, 3) vectors to rotate.
+
+    Returns:
+        (N, 3) rotated vectors: ``v + 2*w*(q x v) + 2*(q x (q x v))``.
+    """
+    w = float(quat[0])
+    q = quat[1:4].astype(np.float64)
+    cross1 = np.cross(np.broadcast_to(q, vecs.shape), vecs)
+    cross2 = np.cross(np.broadcast_to(q, vecs.shape), cross1)
+    return vecs + 2.0 * w * cross1 + 2.0 * cross2
+
+
+def _recenter_mesh_props(props: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold a mesh's geometry centroid into its instance centers.
+
+    Returns a copy of ``props`` with ``geometry.positions`` re-expressed
+    relative to their centroid (small, local coordinates) and each instance
+    ``center`` moved by ``R*(S*centroid)`` so the composite world position of
+    every vertex is unchanged. This keeps large world-space vertex arrays out
+    of float32 GPU buffers; the (now small) centers are subsequently shifted
+    by -origin like all other positions.
+
+    A no-op unless ``geometry.positions`` is a translatable numeric array.
+    """
+    geometry = props.get("geometry")
+    if not isinstance(geometry, dict) or geometry.get("positions") is None:
+        return props
+    positions = geometry["positions"]
+    if isinstance(positions, JSExpr):
+        return props
+    verts = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if verts.size == 0:
+        return props
+    centroid = verts.mean(axis=0)
+
+    out = dict(props)
+    new_geometry = dict(geometry)
+    new_geometry["positions"] = (verts - centroid).reshape(-1).astype(np.float32)
+    out["geometry"] = new_geometry
+
+    centers = np.asarray(out.get("centers"), dtype=np.float64).reshape(-1, 3)
+    # Per-instance transform: quaternion is [w,x,y,z], scale is scalar or
+    # [x,y,z]. Offset each center by the transformed centroid so the composite
+    # (center + R*(S*(vertex-centroid))) matches the original.
+    quats = out.get("quaternions")
+    quat = out.get("quaternion")
+    scales = out.get("scales")
+    scale = out.get("scale")
+    offsets = np.empty_like(centers)
+    for i in range(len(centers)):
+        if scales is not None:
+            s = np.asarray(scales, dtype=np.float64).reshape(-1, 3)[i]
+        elif scale is not None:
+            s = np.asarray(scale, dtype=np.float64)
+            if s.ndim == 0:
+                s = np.repeat(s, 3)
+        else:
+            s = np.ones(3)
+        if quats is not None:
+            q = np.asarray(quats, dtype=np.float64).reshape(-1, 4)[i]
+        elif quat is not None:
+            q = np.asarray(quat, dtype=np.float64)
+        else:
+            q = np.array([1.0, 0.0, 0.0, 0.0])
+        scaled = (s * centroid).reshape(1, 3)
+        offsets[i] = _quat_rotate(q, scaled)[0]
+    # Keep centers in float64 here: they may still be at world magnitude
+    # (~4.4e5) and only become float32-safe after the -origin shift that the
+    # caller applies next. Casting to float32 now would reintroduce the
+    # precision loss the origin machinery exists to avoid.
+    out["centers"] = (centers + offsets).reshape(-1)
+    return out
 
 
 def _translate_flat(arr: Any, origin: np.ndarray, stride: int) -> Any:
@@ -371,7 +455,11 @@ def _translate_flat(arr: Any, origin: np.ndarray, stride: int) -> Any:
     """
     if isinstance(arr, JSExpr):
         return arr
-    values = np.asarray(arr, dtype=np.float32)
+    # Subtract in float64 and only cast to float32 afterwards: the inputs may
+    # be at world magnitude (~4.4e5), where a float32 representation before the
+    # subtraction would already have lost the sub-metre detail. Doing the
+    # subtraction first keeps the shifted (small) result precise.
+    values = np.asarray(arr, dtype=np.float64)
     if values.ndim == 2 and values.shape[1] == stride:
         flat = values.reshape(-1).copy()
     elif values.ndim == 1 and values.size % stride == 0:
@@ -381,33 +469,31 @@ def _translate_flat(arr: Any, origin: np.ndarray, stride: int) -> Any:
         # rather than corrupt the data.
         return arr
     flat = flat.reshape(-1, stride)
-    flat[:, 0:3] -= origin.astype(np.float32)
-    return flat.reshape(-1)
+    flat[:, 0:3] -= origin.astype(np.float64)
+    return flat.reshape(-1).astype(np.float32)
 
 
 def _translate_component_props(
     props: Dict[str, Any], origin: np.ndarray
 ) -> Dict[str, Any]:
     """Return a copy of a component's props with positions shifted by -origin."""
-    out = dict(props)
+    # Fold any mesh geometry centroid into its instance centers first, so the
+    # large-magnitude vertex array becomes small/local and the world offset it
+    # carried lands on ``centers`` -- which the loop below then shifts by
+    # -origin like every other position array (single, uniform shift). Mesh
+    # ``geometry.positions`` are deliberately NOT in the shift lists: shifting
+    # them in addition to the centers would double-shift the composite.
+    out = _recenter_mesh_props(props)
     for key in _POSITION_ATTRS_STRIDE3:
         if key in out and out[key] is not None:
             out[key] = _translate_flat(out[key], origin, 3)
     for key in _POSITION_ATTRS_STRIDE4:
         if key in out and out[key] is not None:
             out[key] = _translate_flat(out[key], origin, 4)
-    # Mesh geometry vertices live under a nested ``geometry`` dict.
-    geometry = out.get("geometry")
-    if isinstance(geometry, dict) and geometry.get("positions") is not None:
-        geometry = dict(geometry)
-        geometry["positions"] = _translate_flat(geometry["positions"], origin, 3)
-        out["geometry"] = geometry
     # Group children are nested components with their own position attrs; the
     # group's own ``position`` offset is a world-space translation too.
     if "children" in out and isinstance(out["children"], list):
-        out["children"] = [
-            _translate_layer(child, origin) for child in out["children"]
-        ]
+        out["children"] = [_translate_layer(child, origin) for child in out["children"]]
     if "position" in out and out["position"] is not None:
         pos = np.asarray(out["position"], dtype=np.float64)
         out["position"] = (pos - origin).tolist()

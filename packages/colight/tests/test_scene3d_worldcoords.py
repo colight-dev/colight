@@ -17,7 +17,6 @@ The GPU-dependent halves (actual render correctness, decoration-aware alpha in
 """
 
 import numpy as np
-import pytest
 
 from colight import scene3d
 from colight.cli_tools import scene_pick
@@ -66,11 +65,10 @@ def test_origin_travels_as_metadata():
 
 
 def test_origin_shifts_line_and_mesh_positions():
-    """starts/ends and mesh geometry positions are shifted too."""
+    """starts/ends shift by -origin; a mesh re-centers so the *composite*
+    (center + local vertex) lands in the shifted frame with small buffers."""
     scene = scene3d.Scene(
-        scene3d.LineSegments(
-            starts=[[UTM, 0, 0]], ends=[[UTM + 4, 0, 0]]
-        ),
+        scene3d.LineSegments(starts=[[UTM, 0, 0]], ends=[[UTM + 4, 0, 0]]),
         scene3d.Mesh(
             positions=[[UTM, 0, 0], [UTM + 1, 1, 0], [UTM, 1, 0]],
             indices=[0, 1, 2],
@@ -80,8 +78,15 @@ def test_origin_shifts_line_and_mesh_positions():
     arrays = _arrays_by_key(scene)
     np.testing.assert_allclose(arrays["starts"].values, [0, 0, 0], atol=1e-3)
     np.testing.assert_allclose(arrays["ends"].values, [4, 0, 0], atol=1e-3)
+    # Mesh geometry is folded to its centroid: local coords are small (no
+    # ~445000-magnitude vertices left in the float32 GPU buffer).
+    local = np.asarray(arrays["positions"].values).reshape(-1, 3)
+    assert np.abs(local).max() < 5.0
+    # The composite center + local vertex reproduces the origin-shifted world
+    # vertices [0,0,0], [1,1,0], [0,1,0] exactly (identity of the fold).
+    center = np.asarray(arrays["centers"].values).reshape(3)
     np.testing.assert_allclose(
-        arrays["positions"].values, [0, 0, 0, 1, 1, 0, 0, 1, 0], atol=1e-3
+        center + local, [[0, 0, 0], [1, 1, 0], [0, 1, 0]], atol=1e-2
     )
 
 
@@ -89,6 +94,50 @@ def test_no_origin_leaves_positions_untouched():
     scene = scene3d.Scene(scene3d.PointCloud(center=[UTM, UTM, 0.0]))
     centers = _arrays_by_key(scene)["centers"].values
     np.testing.assert_allclose(centers, [UTM, UTM, 0.0], rtol=1e-4)
+
+
+def test_world_mesh_not_double_shifted():
+    """Regression for the black-scene bug: a world-space mesh (center defaults
+    to [0,0,0]) must be shifted by -origin exactly ONCE. The old code shifted
+    geometry.positions AND centers, landing the composite at ~-origin (445 km
+    off screen); centroid-folding + a single center shift keeps it near 0."""
+    rng = np.random.default_rng(1)
+    verts = (rng.random((2000, 3)) * 3000.0 + [UTM, UTM, 2900.0]).astype("float32")
+    origin = verts.mean(axis=0)
+    scene = scene3d.Scene(
+        scene3d.Mesh(positions=verts, indices=np.arange(1998)), origin=origin
+    )
+    arrays = _arrays_by_key(scene)
+    center = np.asarray(arrays["centers"].values).reshape(3)
+    local = np.asarray(arrays["positions"].values).reshape(-1, 3)
+    # Local geometry is small (float32-safe), not ~445000-magnitude.
+    assert np.abs(local).max() < 2000.0
+    # Composite of every vertex lands within the shifted extent (~[-1500,1500]),
+    # NOT ~-445000. This is the single-shift invariant.
+    composite = center + local
+    assert np.abs(composite).max() < 2000.0
+
+
+def test_recentering_preserves_composite_with_transform():
+    """Centroid-fold accounts for per-instance scale + rotation so the
+    composite world position is unchanged (identity)."""
+    # 90deg rotation about Z as [w,x,y,z]; scale 2.
+    q = [np.cos(np.pi / 4), 0.0, 0.0, np.sin(np.pi / 4)]
+    positions = np.array([[10.0, 0, 0], [12, 0, 0], [10, 4, 0]], dtype="float32")
+    center = [100.0, 200.0, 0.0]
+    mesh = scene3d.Mesh(
+        positions=positions, indices=[0, 1, 2], center=center, quaternion=q, scale=2.0
+    )
+    scene = scene3d.Scene(mesh, origin=[0, 0, 0])
+    arrays = _arrays_by_key(scene)
+    local = np.asarray(arrays["positions"].values).reshape(-1, 3)
+    new_center = np.asarray(arrays["centers"].values).reshape(3)
+    # Reproduce the GPU composite: center + R*(S*local), R from [w,x,y,z].
+    from colight.scene3d import _quat_rotate
+
+    composite = new_center + _quat_rotate(np.asarray(q), 2.0 * local)
+    expected = np.asarray(center) + _quat_rotate(np.asarray(q), 2.0 * positions)
+    np.testing.assert_allclose(composite, expected, atol=1e-2)
 
 
 # ============================ Fix 4: mesh ============================
@@ -201,10 +250,22 @@ def test_min_alpha_splits_occluders(monkeypatch):
     """Transparent hits move from ``hits`` into ``occluders``."""
     # Two hits: instance 0 is a 25%-alpha occluder, instance 1 is opaque.
     fake_hits = [
-        {"component": 0, "type": "Mesh", "instance": 0, "distance": 0.0,
-         "pixels": 4, "share": 0.5},
-        {"component": 1, "type": "Cuboid", "instance": 5, "distance": 1.0,
-         "pixels": 4, "share": 0.5},
+        {
+            "component": 0,
+            "type": "Mesh",
+            "instance": 0,
+            "distance": 0.0,
+            "pixels": 4,
+            "share": 0.5,
+        },
+        {
+            "component": 1,
+            "type": "Cuboid",
+            "instance": 5,
+            "distance": 1.0,
+            "pixels": 4,
+            "share": 0.5,
+        },
     ]
     alpha_by = {(0, 0): 0.25, (1, 5): 1.0}
 
