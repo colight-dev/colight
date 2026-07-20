@@ -17,8 +17,9 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import { SceneImpl } from "./impl3d";
-import { ClipPlane } from "./clipPlanes";
+import { SceneImpl, defaultPrimitiveRegistry } from "./impl3d";
+import { ClipPlane, planesExcludeBounds } from "./clipPlanes";
+import { computeSelectionBounds, unionBounds, Bounds3 } from "./pick-snapshot";
 import {
   ComponentConfig,
   PointCloudComponentConfig,
@@ -692,6 +693,27 @@ function SceneInner({
     [components],
   );
 
+  // "Section excludes entire scene": true when the active clip planes discard
+  // every corner of the scene's world-space bounds (nothing renders). Surfaced
+  // in the clip-planes DOM marker so `screenshot --json` can warn — this is the
+  // section-view analogue of the camera-frustum / mostly-background warnings.
+  const clipExcludesScene = useMemo(() => {
+    if (!clipPlanes || clipPlanes.length === 0) return false;
+    let bounds: Bounds3 | null = null;
+    for (const comp of components) {
+      const spec =
+        mergedSpecs?.[comp.type] ??
+        (defaultPrimitiveRegistry as any)[comp.type];
+      if (!spec) continue;
+      bounds = unionBounds(
+        bounds,
+        computeSelectionBounds(comp as any, spec, transforms),
+      );
+    }
+    if (!bounds) return false;
+    return planesExcludeBounds(clipPlanes, bounds.min, bounds.max);
+  }, [clipPlanes, components, mergedSpecs, transforms]);
+
   const cameraChangeCallback = useCallback(
     (cam: CameraParams) => {
       internalCameraRef.current = cam;
@@ -813,12 +835,13 @@ function SceneInner({
             // can report that the view is sectioned, mirroring the filters
             // marker. Offsets are the live (state-resolved) values.
             <div
-              data-colight-clip-planes={JSON.stringify(
-                clipPlanes.map((p) => ({
+              data-colight-clip-planes={JSON.stringify({
+                planes: clipPlanes.map((p) => ({
                   normal: p.normal,
                   offset: p.offset,
                 })),
-              )}
+                excludesScene: clipExcludesScene,
+              })}
               style={{ display: "none" }}
             />
           )}

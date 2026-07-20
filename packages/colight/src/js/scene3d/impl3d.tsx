@@ -494,7 +494,7 @@ function initGeometryResources(
   }
 }
 
-const defaultPrimitiveRegistry: Record<
+export const defaultPrimitiveRegistry: Record<
   ComponentConfig["type"],
   PrimitiveSpec<any>
 > = {

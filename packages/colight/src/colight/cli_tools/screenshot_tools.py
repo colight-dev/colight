@@ -378,6 +378,50 @@ def collect_dom_selections(studio: StudioContext) -> List[Dict[str, Any]]:
     return result if isinstance(result, list) else []
 
 
+# Collects scene-level section / clipping planes from the rendered DOM. Each
+# sectioned scene emits a hidden marker carrying its planes (normal + resolved
+# offset) and an excludesScene flag, so screenshot --json reports that the view
+# is sectioned — matching the filters contract.
+_CLIP_PLANES_QUERY = (
+    "Array.from(document.querySelectorAll('[data-colight-clip-planes]'))"
+    ".map((el) => JSON.parse(el.getAttribute('data-colight-clip-planes')))"
+)
+
+
+def collect_dom_clip_planes(
+    studio: StudioContext,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Scene-level section / clipping planes present in the rendered page.
+
+    Returns:
+        Tuple of (planes, warnings). ``planes`` has one entry per active plane:
+        ``{"normal": [nx, ny, nz], "offset": d}`` (offsets are the resolved,
+        state-driven values). ``warnings`` carries a ``section-excludes-scene``
+        entry when a scene's planes clip away its entire bounds (blank render).
+    """
+    result = studio.evaluate(_CLIP_PLANES_QUERY)
+    planes: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, str]] = []
+    if isinstance(result, list):
+        for entry in result:
+            if not isinstance(entry, dict):
+                continue
+            entry_planes = entry.get("planes")
+            if isinstance(entry_planes, list):
+                planes.extend(p for p in entry_planes if isinstance(p, dict))
+            if entry.get("excludesScene"):
+                warnings.append(
+                    {
+                        "code": "section-excludes-scene",
+                        "message": (
+                            "clip_planes exclude the entire scene bounds — "
+                            "nothing renders; widen the section offset"
+                        ),
+                    }
+                )
+    return planes, warnings
+
+
 def _capture_scene(
     scene: SceneLike, frame: Optional[str], want_coverage: bool
 ) -> Tuple[bytes, int, int, Dict[str, Any]]:
@@ -443,6 +487,12 @@ def _capture_scene(
     selections = collect_dom_selections(scene.studio)
     if selections:
         extras["selections"] = selections
+
+    clip_planes, clip_warnings = collect_dom_clip_planes(scene.studio)
+    if clip_planes:
+        extras["clip_planes"] = clip_planes
+    if clip_warnings:
+        extras.setdefault("warnings", []).extend(clip_warnings)
 
     if want_coverage and is_scene:
         snapshot = scene_pick.take_snapshot(scene.studio)
