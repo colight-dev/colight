@@ -381,6 +381,50 @@ from colight import scene3d
 
 # %% [markdown]
 
+# ## Annotation callouts (`Annotation`)
+#
+# An **annotation** is a named text callout anchored in the scene's data space:
+# a marker dot at the anchor, a thin leader line, and a text label. It renders as
+# a DOM overlay (like the legend), so it is captured in screenshots. Anchor it
+# either to a world `position=[x, y, z]` (origin-aware, like a clip-plane
+# `point`) or to a component instance (`component=C, instance=I`, resolved to that
+# instance's center on the client so it tracks the geometry).
+#
+# Like selections, annotations live in `$state.annotations` — build them with
+# `scene3d.Annotation(name, text, ...)` and seed them with `scene3d.annotate(...)`
+# — so they sync Python↔JS and persist into `.colight` artifacts, and the name is
+# a shared referent. They are machine-legible: `inspect` reports each callout's
+# `{name, text, anchor}`; `screenshot --json` adds the resolved world position and
+# the projected screen position (in `pick-at` pixel space) with a `visible` flag;
+# and `pick-at` reports instance-anchored callouts as each hit's `annotations`.
+
+# %%
+from colight import scene3d
+
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.3, 0.3, 0.6],
+        )
+    )
+    | scene3d.annotate(
+        scene3d.Annotation("shoot", "high-grade shoot", component=0, instance=1),
+        scene3d.Annotation("origin", "survey datum", position=[0, 0, 0]),
+    )
+    | {
+        "defaultCamera": {
+            "position": [0, 0, 12],
+            "target": [0, 0, 0],
+            "up": [0, 1, 0],
+            "fov": 45,
+        }
+    }
+)
+
+# %% [markdown]
+
 # ## Picking
 #
 # A picking system allows for selecting elements in a scene using the `onHover` callback.

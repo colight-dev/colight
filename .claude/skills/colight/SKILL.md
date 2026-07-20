@@ -85,6 +85,19 @@ colight screenshot TARGET --out x.png --json   # deterministic pixels; --check v
 state_key}`) from `inspect`/`screenshot --json` to know the view is sectioned; a
   `section-excludes-scene` warning fires if the planes clip away everything (blank
   render). Max 8 planes; v1 does not cap/fill the cut (hollow shells show).
+- **Annotation callouts (`scene3d.Annotation` + `scene3d.annotate`).** A named text
+  callout anchored in data space — a marker dot + leader line + label rendered as a
+  DOM overlay (captured in screenshots, like the legend). Anchor it to a world
+  `position=[x,y,z]` (origin-aware, like a clip-plane `point`) or to a component
+  instance (`component=C, instance=I`, resolved to that instance's center). Like
+  selections, annotations live in `$state.annotations`, so they sync Python↔JS and
+  persist into `.colight` artifacts, and the NAME is a shared referent. Machine-
+  legible: `inspect` reports `{name, text, anchor}`; `screenshot --json` adds each
+  callout's resolved `world` position and projected `screen` position (in pick-at
+  pixel space) plus a `visible` flag (false when the anchor is behind the camera or
+  off-screen); `pick-at` reports instance-anchored callouts as each hit's
+  `annotations: [names]`. An agent reads a callout's `screen` and can `pick-at`
+  right next to it.
 - **Did my change do what I intended?** `colight diff old.py new.py` (or two artifacts)
   before reaching for pixels.
 - **Need to see it?** `colight screenshot`, then Read the PNG. Screenshots are
