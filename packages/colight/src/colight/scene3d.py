@@ -1,10 +1,10 @@
-from typing import Any, Dict, Literal, Optional, Sequence, TypedDict, Union
+from typing import Any, Dict, Literal, Mapping, Optional, Sequence, TypedDict, Union
 
 import numpy as np
 
 import colight.plot as Plot
 from colight import colormaps
-from colight.layout import JSExpr
+from colight.layout import JSExpr, is_js_expr
 
 # Move Array type definition after imports
 ArrayLike = Union[list, np.ndarray, JSExpr]
@@ -115,9 +115,32 @@ class ColorBy(TypedDict, total=False):
     cmap: str  # colormap name, default "viridis"
     domain: Sequence[float]  # (min, max) for continuous maps
     label: str  # what the colors encode (legend title)
-    categories: Sequence[str]  # display names for categorical codes
+    # Categorical display: either ordinal display names (["ore", "waste"]) or a
+    # first-class category table ([{value, label, color?}]) — the xmi id-maps
+    # idiom with arbitrary codes, per-category colors, and a fallback slot.
+    categories: Sequence[Any]
+    fallback: Dict[str, Any]  # {label?, color?} for unmatched/NaN (category table)
+    palette: str  # categorical palette for auto-assigned colors (default tab10)
     nan_color: Sequence[float]  # RGB for NaN/invalid values
     legend: Union[bool, str]  # False hides; or a dock corner like "top-left"
+
+
+class ColorChannel(TypedDict, total=False):
+    """One named color channel (a ``color_by``-shaped spec).
+
+    Channels ship their raw ``values`` once; the active channel is colorized
+    client-side (JS applies a LUT / category table), so an artifact can switch
+    which attribute drives the colors without re-exporting.
+    """
+
+    values: ArrayLike
+    cmap: str
+    domain: Sequence[float]
+    label: str
+    categories: Sequence[Any]
+    fallback: Dict[str, Any]
+    palette: str
+    nan_color: Sequence[float]
 
 
 _LEGEND_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
@@ -153,6 +176,95 @@ def _apply_color_by(
         meta["position"] = legend
     data["colors"] = flatten_array(colors, dtype=np.float32)
     data["color_by"] = meta
+
+
+def _apply_color_channels(
+    data: Dict[str, Any],
+    color_channels: Optional[Mapping[str, Any]],
+    active_channel: Optional[Union[str, JSExpr]],
+    legend: Union[bool, str] = True,
+) -> None:
+    """Resolve named ``color_channels`` for client-side switching.
+
+    Each channel ships its raw ``values`` once plus a compact colorizer (a
+    256-entry RGB LUT for continuous, or the resolved category table for
+    categorical) so JS recolors the active channel without reimplementing
+    colormaps. Python also bakes the initially-active channel's colors so the
+    first render (and non-JS paths) are correct.
+
+    Mutates ``data``: sets ``colors`` (baked active channel), ``color_by`` (the
+    active channel's legend), ``color_channels`` (per-channel colorizer +
+    legend + values), and ``active_channel`` (literal name or the JSExpr JS
+    resolves against ``$state``).
+
+    Args:
+        active_channel: A literal channel name, a ``Plot.js("$state...")``
+            expression, or None (defaults to the first channel).
+        legend: False hides the legend; a corner string docks it.
+
+    Raises:
+        ValueError: When ``color_by``/``colors``/``color`` are also present,
+            channels are empty, or a literal ``active_channel`` is unknown.
+    """
+    if not color_channels:
+        return
+    if "colors" in data or "color" in data or "color_by" in data:
+        raise ValueError(
+            "color_channels is mutually exclusive with color_by / colors / color"
+        )
+    if isinstance(legend, str) and legend not in _LEGEND_POSITIONS:
+        raise ValueError(
+            f"invalid legend position {legend!r} (one of {', '.join(_LEGEND_POSITIONS)})"
+        )
+
+    names = list(color_channels.keys())
+    if not names:
+        raise ValueError("color_channels must declare at least one channel")
+
+    # Which channel to bake for the initial render. A JSExpr active_channel is
+    # resolved by JS at runtime; Python bakes a concrete default (the literal
+    # if given, else the first channel).
+    is_expr = is_js_expr(active_channel)
+    default_name: str
+    if active_channel is None or is_expr:
+        default_name = names[0]
+    else:
+        default_name = str(active_channel)
+        if default_name not in color_channels:
+            raise ValueError(
+                f"active_channel {default_name!r} not in color_channels " f"{names}"
+            )
+
+    channels_meta: Dict[str, Any] = {}
+    baked_colors: Optional[np.ndarray] = None
+    baked_legend: Optional[Dict[str, Any]] = None
+    for name, spec in color_channels.items():
+        colors, chan_legend, colorizer = colormaps.resolve_channel(dict(spec))
+        n = colors.shape[0]
+        channels_meta[name] = {
+            "label": chan_legend.get("label", name),
+            "legend": chan_legend,
+            "colorizer": colorizer,
+            "values": flatten_array(
+                np.asarray(spec["values"], dtype=np.float32), dtype=np.float32
+            ),
+            "count": n,
+        }
+        if name == default_name:
+            baked_colors = colors
+            baked_legend = dict(chan_legend)
+
+    assert baked_colors is not None and baked_legend is not None
+    if legend is False:
+        baked_legend["legend"] = False
+    elif isinstance(legend, str):
+        baked_legend["position"] = legend
+
+    data["colors"] = flatten_array(baked_colors, dtype=np.float32)
+    data["color_by"] = baked_legend
+    data["color_channels"] = channels_meta
+    # JS resolves a JSExpr against $state; a literal (or default) passes through.
+    data["active_channel"] = active_channel if is_expr else default_name
 
 
 class FilterBy(TypedDict, total=False):
@@ -1114,6 +1226,8 @@ def PointCloud(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all points
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-point colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
@@ -1155,6 +1269,7 @@ def PointCloud(
     if color is not None:
         data["color"] = color
     _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
@@ -1192,6 +1307,8 @@ def Ellipsoid(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
@@ -1248,6 +1365,7 @@ def Ellipsoid(
     elif color is not None:
         data["color"] = color
     _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
@@ -1283,6 +1401,8 @@ def Cuboid(
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
     filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
@@ -1334,6 +1454,7 @@ def Cuboid(
     elif color is not None:
         data["color"] = color
     _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
@@ -1361,6 +1482,8 @@ def LineBeams(
     size: Optional[NumberLike] = None,  # Default size for all beams
     colors: Optional[ArrayLike] = None,  # Per-line colors
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-line colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
@@ -1402,6 +1525,7 @@ def LineBeams(
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
     _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:
@@ -1431,6 +1555,8 @@ def LineSegments(
     size: Optional[NumberLike] = None,
     colors: Optional[ArrayLike] = None,
     color_by: Optional[ColorBy] = None,  # Colormap-driven per-segment colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     alphas: Optional[ArrayLike] = None,
@@ -1476,6 +1602,7 @@ def LineSegments(
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
     _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:

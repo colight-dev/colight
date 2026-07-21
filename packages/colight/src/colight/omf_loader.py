@@ -174,6 +174,88 @@ class OMFLineSet:
             **kwargs,
         )
 
+    def line_segments_channels(
+        self,
+        channels: Dict[str, Dict[str, Any]],
+        active_channel: Optional[Union[str, "Any"]] = None,
+        **kwargs: Any,
+    ) -> scene3d.SceneComponent:
+        """Build a LineSegments with switchable color channels from attributes.
+
+        Each entry maps a channel name to ``{attribute?, cmap?, domain?,
+        label?, categories?, ...}``. ``attribute`` (default: the channel name)
+        names the segment attribute to pull per-segment ``values`` from — the
+        same per-segment expansion path as ``color_by``. Categorical channels
+        pass ``categories`` (a first-class table) through unchanged.
+
+        Args:
+            channels: Channel specs keyed by channel name.
+            active_channel: Literal name or a ``Plot.js("$state...")`` ref for
+                the channel selector (None = first channel).
+            **kwargs: Forwarded to ``scene3d.LineSegments`` (size, ...).
+
+        Raises:
+            KeyError: A referenced attribute is not present on the line set.
+        """
+        resolved: Dict[str, scene3d.ColorChannel] = {}
+        for name, spec in channels.items():
+            entry: Dict[str, Any] = dict(spec)
+            # A spec may already carry explicit `values` (e.g. from
+            # binned_categorical); otherwise pull them from a named attribute.
+            attribute = entry.pop("attribute", None)
+            if "values" not in entry:
+                entry["values"] = self.segment_attributes[attribute or name]
+            entry.setdefault("label", name)
+            resolved[name] = entry  # type: ignore[assignment]
+        return scene3d.LineSegments(
+            starts=self.starts.astype(np.float32),
+            ends=self.ends.astype(np.float32),
+            color_channels=resolved,
+            active_channel=active_channel,
+            **kwargs,
+        )
+
+    def binned_categorical(
+        self,
+        attribute: str,
+        edges: Sequence[float],
+        labels: Sequence[str],
+        colors: Optional[Sequence[Sequence[float]]] = None,
+    ) -> Dict[str, Any]:
+        """Synthesize a categorical channel spec by binning a scalar attribute.
+
+        Useful when a line set has no native categorical attribute (e.g. no
+        rock group): bin a continuous grade into labeled classes. Returns a
+        ``color_by``-shaped dict ({values, categories}) ready to drop into a
+        ``color_channels`` entry.
+
+        Args:
+            attribute: Segment attribute to bin.
+            edges: ``len(labels) - 1`` interior bin edges (ascending); values
+                are assigned to bin ``i`` when ``edges[i-1] <= v < edges[i]``.
+            labels: One label per bin.
+            colors: Optional per-bin RGB; None auto-assigns from the palette.
+
+        Raises:
+            ValueError: When ``len(edges) != len(labels) - 1``.
+        """
+        if len(edges) != len(labels) - 1:
+            raise ValueError("binned_categorical needs len(labels) - 1 edges")
+        values = np.asarray(self.segment_attributes[attribute], dtype=np.float64)
+        # np.digitize: code i for edges[i-1] <= v < edges[i]; NaN -> len(labels)
+        # (out of range) which falls to the fallback slot.
+        codes = np.digitize(values, np.asarray(edges, dtype=np.float64)).astype(
+            np.float64
+        )
+        codes[~np.isfinite(values)] = np.nan
+        categories = []
+        for i, lab in enumerate(labels):
+            entry: Dict[str, Any] = {"value": i, "label": lab}
+            if colors is not None:
+                entry["color"] = list(colors[i])
+            categories.append(entry)
+        return {"values": codes, "categories": categories}
+
 
 @dataclass
 class OMFSurface:

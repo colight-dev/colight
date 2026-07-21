@@ -118,6 +118,29 @@ describe("rendering", () => {
     expect(container.textContent).toContain("waste");
   });
 
+  it("renders a first-class category table with declared labels + fallback", () => {
+    const spec = {
+      cmap: "categorical",
+      categorical: true,
+      label: "Lithology",
+      categories: [
+        { value: 0, label: "not logged", color: [0.5, 0.5, 0.5] },
+        { value: 1, label: "Dacite", color: [1, 0, 0] },
+      ],
+      fallback: { label: "unmapped", color: [0, 0, 1] },
+    };
+    const { container } = render(<Legend spec={spec} />);
+    expect(container.textContent).toContain("Lithology");
+    expect(container.textContent).toContain("not logged");
+    expect(container.textContent).toContain("Dacite");
+    expect(container.textContent).toContain("unmapped"); // fallback row
+    // Report carries the category table + fallback for agents.
+    const card = container.querySelector("[data-colight-legend]")!;
+    const report = JSON.parse(card.getAttribute("data-colight-legend")!);
+    expect(report.categories).toHaveLength(2);
+    expect(report.fallback.label).toBe("unmapped");
+  });
+
   it("SceneLegends groups entries by dock position", () => {
     const { container } = render(
       <SceneLegends

@@ -325,6 +325,8 @@ export const BASE_COMPONENT_PROPS: readonly string[] = [
   "colors",
   "color",
   "color_by",
+  "color_channels",
+  "active_channel",
   "alphas",
   "alpha",
   "scales",

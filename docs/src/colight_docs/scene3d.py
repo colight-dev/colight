@@ -263,6 +263,59 @@ cloud
 
 # %% [markdown]
 
+# ## Coloring by data (`color_by`, categorical, `color_channels`)
+#
+# Every instanced primitive (and the line helpers) accepts `color_by` — a
+# colormap spec `{values, cmap, domain, label}` that maps per-instance scalar
+# `values` through a colormap (`colight.colormaps`, pure numpy) into
+# per-instance colors, and attaches a legend the scene renders and
+# `colight inspect` / `screenshot --json` report. `pick-at` dereferences the
+# rendered color for the picked instance.
+#
+# **Categorical.** Pass `categories` as a table of `{value, label, color?}` for
+# the id-maps idiom (lithology/vein codes → labels, e.g. `0 = "not logged"`).
+# Colors are auto-assigned from a colorblind-reasonable palette when omitted;
+# any value matching no category (and `NaN`) lands in a `fallback` slot
+# (default mid-grey, override with `fallback={"label": ..., "color": ...}`).
+# The legend renders discrete swatches, and its machine-readable form carries
+# `categories: [{value, label, color}]` so an agent maps colors → meaning.
+#
+# ```python
+# Cuboid(centers, color_by={
+#     "values": litho_codes,
+#     "categories": [
+#         {"value": 0, "label": "not logged", "color": [0.5, 0.5, 0.5]},
+#         {"value": 1, "label": "Dacite"},   # color auto-assigned
+#         {"value": 2, "label": "Andesite"},
+#     ],
+#     "label": "Lithology",
+# })
+# ```
+#
+# **Switchable channels (`color_channels`).** ParaView's color-by dropdown is
+# *the* viewing UI for block models and drillholes. `color_channels` makes that
+# switch **client-side**: declare several named channels (each a `color_by`-
+# shaped spec), and an `active_channel` (a literal name or a
+# `Plot.js("$state.color_channel")` reference). Every channel's raw `values`
+# ship **once**; Python also ships, per channel, a compact colorizer (a
+# 256-entry RGB LUT for continuous, or the resolved category table for
+# categorical) so the browser recolors the active channel — no re-export, no
+# server round-trip. A switch is a discrete event that re-uploads only the
+# colors buffer; geometry is never rebuilt. The legend follows the active
+# channel, and `pick-at` reports the **full data row** for the picked instance:
+# `channels: {"CU_pct": 0.83, "AG_ppm": 12.4, "Lithology": "Dacite"}`
+# (categorical channels reported as their label). `color_by` and
+# `color_channels` are mutually exclusive.
+#
+# ```python
+# Cuboid(centers, color_channels={
+#     "CU_pct":    {"values": cu, "cmap": "viridis", "domain": (0, 2), "label": "Cu %"},
+#     "AG_ppm":    {"values": ag, "cmap": "magma",   "domain": (0, 80)},
+#     "Lithology": {"values": litho, "categories": [...]},
+# }, active_channel=Plot.js("$state.color_channel"))
+# ```
+
+# %% [markdown]
 # ## Filtering instances (`filter_by`)
 #
 # `filter_by` hides instances whose per-instance scalar `values` fall outside a

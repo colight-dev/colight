@@ -122,6 +122,61 @@ def test_categorical_color_by():
     assert "domain" not in meta
 
 
+CATEGORICAL_SPEC = {
+    "values": [0, 1, 2, 7],
+    "categories": [
+        {"value": 0, "label": "not logged", "color": [0.5, 0.5, 0.5]},
+        {"value": 1, "label": "Dacite"},
+        {"value": 2, "label": "Andesite"},
+    ],
+    "label": "Lithology",
+}
+
+
+def test_category_table_color_by():
+    """First-class category table: {value, label, color?} + fallback slot."""
+    props = props_of(scene3d.PointCloud(centers4, color_by=CATEGORICAL_SPEC))
+    meta = props["color_by"]
+    assert meta["categorical"] is True
+    assert meta["cmap"] == "categorical"
+    assert [c["label"] for c in meta["categories"]] == [
+        "not logged",
+        "Dacite",
+        "Andesite",
+    ]
+    assert [c["value"] for c in meta["categories"]] == [0, 1, 2]
+    # Each category carries a resolved color (declared or auto-palette).
+    assert all(len(c["color"]) == 3 for c in meta["categories"])
+    # Fallback slot for unmatched/NaN values.
+    assert meta["fallback"]["label"] == "unmapped"
+    assert "domain" not in meta
+
+    colors = props["colors"].reshape(-1, 3)
+    # code 0 -> declared grey; code 7 (unmatched) -> fallback grey.
+    np.testing.assert_allclose(colors[0], [0.5, 0.5, 0.5], atol=1e-6)
+    np.testing.assert_allclose(colors[3], [0.5, 0.5, 0.5], atol=1e-6)
+
+
+def test_category_table_nan_fallback():
+    props = props_of(
+        scene3d.PointCloud(
+            centers4,
+            color_by={
+                "values": [1, 2, float("nan"), 99],
+                "categories": [
+                    {"value": 1, "label": "a", "color": [1, 0, 0]},
+                    {"value": 2, "label": "b", "color": [0, 1, 0]},
+                ],
+                "fallback": {"label": "other", "color": [0, 0, 1]},
+            },
+        )
+    )
+    colors = props["colors"].reshape(-1, 3)
+    np.testing.assert_allclose(colors[0], [1, 0, 0], atol=1e-6)
+    np.testing.assert_allclose(colors[2], [0, 0, 1], atol=1e-6)  # NaN -> fallback
+    np.testing.assert_allclose(colors[3], [0, 0, 1], atol=1e-6)  # 99 -> fallback
+
+
 def test_standalone_legend_layout_item():
     legend = scene3d.Legend(cmap="viridis", domain=(0, 2.5), label="Cu %")
     ref, props = legend.for_json()
@@ -310,3 +365,89 @@ def test_pick_at_dereferences_colormapped_colors(e2e_scene):
         assert hit["values"]["color"] == pytest.approx(
             list(expected[instance]), abs=1e-4
         )
+
+
+# Categorical scene: cuboids colored by a declared category table. code 0
+# declares grey; codes 1/2 auto-palette (tab10); code 9 (unmatched) -> fallback.
+CATEGORICAL_E2E_SCENE = """import colight.scene3d as S
+
+(
+    S.Cuboid(
+        centers=[[-3.0, 0, 0], [-1.0, 0, 0], [1.0, 0, 0], [3.0, 0, 0]],
+        half_size=0.5,
+        color_by={
+            "values": [0, 1, 2, 9],
+            "categories": [
+                {"value": 0, "label": "not logged", "color": [0.5, 0.5, 0.5]},
+                {"value": 1, "label": "Dacite"},
+                {"value": 2, "label": "Andesite"},
+            ],
+            "fallback": {"label": "other", "color": [0.9, 0.1, 0.1]},
+            "label": "Lithology",
+        },
+    )
+    + {"defaultCamera": {"position": [0, 0, 12], "target": [0, 0, 0],
+                         "up": [0, 1, 0], "fov": 45}}
+)
+"""
+
+
+@pytest.fixture()
+def categorical_e2e_scene(tmp_path):
+    _require_renderer()
+    scene_path = tmp_path / "categorical_scene.py"
+    scene_path.write_text(CATEGORICAL_E2E_SCENE)
+    return scene_path
+
+
+def test_categorical_screenshot_json_reports_categories(
+    categorical_e2e_scene, tmp_path
+):
+    out = tmp_path / "cat.png"
+    result = CliRunner().invoke(
+        cli_main,
+        [
+            "screenshot",
+            str(categorical_e2e_scene),
+            "--out",
+            str(out),
+            *SIZE_ARGS,
+            "--json",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    leg = payload["legends"][0]
+    assert leg["categorical"] is True
+    labels = [c["label"] for c in leg["categories"]]
+    assert labels == ["not logged", "Dacite", "Andesite"]
+    assert leg["fallback"]["label"] == "other"
+
+
+def test_pick_at_verifies_categorical_colors(categorical_e2e_scene):
+    """The rendered per-instance colors are exactly the declared category
+    colors (or fallback for unmatched), verified through the pick path."""
+    from colight.colormaps import CATEGORICAL_CMAPS
+
+    tab10 = CATEGORICAL_CMAPS["tab10"]
+    expected = {
+        0: [0.5, 0.5, 0.5],  # declared grey
+        1: list(tab10[0]),  # auto-palette (first auto-needed -> tab10[0])
+        2: list(tab10[1]),  # auto-palette (second -> tab10[1])
+        3: [0.9, 0.1, 0.1],  # code 9 unmatched -> fallback
+    }
+    runner = CliRunner()
+    for x, instance in [(79, 0), (160, 1), (240, 2), (321, 3)]:
+        result = runner.invoke(
+            cli_main,
+            ["pick-at", str(categorical_e2e_scene), f"{x},200", *SIZE_ARGS, "--json"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        hits = payload["hits"]
+        assert hits, payload
+        hit = hits[0]
+        assert hit["instance"] == instance
+        assert hit["values"]["color"] == pytest.approx(expected[instance], abs=1e-2)

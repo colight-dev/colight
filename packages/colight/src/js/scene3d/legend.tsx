@@ -23,12 +23,25 @@ export type LegendPosition =
   | "bottom-left"
   | "bottom-right";
 
+/** One declared category: a value code, its domain label, and swatch. */
+export interface CategoryEntry {
+  value: number;
+  label: string;
+  color: number[];
+}
+
+/** The fallback slot for unmatched/NaN categorical values. */
+export interface FallbackEntry {
+  label: string;
+  color: number[];
+}
+
 /**
  * Colormap spec attached to a component as `color_by` (JSON produced by
  * colight/colormaps.py — snake_case-free single-word keys).
  */
 export interface ColorByMeta {
-  /** Colormap name (e.g. "viridis", "tab10"). */
+  /** Colormap name (e.g. "viridis", "tab10", "categorical"). */
   cmap: string;
   /** True for categorical palettes, false for continuous ramps. */
   categorical?: boolean;
@@ -38,14 +51,30 @@ export interface ColorByMeta {
   domain?: [number, number];
   /** Continuous only: RGB anchor colors of the ramp, in [0, 1]. */
   stops?: number[][];
-  /** Categorical only: one RGB swatch per category, in [0, 1]. */
+  /** Ordinal categorical: one RGB swatch per category, in [0, 1]. */
   colors?: number[][];
-  /** Categorical only: display names for codes 0..K-1. */
-  categories?: string[];
+  /**
+   * Categorical: display names for ordinal codes (string[]) OR the first-class
+   * category table ({value, label, color}[]) — the xmi id-maps idiom.
+   */
+  categories?: string[] | CategoryEntry[];
+  /** Declared-category mode: fallback swatch for unmatched/NaN values. */
+  fallback?: FallbackEntry;
   /** False suppresses the in-scene legend. */
   legend?: boolean;
   /** Dock corner (default "top-right"). */
   position?: LegendPosition;
+}
+
+/** Whether `categories` is the first-class {value, label, color} table. */
+export function isCategoryTable(
+  categories: ColorByMeta["categories"],
+): categories is CategoryEntry[] {
+  return (
+    Array.isArray(categories) &&
+    categories.length > 0 &&
+    typeof categories[0] === "object"
+  );
 }
 
 // =============================================================================
@@ -92,6 +121,7 @@ export function legendReport(
   if (spec.label !== undefined) report.label = spec.label;
   if (spec.domain !== undefined) report.domain = spec.domain;
   if (spec.categories !== undefined) report.categories = spec.categories;
+  if (spec.fallback !== undefined) report.fallback = spec.fallback;
   if (component) {
     report.component = component.index;
     report.type = component.type;
@@ -113,20 +143,34 @@ interface LegendCardProps {
 function LegendCard({ spec, component }: LegendCardProps) {
   const report = JSON.stringify(legendReport(spec, component));
 
+  const swatchRow = (rgb: number[], text: string, key: React.Key) => (
+    <div key={key} className={tw("flex items-center gap-[6px]")}>
+      <span
+        className={tw("inline-block w-[12px] h-[12px] rounded-[2px]")}
+        style={{
+          background: cssColor(rgb),
+          border: "1px solid rgba(0,0,0,0.25)",
+        }}
+      />
+      <span>{text}</span>
+    </div>
+  );
+
   const body = spec.categorical ? (
     <div className={tw("flex flex-col gap-[3px]")}>
-      {(spec.colors ?? []).map((rgb, i) => (
-        <div key={i} className={tw("flex items-center gap-[6px]")}>
-          <span
-            className={tw("inline-block w-[12px] h-[12px] rounded-[2px]")}
-            style={{
-              background: cssColor(rgb),
-              border: "1px solid rgba(0,0,0,0.25)",
-            }}
-          />
-          <span>{spec.categories?.[i] ?? String(i)}</span>
-        </div>
-      ))}
+      {isCategoryTable(spec.categories)
+        ? // First-class category table: swatch + declared domain label.
+          spec.categories.map((cat, i) => swatchRow(cat.color, cat.label, i))
+        : // Ordinal palette: colors[] indexed by code, categories[] labels.
+          (spec.colors ?? []).map((rgb, i) =>
+            swatchRow(
+              rgb,
+              (spec.categories as string[] | undefined)?.[i] ?? String(i),
+              i,
+            ),
+          )}
+      {spec.fallback &&
+        swatchRow(spec.fallback.color, spec.fallback.label, "fallback")}
     </div>
   ) : (
     <div>

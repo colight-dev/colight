@@ -162,3 +162,113 @@ class TestResolveColorBy:
     def test_unknown_key_raises(self):
         with pytest.raises(ValueError, match="unknown color_by keys"):
             colormaps.resolve_color_by({"values": [0.0], "vmax": 1.0})
+
+
+class TestResolveCategorical:
+    """First-class category tables (xmi id-maps idiom): {value, label, color?}."""
+
+    CATS = [
+        {"value": 0, "label": "not logged", "color": [0.5, 0.5, 0.5]},
+        {"value": 1, "label": "Dacite"},
+        {"value": 2, "label": "Andesite"},
+    ]
+
+    def test_declared_colors_and_auto_palette(self):
+        colors, meta = colormaps.resolve_categorical(
+            [0, 1, 2], self.CATS, label="Lithology"
+        )
+        assert colors.shape == (3, 3)
+        # Declared grey for code 0.
+        np.testing.assert_allclose(colors[0], [0.5, 0.5, 0.5], atol=1e-6)
+        # Auto-palette (tab10 blue) for code 1.
+        np.testing.assert_allclose(
+            colors[1], colormaps.CATEGORICAL_CMAPS["tab10"][0], atol=1e-6
+        )
+        assert meta["categorical"] is True
+        assert meta["cmap"] == "categorical"
+        assert meta["label"] == "Lithology"
+        assert [c["label"] for c in meta["categories"]] == [
+            "not logged",
+            "Dacite",
+            "Andesite",
+        ]
+        assert [c["value"] for c in meta["categories"]] == [0, 1, 2]
+
+    def test_nan_and_unmatched_use_fallback(self):
+        colors, meta = colormaps.resolve_categorical([0, 7, float("nan")], self.CATS)
+        # Default fallback is mid-grey.
+        np.testing.assert_allclose(colors[1], [0.5, 0.5, 0.5], atol=1e-6)
+        np.testing.assert_allclose(colors[2], [0.5, 0.5, 0.5], atol=1e-6)
+        assert meta["fallback"]["label"] == "unmapped"
+
+    def test_custom_fallback(self):
+        _colors, meta = colormaps.resolve_categorical(
+            [9], self.CATS, fallback={"label": "other", "color": [1.0, 0.0, 0.0]}
+        )
+        assert meta["fallback"]["label"] == "other"
+        assert meta["fallback"]["color"] == [1.0, 0.0, 0.0]
+
+    def test_arbitrary_value_codes(self):
+        # Codes need not be 0..K-1 (e.g. sparse lithology ids).
+        cats = [{"value": 10, "label": "a"}, {"value": 42, "label": "b"}]
+        colors, _meta = colormaps.resolve_categorical([42, 10, 5], cats)
+        # code 42 -> b's color, code 5 unmatched -> fallback grey.
+        np.testing.assert_allclose(colors[2], [0.5, 0.5, 0.5], atol=1e-6)
+        assert not np.allclose(colors[0], colors[1])
+
+    def test_missing_label_raises(self):
+        with pytest.raises(ValueError, match="label"):
+            colormaps.resolve_categorical([0], [{"value": 0}])
+
+    def test_resolve_color_by_routes_category_table(self):
+        colors, meta = colormaps.resolve_color_by(
+            {"values": [0, 1], "categories": self.CATS, "label": "L"}
+        )
+        assert meta["categorical"] is True
+        assert "categories" in meta and isinstance(meta["categories"][0], dict)
+        assert colors.shape == (2, 3)
+
+    def test_domain_with_category_table_raises(self):
+        with pytest.raises(ValueError, match="continuous"):
+            colormaps.resolve_color_by(
+                {"values": [0], "categories": self.CATS, "domain": (0, 1)}
+            )
+
+
+class TestContinuousLut:
+    def test_shape_and_endpoints(self):
+        lut = colormaps.continuous_lut("viridis")
+        assert lut.shape == (256, 3)
+        assert lut.dtype == np.float32
+        np.testing.assert_allclose(lut[0], VIRIDIS_LO, atol=1e-6)
+        np.testing.assert_allclose(lut[-1], VIRIDIS_HI, atol=1e-6)
+
+    def test_rejects_categorical(self):
+        with pytest.raises(ValueError, match="continuous"):
+            colormaps.continuous_lut("tab10")
+
+
+class TestResolveChannel:
+    def test_continuous_channel_ships_lut(self):
+        colors, legend, colorizer = colormaps.resolve_channel(
+            {"values": [0.0, 1.0, 2.0], "cmap": "viridis", "domain": (0, 2)}
+        )
+        assert colors.shape == (3, 3)
+        assert colorizer["kind"] == "continuous"
+        assert len(colorizer["lut"]) == 256
+        assert colorizer["domain"] == [0.0, 2.0]
+        assert legend["categorical"] is False
+
+    def test_categorical_channel_ships_table(self):
+        _colors, legend, colorizer = colormaps.resolve_channel(
+            {
+                "values": [0, 1],
+                "categories": [
+                    {"value": 0, "label": "a"},
+                    {"value": 1, "label": "b"},
+                ],
+            }
+        )
+        assert colorizer["kind"] == "categorical"
+        assert [c["label"] for c in colorizer["categories"]] == ["a", "b"]
+        assert legend["categorical"] is True

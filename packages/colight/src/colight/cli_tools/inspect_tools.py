@@ -365,6 +365,8 @@ def legend_payload(
     entry["categorical"] = bool(color_by.get("categorical"))
     if "categories" in color_by:
         entry["categories"] = color_by["categories"]
+    if "fallback" in color_by:
+        entry["fallback"] = color_by["fallback"]
     return entry
 
 
@@ -571,6 +573,13 @@ def inspect_visual_data(
     ]
     if filters:
         payload["filters"] = filters
+    channels = [
+        {"component": component.path, **component.color_channels}
+        for component in state.components
+        if component.color_channels is not None
+    ]
+    if channels:
+        payload["color_channels"] = channels
     clip_planes = [clip_plane_payload(p) for p in _find_clip_planes(data)]
     if clip_planes:
         payload["clip_planes"] = clip_planes

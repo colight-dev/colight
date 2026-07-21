@@ -96,6 +96,67 @@ scene3d.Scene(
     origin=ORIGIN,
 )
 
+# ## Drillholes with a channel selector (ParaView-style)
+#
+# ParaView's color-by dropdown *is* the viewing UI: geologists truncate
+# exports to a handful of attributes and re-export to change which one drives
+# the colors. Scene3D's `color_channels` makes that switch client-side — every
+# channel's raw values ship ONCE, and a `$state`-driven dropdown recolors the
+# active channel in the browser (no re-export, no server round-trip).
+#
+# Here the drillholes carry a continuous **Cu %** channel and a **grade class**
+# categorical channel synthesized by binning Cu (the Wolfpass assay has no
+# native rock-group attribute; `binned_categorical` derives one). Categorical
+# channels report their class *labels* on `pick-at` — "click an interval, read
+# the data row".
+
+GRADE_CLASS = drillholes.binned_categorical(
+    "CU_pct",
+    edges=[0.3, 0.7, 1.2],
+    labels=["trace", "low", "moderate", "high"],
+    colors=[
+        [0.85, 0.85, 0.85],
+        [0.55, 0.75, 0.95],
+        [0.95, 0.75, 0.35],
+        [0.85, 0.20, 0.20],
+    ],
+)
+
+(
+    scene3d.Scene(
+        drillholes.line_segments_channels(
+            channels={
+                "Cu %": {
+                    "attribute": "CU_pct",
+                    "cmap": "viridis",
+                    "domain": (0.0, 2.0),
+                },
+                "Grade class": GRADE_CLASS,
+            },
+            active_channel=Plot.js("$state.color_channel"),
+            size=10.0,
+        ),
+        collars.point_cloud(color=[0.95, 0.26, 0.21], size=25.0),
+        topo.mesh(
+            color=[0.82, 0.76, 0.65],
+            decorations=[scene3d.deco([0], alpha=0.25)],
+        ),
+        origin=ORIGIN,
+    )
+    | Plot.Slider(
+        "color_channel",
+        options=["Cu %", "Grade class"],
+        init="Cu %",
+        label="Color by",
+    )
+)
+
+# Flipping the dropdown from "Cu %" to "Grade class" recolors all 8,583
+# intervals in the browser — the viridis grade ramp becomes four discrete
+# grade classes (with a legend of swatches), and `pick-at` on any interval now
+# reports both `channels: {"Cu %": 0.83, "Grade class": "moderate"}`. Nothing
+# re-uploads: only the per-instance colors buffer is rewritten.
+
 # ## Block model above cutoff
 #
 # The block model holds estimated Cu grade for 1,689,600 ten-metre cells.

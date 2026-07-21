@@ -2827,11 +2827,28 @@ export function SceneImpl({
         ? createCameraParams(activeCameraRef.current)
         : null,
       origin: originRef.current ?? null,
-      components: comps.map((comp, index) => ({
-        component: index,
-        type: comp.type,
-        count: primitiveRegistry[comp.type]?.getElementCount(comp) ?? 0,
-      })),
+      components: comps.map((comp, index) => {
+        const info: Record<string, unknown> = {
+          component: index,
+          type: comp.type,
+          count: primitiveRegistry[comp.type]?.getElementCount(comp) ?? 0,
+        };
+        // Switchable color channels: report the active channel + the available
+        // channels (name + label + kind) so an agent learns it can switch by
+        // setting the $state ref that drives active_channel.
+        const channels = (comp as any).color_channels as
+          | Record<string, any>
+          | undefined;
+        if (channels) {
+          info.active_channel = (comp as any)._activeChannel ?? null;
+          info.channels = Object.keys(channels).map((name) => ({
+            name,
+            label: channels[name].label ?? name,
+            kind: channels[name].colorizer?.kind ?? "continuous",
+          }));
+        }
+        return info;
+      }),
       // Named selections (resolved membership) so the CLI can resolve a
       // selection name to component + instances and report pick-at membership.
       selections: (selectionReports ?? []).map((s) => ({
