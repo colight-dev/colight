@@ -19,7 +19,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "peerDependencies": {
     "react": ">=18"

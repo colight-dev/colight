@@ -8,10 +8,10 @@ A typical and recommended workflow is to use colight with VS Code's Python Inter
 
 Of course, one can also use colight from within Jupyter Labs and Colab.
 
-If jupyter has trouble finding a kernel to evaluate from, you can install one (using poetry) via:
+If jupyter has trouble finding a kernel to evaluate from, you can install one via:
 
 ```bash
-poetry run python -m ipykernel install --user --name colight
+uv run python -m ipykernel install --user --name colight
 ```
 
 ### Pre-commit Hooks

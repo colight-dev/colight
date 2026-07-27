@@ -9,15 +9,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe("Server Integration Tests", () => {
   let serverProcess;
+  let baseUrl;
+  let wsUrl;
   const testDir = join(__dirname, "..", "integration-test-fixture");
-  const port = 5569;
-  const baseUrl = `http://localhost:${port}`;
-  const wsUrl = `ws://localhost:${port + 1}`;
 
   beforeAll(async () => {
     console.log("Starting server with test directory:", testDir);
 
-    // Start the server
+    // Start the server on an ephemeral port (--port 0) so concurrent test
+    // runs in other checkouts/workers can never collide on a fixed port.
     serverProcess = spawn(
       "uv",
       [
@@ -28,77 +28,73 @@ describe("Server Integration Tests", () => {
         "live",
         testDir,
         "--port",
-        String(port),
+        "0",
         "--no-open",
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
         cwd: join(__dirname, "..", "..", "..", ".."), // Go to project root
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
       },
     );
 
-    // Log server output for debugging
-    serverProcess.stdout.on("data", (data) => {
-      console.log("Server stdout:", data.toString());
-    });
     serverProcess.stderr.on("data", (data) => {
       console.error("Server stderr:", data.toString());
     });
 
-    // Wait for server to start
-    await new Promise((resolve, reject) => {
-      const maxAttempts = 10; // Allow extra time for server startup in CI
-      let attempts = 0;
-      let serverFailed = false;
-
-      // Check if server process exited
-      serverProcess.on("exit", (code) => {
-        serverFailed = true;
-        reject(new Error(`Server process exited with code ${code}`));
-      });
-
-      const checkServer = async () => {
-        if (serverFailed) return;
-
-        attempts++;
-        console.log(
-          `Checking server availability (attempt ${attempts}/${maxAttempts})...`,
+    // The server prints "LiveServer running at http://<host>:<port>" only
+    // after BOTH the HTTP and WebSocket servers are bound and listening.
+    // Parse the resolved port from that line.
+    const port = await new Promise((resolve, reject) => {
+      let output = "";
+      const timer = setTimeout(() => {
+        reject(
+          new Error(`Server startup timed out. Output so far:\n${output}`),
         );
+      }, 30000);
 
-        try {
-          const response = await fetch(baseUrl);
-          // Accept any response from the server (including 404) as "server is ready"
-          if (response) {
-            console.log(`Server is ready! (status: ${response.status})`);
-            resolve();
-            return;
-          }
-        } catch (error) {
-          console.log(`Server not ready yet: ${error.message}`);
+      serverProcess.stdout.on("data", (data) => {
+        const text = data.toString();
+        output += text;
+        console.log("Server stdout:", text);
+        const match = output.match(
+          /LiveServer running at http:\/\/[^:]+:(\d+)/,
+        );
+        if (match) {
+          clearTimeout(timer);
+          resolve(parseInt(match[1], 10));
         }
-
-        if (attempts >= maxAttempts) {
-          reject(
-            new Error(
-              `Server startup timeout after ${maxAttempts} attempts (${maxAttempts} seconds)`,
-            ),
-          );
-        } else {
-          setTimeout(checkServer, 1000);
-        }
-      };
-
-      // Check immediately since server should start fast
-      setTimeout(checkServer, 500);
+      });
+      serverProcess.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(
+          new Error(
+            `Server process exited with code ${code}. Output:\n${output}`,
+          ),
+        );
+      });
+      serverProcess.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
     });
+
+    baseUrl = `http://localhost:${port}`;
+    wsUrl = `ws://localhost:${port + 1}`;
+    console.log(`Server ready: ${baseUrl} (ws: ${wsUrl})`);
   }, 60000); // 60 second timeout for setup
 
   afterAll(async () => {
-    // Kill server
-    if (serverProcess) {
+    // Kill server; don't wait on "close" if the process is already gone.
+    if (serverProcess && serverProcess.exitCode === null) {
       console.log("Stopping server...");
+      const closed = new Promise((resolve) =>
+        serverProcess.once("close", resolve),
+      );
       serverProcess.kill();
-      await new Promise((resolve) => serverProcess.on("close", resolve));
+      const forceKill = setTimeout(() => serverProcess.kill("SIGKILL"), 5000);
+      await closed;
+      clearTimeout(forceKill);
     }
   });
 

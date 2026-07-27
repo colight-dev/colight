@@ -1,5 +1,6 @@
 **/*_build.js
 **/*.mjs
+!examples/streaming/*.mjs
 *.ipynb
 *.slides.html
 meta.json
@@ -28,8 +29,11 @@ docs/api/
 planning
 **/output-panel.js
 site-build
-*.vsix 
+/output/
+/.playwright-cli/
+*.vsix
 .vscode-test
-packages/colight-vscode/media/output-panel.js 
-packages/colight-vscode/out.claude/settings.local.json
-.claude
+packages/colight-vscode/media/output-panel.js
+packages/colight-vscode/out
+.claude/*
+!.claude/skills/

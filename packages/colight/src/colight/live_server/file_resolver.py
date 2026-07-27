@@ -17,12 +17,18 @@ def find_files(
 
     if input_path.is_file():
         # Single file mode
-        return [input_path] if matches_patterns(input_path, include, ignore) else []
+        return (
+            [input_path]
+            if matches_patterns(input_path, include, ignore, base_path=input_path)
+            else []
+        )
 
     # Directory mode
     for pattern in include:
         for file_path in input_path.rglob(pattern):
-            if file_path.is_file() and matches_patterns(file_path, include, ignore):
+            if file_path.is_file() and matches_patterns(
+                file_path, include, ignore, base_path=input_path
+            ):
                 files.append(file_path)
 
     return sorted(set(files))  # Remove duplicates and sort
@@ -32,13 +38,34 @@ def matches_patterns(
     file_path: pathlib.Path,
     include_patterns: List[str],
     ignore_patterns: Optional[List[str]] = None,
+    base_path: Optional[pathlib.Path] = None,
 ) -> bool:
-    """Check if file matches include patterns and doesn't match ignore patterns."""
-    file_str = str(file_path)
+    """Check if file matches include patterns and doesn't match ignore patterns.
+
+    Args:
+        file_path: Path to check
+        include_patterns: Patterns the file must match
+        ignore_patterns: Patterns that exclude the file
+        base_path: The served root. When given, patterns are matched against
+            the path relative to it, so directory names *above* the root
+            (e.g. a checkout living inside a hidden directory like
+            ".claude/worktrees/...") never affect matching. Falls back to the
+            bare file name when file_path is the base itself, and to the full
+            path when file_path lies outside base_path.
+    """
+    match_path = file_path
+    if base_path is not None:
+        try:
+            rel = file_path.relative_to(base_path)
+            match_path = rel if rel.parts else pathlib.Path(file_path.name)
+        except ValueError:
+            pass
+
+    file_str = str(match_path)
 
     # First check ignore patterns - check all parts of the path
     if ignore_patterns:
-        for part in file_path.parts:
+        for part in match_path.parts:
             for pattern in ignore_patterns:
                 if fnmatch.fnmatch(part, pattern):
                     return False
@@ -151,7 +178,10 @@ class FileResolver:
         """
 
         return matches_patterns(
-            file_path, self.include, merge_ignore_patterns(self.ignore)
+            file_path,
+            self.include,
+            merge_ignore_patterns(self.ignore),
+            base_path=self.input_path,
         )
 
     def get_all_files(self) -> List[str]:

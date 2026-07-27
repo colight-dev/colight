@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 import colight.plot_defs as plot_defs
-from colight.core import Frames, Import, Slider, case, cond, katex, md
+from colight.core import Frames, Import, Slider, case, channel, cond, katex, md
 from colight.env import configure
 from colight.layout import (
     Column,
@@ -592,6 +592,7 @@ __all__ = [
     "onChange",
     "Frames",
     "Slider",
+    "channel",
     # ## Layout
     "Column",
     "Grid",

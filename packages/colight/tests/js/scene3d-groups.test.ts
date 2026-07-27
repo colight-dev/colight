@@ -511,7 +511,11 @@ describe("scene3d groups", () => {
         children: [innerGroup],
       };
 
-      const { components: flattened, transforms } = flattenGroups([outerGroup]);
+      const {
+        components: flattened,
+        transforms,
+        namedTransforms,
+      } = flattenGroups([outerGroup]);
 
       expect(flattened.length).toBe(1);
       const pc = flattened[0] as PointCloudComponentConfig;
@@ -521,11 +525,24 @@ describe("scene3d groups", () => {
       expect(pc.centers[1]).toBeCloseTo(0);
       expect(pc.centers[2]).toBeCloseTo(0);
 
-      // Transform should be composed: outer [0,1,0] + inner [1,0,0] = [1,1,0]
-      expect((flattened[0] as any)._transformIndex).toBe(1);
-      expect(transforms[1].position[0]).toBeCloseTo(1);
-      expect(transforms[1].position[1]).toBeCloseTo(1);
-      expect(transforms[1].position[2]).toBeCloseTo(0);
+      // Transform should be composed: outer [0,1,0] + inner [1,0,0] = [1,1,0].
+      // The component's slot is looked up rather than hardcoded: named groups
+      // also claim slots (so geometry can reference them by name), so the
+      // component's index depends on how many names precede it.
+      const componentSlot = (flattened[0] as any)._transformIndex as number;
+      expect(componentSlot).toBeGreaterThan(0);
+      expect(transforms[componentSlot].position[0]).toBeCloseTo(1);
+      expect(transforms[componentSlot].position[1]).toBeCloseTo(1);
+      expect(transforms[componentSlot].position[2]).toBeCloseTo(0);
+
+      // Both named groups get their own palette slot, holding their COMPOSED
+      // world transform - "inner" is outer's [0,1,0] plus its own [1,0,0].
+      const outerSlot = namedTransforms.get("outer")!;
+      const innerSlot = namedTransforms.get("inner")!;
+      expect(transforms[outerSlot].position[0]).toBeCloseTo(0);
+      expect(transforms[outerSlot].position[1]).toBeCloseTo(1);
+      expect(transforms[innerSlot].position[0]).toBeCloseTo(1);
+      expect(transforms[innerSlot].position[1]).toBeCloseTo(1);
 
       // Group path should include both names
       expect((pc as any)._groupPath).toEqual(["outer", "inner"]);

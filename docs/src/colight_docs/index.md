@@ -7,10 +7,12 @@ Colight is a Python library for creating interactive, JavaScript-based visuals. 
 Key features:
 
 - Seamless integration with [Observable Plot](https://observablehq.com/plot/), a layered grammar-of-graphics based library, for creating rich, interactive plots
+- WebGPU-powered 3D scenes via [Scene3D](scene3d.py) — point clouds, ellipsoids, cuboids, meshes, and more
 - Compose plots, HTML elements, and interactive widgets using a simple, declarative syntax
 - Animate plots with built-in support for sliders and frame-by-frame animations
 - Embed visuals in Jupyter notebooks or standalone HTML files
 - Customize every aspect of your visuals with JavaScript when needed
+- A [CLI](learn-more/cli.py) for live-editing notebook-style `.py` documents and publishing them to Markdown/HTML
 
 ### Installation
 

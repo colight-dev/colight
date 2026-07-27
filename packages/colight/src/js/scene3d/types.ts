@@ -24,6 +24,13 @@ export interface PrimitiveSpec<ConfigType> {
   coerce?: (props: Record<string, any>) => Record<string, any>;
 
   /**
+   * Complete set of prop names this primitive accepts (data props in
+   * snake_case plus the shared framework props). Used by the compiler to
+   * warn loudly about unknown keys instead of silently dropping them.
+   */
+  knownProps?: Set<string>;
+
+  /**
    * Fields that should be coerced to typed arrays.
    * Used by Scene to normalize NdArrayView and regular arrays.
    */
@@ -57,6 +64,18 @@ export interface PrimitiveSpec<ConfigType> {
    * Number of floats needed per instance for picking data.
    */
   floatsPerPicking: number;
+
+  /**
+   * The instance vertex buffer layouts handed to the GPU pipelines.
+   *
+   * Exposed for introspection so the invariant that keeps instanced drawing
+   * correct is checkable: `arrayStride` MUST equal
+   * `floatsPerInstance/Picking * 4`, since the CPU fill writes at the float
+   * count while the GPU steps at the declared stride. When they disagree,
+   * instance 0 still looks right and every later instance reads garbage.
+   */
+  renderInstanceLayout: VertexBufferLayout;
+  pickingInstanceLayout: VertexBufferLayout;
 
   /**
    * Returns the centers of all instances in this component.
@@ -248,6 +267,16 @@ export interface PrimitiveSpec<ConfigType> {
    * These buffers are shared across all instances of the primitive.
    */
   createGeometryResource(device: GPUDevice): GeometryResource;
+
+  /**
+   * Rebuild this primitive's geometry bytes without touching the GPU (D1b).
+   * Used to write new contents into an existing GeometryResource when the
+   * geometry's identity is unchanged but its contents are not.
+   */
+  buildGeometryData?(): GeometryData;
+
+  /** Floats per vertex in the geometry buffer layout. */
+  geometryStrideFloats?: number;
 }
 
 export interface Decoration {
@@ -304,8 +333,57 @@ export interface ElementConstants {
  */
 export type RenderLayer = "scene" | "overlay";
 
+/**
+ * Prop names shared by every primitive via BaseComponentConfig.
+ * Data props are snake_case (matching the Python API); framework props
+ * (callbacks, hover/outline styling, picking options) are camelCase.
+ * Used to build each spec's `knownProps` set for unknown-key warnings.
+ */
+export const BASE_COMPONENT_PROPS: readonly string[] = [
+  "type",
+  "constants",
+  "layer",
+  "filter_by",
+  "colors",
+  "color",
+  "color_by",
+  "color_channels",
+  "active_channel",
+  "alphas",
+  "alpha",
+  "scales",
+  "scale",
+  "decorations",
+  "hoverProps",
+  "pickingScale",
+  "outline",
+  "outlineColor",
+  "outlineWidth",
+  "onHover",
+  "onClick",
+  "onDragStart",
+  "onDrag",
+  "onDragEnd",
+  "dragConstraint",
+];
+
 export interface BaseComponentConfig {
   constants?: ElementConstants;
+
+  /**
+   * Per-instance filter: hide instances whose scalar `values` fall outside
+   * [min, max] (NaN values are always hidden). `values` is uploaded once as
+   * instance data; min/max live in a small per-component uniform slot, so a
+   * threshold change (e.g. a $state slider) does not re-upload instance data.
+   * Filtered-out instances are also unpickable. `min`/`max` are resolved to
+   * numbers before reaching JS.
+   */
+  filter_by?: {
+    values: Float32Array | number[];
+    min?: number | null;
+    max?: number | null;
+    label?: string;
+  };
 
   /**
    * Render layer for this component.
@@ -320,6 +398,14 @@ export interface BaseComponentConfig {
    * Each instance requires 3 consecutive values in the range [0,1].
    */
   colors?: Float32Array;
+
+  /**
+   * Colormap legend spec attached by the Python side when colors were
+   * computed via `color_by` (see js/scene3d/legend.tsx `ColorByMeta`).
+   * Metadata only — rendering consumes `colors`; the Scene renders a
+   * legend overlay from this.
+   */
+  color_by?: import("./legend").ColorByMeta;
 
   /**
    * Per-instance alpha (opacity) values.
@@ -627,6 +713,22 @@ export interface GeometryResource {
   geometryKey?: unknown;
 }
 
+/**
+ * GPU resources backing one mesh's per-vertex weighted transform references
+ * (D2): the storage buffer the blended vertex shader pulls from, and the
+ * group-1 bind group that exposes it.
+ *
+ * Kept separate from `GeometryResource` on purpose: the references are NOT in
+ * the interleaved vertex buffer, so a weights-only change writes this buffer
+ * and touches nothing else. `key` is the contents signal (the spec's
+ * `transformRefsKey`), compared exactly as `geometryKey` is.
+ */
+export interface TransformRefResource {
+  buffer: GPUBuffer;
+  bindGroup: GPUBindGroup;
+  key?: unknown;
+}
+
 export interface GeometryResources {
   [key: string]: GeometryResource | null;
   PointCloud: GeometryResource | null;
@@ -655,7 +757,12 @@ export interface RenderObject {
   indexFormat?: GPUIndexFormat;
   instanceCount: number;
   vertexCount: number;
-  textureBindGroup?: GPUBindGroup;
+  /**
+   * Primitive-local bind group (group 1), when this primitive declares one:
+   * a texture (ImagePlane, textured meshes) or a mesh's per-vertex
+   * transform-reference buffer. Group 0 is the shared scene bindings.
+   */
+  bindGroup1?: GPUBindGroup;
 
   pickingPipeline: GPURenderPipeline;
   /** Pipeline for overlay picking (depthCompare: "always", no depth write) */

@@ -6,8 +6,13 @@
  * produce consistent, correctly normalized output.
  */
 
-import { describe, it, expect } from "vitest";
-import { compileScene, RawComponent } from "../../src/js/scene3d/compiler";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  clearInternedSpecSets,
+  compileScene,
+  RawComponent,
+} from "../../src/js/scene3d/compiler";
+import { clearInlineMeshCache } from "../../src/js/scene3d/inlineMesh";
 import { ImageProjectionProps } from "../../src/js/scene3d/helpers";
 import { GroupConfig } from "../../src/js/scene3d/groups";
 
@@ -458,5 +463,104 @@ describe("Scene Compiler - Transform Array", () => {
 
     // Identity + 2 group transforms
     expect(result.transforms.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// =============================================================================
+// primitiveSpecs Identity Stability
+// =============================================================================
+
+/**
+ * `primitiveSpecs` identity is a signal, not an accident: downstream it gates
+ * re-initialising geometry resources and clearing the pipeline cache. A scene
+ * recompiles on every `$state` change, so a fresh object per compile would tear
+ * down and rebuild GPU resources for a scene that did not change.
+ *
+ * Contents changes travel separately on `specContentsKey`, precisely so an
+ * inline mesh deforming under a stable topology rewrites buffers WITHOUT
+ * touching pipelines.
+ */
+describe("Scene Compiler - primitiveSpecs identity", () => {
+  const POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const INDICES = new Uint32Array([0, 1, 2]);
+
+  function meshScene(
+    positions: Float32Array = POSITIONS,
+    geometryKey?: string,
+  ): RawComponent[] {
+    return [
+      {
+        type: "Mesh",
+        geometry: { positions, indices: INDICES },
+        ...(geometryKey !== undefined ? { geometryKey } : {}),
+        centers: new Float32Array([0, 0, 0]),
+      } as any,
+    ];
+  }
+
+  beforeEach(() => {
+    clearInlineMeshCache();
+    clearInternedSpecSets();
+  });
+
+  it("two successive compiles with unchanged specs return the identical object", () => {
+    const first = compileScene(meshScene());
+    const second = compileScene(meshScene());
+
+    expect(first.primitiveSpecs).toBeDefined();
+    expect(second.primitiveSpecs).toBe(first.primitiveSpecs);
+  });
+
+  it("a changed spec set returns a new object", () => {
+    const oneMesh = compileScene(meshScene());
+    const twoMeshes = compileScene([...meshScene(), ...meshScene()]);
+
+    expect(twoMeshes.primitiveSpecs).not.toBe(oneMesh.primitiveSpecs);
+    expect(Object.keys(twoMeshes.primitiveSpecs!).length).toBe(
+      Object.keys(oneMesh.primitiveSpecs!).length + 1,
+    );
+  });
+
+  it("stability is per spec set, so two scenes do not thrash each other", () => {
+    // Interleave compiles of two DIFFERENT scenes, as two Scene instances on
+    // one page would. A single shared "previous result" slot would make each
+    // compile miss, handing out a fresh object every time.
+    const sceneA1 = compileScene(meshScene(POSITIONS, "a"));
+    const sceneB1 = compileScene(meshScene(POSITIONS, "b"));
+    const sceneA2 = compileScene(meshScene(POSITIONS, "a"));
+    const sceneB2 = compileScene(meshScene(POSITIONS, "b"));
+
+    expect(sceneA2.primitiveSpecs).toBe(sceneA1.primitiveSpecs);
+    expect(sceneB2.primitiveSpecs).toBe(sceneB1.primitiveSpecs);
+    expect(sceneA1.primitiveSpecs).not.toBe(sceneB1.primitiveSpecs);
+  });
+
+  it("an in-place deformation keeps specs identity but changes the contents key", () => {
+    // Fresh position arrays under a stable geometry_key: inlineMesh.ts reuses
+    // the cached spec OBJECT and only bumps its geometryKey. The registry must
+    // stay stable (no pipeline rebuild) while the contents key moves (buffers
+    // get rewritten).
+    const before = compileScene(meshScene(POSITIONS, "deforming"));
+    const deformed = new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]);
+    const after = compileScene(meshScene(deformed, "deforming"));
+
+    expect(after.primitiveSpecs).toBe(before.primitiveSpecs);
+    expect(after.specContentsKey).not.toBe(before.specContentsKey);
+  });
+
+  it("a recompile with genuinely unchanged geometry leaves the contents key alone", () => {
+    const first = compileScene(meshScene(POSITIONS, "stable"));
+    const second = compileScene(meshScene(POSITIONS, "stable"));
+
+    expect(second.primitiveSpecs).toBe(first.primitiveSpecs);
+    expect(second.specContentsKey).toBe(first.specContentsKey);
+  });
+
+  it("scenes without any specs report undefined rather than a shared empty object", () => {
+    const result = compileScene([
+      { type: "PointCloud", centers: new Float32Array([0, 0, 0]) } as any,
+    ]);
+    expect(result.primitiveSpecs).toBeUndefined();
+    expect(result.specContentsKey).toBeUndefined();
   });
 });

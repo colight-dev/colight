@@ -1,5 +1,8 @@
 import pathlib
-from typing import Any, Optional, Union
+import re
+from typing import Any, Optional, Sequence, Union
+
+import numpy as np
 
 from colight.components.slider import Slider
 from colight.layout import (
@@ -229,12 +232,113 @@ katex = JSRef("katex")
 """Render a TeX string, in a LayoutItem."""
 
 
+CHANNEL_RULES = ("nearest", "step", "linear", "qlerp")
+"""The resampling rules a `channel` may declare."""
+
+_PARAMETER_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def channel(
+    parameter: str,
+    values: Any,
+    at: Optional[Sequence[float]] = None,
+    rule: str = "linear",
+) -> JSCall:
+    """Declare a prop whose value is resampled client-side from shipped samples.
+
+    The `values` rows travel once, as one array. A `$state` scalar named
+    `parameter` indexes them: whenever it changes, the browser resamples row
+    `at[i]`..`at[i+1]` under `rule` and hands the result to the prop, with no
+    Python round trip. The declaration is legible to `colight inspect`, which
+    reports the parameter, its domain, the rule and the prop it drives.
+
+    A channel carries no notion of time: `parameter="t"` is a clock,
+    `parameter="grade"` a cutoff, `parameter="blend"` a morph.
+
+    Args:
+        parameter: The `$state` key this channel is indexed by.
+        values: Array-like of shape (N, ...) — row `i` is the value at `at[i]`.
+            Scalars per row (N,), vectors (N, 3)/(N, 4), and wide rows (N, M)
+            (e.g. a table of flattened vertex positions) are all accepted.
+        at: (N,) strictly increasing sample coordinates. Defaults to
+            `arange(N)`.
+        rule: How values between samples are produced — `"nearest"`, `"step"`
+            (hold the lower sample), `"linear"` (elementwise lerp) or
+            `"qlerp"` (normalized quaternion lerp with antipodal correction,
+            for (N, 4) xyzw rows).
+
+    Returns:
+        A `JSCall` to the client-side resampler, usable anywhere a prop value
+        is accepted.
+
+    Raises:
+        ValueError: On an unknown rule, a malformed parameter name, an empty
+            or mismatched `at`, non-increasing `at`, or `qlerp` on values that
+            are not (N, 4).
+    """
+    if not isinstance(parameter, str) or not _PARAMETER_NAME_RE.match(parameter):
+        raise ValueError(
+            f"channel parameter must be an identifier-like $state key, got {parameter!r}"
+        )
+    if rule not in CHANNEL_RULES:
+        raise ValueError(
+            f"channel rule must be one of {list(CHANNEL_RULES)}, got {rule!r}"
+        )
+
+    values_array = np.asarray(values)
+    if values_array.ndim == 0:
+        raise ValueError("channel values must have shape (N, ...), got a scalar")
+    if values_array.dtype.kind not in "fiu":
+        raise ValueError(
+            f"channel values must be numeric, got dtype {values_array.dtype}"
+        )
+    if values_array.dtype.kind != "f":
+        values_array = values_array.astype(np.float32)
+    n = int(values_array.shape[0])
+    if n < 1:
+        raise ValueError("channel values must have at least one row")
+
+    if at is None:
+        at_array = np.arange(n, dtype=np.float64)
+    else:
+        at_array = np.asarray(at, dtype=np.float64)
+        if at_array.ndim != 1:
+            raise ValueError(f"channel `at` must be 1-D, got shape {at_array.shape}")
+        if at_array.shape[0] != n:
+            raise ValueError(
+                f"channel `at` has {at_array.shape[0]} coordinates but values has "
+                f"{n} rows"
+            )
+        if n > 1 and not np.all(np.diff(at_array) > 0):
+            raise ValueError("channel `at` must be strictly increasing")
+
+    if rule == "qlerp" and (values_array.ndim != 2 or values_array.shape[1] != 4):
+        raise ValueError(
+            f"channel rule 'qlerp' requires values of shape (N, 4) xyzw quaternions, "
+            f"got {tuple(values_array.shape)}"
+        )
+
+    return JSCall(
+        "colight.resampleChannel",
+        [
+            {
+                "parameter": parameter,
+                "value": js(f'$state["{parameter}"]'),
+                "at": at_array,
+                "values": values_array,
+                "rule": rule,
+            }
+        ],
+    )
+
+
 __all__ = [
     # ## Interactivity
     "State",
     "onChange",
     "Frames",
     "Slider",
+    "channel",
     # ## Layout
     # Useful for layouts and custom views.
     # Note that syntax sugar exists for `Column` (`|`) and `Row` (`&`) using operator overloading.

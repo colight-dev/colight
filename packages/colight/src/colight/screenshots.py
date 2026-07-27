@@ -32,6 +32,7 @@ class StudioContext(ChromeContext):
         keep_alive: float = 1.0,
         window_vars=None,
         ready_timeout: float | None = None,
+        settle_window: float | None = None,
         **kwargs,
     ):
         """
@@ -42,12 +43,23 @@ class StudioContext(ChromeContext):
             data: Pre-serialized plot data (optional)
             buffers: Pre-serialized buffers (optional)
             window_vars: Dict of variables to set on window object before loading content
+            ready_timeout: Hard failure deadline for readiness, in seconds.
+            settle_window: Seconds to wait for the scene to quiesce before
+                capturing it anyway and marking the result unsettled. Should
+                be comfortably shorter than ``ready_timeout``. None waits for
+                quiescence indefinitely (up to ``ready_timeout``).
             **kwargs: Additional arguments passed to ChromeContext
         """
         self._plot = plot
         self._data = data
         self._buffers = buffers
         self._ready_timeout = ready_timeout
+        self._settle_window = settle_window
+        self._settled = True
+        self._settle_reason: Optional[str] = None
+        # Per-load render id: one context can load several plots in
+        # sequence, and readiness must be awaited on the *current* instance.
+        self._load_count = 0
         super().__init__(
             reuse=reuse, keep_alive=keep_alive, window_vars=window_vars, **kwargs
         )
@@ -58,16 +70,35 @@ class StudioContext(ChromeContext):
             self.load_plot(self._plot, data=self._data, buffers=self._buffers)
         return context
 
+    @property
+    def render_id(self) -> str:
+        """Id of the most recently loaded plot instance."""
+        if self._load_count == 0:
+            return self.id
+        return f"{self.id}_{self._load_count}"
+
     def _ready_result_js(self) -> str:
+        """JS that awaits readiness and leaves a ``readyResult`` in scope.
+
+        The result carries ``settled``: true when the scene quiesced, false
+        when the settle window elapsed on a scene that is still rendering
+        (see ``ReadyStateManager.whenReady``).
+        """
+        window_arg = ""
+        if self._settle_window is not None:
+            window_arg = f", {int(self._settle_window * 1000)}"
+        ready_call = f"window.colight.whenReady('{self.render_id}'{window_arg})"
         if self._ready_timeout is None:
             return (
-                f"await window.colight.whenReady('{self.id}');"
-                "const readyResult = { ok: true };"
+                f"const ready = await {ready_call};"
+                "const readyResult = { ok: true, settled: ready.settled, "
+                "settleReason: ready.reason };"
             )
         timeout_ms = int(self._ready_timeout * 1000)
         return (
             "const readyResult = await Promise.race(["
-            f"window.colight.whenReady('{self.id}').then(() => ({{ ok: true }})), "
+            f"{ready_call}.then((ready) => ({{ ok: true, settled: ready.settled, "
+            "settleReason: ready.reason })), "
             f"new Promise(resolve => setTimeout(() => resolve({{ ok: false, reason: 'timeout' }}), {timeout_ms}))"
             "]);"
         )
@@ -76,16 +107,37 @@ class StudioContext(ChromeContext):
         if not isinstance(result, dict):
             raise RuntimeError(f"Colight {context} did not return readiness status")
         if result.get("ok") is True:
+            # Record the two-tier outcome for callers that report it. A
+            # missing `settled` key (older payload shape) counts as settled.
+            self._settled = result.get("settled", True) is not False
+            self._settle_reason = (
+                result.get("settleReason") if not self._settled else None
+            )
             return
         reason = result.get("reason")
         error = result.get("error")
         if reason == "timeout":
             raise TimeoutError(
-                f"Colight {context} timed out after {self._ready_timeout}s"
+                f"Colight {context} timed out after {self._ready_timeout}s "
+                "without rendering a single frame"
             )
         if error:
             raise RuntimeError(f"Colight {context} failed: {error}")
         raise RuntimeError(f"Colight {context} failed")
+
+    @property
+    def settled(self) -> bool:
+        """Whether the last readiness wait reached quiescence.
+
+        False means the capture was taken of a scene that was still
+        animating: valid pixels, but not a reproducible hash.
+        """
+        return self._settled
+
+    @property
+    def settle_reason(self) -> Optional[str]:
+        """Why the last wait did not settle (None when it settled)."""
+        return self._settle_reason
 
     def load_studio_html(self):
         # Check if Colight environment is already loaded
@@ -142,6 +194,7 @@ class StudioContext(ChromeContext):
             print("[StudioContext] Loading plot into Colight")
 
         self.load_studio_html()
+        self._load_count += 1
 
         # Use provided data/buffers if available, otherwise serialize
         if data is not None and buffers is not None:
@@ -149,7 +202,7 @@ class StudioContext(ChromeContext):
         else:
             data, buffers = widget.to_json_with_state(plot, buffers=[])
             colight_data = format.create_bytes(data, buffers)
-        colight_filename = f"plot_{self.id}.colight"
+        colight_filename = f"plot_{self.render_id}.colight"
         self.server.add_served_file(colight_filename, colight_data)
         colight_url = f"http://localhost:{self.server_port}/{colight_filename}"
 
@@ -162,10 +215,10 @@ class StudioContext(ChromeContext):
         ready_wait = self._ready_result_js()
         render_js = f"""
          (async () => {{
-           console.log('[StudioContext] Loading .colight file for ID: {self.id}');
+           console.log('[StudioContext] Loading .colight file for ID: {self.render_id}');
            try {{
              const colightData = await window.colight.loadColightFile('{colight_url}');
-             await window.colight.render('studio', colightData, '{self.id}');
+             await window.colight.render('studio', colightData, '{self.render_id}');
              {ready_wait}
              return readyResult;
            }} catch (error) {{
@@ -222,7 +275,7 @@ class StudioContext(ChromeContext):
                 const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
                     Uint8Array.from(atob(b64), c => c.charCodeAt(0))
                 );
-                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                const result = window.colight.instances['{self.render_id}'].updateWithBuffers(updates, buffers);
                 {ready_wait}
                 return {{
                     ok: readyResult.ok,
@@ -266,7 +319,7 @@ class StudioContext(ChromeContext):
                 const buffers = {json.dumps(encoded_buffers)}.map(b64 =>
                     Uint8Array.from(atob(b64), c => c.charCodeAt(0))
                 );
-                const result = window.colight.instances['{self.id}'].updateWithBuffers(updates, buffers);
+                const result = window.colight.instances['{self.render_id}'].updateWithBuffers(updates, buffers);
                 {ready_wait}
                 return {{
                     ok: readyResult.ok,
@@ -426,7 +479,8 @@ class StudioContext(ChromeContext):
 
         # Trigger WebGPU canvas capture for 3D content before PDF generation
         self.evaluate(
-            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
 
         # Capture the PDF content (including static images of 3D canvases)
@@ -434,7 +488,8 @@ class StudioContext(ChromeContext):
 
         # Cleanup and restore interactive 3D content
         self.evaluate(
-            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
 
         if output_path:
@@ -450,11 +505,13 @@ class StudioContext(ChromeContext):
     def capture_bytes(self, format: str = "png", quality: int = 90):
         """Capture image bytes in specified format."""
         self.evaluate(
-            f"window.colight.beforeScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.beforeScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
         bytes = self.capture_image(format=format, quality=quality)
         self.evaluate(
-            f"window.colight.afterScreenCapture('{self.id}');", await_promise=True
+            f"window.colight.afterScreenCapture('{self.render_id}');",
+            await_promise=True,
         )
         return bytes
 

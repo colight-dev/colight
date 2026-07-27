@@ -15,12 +15,20 @@ import { NOOP_READY_STATE } from "./scene3d/types";
 import {
   createCanvasOverlays,
   removeCanvasOverlays,
+  scene3dAgentApi,
 } from "./scene3d/canvasSnapshot";
 import { colight } from "./globals";
+import { resampleChannel } from "./channels";
 
 // Register scene3d snapshot utilities with colight global for PDF export
 colight.beforeScreenCapture = createCanvasOverlays;
 colight.afterScreenCapture = removeCanvasOverlays;
+// Agent-facing scene3d queries (full-frame pick readback, framing, highlight)
+colight.scene3d = scene3dAgentApi;
+// Declared channels resolve here: Plot.channel(...) serializes to a JSCall on
+// the path "colight.resampleChannel", which the AST evaluator looks up in this
+// namespace with its config argument already evaluated.
+colight.resampleChannel = resampleChannel;
 
 // Wrap Scene to inject readyState from colight context
 function ColightScene(props) {
@@ -323,6 +331,7 @@ export function repeat(data) {
 }
 export {
   bylight,
+  colight,
   d3,
   inspect,
   MarkSpec,

@@ -40,8 +40,12 @@ export const IDENTITY_POS: Vec3 = [0, 0, 0];
  */
 export interface GroupConfig {
   type: "Group";
-  /** Child components (can include nested groups) */
-  children: (ComponentConfig | GroupConfig)[];
+  /**
+   * Child components (can include nested groups). Optional: a NAMED group
+   * with no children is a pure named transform, whose palette slot geometry
+   * elsewhere can reference by name (Mesh `transform_refs`).
+   */
+  children?: (ComponentConfig | GroupConfig)[];
   /** Default props for children (child values take precedence) */
   childDefaults?: GroupStyleProps;
   /** Override props for children (group values take precedence) */
@@ -446,6 +450,17 @@ export interface FlattenGroupsResult {
   groupRegistry: GroupRegistry;
   /** Array of GPU transforms (index 0 is always identity) */
   transforms: GPUTransform[];
+  /**
+   * Palette index of every NAMED group's composed world transform.
+   *
+   * Components get their palette slot from where they sit in the hierarchy;
+   * this map instead names slots so geometry can reference them explicitly
+   * (per-vertex weighted transform references — see `transform_refs` on Mesh).
+   * A named group always gets a slot, even when its world transform is
+   * identity, so a reference to it resolves. Later groups with a repeated name
+   * win, matching "last declaration wins" everywhere else in the scene.
+   */
+  namedTransforms: Map<string, number>;
 }
 
 // Counter for generating unique anonymous group names
@@ -461,6 +476,7 @@ function flattenGroupsInternal(
   parentProps: AccumulatedProps | undefined,
   registry: GroupRegistry,
   transforms: GPUTransform[],
+  namedTransforms: Map<string, number>,
 ): FlattenedComponent[] {
   const result: FlattenedComponent[] = [];
 
@@ -481,6 +497,16 @@ function flattenGroupsInternal(
         ? composeTransforms(parentTransform, getGroupTransform(component))
         : parentTransform;
 
+      // A named group gets its own palette slot so geometry can reference it
+      // by name (transform_refs). Index 0 is reserved for identity, but a
+      // named identity group still gets a real slot — the reference must
+      // resolve to a stable index regardless of what the transform holds, and
+      // a $state-driven quaternion can make it non-identity next frame.
+      if (component.name !== undefined) {
+        namedTransforms.set(component.name, transforms.length);
+        transforms.push(toGPUTransform(worldTransform));
+      }
+
       // Register group handlers if present
       if (groupName && groupHasHandlers(component)) {
         const pathKey = newPath.join("/");
@@ -499,12 +525,13 @@ function flattenGroupsInternal(
 
       // Recursively flatten children
       const flattened = flattenGroupsInternal(
-        component.children,
+        component.children ?? [],
         worldTransform,
         newPath,
         mergedProps,
         registry,
         transforms,
+        namedTransforms,
       );
       result.push(...flattened);
     } else {
@@ -555,6 +582,7 @@ export function flattenGroups(
 
   // Initialize transforms array with identity at index 0
   const transforms: GPUTransform[] = [IDENTITY_GPU_TRANSFORM];
+  const namedTransforms = new Map<string, number>();
 
   const flattenedComponents = flattenGroupsInternal(
     components,
@@ -563,11 +591,13 @@ export function flattenGroups(
     undefined,
     registry,
     transforms,
+    namedTransforms,
   );
   return {
     components: flattenedComponents,
     groupRegistry: registry,
     transforms,
+    namedTransforms,
   };
 }
 
@@ -588,7 +618,7 @@ export function hasGroups(
         return true;
       }
       // Recurse into children of composition-only groups
-      if (hasGroups(component.children)) {
+      if (hasGroups(component.children ?? [])) {
         return true;
       }
     }
@@ -606,7 +636,7 @@ export function unwrapGroups(
   const result: ComponentConfig[] = [];
   for (const component of components) {
     if (isGroup(component)) {
-      result.push(...unwrapGroups(component.children));
+      result.push(...unwrapGroups(component.children ?? []));
     } else {
       result.push(component);
     }

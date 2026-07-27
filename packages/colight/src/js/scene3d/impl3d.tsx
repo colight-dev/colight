@@ -9,8 +9,25 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { throttle, deepEqualModuloTypedArrays } from "./utils";
-import { useCanvasSnapshot } from "./canvasSnapshot";
+import {
+  throttle,
+  deepEqualModuloTypedArrays,
+  componentsEqualIgnoringFilter,
+} from "./utils";
+import {
+  probeStage,
+  probeRecord,
+  probeFrame,
+  probeRefresh,
+  probeInstrumentDevice,
+  PROBE_STAGES,
+} from "../probe";
+import {
+  useCanvasSnapshot,
+  SceneSnapshotApi,
+  PickBufferResult,
+  FrameView,
+} from "./canvasSnapshot";
 import {
   CameraParams,
   CameraState,
@@ -18,6 +35,7 @@ import {
   createCameraState,
   dolly,
   adjustFov,
+  fitCameraToBounds,
   orbit,
   pan,
   roll,
@@ -27,6 +45,16 @@ import {
   getProjectionMatrix,
   getViewMatrix,
 } from "./camera3d";
+import {
+  buildPickLegend,
+  computeSelectionBounds,
+  describeInstance,
+  inRanges,
+  unionBounds,
+  u32ToBase64,
+  Bounds3,
+  InstanceRanges,
+} from "./pick-snapshot";
 
 // @ts-ignore - lodash-es types are available via @types/lodash-es
 import isEqual from "lodash-es/isEqual";
@@ -48,6 +76,12 @@ import {
   ImagePlaneComponentConfig,
   ImageSource,
 } from "./components";
+import { updateBuffers, destroyGeometryResource } from "./pipelineUtils";
+import {
+  getBlendBindGroupLayout,
+  PRIMITIVE_BIND_GROUP,
+  BLEND_BINDING,
+} from "./primitives/mesh";
 import {
   GPUTransform,
   packTransformsToBuffer,
@@ -55,12 +89,19 @@ import {
   IDENTITY_GPU_TRANSFORM,
 } from "./gpu-transforms";
 import { unpackID } from "./picking";
+import { specContentsKey as computeSpecContentsKey } from "./compiler";
 import { GroupRegistry } from "./groups";
 import { LIGHTING, outlineVertCode, outlineFragCode } from "./shaders";
+import {
+  packClipPlanes,
+  CLIP_PLANES_BUFFER_SIZE,
+  ClipPlane,
+} from "./clipPlanes";
 import {
   BufferInfo,
   GeometryResources,
   GeometryResource,
+  TransformRefResource,
   PrimitiveSpec,
   RenderObject,
   PipelineCacheEntry,
@@ -82,6 +123,7 @@ import {
 } from "./drag";
 import { buildPickInfo } from "./pick-info";
 import { screenRay } from "./project";
+import { resolveAnnotations } from "./annotations";
 import {
   OutlineConfig,
   OutlineTarget,
@@ -372,6 +414,38 @@ export interface SceneImplProps {
   /** Array of GPU transforms for group transform application */
   transforms: GPUTransform[];
 
+  /**
+   * Packed per-slot filter thresholds for the filterParams storage buffer
+   * (4 floats/slot: minVal, maxVal, active, pad). Slot 0 is inactive.
+   * Components reference a slot via their `_filterIndex`.
+   */
+  filterParams?: Float32Array;
+
+  /**
+   * Resolved named selections (membership + reporting), from the compiler.
+   * Exposed through the snapshot API so pick-at reports membership and the CLI
+   * can resolve selection names to component + instances.
+   */
+  selections?: import("./selections").SelectionReport[];
+
+  /**
+   * Named annotation callouts resident in `$state.annotations`. Exposed through
+   * the snapshot API so pick-at reports instance-anchored membership and
+   * inspect / screenshot --json report each callout's resolved world position
+   * and projected screen position (in pick-at pixel space).
+   */
+  annotations?: import("./annotations").Annotations;
+
+  /**
+   * Scene-level section / clipping planes. Each plane is
+   * `{ normal: [nx,ny,nz], offset }`: a fragment is KEPT where
+   * `dot(worldPos, normal) <= offset` for EVERY plane (intersection of kept
+   * half-spaces). Applies to ALL components in render AND pick passes via the
+   * shared clipPlanes uniform. A $state offset change re-evaluates to the same
+   * components with new plane values, so it takes the light render path (a
+   * uniform write, no instance re-upload). Max 8 planes. */
+  clipPlanes?: ClipPlane[];
+
   /** Width of the container in pixels */
   containerWidth: number;
 
@@ -408,8 +482,138 @@ export interface SceneImplProps {
   /** Optional map of custom primitive specifications */
   primitiveSpecs?: Record<string, PrimitiveSpec<any>>;
 
+  /**
+   * Contents signal for `primitiveSpecs`, from `compileScene`. Changes when an
+   * inline mesh's geometry or transform references change, including in-place
+   * deformations that leave `primitiveSpecs` identity untouched. Omit and
+   * contents changes are derived from the specs directly on every render.
+   */
+  specContentsKey?: string;
+
   /** Optional registry of group handlers for event bubbling */
   groupRegistry?: GroupRegistry;
+
+  /** World-space offset positions were pre-shifted by in Python (Scene
+   * origin). Metadata only: reporting adds it back so dereferenced positions
+   * are in the caller's coordinate space. Does not affect rendering. */
+  origin?: [number, number, number];
+
+  /** RGB clear color [r,g,b] (0-1) behind the geometry. Default opaque black. */
+  background?: [number, number, number];
+}
+
+/**
+ * Bring `resources[primitiveName]` up to date with `spec` (D1b).
+ *
+ * `spec.geometryKey` is the contents signal. When it differs from the
+ * resource's, the geometry's *bytes* changed while its identity (and therefore
+ * its spec, shaders and pipelines) did not - so write the new bytes into the
+ * buffers that already exist rather than allocating a replacement set. Buffers
+ * are grown only when the new bytes do not fit, and the ones they replace are
+ * destroyed. Before D1b this branch called `createGeometryResource` and simply
+ * overwrote the map slot, orphaning both GPUBuffers on every change.
+ *
+ * @returns "created" | "updated" | "grew" | null (null = already current)
+ */
+function syncGeometryResource(
+  device: GPUDevice,
+  resources: GeometryResources,
+  primitiveName: string,
+  spec: PrimitiveSpec<any>,
+): "created" | "updated" | "grew" | null {
+  // Cast to any since resources is typed with known keys but we might have custom ones
+  const existing = (resources as any)[primitiveName] as
+    | GeometryResource
+    | null
+    | undefined;
+  const specKey = (spec as any).geometryKey;
+
+  if (!existing) {
+    const resource = spec.createGeometryResource(device);
+    resource.geometryKey = specKey;
+    (resources as any)[primitiveName] = resource;
+    return "created";
+  }
+
+  if (specKey === undefined || existing.geometryKey === specKey) return null;
+
+  if (spec.buildGeometryData) {
+    const { grew } = updateBuffers(
+      device,
+      existing,
+      spec.buildGeometryData(),
+      spec.geometryStrideFloats,
+    );
+    existing.geometryKey = specKey;
+    return grew ? "grew" : "updated";
+  }
+
+  // Spec cannot rebuild its bytes without the GPU: fall back to a full
+  // replacement, but destroy what it replaces.
+  destroyGeometryResource(existing);
+  const resource = spec.createGeometryResource(device);
+  resource.geometryKey = specKey;
+  (resources as any)[primitiveName] = resource;
+  return "grew";
+}
+
+/**
+ * Bring a mesh's per-vertex transform-reference resources up to date (D2).
+ *
+ * The same grow-only reuse pattern as geometry and the transforms palette:
+ * write into the buffer that already exists, allocate a larger one only when
+ * the bytes do not fit, and destroy what it replaces. The bind group is
+ * rebuilt only when the buffer handle changes.
+ *
+ * The point of this being its own buffer is the write separation: a
+ * weights-only change reaches the GPU here and NEVER rewrites the interleaved
+ * vertex buffer. A palette-only change (a Group quaternion driven by $state)
+ * does not even reach here — the references are unchanged; only the transforms
+ * buffer is repacked, and the blend animates with zero geometry traffic.
+ *
+ * @returns The current resource, or null when the spec declares no references.
+ */
+function syncTransformRefResource(
+  device: GPUDevice,
+  resources: Map<string, TransformRefResource>,
+  primitiveName: string,
+  spec: PrimitiveSpec<any>,
+): TransformRefResource | null {
+  const data = (spec as any).transformRefData as Float32Array | undefined;
+  if (!data) {
+    const stale = resources.get(primitiveName);
+    if (stale) {
+      stale.buffer.destroy();
+      resources.delete(primitiveName);
+    }
+    return null;
+  }
+
+  const key = (spec as any).transformRefsKey;
+  const existing = resources.get(primitiveName);
+  const size = Math.max(align16(data.byteLength), 16);
+
+  if (existing && existing.buffer.size >= size) {
+    if (existing.key === key) return existing;
+    device.queue.writeBuffer(existing.buffer, 0, data);
+    existing.key = key;
+    return existing;
+  }
+
+  if (existing) existing.buffer.destroy();
+  const buffer = device.createBuffer({
+    size,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    label: `Transform references (${primitiveName})`,
+  });
+  device.queue.writeBuffer(buffer, 0, data);
+  const bindGroup = device.createBindGroup({
+    layout: getBlendBindGroupLayout(device),
+    entries: [{ binding: BLEND_BINDING, resource: { buffer } }],
+  });
+  const resource: TransformRefResource = { buffer, bindGroup, key };
+  resources.set(primitiveName, resource);
+  return resource;
 }
 
 function initGeometryResources(
@@ -417,27 +621,12 @@ function initGeometryResources(
   resources: GeometryResources,
   registry: Record<string, PrimitiveSpec<any>>,
 ) {
-  // Create geometry for each primitive type
   for (const [primitiveName, spec] of Object.entries(registry)) {
-    // Only create if not already present or geometryKey changed
-    // Cast to any since resources is typed with known keys but we might have custom ones
-    const existing = (resources as any)[primitiveName] as
-      | GeometryResource
-      | null
-      | undefined;
-    const specKey = (spec as any).geometryKey;
-    if (
-      !existing ||
-      (specKey !== undefined && existing.geometryKey !== specKey)
-    ) {
-      const resource = spec.createGeometryResource(device);
-      (resource as any).geometryKey = specKey;
-      (resources as any)[primitiveName] = resource;
-    }
+    syncGeometryResource(device, resources, primitiveName, spec);
   }
 }
 
-const defaultPrimitiveRegistry: Record<
+export const defaultPrimitiveRegistry: Record<
   ComponentConfig["type"],
   PrimitiveSpec<any>
 > = {
@@ -567,18 +756,20 @@ function encodeScenePass({
   depthTexture,
   renderObjects,
   uniformBindGroup,
+  clearColor,
 }: {
   commandEncoder: GPUCommandEncoder;
   targetView: GPUTextureView;
   depthTexture: GPUTexture | null;
   renderObjects: RenderObject[];
   uniformBindGroup: GPUBindGroup;
+  clearColor?: { r: number; g: number; b: number; a: number };
 }) {
   const pass = commandEncoder.beginRenderPass({
     colorAttachments: [
       {
         view: targetView,
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        clearValue: clearColor ?? { r: 0, g: 0, b: 0, a: 1 },
         loadOp: "clear",
         storeOp: "store",
       },
@@ -597,8 +788,8 @@ function encodeScenePass({
   for (const ro of renderObjects) {
     pass.setPipeline(ro.pipeline);
     pass.setBindGroup(0, uniformBindGroup);
-    if (ro.textureBindGroup) {
-      pass.setBindGroup(1, ro.textureBindGroup);
+    if (ro.bindGroup1) {
+      pass.setBindGroup(PRIMITIVE_BIND_GROUP, ro.bindGroup1);
     }
     pass.setVertexBuffer(0, ro.geometryBuffer);
     pass.setVertexBuffer(1, ro.instanceBuffer.buffer, ro.instanceBuffer.offset);
@@ -734,6 +925,10 @@ const requestAdapterWithRetry = async (maxAttempts = 4, delayMs = 10) => {
 export function SceneImpl({
   components,
   transforms = [IDENTITY_GPU_TRANSFORM],
+  filterParams,
+  clipPlanes,
+  selections: selectionReports,
+  annotations,
   containerWidth,
   containerHeight,
   style,
@@ -746,13 +941,32 @@ export function SceneImpl({
   onClick: onSceneClick,
   readyState = NOOP_READY_STATE,
   primitiveSpecs,
+  specContentsKey,
   groupRegistry,
+  origin,
+  background,
 }: SceneImplProps) {
-  // Merge default registry with custom specs
-  const primitiveRegistry = useMemo(() => {
-    if (!primitiveSpecs) return defaultPrimitiveRegistry;
-    return { ...defaultPrimitiveRegistry, ...primitiveSpecs };
-  }, [primitiveSpecs]);
+  // Merge default registry with custom specs.
+  //
+  // `primitiveSpecs` keeps its identity across compiles whenever the spec set
+  // is unchanged (compileScene holds it stable — see compiler.ts), so plain
+  // memoization on that identity is enough here. Downstream this keeps the
+  // pipeline cache and the geometry-resource map from being torn down and
+  // rebuilt on every `$state` change.
+  const primitiveRegistry = useMemo(
+    () =>
+      primitiveSpecs
+        ? { ...defaultPrimitiveRegistry, ...primitiveSpecs }
+        : defaultPrimitiveRegistry,
+    [primitiveSpecs],
+  );
+
+  // Contents signal for the specs. `compileScene` supplies it; callers that
+  // build `primitiveSpecs` by hand (and the counting harnesses) do not, so fall
+  // back to deriving it here. Either way it must be recomputed on every render:
+  // an in-place deformation changes neither `primitiveSpecs` identity nor any
+  // other dep, and this string is the only thing that reveals it.
+  const contentsKey = specContentsKey ?? computeSpecContentsKey(primitiveSpecs);
   const primitiveRegistryRef = useRef(primitiveRegistry);
 
   useEffect(() => {
@@ -813,6 +1027,8 @@ export function SceneImpl({
     uniformBindGroup: GPUBindGroup;
     bindGroupLayout: GPUBindGroupLayout;
     transformsBuffer: GPUBuffer;
+    filterParamsBuffer: GPUBuffer;
+    clipPlanesBuffer: GPUBuffer;
     staleTransformsBuffers: GPUBuffer[];
     staleDynamicBuffers: Array<
       Pick<DynamicBuffers, "renderBuffer" | "pickingBuffer">
@@ -836,6 +1052,11 @@ export function SceneImpl({
     dynamicBuffers: DynamicBuffers | null;
     resources: GeometryResources;
     imageResources: Map<string, ImageResource>;
+    /**
+     * Per-vertex transform-reference buffers + bind groups, keyed by primitive
+     * type name (D2). Only meshes that declare `transform_refs` appear here.
+     */
+    transformRefResources: Map<string, TransformRefResource>;
 
     renderedCamera?: CameraState;
     renderedComponents?: ComponentConfig[];
@@ -857,6 +1078,49 @@ export function SceneImpl({
     activeCameraRef.current = nextCamera;
     return nextCamera;
   }, [controlledCamera, internalCamera]);
+
+  // Clear color (behind geometry) derived from the scene `background` prop.
+  // Held in a ref so the render callback (which has a large dep list) picks
+  // up changes without being rebuilt.
+  //
+  // NOTE: this drives the WebGPU render-pass clearValue, which is what the
+  // live browser presents. Headless `colight screenshot` (CDP
+  // Page.captureScreenshot over a premultiplied WebGPU canvas) does not
+  // capture cleared-but-undrawn regions faithfully -- they come back as the
+  // black page -- so a custom background is currently visible in the live
+  // view but not in screenshots. Fixing that means switching the screenshot
+  // capture to a GPU pixel readback, which is out of scope here.
+  const clearColorRef = useRef<{ r: number; g: number; b: number; a: number }>({
+    r: 0,
+    g: 0,
+    b: 0,
+    a: 1,
+  });
+  useEffect(() => {
+    clearColorRef.current = background
+      ? { r: background[0], g: background[1], b: background[2], a: 1 }
+      : { r: 0, g: 0, b: 0, a: 1 };
+    requestRender("background-change");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [background?.[0], background?.[1], background?.[2]]);
+
+  // Scene origin (world-space offset positions were pre-shifted by). Held in a
+  // ref for the snapshot/pick API, which adds it back to dereferenced
+  // positions so the CLI reports coordinates in the caller's space.
+  const originRef = useRef<[number, number, number] | undefined>(origin);
+  useEffect(() => {
+    originRef.current = origin;
+  }, [origin]);
+
+  // Named annotation callouts, held in a ref so the snapshot API can project
+  // them with the live camera each time getInfo() is called (pick-at /
+  // screenshot --json read the projected screen positions).
+  const annotationsRef = useRef<
+    import("./annotations").Annotations | undefined
+  >(annotations);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
 
   const handleCameraUpdate = useCallback(
     (updateFn: (camera: CameraState) => CameraState) => {
@@ -1143,10 +1407,30 @@ export function SceneImpl({
     ],
   );
 
+  // Agent-facing snapshot API (full-frame pick readback, camera framing,
+  // selection highlighting). The impl closes over per-render props/refs and
+  // is reassigned every render; the stable wrapper lives in the registry.
+  const snapshotImplRef = useRef<SceneSnapshotApi | null>(null);
+  const stableSnapshotApi = useMemo<SceneSnapshotApi>(
+    () => ({
+      getInfo: () => snapshotImplRef.current!.getInfo(),
+      pickBuffer: (options) => snapshotImplRef.current!.pickBuffer(options),
+      instanceInfo: (componentIdx, instanceIdx) =>
+        snapshotImplRef.current!.instanceInfo(componentIdx, instanceIdx),
+      frameOnSelection: (componentIdx, ranges, view) =>
+        snapshotImplRef.current!.frameOnSelection(componentIdx, ranges, view),
+      applyHighlight: (componentIdx, ranges, options) =>
+        snapshotImplRef.current!.applyHighlight(componentIdx, ranges, options),
+      clearHighlight: () => snapshotImplRef.current!.clearHighlight(),
+    }),
+    [],
+  );
+
   const { canvasRef } = useCanvasSnapshot(
     gpuRef.current?.device,
     gpuRef.current?.context,
     renderToTexture,
+    stableSnapshotApi,
   );
 
   const [isReady, setIsReady] = useState(false);
@@ -1206,6 +1490,12 @@ export function SceneImpl({
         throw err;
       });
 
+      // Wrap `queue.writeBuffer` once here so the frame-time probe can count
+      // calls and bytes without touching the ~15 individual write sites. The
+      // wrapper is a no-op boolean test while the probe is off.
+      probeRefresh();
+      probeInstrumentDevice(device);
+
       // Add error handling for uncaptured errors
       device.addEventListener("uncapturederror", ((event: Event) => {
         if (event instanceof GPUUncapturedErrorEvent) {
@@ -1234,6 +1524,20 @@ export function SceneImpl({
             visibility: GPUShaderStage.VERTEX,
             buffer: { type: "read-only-storage" },
           },
+          {
+            // Per-component filter thresholds (see filterParamsStruct)
+            binding: 2,
+            visibility: GPUShaderStage.VERTEX,
+            buffer: { type: "read-only-storage" },
+          },
+          {
+            // Scene-level section / clipping planes (see clipPlanesStruct).
+            // Read in the FRAGMENT stage (discard); every generated and custom
+            // fragment shader calls applyClipPlanes.
+            binding: 3,
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: "uniform" },
+          },
         ],
       });
 
@@ -1252,11 +1556,29 @@ export function SceneImpl({
         label: "Group transforms buffer",
       });
 
+      // Per-component filter thresholds. Grows as needed; slot 0 is inactive.
+      const filterParamsBuffer = device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        label: "Filter params buffer",
+      });
+
+      // Scene-level section / clipping planes. Fixed size (count + 8 * vec4),
+      // so it never resizes — only its contents are rewritten (the light path
+      // a $state offset change flows through).
+      const clipPlanesBuffer = device.createBuffer({
+        size: CLIP_PLANES_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: "Clip planes buffer",
+      });
+
       const uniformBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
         entries: [
           { binding: 0, resource: { buffer: uniformBuffer } },
           { binding: 1, resource: { buffer: transformsBuffer } },
+          { binding: 2, resource: { buffer: filterParamsBuffer } },
+          { binding: 3, resource: { buffer: clipPlanesBuffer } },
         ],
       });
 
@@ -1273,6 +1595,8 @@ export function SceneImpl({
         uniformBindGroup,
         bindGroupLayout,
         transformsBuffer,
+        filterParamsBuffer,
+        clipPlanesBuffer,
         staleTransformsBuffers: [],
         staleDynamicBuffers: [],
         depthTexture: null,
@@ -1301,6 +1625,7 @@ export function SceneImpl({
           ImagePlane: null,
         },
         imageResources: new Map(),
+        transformRefResources: new Map(),
       };
 
       // Now initialize geometry resources
@@ -1318,15 +1643,106 @@ export function SceneImpl({
 
   useEffect(() => {
     if (!isReady || !gpuRef.current) return;
-    initGeometryResources(
-      gpuRef.current.device,
-      gpuRef.current.resources,
-      primitiveRegistry,
-    );
+    const { device, resources } = gpuRef.current;
+
+    // Drop resources whose primitive is no longer registered. `resources` is
+    // keyed by type name, so an inline mesh that legitimately changes identity
+    // (a topology change mints a new `__InlineMesh_N`) would otherwise leave
+    // its buffers in the map forever, never eligible for the unmount sweep.
+    for (const name of Object.keys(resources)) {
+      if (name in primitiveRegistry) continue;
+      const stale = resources[name];
+      if (stale) destroyGeometryResource(stale);
+      delete resources[name];
+    }
+    // Same sweep for transform-reference buffers, which are keyed the same way.
+    for (const [name, stale] of gpuRef.current.transformRefResources) {
+      if (name in primitiveRegistry) continue;
+      stale.buffer.destroy();
+      gpuRef.current.transformRefResources.delete(name);
+    }
+
+    initGeometryResources(device, resources, primitiveRegistry);
     renderObjectCache.current = {};
     gpuRef.current.pipelineCache.clear();
     gpuRef.current.renderedComponents = undefined;
   }, [isReady, primitiveRegistry]);
+
+  // Geometry CONTENTS sync (D1b).
+  //
+  // An inline mesh's vertex arrays live on its spec, not on the component
+  // config, so a deformation of stable topology leaves the components array
+  // deeply equal and is invisible to the components-changed path below. Watch
+  // the specs directly: `spec.geometryKey` is bumped by inlineMesh.ts whenever
+  // fresh arrays arrive under an unchanged identity — the spec object itself is
+  // reused, so only that key moves, and `primitiveSpecs` identity does not.
+  //
+  // `specContentsKey` (from compileScene) is that contents signal, deliberately
+  // separate from `primitiveRegistry` identity: a deformation must rewrite
+  // buffers WITHOUT re-initialising geometry resources or clearing the pipeline
+  // cache, which is what the registry-identity effect above does. On a change
+  // the body writes bytes into the buffers that already exist rather than
+  // allocating.
+  useEffect(() => {
+    if (!isReady || !gpuRef.current) return;
+    const { device, resources } = gpuRef.current;
+    let changed = false;
+    let grew = false;
+    for (const [name, spec] of Object.entries(primitiveRegistry)) {
+      const outcome = syncGeometryResource(device, resources, name, spec);
+      if (outcome === null) continue;
+      changed = true;
+      if (outcome !== "updated") grew = true;
+    }
+
+    // Per-vertex transform references (D2) ride the same contents-sync seam,
+    // on their own buffer. A weights-only change lands here and rewrites ONLY
+    // that buffer — the interleaved vertex buffer is not touched, which is the
+    // whole reason the references are not vertex attributes. A changed buffer
+    // handle means the bind group changed too, so cached RenderObjects must
+    // pick the new one up.
+    for (const [name, spec] of Object.entries(primitiveRegistry)) {
+      if ((spec as any).transformRefData === undefined) continue;
+      const before = gpuRef.current.transformRefResources.get(name);
+      const beforeKey = before?.key;
+      const resource = syncTransformRefResource(
+        device,
+        gpuRef.current.transformRefResources,
+        name,
+        spec,
+      );
+      if (!resource || resource.key === beforeKey) continue;
+      changed = true;
+      if (!before || before.bindGroup !== resource.bindGroup) {
+        for (const ro of gpuRef.current.renderObjects) {
+          if (ro.spec.type === name) ro.bindGroup1 = resource.bindGroup;
+        }
+      }
+    }
+
+    if (!changed) return;
+    if (grew) {
+      // Buffers were replaced; RenderObjects cached the old handles/counts.
+      renderObjectCache.current = {};
+      gpuRef.current.renderedComponents = undefined;
+    } else {
+      // Buffers were reused in place - RenderObjects stay valid, but vertex or
+      // index counts may have shifted within the same allocation.
+      for (const ro of gpuRef.current.renderObjects) {
+        const resource = (resources as any)[
+          ro.spec.type
+        ] as GeometryResource | null;
+        if (!resource) continue;
+        ro.geometryBuffer = resource.vb;
+        ro.indexBuffer = resource.ib;
+        ro.indexCount = resource.indexCount;
+        ro.indexFormat = resource.indexFormat;
+        ro.vertexCount = resource.vertexCount;
+      }
+    }
+    requestRender("geometry contents changed");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, contentsKey, primitiveRegistry]);
 
   /******************************************************
    * B) Depth & Pick textures
@@ -1656,7 +2072,7 @@ export function SceneImpl({
         };
 
         const hasAlphaComponents = components.some(componentHasAlpha);
-        let textureBindGroup: GPUBindGroup | undefined;
+        let bindGroup1: GPUBindGroup | undefined;
 
         // Handle texture binding for ImagePlane and textured meshes
         const firstComponent = info.components[0] as any;
@@ -1683,26 +2099,24 @@ export function SceneImpl({
               imageSource,
               imageKey,
             );
-            textureBindGroup = imageResource?.bindGroup;
+            bindGroup1 = imageResource?.bindGroup;
           }
-          if (!textureBindGroup) return;
+          if (!bindGroup1) return;
         }
 
-        const specKey = (spec as any).geometryKey;
-        let geometryResource = (resources as any)[type] as
-          | GeometryResource
-          | null
-          | undefined;
-        if (
-          !geometryResource ||
-          (specKey !== undefined &&
-            (geometryResource as any).geometryKey !== specKey)
-        ) {
-          geometryResource = spec.createGeometryResource(device);
-          (geometryResource as any).geometryKey = specKey;
-          (resources as any)[type] = geometryResource;
-        }
-        geometryResource = getGeometryResource(resources, type);
+        // Per-vertex weighted transform references (D2). Same group-1 slot as
+        // a texture, which is why the two cannot be combined yet (defineMesh
+        // rejects that pairing loudly).
+        const transformRefResource = syncTransformRefResource(
+          device,
+          gpuRef.current.transformRefResources,
+          type,
+          spec,
+        );
+        if (transformRefResource) bindGroup1 = transformRefResource.bindGroup;
+
+        syncGeometryResource(device, resources, type, spec);
+        let geometryResource = getGeometryResource(resources, type);
         if (needNewRenderObject) {
           // Create new render object with all the required resources
           renderObject = {
@@ -1715,7 +2129,7 @@ export function SceneImpl({
             indexFormat: geometryResource.indexFormat,
             instanceCount: totalInstanceCount,
             vertexCount: geometryResource.vertexCount,
-            textureBindGroup,
+            bindGroup1,
             pickingInstanceBuffer: pickingBufferInfo,
             pickingDataStale: true,
             componentIndex: info.indices[0],
@@ -1738,8 +2152,16 @@ export function SceneImpl({
           renderObject.spec = spec;
           renderObject.layer = layer;
           renderObject.pickingDataStale = true;
+          // Geometry may have been rewritten or grown since this render object
+          // was built (D1b), so re-read every field that describes it - not
+          // just the format. A grown buffer is a NEW GPUBuffer handle, and a
+          // rewrite can change the index/vertex counts within one allocation.
+          renderObject.geometryBuffer = geometryResource.vb;
+          renderObject.indexBuffer = geometryResource.ib;
+          renderObject.indexCount = geometryResource.indexCount;
           renderObject.indexFormat = geometryResource.indexFormat;
-          renderObject.textureBindGroup = textureBindGroup;
+          renderObject.vertexCount = geometryResource.vertexCount;
+          renderObject.bindGroup1 = bindGroup1;
           if (hasAlphaComponents && !renderObject.hasAlphaComponents) {
             Object.assign(
               renderObject,
@@ -1932,8 +2354,8 @@ export function SceneImpl({
 
       pass.setPipeline(ro.pipeline);
       pass.setBindGroup(0, uniformBindGroup);
-      if (ro.textureBindGroup) {
-        pass.setBindGroup(1, ro.textureBindGroup);
+      if (ro.bindGroup1) {
+        pass.setBindGroup(PRIMITIVE_BIND_GROUP, ro.bindGroup1);
       }
       pass.setVertexBuffer(0, ro.geometryBuffer);
       pass.setVertexBuffer(1, instanceBuffer, instanceOffset);
@@ -2017,6 +2439,10 @@ export function SceneImpl({
         pendingAnimationFrameRef.current = null;
       }
       if (!gpuRef.current) return;
+
+      // Probe: `render` spans entry through onSubmittedWorkDone (see the
+      // probeRecord at the end of this function).
+      const probeRenderStart = performance.now();
 
       camState = camState || activeCameraRef.current!;
 
@@ -2144,24 +2570,58 @@ export function SceneImpl({
       const transformsData = packTransformsToBuffer(transforms);
       const requiredSize = transformsData.byteLength;
 
-      // Resize transforms buffer if needed
+      // Filter thresholds: default to a single inactive slot when none given.
+      // This is the cheap per-frame write that a $state threshold change flows
+      // through — the large per-instance filter values live in instance data
+      // and are not touched here.
+      const filterData =
+        filterParams && filterParams.length > 0
+          ? filterParams
+          : new Float32Array([0, 0, 0, 0]);
+      const requiredFilterSize = filterData.byteLength;
+
+      // Resize either storage buffer if needed, recreating the bind group so it
+      // always references the current buffers plus the filter params binding.
+      let bindGroupDirty = false;
       if (requiredSize > gpuRef.current.transformsBuffer.size) {
         gpuRef.current.staleTransformsBuffers.push(
           gpuRef.current.transformsBuffer,
         );
-        const newTransformsBuffer = device.createBuffer({
+        gpuRef.current.transformsBuffer = device.createBuffer({
           size: requiredSize,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
           label: "Group transforms buffer",
         });
-        gpuRef.current.transformsBuffer = newTransformsBuffer;
-
-        // Recreate bind group with new buffer
+        bindGroupDirty = true;
+      }
+      if (requiredFilterSize > gpuRef.current.filterParamsBuffer.size) {
+        gpuRef.current.staleTransformsBuffers.push(
+          gpuRef.current.filterParamsBuffer,
+        );
+        gpuRef.current.filterParamsBuffer = device.createBuffer({
+          size: requiredFilterSize,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+          label: "Filter params buffer",
+        });
+        bindGroupDirty = true;
+      }
+      if (bindGroupDirty) {
         gpuRef.current.uniformBindGroup = device.createBindGroup({
           layout: gpuRef.current.bindGroupLayout,
           entries: [
             { binding: 0, resource: { buffer: uniformBuffer } },
-            { binding: 1, resource: { buffer: newTransformsBuffer } },
+            {
+              binding: 1,
+              resource: { buffer: gpuRef.current.transformsBuffer },
+            },
+            {
+              binding: 2,
+              resource: { buffer: gpuRef.current.filterParamsBuffer },
+            },
+            {
+              binding: 3,
+              resource: { buffer: gpuRef.current.clipPlanesBuffer },
+            },
           ],
         });
       }
@@ -2174,6 +2634,26 @@ export function SceneImpl({
         transformsData.buffer,
         transformsData.byteOffset,
         transformsData.byteLength,
+      );
+
+      device.queue.writeBuffer(
+        gpuRef.current.filterParamsBuffer,
+        0,
+        filterData.buffer,
+        filterData.byteOffset,
+        filterData.byteLength,
+      );
+
+      // Scene-level clip planes: a small fixed-size uniform. Writing it here
+      // (never re-uploading instance buffers) is the light path a $state
+      // section offset flows through — packClipPlanes throws loudly above 8.
+      const clipPlanesData = packClipPlanes(clipPlanes);
+      device.queue.writeBuffer(
+        gpuRef.current.clipPlanesBuffer,
+        0,
+        clipPlanesData.buffer,
+        clipPlanesData.byteOffset,
+        clipPlanesData.byteLength,
       );
 
       try {
@@ -2196,6 +2676,7 @@ export function SceneImpl({
           depthTexture,
           renderObjects: sortedRenderObjects,
           uniformBindGroup,
+          clearColor: clearColorRef.current,
         });
 
         const outlineReady = !!(
@@ -2260,10 +2741,20 @@ export function SceneImpl({
         onRenderComplete();
       }
 
+      probeRecord(PROBE_STAGES.render, performance.now() - probeRenderStart);
+      // Flush this frame's writeBuffer tally and close the rAF-to-rAF interval.
+      probeFrame();
+
       onFrameRendered?.(performance.now());
       onReady?.();
     },
-    [containerWidth, containerHeight, onFrameRendered, components],
+    [
+      containerWidth,
+      containerHeight,
+      onFrameRendered,
+      components,
+      filterParams,
+    ],
   );
 
   function requestRender(label: string) {
@@ -2288,14 +2779,9 @@ export function SceneImpl({
     pickingLockRef.current = true;
 
     try {
-      const {
-        device,
-        pickTexture,
-        pickDepthTexture,
-        readbackBuffer,
-        uniformBindGroup,
-        renderObjects,
-      } = gpuRef.current;
+      const { device, pickTexture, pickDepthTexture, readbackBuffer } =
+        gpuRef.current;
+      const { renderObjects } = gpuRef.current;
       if (!pickTexture || !pickDepthTexture || !readbackBuffer) return;
 
       // Ensure picking data is ready for all objects
@@ -2328,58 +2814,8 @@ export function SceneImpl({
         return;
       }
 
-      // Sort render objects for picking: scene first, then overlay
-      // Overlay objects use depthCompare: "always" so they overwrite scene objects,
-      // giving them picking priority even when geometrically behind
-      const sortedForPicking = [...renderObjects].sort((a, b) => {
-        const aOverlay = a.layer === "overlay" ? 1 : 0;
-        const bOverlay = b.layer === "overlay" ? 1 : 0;
-        return aOverlay - bOverlay;
-      });
-
       const cmd = device.createCommandEncoder({ label: "Picking encoder" });
-      const passDesc: GPURenderPassDescriptor = {
-        colorAttachments: [
-          {
-            view: pickTexture.createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store",
-          },
-        ],
-        depthStencilAttachment: {
-          view: pickDepthTexture.createView(),
-          depthClearValue: 1.0,
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
-        },
-      };
-      const pass = cmd.beginRenderPass(passDesc);
-      pass.setBindGroup(0, uniformBindGroup);
-
-      for (const ro of sortedForPicking) {
-        pass.setPipeline(ro.pickingPipeline);
-        pass.setBindGroup(0, uniformBindGroup);
-        if (ro.textureBindGroup) {
-          pass.setBindGroup(1, ro.textureBindGroup);
-        }
-        pass.setVertexBuffer(0, ro.geometryBuffer);
-        pass.setVertexBuffer(
-          1,
-          ro.pickingInstanceBuffer.buffer,
-          ro.pickingInstanceBuffer.offset,
-        );
-
-        // Draw with indices if we have them, otherwise use vertex count
-        if (ro.indexBuffer && ro.indexCount > 0) {
-          pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
-          pass.drawIndexed(ro.indexCount, ro.instanceCount);
-        } else if (ro.vertexCount) {
-          pass.draw(ro.vertexCount, ro.instanceCount);
-        }
-      }
-
-      pass.end();
+      encodeFullPickPass(cmd);
 
       cmd.copyTextureToBuffer(
         { texture: pickTexture, origin: { x: pickX, y: pickY } },
@@ -2440,6 +2876,530 @@ export function SceneImpl({
     }
     return null;
   }
+
+  /******************************************************
+   * D2) Agent-facing snapshot API (full-frame pick readback)
+   ******************************************************/
+
+  /**
+   * Encodes the standard pick pass (all render objects) into the shared
+   * pick texture. Used by interactive picking and full-frame readback so
+   * both consume identical pick ids.
+   */
+  function encodeFullPickPass(cmd: GPUCommandEncoder): boolean {
+    if (!gpuRef.current) return false;
+    const { pickTexture, pickDepthTexture, uniformBindGroup, renderObjects } =
+      gpuRef.current;
+    if (!pickTexture || !pickDepthTexture) return false;
+
+    // Sort render objects for picking: scene first, then overlay
+    // Overlay objects use depthCompare: "always" so they overwrite scene
+    // objects, giving them picking priority even when geometrically behind
+    const sortedForPicking = [...renderObjects].sort((a, b) => {
+      const aOverlay = a.layer === "overlay" ? 1 : 0;
+      const bOverlay = b.layer === "overlay" ? 1 : 0;
+      return aOverlay - bOverlay;
+    });
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: pickTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: pickDepthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+    pass.setBindGroup(0, uniformBindGroup);
+
+    for (const ro of sortedForPicking) {
+      pass.setPipeline(ro.pickingPipeline);
+      pass.setBindGroup(0, uniformBindGroup);
+      if (ro.bindGroup1) {
+        pass.setBindGroup(PRIMITIVE_BIND_GROUP, ro.bindGroup1);
+      }
+      pass.setVertexBuffer(0, ro.geometryBuffer);
+      pass.setVertexBuffer(
+        1,
+        ro.pickingInstanceBuffer.buffer,
+        ro.pickingInstanceBuffer.offset,
+      );
+
+      // Draw with indices if we have them, otherwise use vertex count
+      if (ro.indexBuffer && ro.indexCount > 0) {
+        pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+        pass.drawIndexed(ro.indexCount, ro.instanceCount);
+      } else if (ro.vertexCount) {
+        pass.draw(ro.vertexCount, ro.instanceCount);
+      }
+    }
+
+    pass.end();
+    return true;
+  }
+
+  /**
+   * Encodes a pick pass drawing ONLY the given component (optionally only
+   * the given instance ranges). Instance data is rebuilt unsorted with the
+   * scene's real pick ids, so the readback decodes against the same legend
+   * as the full pass. Used to measure a selection's unoccluded footprint.
+   */
+  function encodeSelectionPickPass(
+    cmd: GPUCommandEncoder,
+    componentIdx: number,
+    ranges: InstanceRanges | undefined,
+    tempBuffers: GPUBuffer[],
+  ): boolean {
+    if (!gpuRef.current) return false;
+    const {
+      device,
+      pickTexture,
+      pickDepthTexture,
+      uniformBindGroup,
+      renderObjects,
+      renderedComponents,
+    } = gpuRef.current;
+    if (!pickTexture || !pickDepthTexture || !renderedComponents) return false;
+
+    const pass = cmd.beginRenderPass({
+      colorAttachments: [
+        {
+          view: pickTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: pickDepthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+    pass.setBindGroup(0, uniformBindGroup);
+
+    for (const ro of renderObjects) {
+      const offset = ro.componentOffsets.find(
+        (o) => o.componentIdx === componentIdx,
+      );
+      if (!offset || offset.elementCount === 0) continue;
+      const component = renderedComponents[componentIdx];
+      const spec = ro.spec;
+      const floatsPerElement = spec.instancesPerElement * spec.floatsPerPicking;
+
+      // Unsorted build with baseOffset 0; pickingBase keeps the real ids.
+      const full = new Float32Array(offset.elementCount * floatsPerElement);
+      buildPickingData(component, spec, full, offset.pickingStart, 0);
+
+      let data = full;
+      let instanceCount = offset.elementCount * spec.instancesPerElement;
+      if (ranges && ranges.length) {
+        const selected: number[] = [];
+        for (let i = 0; i < offset.elementCount; i++) {
+          if (inRanges(i, ranges)) selected.push(i);
+        }
+        data = new Float32Array(selected.length * floatsPerElement);
+        selected.forEach((elementIdx, j) => {
+          data.set(
+            full.subarray(
+              elementIdx * floatsPerElement,
+              (elementIdx + 1) * floatsPerElement,
+            ),
+            j * floatsPerElement,
+          );
+        });
+        instanceCount = selected.length * spec.instancesPerElement;
+      }
+      if (instanceCount === 0) continue;
+
+      const buffer = device.createBuffer({
+        size: Math.max(data.byteLength, 16),
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        label: "Selection pick instance buffer",
+      });
+      device.queue.writeBuffer(
+        buffer,
+        0,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+      );
+      tempBuffers.push(buffer);
+
+      pass.setPipeline(ro.pickingPipeline);
+      pass.setBindGroup(0, uniformBindGroup);
+      if (ro.bindGroup1) {
+        pass.setBindGroup(PRIMITIVE_BIND_GROUP, ro.bindGroup1);
+      }
+      pass.setVertexBuffer(0, ro.geometryBuffer);
+      pass.setVertexBuffer(1, buffer, 0);
+      if (ro.indexBuffer && ro.indexCount > 0) {
+        pass.setIndexBuffer(ro.indexBuffer, ro.indexFormat ?? "uint16");
+        pass.drawIndexed(ro.indexCount, instanceCount);
+      } else if (ro.vertexCount) {
+        pass.draw(ro.vertexCount, instanceCount);
+      }
+    }
+
+    pass.end();
+    return true;
+  }
+
+  /** Latest components as compiled for rendering, ignoring any highlight. */
+  const originalComponentsRef = useRef<ComponentConfig[] | null>(null);
+
+  function snapshotBaseComponents(): ComponentConfig[] {
+    return (
+      originalComponentsRef.current ??
+      gpuRef.current?.renderedComponents ??
+      components
+    );
+  }
+
+  function snapshotInfo() {
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    const comps = snapshotBaseComponents();
+    return {
+      width: canvas?.width ?? 0,
+      height: canvas?.height ?? 0,
+      dpr: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+      rect: rect
+        ? {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          }
+        : null,
+      camera: activeCameraRef.current
+        ? createCameraParams(activeCameraRef.current)
+        : null,
+      origin: originRef.current ?? null,
+      components: comps.map((comp, index) => {
+        const info: Record<string, unknown> = {
+          component: index,
+          type: comp.type,
+          count: primitiveRegistry[comp.type]?.getElementCount(comp) ?? 0,
+        };
+        // Switchable color channels: report the active channel + the available
+        // channels (name + label + kind) so an agent learns it can switch by
+        // setting the $state ref that drives active_channel.
+        const channels = (comp as any).color_channels as
+          | Record<string, any>
+          | undefined;
+        if (channels) {
+          info.active_channel = (comp as any)._activeChannel ?? null;
+          info.channels = Object.keys(channels).map((name) => ({
+            name,
+            label: channels[name].label ?? name,
+            kind: channels[name].colorizer?.kind ?? "continuous",
+          }));
+        }
+        return info;
+      }),
+      // Named selections (resolved membership) so the CLI can resolve a
+      // selection name to component + instances and report pick-at membership.
+      selections: (selectionReports ?? []).map((s) => ({
+        name: s.name,
+        component: s.component,
+        type: s.type,
+        count: s.count,
+        predicate: s.predicate,
+        instances: s.indexes,
+      })),
+      // Named annotation callouts, projected with the live camera. Screen
+      // positions are page CSS pixels (pick-at pixel space): the canvas-local
+      // projection is offset by the canvas rect's page origin.
+      annotations: snapshotAnnotations(comps, rect),
+    };
+  }
+
+  /** Resolves + projects the scene's annotations for the snapshot report.
+   * Screen positions are in page pick-at pixel space (canvas rect applied). */
+  function snapshotAnnotations(
+    comps: ComponentConfig[],
+    rect: DOMRect | undefined,
+  ) {
+    const camera = activeCameraRef.current;
+    const cssRect =
+      rect && rect.width > 0 && rect.height > 0
+        ? { width: rect.width, height: rect.height }
+        : null;
+    const resolved = resolveAnnotations(
+      annotationsRef.current,
+      comps,
+      (component) => primitiveRegistry[component.type],
+      transforms,
+      camera,
+      cssRect,
+      originRef.current ?? null,
+    );
+    // The scene `origin` shifted all rendered positions; add it back to the
+    // reported world so callers see coordinates in their ORIGINAL space, the
+    // same convention as pick-at's dereferenced positions. (Projection above
+    // uses the shifted world, matching the rendered geometry.)
+    const o = originRef.current;
+    return resolved.map((a) => ({
+      name: a.name,
+      text: a.text,
+      anchor: a.anchor,
+      world:
+        a.world && o
+          ? [a.world[0] + o[0], a.world[1] + o[1], a.world[2] + o[2]]
+          : a.world,
+      // Offset canvas-local CSS into page CSS (pick-at) space.
+      screen:
+        a.screen && rect
+          ? { x: a.screen.x + rect.left, y: a.screen.y + rect.top }
+          : a.screen,
+      visible: a.visible,
+    }));
+  }
+
+  async function snapshotPickBuffer(options?: {
+    componentIdx?: number;
+    instances?: InstanceRanges;
+  }): Promise<PickBufferResult | null> {
+    if (!gpuRef.current || !canvasRef.current) return null;
+    const { device, pickTexture, renderObjects, renderedComponents } =
+      gpuRef.current;
+    if (!pickTexture || !renderedComponents) return null;
+
+    for (const ro of renderObjects) {
+      ensurePickingData(device, renderedComponents, ro);
+    }
+
+    const cmd = device.createCommandEncoder({
+      label: "Full-frame pick encoder",
+    });
+    const tempBuffers: GPUBuffer[] = [];
+    const encoded =
+      options?.componentIdx !== undefined && options.componentIdx !== null
+        ? encodeSelectionPickPass(
+            cmd,
+            options.componentIdx,
+            options.instances,
+            tempBuffers,
+          )
+        : encodeFullPickPass(cmd);
+    if (!encoded) return null;
+
+    const width = pickTexture.width;
+    const height = pickTexture.height;
+    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    const readback = device.createBuffer({
+      size: bytesPerRow * height,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      label: "Full-frame pick readback",
+    });
+    cmd.copyTextureToBuffer(
+      { texture: pickTexture },
+      { buffer: readback, bytesPerRow, rowsPerImage: height },
+      [width, height, 1],
+    );
+    device.queue.submit([cmd.finish()]);
+
+    await readback.mapAsync(GPUMapMode.READ);
+    const mapped = new Uint32Array(readback.getMappedRange());
+    const ids = new Uint32Array(width * height);
+    const rowStride = bytesPerRow / 4;
+    for (let y = 0; y < height; y++) {
+      const src = y * rowStride;
+      const dst = y * width;
+      for (let x = 0; x < width; x++) {
+        // rgba8unorm little-endian: r | g<<8 | b<<16 | a<<24; the pick id
+        // occupies rgb (see the interactive readback in pickAtScreenXY).
+        ids[dst + x] = mapped[src + x] & 0xffffff;
+      }
+    }
+    readback.unmap();
+    readback.destroy();
+    for (const buffer of tempBuffers) buffer.destroy();
+
+    // The legend is serialized from the same componentOffsets registry that
+    // findPickedElement (interactive picking) decodes against.
+    const legend = buildPickLegend(
+      renderedComponents,
+      renderObjects.map((ro) => ro.componentOffsets),
+    );
+    return { width, height, ids: u32ToBase64(ids), legend };
+  }
+
+  function snapshotInstanceInfo(
+    componentIdx: number,
+    instanceIdx: number,
+  ): Record<string, unknown> | null {
+    const comps = snapshotBaseComponents();
+    const component = comps[componentIdx];
+    if (!component) return null;
+    const spec = primitiveRegistry[component.type];
+    if (!spec) return null;
+    const count = spec.getElementCount(component);
+    if (instanceIdx < 0 || instanceIdx >= count) return null;
+    const values = describeInstance(component, spec, instanceIdx);
+    // The scene `origin` shifted all positions in Python; add it back so the
+    // dereferenced position is in the caller's original coordinate space.
+    const o = originRef.current;
+    if (o && Array.isArray(values.center)) {
+      values.center = [
+        (values.center[0] as number) + o[0],
+        (values.center[1] as number) + o[1],
+        (values.center[2] as number) + o[2],
+      ];
+    }
+    return values;
+  }
+
+  async function snapshotFrameOnSelection(
+    componentIdx: number | null,
+    ranges?: InstanceRanges,
+    view?: FrameView,
+  ): Promise<CameraParams | null> {
+    if (!gpuRef.current) return null;
+    const comps = gpuRef.current.renderedComponents ?? components;
+    let bounds: Bounds3 | null = null;
+    if (componentIdx === null || componentIdx === undefined) {
+      for (const comp of comps) {
+        const spec = primitiveRegistry[comp.type];
+        if (!spec) continue;
+        bounds = unionBounds(
+          bounds,
+          computeSelectionBounds(comp, spec, transforms),
+        );
+      }
+    } else {
+      const component = comps[componentIdx];
+      if (!component) return null;
+      const spec = primitiveRegistry[component.type];
+      if (!spec) return null;
+      bounds = computeSelectionBounds(component, spec, transforms, ranges);
+    }
+    if (!bounds) return null;
+
+    let baseCamera = createCameraParams(activeCameraRef.current!);
+    if (view?.direction) {
+      // Aim from an explicit world-space direction: fitCameraToBounds
+      // preserves the direction/up of the camera it is given, so build a
+      // template camera looking at the bounds center from that direction.
+      const [dx, dy, dz] = view.direction;
+      const length = Math.hypot(dx, dy, dz) || 1;
+      const d: [number, number, number] = [
+        dx / length,
+        dy / length,
+        dz / length,
+      ];
+      let up: [number, number, number] = view.up ?? baseCamera.up;
+      const cross = [
+        d[1] * up[2] - d[2] * up[1],
+        d[2] * up[0] - d[0] * up[2],
+        d[0] * up[1] - d[1] * up[0],
+      ];
+      if (Math.hypot(cross[0], cross[1], cross[2]) < 1e-6) {
+        // Up parallel to the view direction (e.g. a top view with Y up):
+        // substitute a perpendicular up so the view matrix stays valid.
+        up = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
+      }
+      const center: [number, number, number] = [
+        (bounds.min[0] + bounds.max[0]) / 2,
+        (bounds.min[1] + bounds.max[1]) / 2,
+        (bounds.min[2] + bounds.max[2]) / 2,
+      ];
+      baseCamera = {
+        ...baseCamera,
+        position: [center[0] + d[0], center[1] + d[1], center[2] + d[2]],
+        target: center,
+        up,
+      };
+    }
+    const fitted = fitCameraToBounds(
+      baseCamera,
+      bounds,
+      containerWidth / containerHeight,
+    );
+    const camState = createCameraState(fitted);
+    // Keep the internal camera in sync so later pick passes and captures
+    // use the framed view. (Headless snapshot flow; no user interaction.)
+    activeCameraRef.current = camState;
+    await renderFrame("frame-selection", camState);
+    return fitted;
+  }
+
+  async function snapshotApplyHighlight(
+    componentIdx: number,
+    ranges?: InstanceRanges,
+    options?: { color?: [number, number, number]; dim?: number },
+  ): Promise<boolean> {
+    if (!gpuRef.current) return false;
+    const base = snapshotBaseComponents();
+    const target = base[componentIdx];
+    if (!target) return false;
+    const targetSpec = primitiveRegistry[target.type];
+    if (!targetSpec) return false;
+
+    const color = options?.color ?? [1.0, 0.15, 0.9];
+    const dim = options?.dim ?? 0.15;
+    const elementCount = targetSpec.getElementCount(target);
+    const indexes: number[] = [];
+    for (let i = 0; i < elementCount; i++) {
+      if (inRanges(i, ranges)) indexes.push(i);
+    }
+
+    const modified = base.map((comp, idx) => {
+      const spec = primitiveRegistry[comp.type];
+      // Skip components whose buffer layout has no alpha slot (e.g. custom
+      // primitives without transparency) — decorations could corrupt data.
+      if (!spec || spec.alphaOffset < 0) return comp;
+      if (idx !== componentIdx) {
+        return {
+          ...comp,
+          alpha: dim,
+          alphas: undefined,
+          decorations: undefined,
+        } as ComponentConfig;
+      }
+      const decoration: any = { indexes, alpha: 1.0 };
+      if (spec.colorOffset >= 0) decoration.color = color;
+      return {
+        ...comp,
+        alpha: dim,
+        alphas: undefined,
+        decorations: [decoration],
+      } as ComponentConfig;
+    });
+
+    originalComponentsRef.current = base;
+    await renderFrame(
+      "highlight-selection",
+      activeCameraRef.current!,
+      modified,
+    );
+    return true;
+  }
+
+  async function snapshotClearHighlight(): Promise<void> {
+    if (!gpuRef.current || !originalComponentsRef.current) return;
+    const base = originalComponentsRef.current;
+    originalComponentsRef.current = null;
+    await renderFrame("clear-highlight", activeCameraRef.current!, base);
+  }
+
+  snapshotImplRef.current = {
+    getInfo: snapshotInfo,
+    pickBuffer: snapshotPickBuffer,
+    instanceInfo: snapshotInstanceInfo,
+    frameOnSelection: snapshotFrameOnSelection,
+    applyHighlight: snapshotApplyHighlight,
+    clearHighlight: snapshotClearHighlight,
+  };
 
   function handleHoverID(pickedID: number) {
     if (!gpuRef.current) return;
@@ -3006,15 +3966,20 @@ export function SceneImpl({
     initWebGPU();
     return () => {
       if (gpuRef.current) {
-        const { device, resources, pipelineCache } = gpuRef.current;
+        const { device, resources, pipelineCache, transformRefResources } =
+          gpuRef.current;
 
         device.queue.onSubmittedWorkDone().then(() => {
           for (const resource of Object.values(resources)) {
-            if (resource) {
-              resource.vb.destroy();
-              resource.ib.destroy();
-            }
+            // `ib` is null for non-indexed geometry; the old sweep called
+            // .destroy() on it unconditionally and threw part-way through,
+            // leaking every resource after the first non-indexed one.
+            if (resource) destroyGeometryResource(resource);
           }
+          for (const resource of transformRefResources.values()) {
+            resource.buffer.destroy();
+          }
+          transformRefResources.clear();
 
           // Clear instance pipeline cache
           pipelineCache.clear();
@@ -3078,15 +4043,83 @@ export function SceneImpl({
     renderFrame,
   ]);
 
-  // Render when camera, components, or transforms change
+  // Auto-fit: when the user supplied no camera, fit the view to the scene's
+  // world-space bounds on first render (and whenever the component set
+  // changes while still uncontrolled). This makes far-from-unit-scale scenes
+  // (a 3 km deposit, a UTM tile) render correctly out of the box instead of
+  // pure black under the unit-scale DEFAULT_CAMERA near/far. Deterministic:
+  // the same components + viewport always yield the same fitted camera, so
+  // `screenshot --check` stays byte-identical. An explicit defaultCamera or
+  // controlled camera skips this entirely.
+  const userCameraProvided = !!(controlledCamera || defaultCamera);
+  const autoFitSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (userCameraProvided) return;
+    if (!isReady || !gpuRef.current) return;
+    if (!components.length) return;
+    if (!containerWidth || !containerHeight) return;
+
+    // Only refit when the component set actually changes (identity of the
+    // compiled array), not on every camera nudge from user interaction.
+    const signature = `${components.length}:${containerWidth}x${containerHeight}`;
+    if (autoFitSignatureRef.current === signature) return;
+
+    let bounds: Bounds3 | null = null;
+    for (const comp of components) {
+      const spec = primitiveRegistry[comp.type];
+      if (!spec) continue;
+      bounds = unionBounds(
+        bounds,
+        computeSelectionBounds(comp, spec, transforms),
+      );
+    }
+    if (!bounds) return;
+
+    autoFitSignatureRef.current = signature;
+    const fitted = fitCameraToBounds(
+      createCameraParams(activeCameraRef.current ?? createCameraState(null)),
+      bounds,
+      containerWidth / containerHeight,
+    );
+    const fittedState = createCameraState(fitted);
+    activeCameraRef.current = fittedState;
+    setInternalCamera(fittedState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isReady,
+    components,
+    transforms,
+    containerWidth,
+    containerHeight,
+    userCameraProvided,
+  ]);
+
+  // Render when camera, components, transforms, or filter thresholds change
   useEffect(() => {
     if (isReady && gpuRef.current) {
-      if (
-        !deepEqualModuloTypedArrays(
-          components,
-          gpuRef.current.renderedComponents,
-        )
-      ) {
+      const prevComponents = gpuRef.current.renderedComponents;
+      const componentsEqual = probeStage(PROBE_STAGES.equalityDeep, () =>
+        deepEqualModuloTypedArrays(components, prevComponents),
+      );
+      // A threshold-only change (e.g. a $state slider driving filter_by.min/max)
+      // re-evaluates the scene, producing a new components array that differs
+      // ONLY in filter_by. In that case we must NOT rebuild/re-upload the large
+      // per-instance buffers: only the tiny filterParams buffer changed. Detect
+      // that here and take the light render path (uniforms + filterParams only).
+      const filterOnlyChange =
+        !componentsEqual &&
+        prevComponents !== undefined &&
+        probeStage(PROBE_STAGES.equalityFilter, () =>
+          componentsEqualIgnoringFilter(components, prevComponents),
+        );
+
+      if (filterOnlyChange) {
+        // Adopt the new components (their _filterIndex/_filterValues are equal
+        // to the previous ones by construction) without rebuilding render
+        // objects, so the reused instance buffers are not re-uploaded.
+        gpuRef.current.renderedComponents = components;
+        requestRender("filter thresholds changed");
+      } else if (!componentsEqual) {
         renderFrame("components changed", activeCameraRef.current!, components);
       } else if (
         !deepEqualModuloTypedArrays(
@@ -3096,12 +4129,22 @@ export function SceneImpl({
       ) {
         requestRender("camera changed");
       } else {
-        // Transforms may have changed even if components are deeply equal
-        // (e.g., group position changed). Re-render to upload new transforms.
-        requestRender("transforms changed");
+        // Transforms or clip planes may have changed even if components are
+        // deeply equal (e.g., a $state section offset). Re-render to upload the
+        // new transforms / clip-plane uniform — a light path, no instance
+        // re-upload.
+        requestRender("transforms or clip planes changed");
       }
     }
-  }, [isReady, components, transforms, controlledCamera, internalCamera]);
+  }, [
+    isReady,
+    components,
+    transforms,
+    filterParams,
+    clipPlanes,
+    controlledCamera,
+    internalCamera,
+  ]);
 
   // Wheel handling
   useEffect(() => {

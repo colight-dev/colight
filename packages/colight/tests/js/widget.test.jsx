@@ -2,7 +2,12 @@ import * as Plot from "@observablehq/plot";
 import { render, act } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStateStore, StateProvider } from "../../src/js/widget";
+import {
+  createStateStore,
+  StateProvider,
+  updateEntryOps,
+  computeStepUpdates,
+} from "../../src/js/widget";
 import { evaluate } from "../../src/js/eval";
 
 // Add this at the top of the file
@@ -149,6 +154,69 @@ describe("Widget", () => {
       });
 
       expect(container.innerHTML).toContain("Count: 0");
+    });
+  });
+
+  describe("TimelineScrubber", () => {
+    const mdAst = {
+      __type__: "function",
+      path: "md",
+      args: [
+        {
+          __type__: "js_source",
+          expression: true,
+          value: "`step ${$state.step}`",
+        },
+      ],
+    };
+
+    it("does not render a scrubber without update entries", async () => {
+      let container;
+      await act(async () => {
+        const result = render(
+          <StateProvider
+            ast={mdAst}
+            state={{ step: 0 }}
+            syncedKeys={new Set(["step"])}
+          />,
+        );
+        container = result.container;
+      });
+      expect(
+        container.querySelector("[data-testid=timeline-scrubber]"),
+      ).toBeNull();
+    });
+
+    it("renders a scrubber (slider + count) when update entries exist", async () => {
+      const entry = (step) => ({
+        data: {
+          ast: { step },
+          state: {},
+          syncedKeys: [],
+          listeners: [],
+          imports: [],
+        },
+        buffers: [],
+      });
+      let container;
+      await act(async () => {
+        const result = render(
+          <StateProvider
+            ast={mdAst}
+            state={{ step: 0 }}
+            syncedKeys={new Set(["step"])}
+            updateEntries={[entry(1), entry(2), entry(3)]}
+          />,
+        );
+        container = result.container;
+      });
+      const scrubber = container.querySelector(
+        "[data-testid=timeline-scrubber]",
+      );
+      expect(scrubber).not.toBeNull();
+      const slider = scrubber.querySelector("input[type=range]");
+      expect(slider.max).toBe("3");
+      expect(scrubber.textContent).toContain("0 / 3");
     });
   });
 
@@ -316,6 +384,191 @@ describe("Widget", () => {
       );
       expect($state.a).toBe(10);
       expect($state.b).toBe(2); // 'b' is still based on the old value of 'a'
+    });
+
+    describe("applyUpdateEntries", () => {
+      // A .colight update entry as parsed by format.js: {data, buffers},
+      // where data is the serialized update envelope.
+      const stateOnlyEntry = (state, buffers = []) => ({
+        data: {
+          ast: null,
+          state,
+          syncedKeys: [],
+          listeners: {},
+          imports: [],
+        },
+        buffers,
+      });
+
+      it("applies a state-only update entry (ast: null) without crashing", async () => {
+        // Regression: applyUpdateEntries used to pass ast (null) straight
+        // into normalizeUpdates, which called null.flatMap and threw.
+        const $state = await createTestStateStore({
+          state: { zoom: 1.0 },
+          updateEntries: [stateOnlyEntry({ zoom: 2.0 })],
+        });
+        // The update overwrites the existing key (not just backfills).
+        expect($state.zoom).toBe(2.0);
+      });
+
+      it("applies state-only updates to new and existing keys in order", async () => {
+        const $state = await createTestStateStore({
+          state: { a: 1 },
+          updateEntries: [
+            stateOnlyEntry({ a: 2, b: 10 }),
+            stateOnlyEntry({ a: 3 }),
+          ],
+        });
+        expect($state.a).toBe(3);
+        expect($state.b).toBe(10);
+      });
+
+      it("resolves buffer references in state-only update entries", async () => {
+        const values = new Float64Array([1.5, -2.5]);
+        const $state = await createTestStateStore({
+          state: {},
+          updateEntries: [
+            stateOnlyEntry(
+              {
+                arr: {
+                  __type__: "ndarray",
+                  data: null,
+                  dtype: "float64",
+                  shape: [2],
+                  __buffer_index__: 0,
+                },
+              },
+              [new DataView(values.buffer)],
+            ),
+          ],
+        });
+        expect(Array.from($state.arr)).toEqual([1.5, -2.5]);
+      });
+
+      it("still applies ast update operations from update entries", async () => {
+        const $state = await createTestStateStore({
+          state: { list: [1, 2] },
+          updateEntries: [
+            {
+              data: {
+                ast: [["list", "append", 3]],
+                state: {},
+                syncedKeys: [],
+                listeners: {},
+                imports: [],
+              },
+              buffers: [],
+            },
+          ],
+        });
+        expect($state.list).toEqual([1, 2, 3]);
+      });
+    });
+
+    describe("timeline scrubber recompute", () => {
+      // A .colight update entry as parsed by format.js: {data, buffers}.
+      const patchEntry = (patch, buffers = []) => ({
+        data: {
+          ast: patch,
+          state: {},
+          syncedKeys: [],
+          listeners: {},
+          imports: [],
+        },
+        buffers,
+      });
+
+      it("reduces a dict-ast update entry to reset ops", () => {
+        const ops = updateEntryOps(patchEntry({ step: 3, action: "GO" }));
+        expect(ops).toEqual([
+          ["step", "reset", 3],
+          ["action", "reset", "GO"],
+        ]);
+      });
+
+      it("reduces a state-only update entry to reset ops", () => {
+        const entry = {
+          data: { ast: null, state: { step: 5 } },
+          buffers: [],
+        };
+        expect(updateEntryOps(entry)).toEqual([["step", "reset", 5]]);
+      });
+
+      it("computeStepUpdates accumulates the first k entries, later wins", () => {
+        const entries = [
+          patchEntry({ step: 1 }),
+          patchEntry({ step: 2 }),
+          patchEntry({ step: 3 }),
+        ];
+        expect(computeStepUpdates(entries, 0)).toEqual([]);
+        expect(computeStepUpdates(entries, 2)).toEqual([
+          ["step", "reset", 1],
+          ["step", "reset", 2],
+        ]);
+        // k beyond length is clamped.
+        expect(computeStepUpdates(entries, 99).length).toBe(3);
+      });
+
+      it("computeStepUpdates resolves each entry's own buffers", () => {
+        const a = new Float64Array([10]);
+        const b = new Float64Array([20]);
+        const ndarray = (i) => ({
+          __type__: "ndarray",
+          data: null,
+          dtype: "float64",
+          shape: [1],
+          __buffer_index__: i,
+        });
+        const entries = [
+          patchEntry({ px: ndarray(0) }, [new DataView(a.buffer)]),
+          patchEntry({ px: ndarray(0) }, [new DataView(b.buffer)]),
+        ];
+        const ops = computeStepUpdates(entries, 2);
+        // Each entry's ndarray ref was resolved against its own buffer.
+        expect(Array.from(new Float64Array(ops[0][2].data.buffer))).toEqual([
+          10,
+        ]);
+        expect(Array.from(new Float64Array(ops[1][2].data.buffer))).toEqual([
+          20,
+        ]);
+      });
+
+      it("applyUpdateEntriesUpTo scrubs forward and rewinds to any step", async () => {
+        const $state = await createTestStateStore({
+          state: { step: 0, action: "START" },
+          updateEntries: [
+            patchEntry({ step: 1, action: "A" }),
+            patchEntry({ step: 2, action: "B" }),
+            patchEntry({ step: 3, action: "C" }),
+          ],
+        });
+        const entries = [
+          patchEntry({ step: 1, action: "A" }),
+          patchEntry({ step: 2, action: "B" }),
+          patchEntry({ step: 3, action: "C" }),
+        ];
+        await $state.prepareUpdateEntries(entries);
+
+        // Position 0 is the initial state.
+        $state.applyUpdateEntriesUpTo(entries, 0);
+        expect([$state.step, $state.action]).toEqual([0, "START"]);
+
+        // Forward.
+        $state.applyUpdateEntriesUpTo(entries, 2);
+        expect([$state.step, $state.action]).toEqual([2, "B"]);
+
+        // Rewind (recompute from initial, not a forward-only apply).
+        $state.applyUpdateEntriesUpTo(entries, 1);
+        expect([$state.step, $state.action]).toEqual([1, "A"]);
+
+        // All the way.
+        $state.applyUpdateEntriesUpTo(entries, 3);
+        expect([$state.step, $state.action]).toEqual([3, "C"]);
+
+        // Back to start restores the captured baseline.
+        $state.applyUpdateEntriesUpTo(entries, 0);
+        expect([$state.step, $state.action]).toEqual([0, "START"]);
+      });
     });
 
     describe("deep property access", () => {

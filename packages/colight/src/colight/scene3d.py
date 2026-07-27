@@ -1,9 +1,21 @@
-from typing import Any, Dict, Literal, Optional, TypedDict, Union
+import warnings
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    TypedDict,
+    Union,
+)
 
 import numpy as np
 
 import colight.plot as Plot
-from colight.layout import JSExpr
+from colight import colormaps
+from colight.layout import JSExpr, is_js_expr
 
 # Move Array type definition after imports
 ArrayLike = Union[list, np.ndarray, JSExpr]
@@ -100,6 +112,218 @@ DRAG_SCREEN: DragConstraint = {"type": "screen"}  # Screen-space drag (fixed dep
 DRAG_FREE: DragConstraint = {"type": "free"}  # Camera-facing plane through start point
 
 
+class ColorBy(TypedDict, total=False):
+    """Colormap-driven coloring for instanced primitives.
+
+    ``values`` is required; everything else has defaults. Colors are
+    computed in Python via :mod:`colight.colormaps`; the colormap spec
+    (cmap, domain, label, ...) travels with the component so the scene can
+    render a legend and ``colight inspect`` / ``screenshot --json`` can
+    report what the colors encode.
+    """
+
+    values: ArrayLike  # scalar values (continuous) or category codes
+    cmap: str  # colormap name, default "viridis"
+    domain: Sequence[float]  # (min, max) for continuous maps
+    label: str  # what the colors encode (legend title)
+    # Categorical display: either ordinal display names (["ore", "waste"]) or a
+    # first-class category table ([{value, label, color?}]) — the xmi id-maps
+    # idiom with arbitrary codes, per-category colors, and a fallback slot.
+    categories: Sequence[Any]
+    fallback: Dict[str, Any]  # {label?, color?} for unmatched/NaN (category table)
+    palette: str  # categorical palette for auto-assigned colors (default tab10)
+    nan_color: Sequence[float]  # RGB for NaN/invalid values
+    legend: Union[bool, str]  # False hides; or a dock corner like "top-left"
+
+
+class ColorChannel(TypedDict, total=False):
+    """One named color channel (a ``color_by``-shaped spec).
+
+    Channels ship their raw ``values`` once; the active channel is colorized
+    client-side (JS applies a LUT / category table), so an artifact can switch
+    which attribute drives the colors without re-exporting.
+    """
+
+    values: ArrayLike
+    cmap: str
+    domain: Sequence[float]
+    label: str
+    categories: Sequence[Any]
+    fallback: Dict[str, Any]
+    palette: str
+    nan_color: Sequence[float]
+
+
+_LEGEND_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def _apply_color_by(
+    data: Dict[str, Any],
+    color_by: Optional[Union[ColorBy, Dict[str, Any]]],
+) -> None:
+    """Resolve a ``color_by`` spec into per-instance colors + legend metadata.
+
+    Mutates ``data``: sets ``colors`` (float32 RGB) and ``color_by`` (the
+    JSON-safe colormap spec consumed by the JS legend and CLI reporting).
+
+    Raises:
+        ValueError: When explicit ``colors``/``color`` are also present, or
+            the spec is malformed.
+    """
+    if color_by is None:
+        return
+    if "colors" in data or "color" in data:
+        raise ValueError("pass either color_by or colors/color, not both")
+    spec: Dict[str, Any] = dict(color_by)
+    legend: Union[bool, str] = spec.pop("legend", True)
+    if isinstance(legend, str) and legend not in _LEGEND_POSITIONS:
+        raise ValueError(
+            f"invalid legend position {legend!r} (one of {', '.join(_LEGEND_POSITIONS)})"
+        )
+    colors, meta = colormaps.resolve_color_by(spec)
+    if legend is False:
+        meta["legend"] = False
+    elif isinstance(legend, str):
+        meta["position"] = legend
+    data["colors"] = flatten_array(colors, dtype=np.float32)
+    data["color_by"] = meta
+
+
+def _apply_color_channels(
+    data: Dict[str, Any],
+    color_channels: Optional[Mapping[str, Any]],
+    active_channel: Optional[Union[str, JSExpr]],
+    legend: Union[bool, str] = True,
+) -> None:
+    """Resolve named ``color_channels`` for client-side switching.
+
+    Each channel ships its raw ``values`` once plus a compact colorizer (a
+    256-entry RGB LUT for continuous, or the resolved category table for
+    categorical) so JS recolors the active channel without reimplementing
+    colormaps. Python also bakes the initially-active channel's colors so the
+    first render (and non-JS paths) are correct.
+
+    Mutates ``data``: sets ``colors`` (baked active channel), ``color_by`` (the
+    active channel's legend), ``color_channels`` (per-channel colorizer +
+    legend + values), and ``active_channel`` (literal name or the JSExpr JS
+    resolves against ``$state``).
+
+    Args:
+        active_channel: A literal channel name, a ``Plot.js("$state...")``
+            expression, or None (defaults to the first channel).
+        legend: False hides the legend; a corner string docks it.
+
+    Raises:
+        ValueError: When ``color_by``/``colors``/``color`` are also present,
+            channels are empty, or a literal ``active_channel`` is unknown.
+    """
+    if not color_channels:
+        return
+    if "colors" in data or "color" in data or "color_by" in data:
+        raise ValueError(
+            "color_channels is mutually exclusive with color_by / colors / color"
+        )
+    if isinstance(legend, str) and legend not in _LEGEND_POSITIONS:
+        raise ValueError(
+            f"invalid legend position {legend!r} (one of {', '.join(_LEGEND_POSITIONS)})"
+        )
+
+    names = list(color_channels.keys())
+    if not names:
+        raise ValueError("color_channels must declare at least one channel")
+
+    # Which channel to bake for the initial render. A JSExpr active_channel is
+    # resolved by JS at runtime; Python bakes a concrete default (the literal
+    # if given, else the first channel).
+    is_expr = is_js_expr(active_channel)
+    default_name: str
+    if active_channel is None or is_expr:
+        default_name = names[0]
+    else:
+        default_name = str(active_channel)
+        if default_name not in color_channels:
+            raise ValueError(
+                f"active_channel {default_name!r} not in color_channels " f"{names}"
+            )
+
+    channels_meta: Dict[str, Any] = {}
+    baked_colors: Optional[np.ndarray] = None
+    baked_legend: Optional[Dict[str, Any]] = None
+    for name, spec in color_channels.items():
+        colors, chan_legend, colorizer = colormaps.resolve_channel(dict(spec))
+        n = colors.shape[0]
+        channels_meta[name] = {
+            "label": chan_legend.get("label", name),
+            "legend": chan_legend,
+            "colorizer": colorizer,
+            "values": flatten_array(
+                np.asarray(spec["values"], dtype=np.float32), dtype=np.float32
+            ),
+            "count": n,
+        }
+        if name == default_name:
+            baked_colors = colors
+            baked_legend = dict(chan_legend)
+
+    assert baked_colors is not None and baked_legend is not None
+    if legend is False:
+        baked_legend["legend"] = False
+    elif isinstance(legend, str):
+        baked_legend["position"] = legend
+
+    data["colors"] = flatten_array(baked_colors, dtype=np.float32)
+    data["color_by"] = baked_legend
+    data["color_channels"] = channels_meta
+    # JS resolves a JSExpr against $state; a literal (or default) passes through.
+    data["active_channel"] = active_channel if is_expr else default_name
+
+
+class FilterBy(TypedDict, total=False):
+    """Per-instance threshold filter for instanced primitives.
+
+    Instances whose scalar ``values`` fall outside ``[min, max]`` are hidden
+    (collapsed in the vertex shader and made unpickable). ``NaN`` values are
+    always hidden. ``values`` is required; ``min``/``max`` default to unbounded.
+
+    ``values`` is uploaded once as a per-instance attribute; ``min``/``max``
+    live in a small per-component uniform, so a threshold change (e.g. a
+    ``Plot.js("$state.cutoff")`` slider) updates only the uniform and does not
+    re-upload the instance data. ``min``/``max`` may be literals or ``$state``
+    references (``Plot.js(...)``).
+    """
+
+    values: ArrayLike  # per-instance scalar values
+    min: Optional[NumberLike]  # inclusive lower bound (default: unbounded)
+    max: Optional[NumberLike]  # inclusive upper bound (default: unbounded)
+    label: str  # what the filter encodes (for inspect / screenshot --json)
+
+
+def _normalize_filter_by(
+    filter_by: Optional[Union[FilterBy, Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """Normalize a ``filter_by`` spec for the JS boundary.
+
+    Flattens ``values`` to a float32 array and passes ``min``/``max``/``label``
+    through unchanged (``min``/``max`` may be numbers or ``$state`` JSExprs).
+
+    Raises:
+        ValueError: When ``values`` is missing.
+    """
+    if filter_by is None:
+        return None
+    spec = dict(filter_by)
+    if spec.get("values") is None:
+        raise ValueError("filter_by requires 'values'")
+    out: Dict[str, Any] = {"values": flatten_array(spec["values"], dtype=np.float32)}
+    if spec.get("min") is not None:
+        out["min"] = spec["min"]
+    if spec.get("max") is not None:
+        out["max"] = spec["max"]
+    if spec.get("label") is not None:
+        out["label"] = spec["label"]
+    return out
+
+
 class Decoration(TypedDict, total=False):
     indexes: ArrayLike
     color: Optional[ArrayLike]  # [r,g,b]
@@ -169,19 +393,54 @@ def deco(
     return decoration  # type: ignore
 
 
-def _snake_to_camel(name: str) -> str:
-    """Convert snake_case to camelCase."""
-    parts = name.split("_")
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+# Props consumed as camelCase by the JS scene3d framework layer (interaction
+# callbacks, hover/outline styling, caching keys, render options, and helper
+# props). ONLY these keys are renamed at the Python->JS boundary. Everything
+# else -- the data props (centers, half_sizes, fill_mode, ...) -- crosses the
+# boundary unchanged in snake_case: the JS coercion layer consumes snake_case
+# keys and warns about keys it does not recognize.
+_JS_PROP_NAMES = {
+    # Interaction & framework props (BaseComponentConfig / GroupConfig)
+    "on_hover": "onHover",
+    "on_click": "onClick",
+    "on_drag": "onDrag",
+    "on_drag_start": "onDragStart",
+    "on_drag_end": "onDragEnd",
+    "drag_constraint": "dragConstraint",
+    "hover_props": "hoverProps",
+    "picking_scale": "pickingScale",
+    "outline_color": "outlineColor",
+    "outline_width": "outlineWidth",
+    "child_defaults": "childDefaults",
+    "child_overrides": "childOverrides",
+    # Caching / render options
+    "image_key": "imageKey",
+    "texture_key": "textureKey",
+    "geometry_key": "geometryKey",
+    "cull_mode": "cullMode",
+    # Per-vertex weighted transform references (Mesh geometry)
+    "transform_refs": "transformRefs",
+    "transform_indices": "transformIndices",
+    "transform_weights": "transformWeights",
+    # Helper props (GridHelper / CameraFrustum / ImageProjection)
+    "center_color": "centerColor",
+    "line_width": "lineWidth",
+    "show_frustum": "showFrustum",
+    "frustum_color": "frustumColor",
+}
 
 
 def _convert_to_js(obj: Any) -> Any:
-    """Recursively convert dict keys from snake_case to camelCase."""
+    """Recursively rename framework props to their JS (camelCase) names.
+
+    Data props are passed through unchanged; the JS side consumes them in
+    snake_case and warns loudly about unknown keys.
+    """
     if isinstance(obj, SceneComponent):
         # Convert SceneComponent to a config object with type and props
         return {"type": obj.type, **_convert_to_js(obj.props)}
     if isinstance(obj, dict):
-        return {_snake_to_camel(k): _convert_to_js(v) for k, v in obj.items()}
+        return {_JS_PROP_NAMES.get(k, k): _convert_to_js(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_convert_to_js(item) for item in obj]
     return obj
@@ -255,15 +514,408 @@ def flatten_layers(layers):
     return flattened
 
 
+# Position-typed component attributes: arrays of world-space coordinates that
+# must be translated by -origin when a scene declares an ``origin`` (see
+# ``Scene(origin=...)``). Everything else -- colors, sizes, quaternions, uvs --
+# is origin-invariant. ``points`` (LineBeams) packs [x,y,z,lineIndex] quads, so
+# only the first three of every four scalars are translated.
+#
+# Mesh geometry is handled specially (``_recenter_mesh_props``): a mesh renders
+# each vertex at ``center + R*(S*vertex)``, so simply subtracting origin from
+# the instance ``centers`` alone would leave the large-magnitude geometry
+# vertices (e.g. UTM eastings ~4.4e5) in float32 GPU buffers -- the precision
+# problem the origin is meant to solve. Instead we fold the geometry centroid
+# into the instance centers (leaving small local geometry) and then shift the
+# centers by -origin uniformly, exactly like every other position array. The
+# composite world position is unchanged; only the *representation* becomes
+# float32-safe.
+_POSITION_ATTRS_STRIDE3 = ("centers", "starts", "ends")
+_POSITION_ATTRS_STRIDE4 = ("points",)
+
+
+def _quat_rotate(quat: np.ndarray, vecs: np.ndarray) -> np.ndarray:
+    """Rotate row vectors by quaternion ``[w, x, y, z]`` (mesh convention).
+
+    Args:
+        quat: (4,) quaternion in ``[w, x, y, z]`` order (the mesh instance
+            convention; identity when absent).
+        vecs: (N, 3) vectors to rotate.
+
+    Returns:
+        (N, 3) rotated vectors: ``v + 2*w*(q x v) + 2*(q x (q x v))``.
+    """
+    w = float(quat[0])
+    q = quat[1:4].astype(np.float64)
+    cross1 = np.cross(np.broadcast_to(q, vecs.shape), vecs)
+    cross2 = np.cross(np.broadcast_to(q, vecs.shape), cross1)
+    return vecs + 2.0 * w * cross1 + 2.0 * cross2
+
+
+def _recenter_mesh_props(props: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold a mesh's geometry centroid into its instance centers.
+
+    Returns a copy of ``props`` with ``geometry.positions`` re-expressed
+    relative to their centroid (small, local coordinates) and each instance
+    ``center`` moved by ``R*(S*centroid)`` so the composite world position of
+    every vertex is unchanged. This keeps large world-space vertex arrays out
+    of float32 GPU buffers; the (now small) centers are subsequently shifted
+    by -origin like all other positions.
+
+    A no-op unless ``geometry.positions`` is a translatable numeric array.
+    """
+    geometry = props.get("geometry")
+    if not isinstance(geometry, dict) or geometry.get("positions") is None:
+        return props
+    positions = geometry["positions"]
+    if isinstance(positions, JSExpr):
+        return props
+    verts = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if verts.size == 0:
+        return props
+    centroid = verts.mean(axis=0)
+
+    out = dict(props)
+    new_geometry = dict(geometry)
+    new_geometry["positions"] = (verts - centroid).reshape(-1).astype(np.float32)
+    out["geometry"] = new_geometry
+
+    centers = np.asarray(out.get("centers"), dtype=np.float64).reshape(-1, 3)
+    # Per-instance transform: quaternion is [w,x,y,z], scale is scalar or
+    # [x,y,z]. Offset each center by the transformed centroid so the composite
+    # (center + R*(S*(vertex-centroid))) matches the original.
+    quats = out.get("quaternions")
+    quat = out.get("quaternion")
+    scales = out.get("scales")
+    scale = out.get("scale")
+    offsets = np.empty_like(centers)
+    for i in range(len(centers)):
+        if scales is not None:
+            s = np.asarray(scales, dtype=np.float64).reshape(-1, 3)[i]
+        elif scale is not None:
+            s = np.asarray(scale, dtype=np.float64)
+            if s.ndim == 0:
+                s = np.repeat(s, 3)
+        else:
+            s = np.ones(3)
+        if quats is not None:
+            q = np.asarray(quats, dtype=np.float64).reshape(-1, 4)[i]
+        elif quat is not None:
+            q = np.asarray(quat, dtype=np.float64)
+        else:
+            q = np.array([1.0, 0.0, 0.0, 0.0])
+        scaled = (s * centroid).reshape(1, 3)
+        offsets[i] = _quat_rotate(q, scaled)[0]
+    # Keep centers in float64 here: they may still be at world magnitude
+    # (~4.4e5) and only become float32-safe after the -origin shift that the
+    # caller applies next. Casting to float32 now would reintroduce the
+    # precision loss the origin machinery exists to avoid.
+    out["centers"] = (centers + offsets).reshape(-1)
+    return out
+
+
+def _translate_flat(arr: Any, origin: np.ndarray, stride: int) -> Any:
+    """Subtract ``origin`` from every position packed in a flat array.
+
+    Args:
+        arr: A flat float array (or nested list) of packed coordinates.
+        origin: (3,) offset to subtract from each x,y,z triple.
+        stride: 3 for plain xyz packing, 4 for [x,y,z,extra] packing (the
+            4th slot, e.g. LineBeams line index, is left untouched).
+
+    Returns:
+        A new float32 array with the offset applied, or ``arr`` unchanged
+        when it is not a translatable numeric array (e.g. a JSExpr).
+    """
+    if isinstance(arr, JSExpr):
+        return arr
+    # Subtract in float64 and only cast to float32 afterwards: the inputs may
+    # be at world magnitude (~4.4e5), where a float32 representation before the
+    # subtraction would already have lost the sub-metre detail. Doing the
+    # subtraction first keeps the shifted (small) result precise.
+    values = np.asarray(arr, dtype=np.float64)
+    if values.ndim == 2 and values.shape[1] == stride:
+        flat = values.reshape(-1).copy()
+    elif values.ndim == 1 and values.size % stride == 0:
+        flat = values.copy()
+    else:
+        # Unexpected shape (e.g. a scalar or ragged input): leave untouched
+        # rather than corrupt the data.
+        return arr
+    flat = flat.reshape(-1, stride)
+    flat[:, 0:3] -= origin.astype(np.float64)
+    return flat.reshape(-1).astype(np.float32)
+
+
+def _translate_component_props(
+    props: Dict[str, Any], origin: np.ndarray
+) -> Dict[str, Any]:
+    """Return a copy of a component's props with positions shifted by -origin."""
+    # Fold any mesh geometry centroid into its instance centers first, so the
+    # large-magnitude vertex array becomes small/local and the world offset it
+    # carried lands on ``centers`` -- which the loop below then shifts by
+    # -origin like every other position array (single, uniform shift). Mesh
+    # ``geometry.positions`` are deliberately NOT in the shift lists: shifting
+    # them in addition to the centers would double-shift the composite.
+    out = _recenter_mesh_props(props)
+    for key in _POSITION_ATTRS_STRIDE3:
+        if key in out and out[key] is not None:
+            out[key] = _translate_flat(out[key], origin, 3)
+    for key in _POSITION_ATTRS_STRIDE4:
+        if key in out and out[key] is not None:
+            out[key] = _translate_flat(out[key], origin, 4)
+    # Group children are nested components with their own position attrs; the
+    # group's own ``position`` offset is a world-space translation too.
+    if "children" in out and isinstance(out["children"], list):
+        out["children"] = [_translate_layer(child, origin) for child in out["children"]]
+    if "position" in out and out["position"] is not None:
+        pos = np.asarray(out["position"], dtype=np.float64)
+        out["position"] = (pos - origin).tolist()
+    return out
+
+
+def _translate_layer(layer: Any, origin: np.ndarray) -> Any:
+    """Translate a single scene layer (component or nested config) by -origin."""
+    if isinstance(layer, SceneComponent):
+        return SceneComponent(
+            layer.type, _translate_component_props(layer.props, origin)
+        )
+    if isinstance(layer, dict) and "type" in layer:
+        return _translate_component_props(layer, origin)
+    return layer
+
+
+# =============================================================================
+# Section / clipping planes
+# =============================================================================
+
+# Fixed-size uniform array on the GPU (see clipPlanesStruct in shaders.ts). More
+# than this many planes cannot be uploaded, so we raise loudly rather than
+# silently drop.
+MAX_CLIP_PLANES = 8
+
+
+class ClipPlane(TypedDict, total=False):
+    """A scene-level section / clipping plane.
+
+    A fragment at world position ``p`` is KEPT where
+    ``dot(p, normal) <= offset`` and discarded otherwise; multiple planes
+    intersect (a fragment must pass every plane). Give the plane either as
+    ``normal`` + ``offset`` or the anchored ``normal`` + ``point`` form.
+    """
+
+    normal: ArrayLike  # plane normal [nx, ny, nz] (normalized internally)
+    offset: NumberLike  # signed distance along normal; may be a $state ref
+    point: ArrayLike  # a point the plane passes through (anchored form)
+
+
+def _is_js_expr(value: Any) -> bool:
+    return isinstance(value, JSExpr)
+
+
+def _normalize_clip_planes(
+    clip_planes: Optional[Sequence[Union[ClipPlane, Dict[str, Any]]]],
+    origin: Optional[np.ndarray],
+) -> Optional[list]:
+    """Normalize ``clip_planes`` into ``[{normal, offset}, ...]`` for the JS boundary.
+
+    - ``normal`` is normalized to unit length (a zero normal is an error).
+    - The anchored ``point`` form is converted to an ``offset`` AFTER the origin
+      re-centering: positions are shifted by ``-origin`` at serialization time,
+      so a plane through world point ``P`` becomes ``offset = dot(P - origin,
+      normal)`` in the shifted space the shader sees. The direct ``offset`` form
+      is already given in that post-origin space (offsets are origin-relative).
+    - ``offset`` (or ``point`` components) may be ``$state`` refs (``Plot.js``)
+      for a slider-driven section sweep. A state-ref ``offset`` passes through
+      unchanged; a ``point`` with any state-ref component is converted to a
+      ``Plot.js`` dot-product expression so the sweep still tracks state.
+
+    Raises:
+        ValueError: on too many planes, a missing/zero normal, or a plane that
+            supplies neither ``offset`` nor ``point``.
+    """
+    if clip_planes is None:
+        return None
+    planes = list(clip_planes)
+    if len(planes) == 0:
+        return None
+    if len(planes) > MAX_CLIP_PLANES:
+        raise ValueError(
+            f"Scene supports at most {MAX_CLIP_PLANES} clip_planes, "
+            f"got {len(planes)}. Reduce the number of section planes."
+        )
+
+    out: list = []
+    origin_vec = None if origin is None else np.asarray(origin, dtype=np.float64)
+    for i, plane in enumerate(planes):
+        if "normal" not in plane:
+            raise ValueError(f"clip_planes[{i}] requires a 'normal'")
+        normal = np.asarray(plane["normal"], dtype=np.float64).reshape(-1)
+        if normal.shape[0] != 3:
+            raise ValueError(f"clip_planes[{i}] 'normal' must have 3 components")
+        norm = float(np.linalg.norm(normal))
+        if norm == 0.0:
+            raise ValueError(f"clip_planes[{i}] 'normal' must be non-zero")
+        unit = (normal / norm).tolist()
+
+        raw_offset = plane.get("offset")
+        raw_point = plane.get("point")
+        has_offset = raw_offset is not None
+        has_point = raw_point is not None
+        if has_offset and has_point:
+            raise ValueError(
+                f"clip_planes[{i}] must specify either 'offset' or 'point', not both"
+            )
+
+        offset: Any
+        if has_offset:
+            # Offset is already in the post-origin (origin-relative) space; pass
+            # scalars and $state refs through unchanged.
+            offset = raw_offset
+        elif has_point:
+            point = raw_point
+            point_is_ref = _is_js_expr(point) or (
+                isinstance(point, (list, tuple)) and any(_is_js_expr(c) for c in point)
+            )
+            if point_is_ref:
+                # A state-driven anchor: emit dot((point - origin), normal) as a
+                # JS expression so the section still tracks state on the client.
+                ox, oy, oz = (
+                    (0.0, 0.0, 0.0)
+                    if origin_vec is None
+                    else (
+                        float(origin_vec[0]),
+                        float(origin_vec[1]),
+                        float(origin_vec[2]),
+                    )
+                )
+                nx, ny, nz = unit
+                px, py, pz = point  # type: ignore[misc]
+                offset = Plot.js(
+                    f"(($p) => ($p[0]-({ox}))*({nx}) + ($p[1]-({oy}))*({ny}) "
+                    f"+ ($p[2]-({oz}))*({nz}))([{_js_scalar(px)}, "
+                    f"{_js_scalar(py)}, {_js_scalar(pz)}])"
+                )
+            else:
+                pt = np.asarray(point, dtype=np.float64).reshape(-1)
+                if pt.shape[0] != 3:
+                    raise ValueError(f"clip_planes[{i}] 'point' must have 3 components")
+                shifted = pt if origin_vec is None else pt - origin_vec
+                offset = float(np.dot(shifted, unit))
+        else:
+            raise ValueError(f"clip_planes[{i}] requires either 'offset' or 'point'")
+
+        out.append({"normal": unit, "offset": offset})
+    return out
+
+
+def _js_scalar(value: Any) -> str:
+    """Render a clip-plane point component as inline JS (number or Plot.js code).
+
+    A ``point`` component may be a literal number or a ``Plot.js(...)`` state
+    ref. For the latter we inline the expression's raw source (wrapped in
+    parens) so the surrounding dot-product expression evaluates against live
+    ``$state``.
+    """
+    if _is_js_expr(value):
+        code = getattr(value, "code", None)
+        if code is None:
+            raise ValueError(
+                "clip_planes 'point' state refs must be Plot.js(...) expressions"
+            )
+        return f"({code})"
+    return repr(float(value))
+
+
+# Top-level scene props the JS side actually consumes. A bare dict passed to
+# ``Scene(...)`` (or added with ``+``) is merged into the scene props object by
+# ``collectLayers`` in scene3d.tsx and then destructured by ``SceneInner``:
+# anything not named here is silently dropped on the floor. Mirrors the
+# ``SceneProps`` / ``SceneLayersProps`` interfaces in
+# ``src/js/scene3d/scene3d.tsx`` — keep the two in sync.
+_SCENE_PROPS = frozenset(
+    {
+        # Layout / sizing
+        "width",
+        "height",
+        "aspectRatio",
+        "className",
+        "style",
+        # Camera
+        "camera",
+        "defaultCamera",
+        "onCameraChange",
+        # Scene-level interaction callbacks
+        "onHover",
+        "onClick",
+        # Rendering & framework
+        "controls",
+        "readyState",
+        "primitiveSpecs",
+        "origin",
+        "background",
+        "selections",
+        "annotations",
+        "clipPlanes",
+        # Composition (a dict may carry components/layers through +)
+        "components",
+        "layers",
+    }
+)
+
+# Keys that make a dict look like a bare CameraParams object rather than a
+# scene-props object — the common mistake is passing the camera itself instead
+# of wrapping it as {"defaultCamera": ...}.
+_CAMERA_PARAM_KEYS = frozenset({"position", "target", "up", "fov", "near", "far"})
+
+
+def _validate_scene_props(props: Dict[str, Any]) -> None:
+    """Raise on scene-prop keys the JS side would silently ignore.
+
+    A dict layer becomes top-level scene props on the JS side, where unknown
+    keys are dropped without warning. Catching them here turns a silently
+    dead prop into a loud error at construction time.
+
+    Args:
+        props: A dict layer passed to ``Scene(...)`` or added with ``+``.
+
+    Raises:
+        ValueError: If any key is not a scene prop. Camera-shaped dicts get a
+            targeted hint pointing at ``defaultCamera``.
+    """
+    unknown = [key for key in props if key not in _SCENE_PROPS]
+    if not unknown:
+        return
+
+    # A camera-shaped dict is the classic footgun: every key is a CameraParams
+    # field, so the whole dict is dead weight. Don't auto-wrap — "camera" and
+    # "defaultCamera" mean different things (controlled vs uncontrolled).
+    if all(key in _CAMERA_PARAM_KEYS for key in unknown):
+        raise ValueError(
+            f"Scene received a camera-shaped dict with keys {sorted(unknown)}, "
+            "which are not scene props and would be ignored. "
+            "Did you mean {'defaultCamera': {...}} (uncontrolled) or "
+            "{'camera': {...}} (controlled)?"
+        )
+
+    raise ValueError(
+        f"Unknown scene prop(s) {sorted(unknown)}. "
+        f"Valid scene props are: {sorted(_SCENE_PROPS)}."
+    )
+
+
 class Scene(Plot.LayoutItem):
     """A 3D scene visual component using WebGPU.
 
     This class creates an interactive 3D scene that can contain multiple types of components:
 
     - Point clouds
-    - Ellipsoids
-    - Ellipsoid bounds (wireframe)
+    - Ellipsoids (solid or wireframe fill modes)
     - Cuboids
+    - Line segments and beams
+    - Meshes (inline vertex/index arrays)
+    - Image planes
+    - Bounding boxes
+    - Groups (nested TRS transforms over any children)
 
     The component supports:
 
@@ -278,6 +930,9 @@ class Scene(Plot.LayoutItem):
     def __init__(
         self,
         *layers: Union[SceneComponent, Dict[str, Any], JSExpr],
+        origin: Optional[Sequence[float]] = None,
+        background: Optional[Sequence[float]] = None,
+        clip_planes: Optional[Sequence[Union[ClipPlane, Dict[str, Any]]]] = None,
         primitive_specs: Optional[Dict[str, Dict[str, Any]]] = None,
         meshes: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -287,11 +942,51 @@ class Scene(Plot.LayoutItem):
             *layers: Scene components and optional properties.
                 Properties can include:
                 - controls: List of controls to show. Currently supports ['fps']
+            origin: Optional world-space offset ``[x, y, z]`` subtracted from
+                every position-typed attribute (centers/starts/ends/points/
+                positions and Group positions) at serialization time. Use it
+                for scenes whose coordinates are far from the origin (e.g.
+                UTM eastings ~445,000 m) so positions fit float32 GPU
+                precision. The offset travels as scene metadata; ``pick-at`` /
+                ``pick-where`` add it back so dereferenced positions are in
+                the caller's original coordinate space, and camera auto-fit
+                works in the shifted space transparently.
+            background: Optional RGB clear color ``[r, g, b]`` (each 0-1) for
+                the WebGPU render pass. Defaults to opaque black. This is the
+                canvas clear color *behind* the geometry; DOM overlays drawn
+                over the canvas (legends, FPS) keep their own styling.
+            clip_planes: Optional scene-level section / clipping planes. Each is
+                ``{"normal": [nx, ny, nz], "offset": d}`` (keep the half-space
+                ``dot(p, normal) <= d``) or the anchored
+                ``{"normal": n, "point": [x, y, z]}`` form (converted to an
+                offset that respects ``origin``). ``offset`` or ``point``
+                components may be ``Plot.js("$state...")`` refs to drive a
+                section-sweep slider. Planes apply to ALL components in both the
+                render and pick passes; interior structure behind the cut
+                becomes visible AND pickable. Max 8 planes. Hollow shells are
+                visible on the cut (v1 does not cap/fill the section surface).
+                For geographic scenes with an ``origin``, prefer the ``point``
+                form — it converts the anchor into the origin-shifted space
+                automatically.
             primitive_specs: Dictionary of custom primitive definitions.
             meshes: Deprecated alias for primitive_specs.
         """
 
         self.layers = flatten_layers(layers)
+        # Dict layers become top-level scene props on the JS side, where
+        # unrecognized keys are silently dropped. Validate here so a dead prop
+        # (classically a bare camera dict) is a loud error, not a no-op.
+        for layer in self.layers:
+            if type(layer) is dict:
+                _validate_scene_props(layer)
+        self.origin = (
+            np.asarray(origin, dtype=np.float64) if origin is not None else None
+        )
+        self.background = list(background) if background is not None else None
+        # Normalize eagerly so validation errors (bad normal, >8 planes) surface
+        # at construction, not deep in the JS boundary. Point->offset conversion
+        # uses origin, matching the -origin re-centering applied to positions.
+        self.clip_planes = _normalize_clip_planes(clip_planes, self.origin)
         if meshes and primitive_specs:
             merged_specs = {**meshes, **primitive_specs}
         else:
@@ -299,13 +994,29 @@ class Scene(Plot.LayoutItem):
         self.primitive_specs = merged_specs
         super().__init__()
 
+    def _scene_kwargs(self) -> Dict[str, Any]:
+        """Scene-level kwargs (origin/background/clip_planes) preserved across +."""
+        kwargs: Dict[str, Any] = {}
+        if self.origin is not None:
+            kwargs["origin"] = self.origin
+        if self.background is not None:
+            kwargs["background"] = self.background
+        if self.clip_planes is not None:
+            # Already normalized ({normal, offset}); re-normalization on the
+            # receiving Scene is idempotent (unit normal, scalar/ref offset).
+            kwargs["clip_planes"] = self.clip_planes
+        return kwargs
+
     def __add__(self, other: Union[SceneComponent, "Scene", Dict[str, Any]]) -> "Scene":
         """Allow combining scenes with + operator."""
         new_specs = self.primitive_specs.copy() if self.primitive_specs else {}
         if isinstance(other, Scene) and other.primitive_specs:
             new_specs.update(other.primitive_specs)
 
-        kwargs = {}
+        kwargs = self._scene_kwargs()
+        if isinstance(other, Scene):
+            # The right-hand scene's origin/background win if it declares them.
+            kwargs.update(other._scene_kwargs())
         if new_specs:
             kwargs["primitive_specs"] = new_specs
 
@@ -316,20 +1027,288 @@ class Scene(Plot.LayoutItem):
 
     def __radd__(self, other: Union[Dict[str, Any], JSExpr]) -> "Scene":
         """Allow combining scenes with + operator when dict or JSExpr is on the left."""
-        kwargs = {}
+        kwargs = self._scene_kwargs()
         if self.primitive_specs:
             kwargs["primitive_specs"] = self.primitive_specs
         return Scene(other, *self.layers, **kwargs)
 
     def for_json(self) -> Any:
         """Convert to JSON representation for JavaScript."""
+        layers = self.layers
+        if self.origin is not None:
+            layers = [_translate_layer(layer, self.origin) for layer in layers]
         components = [
-            e.to_js_call() if isinstance(e, SceneComponent) else e for e in self.layers
+            e.to_js_call() if isinstance(e, SceneComponent) else e for e in layers
         ]
         props: Dict[str, Any] = {"layers": components}
         if self.primitive_specs:
             props["primitiveSpecs"] = self.primitive_specs
+        if self.origin is not None:
+            props["origin"] = self.origin.tolist()
+        if self.background is not None:
+            props["background"] = self.background
+        if self.clip_planes is not None:
+            # camelCase for the JS boundary. Offsets that are Plot.js state refs
+            # serialize through their own for_json (js_source), so a slider
+            # sweep re-resolves on every state change — the light render path.
+            props["clipPlanes"] = self.clip_planes
+        # Named selections are resident in $state.selections (see Selection /
+        # select). Passing a live reference lets the JS side re-resolve them on
+        # every state change (Python or human click), and it costs nothing when
+        # no selections are set (undefined resolves to no-op).
+        props["selections"] = Plot.js("$state.selections")
+        # Named annotation callouts are resident in $state.annotations (see
+        # Annotation / annotate). Like selections, a live reference lets the JS
+        # overlay re-resolve them on every state change and costs nothing when
+        # none are set. Position anchors are given in world (pre-origin) space;
+        # the overlay subtracts `origin` before projecting, matching the -origin
+        # shift already applied to the rendered geometry.
+        props["annotations"] = Plot.js("$state.annotations")
         return [Plot.JSRef("scene3d.Scene"), props]
+
+
+# =============================================================================
+# Named selections
+# =============================================================================
+
+
+class SelectionStyle(TypedDict, total=False):
+    """Highlight style applied to a named selection's instances."""
+
+    color: ArrayLike  # [r,g,b]
+    alpha: NumberLike
+    scale: NumberLike
+    outline: bool
+    outline_color: ArrayLike  # [r,g,b]
+    outline_width: NumberLike
+
+
+def Selection(
+    name: str,
+    component: int,
+    *,
+    instances: Optional[Sequence[int]] = None,
+    values: Optional[ArrayLike] = None,
+    values_ref: Optional[str] = None,
+    min: Optional[NumberLike] = None,
+    max: Optional[NumberLike] = None,
+    style: Optional[Union[SelectionStyle, str]] = None,
+) -> Dict[str, Any]:
+    """Define a named selection over one scene component.
+
+    A selection is a NAMED per-instance mask — the same abstraction as
+    ``filter_by`` — consumed as a highlight decoration plus addressability: it
+    is a *shared referent* that both a human (via clicks) and an agent (via
+    predicates, ``pick-where --selection NAME``, ``screenshot --frame NAME``)
+    can name in conversation. Selections live in ``$state.selections`` (seed
+    them with :func:`select`), so they sync Python<->JS and persist into
+    ``.colight`` artifacts.
+
+    The mask is either an explicit ``instances`` list, or a threshold predicate:
+    ``values`` (inline scalars) or ``values_ref`` (a per-instance attribute name
+    on the component) tested against ``[min, max]``.
+
+    Args:
+        name: Stable selection name (the shared referent).
+        component: Compiled-component index the selection targets.
+        instances: Explicit instance indices to select.
+        values: Inline per-instance scalar values for a threshold predicate.
+        values_ref: Name of a per-instance attribute to read values from.
+        min: Inclusive lower threshold for the predicate.
+        max: Inclusive upper threshold for the predicate.
+        style: Highlight style dict, or ``"default"`` for the built-in
+            highlight. Defaults to the built-in highlight.
+
+    Returns:
+        ``(name, spec)`` where ``spec`` is the ``$state.selections[name]``
+        entry. Pass the results to :func:`select` to seed state.
+    """
+    source: Dict[str, Any]
+    if instances is not None:
+        source = {"instances": [int(i) for i in instances]}
+    elif values is not None or values_ref is not None:
+        source = {}
+        if values is not None:
+            source["values"] = flatten_array(values, dtype=np.float32)
+        if values_ref is not None:
+            source["values_ref"] = values_ref
+        if min is not None:
+            source["min"] = min
+        if max is not None:
+            source["max"] = max
+    else:
+        raise ValueError(
+            "Selection requires either 'instances' or 'values'/'values_ref'"
+        )
+
+    spec: Dict[str, Any] = {"component": int(component), "source": source}
+    if style is not None:
+        spec["style"] = _convert_to_js(style) if isinstance(style, dict) else style
+    return {name: spec}
+
+
+def select(*selections: Dict[str, Any]) -> Any:
+    """Seed ``$state.selections`` with one or more :func:`Selection` specs.
+
+    Returns a ``Plot.initialState`` marker (synced) that makes the selections
+    resident, shared state. Combine it with a scene:
+
+        >>> scene | select(Selection("hi", 0, instances=[1, 2]))
+
+    Args:
+        *selections: Dicts returned by :func:`Selection` (each ``{name: spec}``).
+
+    Returns:
+        A ``Plot.initialState`` layout marker seeding ``$state.selections``.
+    """
+    merged: Dict[str, Any] = {}
+    for sel in selections:
+        merged.update(sel)
+    return Plot.initialState({"selections": merged}, sync=True)
+
+
+def toggle_selection(name: str, component: int) -> Any:
+    """An ``on_click`` handler that toggles the picked instance in a selection.
+
+    Human clicks and agent predicates converge on the same named object: a
+    click adds (or removes) the picked instance to ``$state.selections[name]``
+    (creating an ``instances`` selection if absent). Attach it to a component:
+
+        >>> Cuboid(centers=..., on_click=toggle_selection("hi", 0))
+
+    Args:
+        name: Selection name to toggle membership in.
+        component: Component index the selection targets.
+
+    Returns:
+        A ``Plot.js`` click handler expression.
+    """
+    return Plot.js(
+        """(e) => {
+  const sels = {...($state.selections || {})};
+  const cur = sels[%1] || {component: %2, source: {instances: []}};
+  const src = cur.source || {instances: []};
+  const list = (src.instances || []).slice();
+  const i = e.instanceIndex;
+  const at = list.indexOf(i);
+  if (at >= 0) { list.splice(at, 1); } else { list.push(i); }
+  sels[%1] = {...cur, component: %2, source: {...src, instances: list}};
+  $state.selections = sels;
+}""",
+        name,
+        component,
+    )
+
+
+# =============================================================================
+# Named annotation callouts
+# =============================================================================
+
+
+class AnnotationStyle(TypedDict, total=False):
+    """Small styling knobs for an annotation callout (sane defaults apply)."""
+
+    color: ArrayLike  # marker / leader / label accent color [r, g, b] (0-1)
+
+
+def Annotation(
+    name: str,
+    text: str,
+    *,
+    position: Optional[ArrayLike] = None,
+    component: Optional[int] = None,
+    instance: Optional[int] = None,
+    style: Optional[AnnotationStyle] = None,
+) -> Dict[str, Any]:
+    """Define a named text callout anchored in a scene's data space.
+
+    An annotation is a NAMED object resident in ``$state.annotations`` — the
+    same rationale as :func:`Selection`: state syncs Python<->JS, persists into
+    ``.colight`` artifacts, either party can mutate it, and the *name* is the
+    shared referent. It renders as a marker dot at its anchor, a thin leader
+    line, and a text label (a DOM overlay, so it appears in screenshots). It is
+    also machine-legible: ``inspect`` / ``screenshot --json`` report every
+    annotation's resolved world position and projected screen position (in
+    ``pick-at`` pixel space), and ``pick-at`` reports instance-anchored
+    annotations as membership on the hit instance.
+
+    The anchor is one of two forms:
+
+    - ``position=[x, y, z]``: WORLD coordinates (pre-origin-shift). When the
+        scene declares an ``origin``, the position is shifted by ``-origin`` at
+        serialization time exactly like every other position (see
+        ``Scene(origin=...)`` and clip-plane ``point`` handling), so a callout
+        placed on UTM-scale geometry lands on the geometry.
+    - ``component=C, instance=I``: anchors to the center of instance ``I`` of
+        compiled component ``C``; the center is resolved on the client from the
+        primitive registry (the same centers picking uses), so it tracks the
+        live geometry.
+
+    Args:
+        name: Stable annotation name (the shared referent).
+        text: The callout's free text.
+        position: World-space anchor ``[x, y, z]`` (mutually exclusive with the
+            instance anchor).
+        component: Compiled-component index for an instance anchor.
+        instance: Instance index within ``component`` for an instance anchor.
+        style: Optional ``{"color": [r, g, b]}`` accent for the callout.
+
+    Returns:
+        ``{name: spec}`` where ``spec`` is the ``$state.annotations[name]``
+        entry. Pass the result(s) to :func:`annotate` to seed state.
+
+    Raises:
+        ValueError: When neither/both anchor forms are given, or an instance
+            anchor is missing its ``instance``.
+    """
+    has_position = position is not None
+    has_instance = component is not None or instance is not None
+    if has_position and has_instance:
+        raise ValueError(
+            "Annotation takes either 'position' or 'component'/'instance', not both"
+        )
+    anchor: Dict[str, Any]
+    if has_position:
+        pos = np.asarray(position, dtype=np.float64).reshape(-1)
+        if pos.shape[0] != 3:
+            raise ValueError("Annotation 'position' must have 3 components")
+        anchor = {"position": pos.tolist()}
+    elif has_instance:
+        if component is None or instance is None:
+            raise ValueError(
+                "Annotation instance anchor requires both 'component' and 'instance'"
+            )
+        anchor = {"component": int(component), "instance": int(instance)}
+    else:
+        raise ValueError(
+            "Annotation requires either 'position' or 'component'/'instance'"
+        )
+
+    spec: Dict[str, Any] = {"text": str(text), "anchor": anchor}
+    if style is not None:
+        spec["style"] = _convert_to_js(style) if isinstance(style, dict) else style
+    return {name: spec}
+
+
+def annotate(*annotations: Dict[str, Any]) -> Any:
+    """Seed ``$state.annotations`` with one or more :func:`Annotation` specs.
+
+    Returns a ``Plot.initialState`` marker (synced) that makes the annotations
+    resident, shared state — mirroring :func:`select`. Combine it with a scene:
+
+        >>> scene | annotate(Annotation("note", "check twin hole",
+        ...                              component=0, instance=3))
+
+    Args:
+        *annotations: Dicts returned by :func:`Annotation` (each ``{name: spec}``).
+
+    Returns:
+        A ``Plot.initialState`` layout marker seeding ``$state.annotations``.
+    """
+    merged: Dict[str, Any] = {}
+    for ann in annotations:
+        merged.update(ann)
+    return Plot.initialState({"annotations": merged}, sync=True)
 
 
 def coerce_index_array(arr: Any) -> Any:
@@ -348,10 +1327,14 @@ def PointCloud(
     center: Optional[ArrayLike] = None,  # Singular form for a single point
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all points
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-point colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,  # Default size for all points
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all points
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -364,6 +1347,8 @@ def PointCloud(
         center: Single point center [x, y, z] (convenience for single-point case)
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all points if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-point colors (see ColorBy); adds a legend
         sizes: N array of point sizes or flattened array (optional)
         size: Default size for all points if sizes not provided
         alphas: Array of alpha values per point (optional)
@@ -385,6 +1370,8 @@ def PointCloud(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     if color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
@@ -395,6 +1382,9 @@ def PointCloud(
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     if alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer
@@ -418,10 +1408,14 @@ def Ellipsoid(
     quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all ellipsoids
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,  # Default alpha for all ellipsoids
     fill_mode: str
     | None = None,  # How the shape is drawn ("Solid" or "MajorWireframe")
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -438,6 +1432,8 @@ def Ellipsoid(
         quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all ellipsoids if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-instance colors (see ColorBy); adds a legend
         alphas: Array of alpha values per ellipsoid (optional)
         alpha: Default alpha value for all ellipsoids if alphas not provided
         fill_mode: How the shape is drawn. One of:
@@ -470,6 +1466,8 @@ def Ellipsoid(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
@@ -478,6 +1476,9 @@ def Ellipsoid(
 
     if fill_mode is not None:
         data["fill_mode"] = fill_mode
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer
@@ -501,8 +1502,12 @@ def Cuboid(
     quaternion: Optional[ArrayLike] = None,  # Default orientation quaternion [x,y,z,w]
     colors: Optional[ArrayLike] = None,
     color: Optional[ArrayLike] = None,  # Default RGB color for all cuboids
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-instance colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     alphas: Optional[ArrayLike] = None,  # Per-cuboid alpha values
     alpha: Optional[NumberLike] = None,  # Default alpha for all cuboids
+    filter_by: Optional[FilterBy] = None,  # Per-instance threshold filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -519,6 +1524,8 @@ def Cuboid(
         quaternion: Default orientation quaternion [x,y,z,w] if quaternions not provided
         colors: Nx3 array of RGB colors or flattened array (optional)
         color: Default RGB color [r,g,b] for all cuboids if colors not provided
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-instance colors (see ColorBy); adds a legend
         alphas: Array of alpha values per cuboid (optional)
         alpha: Default alpha value for all cuboids if alphas not provided
         layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
@@ -548,11 +1555,16 @@ def Cuboid(
         data["colors"] = flatten_array(colors, dtype=np.float32)
     elif color is not None:
         data["color"] = color
+    _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
 
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     elif alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer
@@ -571,9 +1583,13 @@ def LineBeams(
     color: Optional[ArrayLike] = None,  # Default RGB color for all beams
     size: Optional[NumberLike] = None,  # Default size for all beams
     colors: Optional[ArrayLike] = None,  # Per-line colors
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-line colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,  # Per-line sizes
     alpha: Optional[NumberLike] = None,  # Default alpha for all beams
     alphas: Optional[ArrayLike] = None,  # Per-line alpha values
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -586,7 +1602,11 @@ def LineBeams(
         color: Default RGB color [r,g,b] for all beams if colors not provided
         size: Default size for all beams if sizes not provided
         colors: Array of RGB colors per line (optional)
-        sizes: Array of sizes per line (optional)
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-line colors (see ColorBy); adds a legend
+        sizes: Per-line radii (thickness), one value per line index (the 4th
+            component of each point). Every segment of a line shares its line's
+            size; for per-segment thickness use ``LineSegments`` with ``sizes``.
         alpha: Default alpha value for all beams if alphas not provided
         alphas: Array of alpha values per line (optional)
         layer: Render layer - "scene" (default) or "overlay" (renders in front, always visible)
@@ -606,12 +1626,17 @@ def LineBeams(
         data["size"] = size
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
+    _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     elif alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer
@@ -631,9 +1656,13 @@ def LineSegments(
     color: Optional[ArrayLike] = None,
     size: Optional[NumberLike] = None,
     colors: Optional[ArrayLike] = None,
+    color_by: Optional[ColorBy] = None,  # Colormap-driven per-segment colors
+    color_channels: Optional[Mapping[str, ColorChannel]] = None,  # Switchable channels
+    active_channel: Optional[Union[str, JSExpr]] = None,  # Active channel name/$state
     sizes: Optional[ArrayLike] = None,
     alpha: Optional[NumberLike] = None,
     alphas: Optional[ArrayLike] = None,
+    filter_by: Optional[FilterBy] = None,  # Per-instance (per-segment) filter
     layer: Optional[Literal["scene", "overlay"]] = None,
     hover_props: Optional[HoverProps] = None,
     picking_scale: Optional[NumberLike] = None,
@@ -647,7 +1676,12 @@ def LineSegments(
         color: Default RGB color [r,g,b] for all segments if colors not provided
         size: Default size for all segments if sizes not provided
         colors: Array of RGB colors per segment (optional)
-        sizes: Array of sizes per segment (optional)
+        color_by: Colormap spec {values, cmap, domain, label, ...} mapping
+            scalar values to per-segment colors (see ColorBy); adds a legend
+        sizes: Per-segment radii (thickness), one value per segment. Expands
+            identically to per-segment ``colors`` — index ``i`` styles segment
+            ``i`` (e.g. structural intensity -> drillhole thickness). Falls back
+            to ``size`` (a scalar for every segment) then the 0.02 default.
         alpha: Default alpha value for all segments if alphas not provided
         alphas: Array of alpha values per segment (optional)
         layer: Render layer - "scene" (default) or "overlay"
@@ -669,12 +1703,17 @@ def LineSegments(
         data["size"] = size
     if colors is not None:
         data["colors"] = flatten_array(colors, dtype=np.float32)
+    _apply_color_by(data, color_by)
+    _apply_color_channels(data, color_channels, active_channel)
     if sizes is not None:
         data["sizes"] = flatten_array(sizes, dtype=np.float32)
     if alphas is not None:
         data["alphas"] = flatten_array(alphas, dtype=np.float32)
     elif alpha is not None:
         data["alpha"] = alpha
+
+    if filter_by is not None:
+        data["filter_by"] = _normalize_filter_by(filter_by)
 
     if layer is not None:
         data["layer"] = layer
@@ -764,7 +1803,7 @@ def ImagePlane(
 
 
 def Group(
-    children: list,
+    children: Optional[list] = None,
     position: Optional[ArrayLike] = None,
     quaternion: Optional[ArrayLike] = None,
     scale: Optional[Union[NumberLike, ArrayLike]] = None,
@@ -787,8 +1826,14 @@ def Group(
     Group-level event handlers receive events bubbled up from any child component.
     Group-level hover_props apply to ALL children when ANY child is hovered.
 
+    A named Group with no children is meaningful: its composed transform still
+    gets a palette slot, so geometry elsewhere in the scene can reference it by
+    name (see Mesh's transform_refs). That is how a control structure can have
+    more named transforms than it has directly-attached components.
+
     Args:
-        children: List of child components (can include nested groups)
+        children: List of child components (can include nested groups).
+            Optional — a named, childless Group is a pure named transform.
         position: Position offset [x, y, z] in parent space
         quaternion: Rotation as quaternion [x, y, z, w]
         scale: Scale factor (uniform number or [x, y, z] per-axis)
@@ -826,35 +1871,10 @@ def Group(
             return list(value)
         return value
 
-    def _coerce_hover_props(props: HoverProps | Dict[str, Any]) -> Dict[str, Any]:
-        """Convert hover_props keys from snake_case to camelCase."""
-        result: Dict[str, Any] = {}
-        for key, value in props.items():
-            if key == "outline_color":
-                result["outlineColor"] = value
-            elif key == "outline_width":
-                result["outlineWidth"] = value
-            else:
-                result[key] = value
-        return result
-
-    def _coerce_child_props(props: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert child_props keys from snake_case to camelCase."""
-        result = {}
-        for key, value in props.items():
-            if key == "hover_props":
-                result["hoverProps"] = _coerce_hover_props(value)
-            elif key == "outline_color":
-                result["outlineColor"] = value
-            elif key == "outline_width":
-                result["outlineWidth"] = value
-            elif key == "picking_scale":
-                result["pickingScale"] = value
-            else:
-                result[key] = value
-        return result
-
-    data: Dict[str, Any] = {"children": children}
+    # Snake_case framework keys (hover_props, on_hover, child_defaults, ...)
+    # are renamed to their JS names centrally by _convert_to_js at
+    # serialization time.
+    data: Dict[str, Any] = {"children": children if children is not None else []}
 
     if position is not None:
         data["position"] = _coerce_group_value(position)
@@ -865,25 +1885,137 @@ def Group(
     if name is not None:
         data["name"] = name
     if child_defaults is not None:
-        data["childDefaults"] = _coerce_child_props(child_defaults)
+        data["child_defaults"] = child_defaults
     if child_overrides is not None:
-        data["childOverrides"] = _coerce_child_props(child_overrides)
+        data["child_overrides"] = child_overrides
     if hover_props is not None:
-        data["hoverProps"] = _coerce_hover_props(hover_props)
+        data["hover_props"] = hover_props
     if on_hover is not None:
-        data["onHover"] = on_hover
+        data["on_hover"] = on_hover
     if on_click is not None:
-        data["onClick"] = on_click
+        data["on_click"] = on_click
     if on_drag is not None:
-        data["onDrag"] = on_drag
+        data["on_drag"] = on_drag
     if on_drag_start is not None:
-        data["onDragStart"] = on_drag_start
+        data["on_drag_start"] = on_drag_start
     if on_drag_end is not None:
-        data["onDragEnd"] = on_drag_end
+        data["on_drag_end"] = on_drag_end
     if drag_constraint is not None:
-        data["dragConstraint"] = drag_constraint
+        data["drag_constraint"] = drag_constraint
 
     return SceneComponent("Group", data)
+
+
+# Maximum transform references per vertex. Beyond a handful, the deformation is
+# no longer low-rank and the positions themselves are the thing to ship.
+MAX_TRANSFORM_REFS_PER_VERTEX = 8
+
+
+def _validate_transform_refs(
+    vertex_count: int,
+    transform_refs: Optional[List[str]],
+    transform_indices: Optional[ArrayLike],
+    transform_weights: Optional[ArrayLike],
+) -> Optional[Dict[str, Any]]:
+    """Validate and normalize per-vertex weighted transform references.
+
+    The three fields describe, per vertex, which Group transforms position it
+    and in what proportion. They are validated here rather than in the browser
+    because a shape mistake is an authoring error whose stack trace belongs on
+    the Python side.
+
+    Args:
+        vertex_count: Number of vertices in the mesh (N).
+        transform_refs: Group names this mesh's vertices reference.
+        transform_indices: (N, K) local slots into transform_refs.
+        transform_weights: (N, K) weights matching transform_indices.
+
+    Returns:
+        Dict of geometry fields to ship, or None when no references were given.
+
+    Raises:
+        ValueError: On a partial declaration, a shape mismatch, K out of
+            range, a slot outside transform_refs, a negative weight, or an
+            all-zero weight row.
+    """
+    given = [
+        transform_refs is not None,
+        transform_indices is not None,
+        transform_weights is not None,
+    ]
+    if not any(given):
+        return None
+    if not all(given):
+        raise ValueError(
+            "Mesh: transform_refs, transform_indices and transform_weights must "
+            "be supplied together (per-vertex weighted transform references). "
+            f"Got transform_refs={transform_refs is not None}, "
+            f"transform_indices={transform_indices is not None}, "
+            f"transform_weights={transform_weights is not None}."
+        )
+
+    refs = list(transform_refs or [])
+    if not refs:
+        raise ValueError("Mesh: transform_refs must name at least one Group")
+    if not all(isinstance(name, str) and name for name in refs):
+        raise ValueError("Mesh: transform_refs must be a list of non-empty strings")
+    if len(set(refs)) != len(refs):
+        raise ValueError(f"Mesh: transform_refs must be unique, got {refs}")
+
+    idx = np.asarray(transform_indices)
+    wts = np.asarray(transform_weights, dtype=np.float32)
+    if idx.ndim == 1:
+        idx = idx.reshape(-1, 1)
+    if wts.ndim == 1:
+        wts = wts.reshape(-1, 1)
+    if idx.shape != wts.shape:
+        raise ValueError(
+            f"Mesh: transform_indices shape {idx.shape} and transform_weights "
+            f"shape {wts.shape} must match"
+        )
+    if idx.shape[0] != vertex_count:
+        raise ValueError(
+            f"Mesh: transform_indices has {idx.shape[0]} rows but the mesh has "
+            f"{vertex_count} vertices"
+        )
+
+    k = idx.shape[1]
+    if not 1 <= k <= MAX_TRANSFORM_REFS_PER_VERTEX:
+        raise ValueError(
+            f"Mesh: 1..{MAX_TRANSFORM_REFS_PER_VERTEX} transform references per "
+            f"vertex are supported, got K={k}"
+        )
+
+    if idx.min() < 0 or idx.max() >= len(refs):
+        raise ValueError(
+            f"Mesh: transform_indices values must index transform_refs "
+            f"(0..{len(refs) - 1}), got range {idx.min()}..{idx.max()}"
+        )
+    if (wts < 0).any():
+        raise ValueError("Mesh: transform_weights must be non-negative")
+
+    row_sums = wts.sum(axis=1)
+    if (row_sums <= 0).any():
+        bad = int(np.argmin(row_sums))
+        raise ValueError(
+            f"Mesh: transform_weights row {bad} sums to {row_sums[bad]}; every "
+            "vertex needs at least one non-zero weight or it collapses to the "
+            "origin"
+        )
+    if np.abs(row_sums - 1.0).max() > 1e-3:
+        warnings.warn(
+            "Mesh: transform_weights rows do not sum to 1 (max deviation "
+            f"{float(np.abs(row_sums - 1.0).max()):.4g}); normalizing. Rows that "
+            "sum to less than 1 would shrink the mesh toward the origin.",
+            stacklevel=3,
+        )
+    wts = wts / row_sums[:, None]
+
+    return {
+        "transform_refs": refs,
+        "transform_indices": idx.astype(np.float32).reshape(-1),
+        "transform_weights": wts.astype(np.float32).reshape(-1),
+    }
 
 
 def Mesh(
@@ -893,6 +2025,9 @@ def Mesh(
     vertex_colors: Optional[ArrayLike] = None,
     uvs: Optional[ArrayLike] = None,
     indices: Optional[ArrayLike] = None,
+    transform_refs: Optional[List[str]] = None,
+    transform_indices: Optional[ArrayLike] = None,
+    transform_weights: Optional[ArrayLike] = None,
     texture: Optional[Any] = None,
     texture_key: Optional[Union[str, int]] = None,
     centers: Optional[ArrayLike] = None,
@@ -913,12 +2048,52 @@ def Mesh(
 
     Supports flexible vertex formats with optional normals, per-vertex colors, UVs, and textures.
 
+    Updating geometry across renders is efficient: when a geometry's identity is
+    stable (same geometry_key, or same structure when no key is given), new
+    vertex data is written into the existing GPU buffers instead of rebuilding
+    shaders and pipelines — buffers grow only when the data doesn't fit. So
+    continuously updating positions (deformation, simulation output, per-frame
+    state) is cheap and does not leak GPU memory, and auto-computed lit normals
+    track position changes. Updates must ship fresh arrays (Python-driven
+    updates always do); in-place mutation of the same array object is not
+    observed, so a caller that mutates in place must bump geometry_key.
+
+    Per-vertex weighted transform references (transform_refs +
+    transform_indices + transform_weights, all three together) position each
+    vertex by a weighted combination of named Group transforms instead of
+    rigidly by one — a bending tube, a fault-dragged surface. Positions blend
+    linearly over the referenced transforms, normals rotate through the
+    renormalized blended rotation, and picking sees the deformed surface.
+    Weight-only edits rewrite a small storage buffer, never the vertex
+    buffer, and driving a referenced Group's transform (e.g. via Plot.channel
+    or $state) animates the deformation with zero geometry re-upload. All
+    referenced transforms apply to the same vertex coordinates, so vertices
+    are authored in one frame; a rotation about a pivot is expressed as
+    translate → rotate → translate-back, which nested Groups compose.
+
     Args:
         positions: Nx3 array of vertex positions (required)
         normals: Nx3 array of vertex normals (optional, auto-computed for lit shading)
         vertex_colors: Nx3 (RGB) or Nx4 (RGBA) array of per-vertex colors (optional)
         uvs: Nx2 array of texture coordinates (required for textured meshes)
         indices: Array of triangle indices (optional for non-indexed meshes)
+        transform_refs: Names of the Groups whose transforms position this
+            mesh's vertices. Supplied together with transform_indices and
+            transform_weights. **When present, the per-vertex blend REPLACES
+            this mesh's own component-level group transform entirely**: the
+            referenced transforms are already composed through Group nesting,
+            so the mesh may sit anywhere in the hierarchy but only the Groups
+            it names move its vertices. Vertices must therefore be authored in
+            the frame those transforms expect. A name with no matching Group
+            in the scene is a loud compile error, never a silent identity
+            transform.
+        transform_indices: (N, K) integer array of local slots into
+            transform_refs, one row per vertex, K references per vertex
+            (1..8). N must equal the vertex count.
+        transform_weights: (N, K) float array of weights matching
+            transform_indices. Weights must be non-negative and each row must
+            have at least one non-zero value; rows are normalized to sum to 1
+            (with a warning when they are off by more than 1e-3).
         texture: Image for texturing (numpy array, PIL Image, etc). Requires uvs.
         texture_key: Optional key to force texture reupload when image data changes
         centers: Nx3 array of mesh instance centers
@@ -931,7 +2106,16 @@ def Mesh(
         quaternion: Default orientation quaternion [w,x,y,z] if quaternions not provided
         shading: "lit" (default) or "unlit"
         cull_mode: "back" (default), "front", or "none"
-        geometry_key: Optional key to force geometry reupload
+        geometry_key: Names this geometry's identity across updates. A stable
+            key means "this is the same geometry": the renderer keeps its
+            shaders/pipelines and writes new vertex data into the existing GPU
+            buffers (growing them only when the data doesn't fit); a changed
+            key forces a clean rebuild. Distinct geometries must be given
+            distinct keys — two components sharing a key declare themselves the
+            same geometry and share GPU buffers. When omitted, identity is
+            derived from the geometry's structure (vertex count, index shape,
+            vertex format): same-structure updates reuse pipelines and rewrite
+            buffer contents, and topology changes rebuild automatically.
         layer: Render layer - "scene" (default) or "overlay"
         **kwargs: Additional arguments like decorations, onHover, onClick
 
@@ -964,16 +2148,42 @@ def Mesh(
             center=[0, 0, 0],
             shading="unlit",
         )
+
+        # One continuous surface deforming under a two-Group control
+        # structure: each vertex blends between the two named transforms.
+        # Only the referenced Groups move it — the mesh's own placement in
+        # the hierarchy plays no part.
+        Group(
+            name="base",
+            children=[
+                Mesh(
+                    positions=tube_vertices,
+                    indices=tube_faces,
+                    transform_refs=["base", "elbow"],
+                    transform_indices=np.tile([0, 1], (n_vertices, 1)),
+                    transform_weights=np.stack([1 - ramp, ramp], axis=1),
+                ),
+                Group(name="elbow", position=[0, 0, 2], quaternion=bend),
+            ],
+        )
     """
     if centers is None:
-        if center is not None:
-            centers = [center]
-        else:
-            raise ValueError("Either 'centers' or 'center' must be provided")
+        # A plain world-space mesh needs no instancing; default to a single
+        # instance at the origin so callers don't have to pass center=[0,0,0].
+        centers = [center] if center is not None else [[0.0, 0.0, 0.0]]
 
-    geometry: Dict[str, Any] = {
-        "positions": flatten_array(positions, dtype=np.float32),
-    }
+    positions_flat = flatten_array(positions, dtype=np.float32)
+    geometry: Dict[str, Any] = {"positions": positions_flat}
+
+    refs = _validate_transform_refs(
+        len(np.asarray(positions_flat).reshape(-1)) // 3,
+        transform_refs,
+        transform_indices,
+        transform_weights,
+    )
+    if refs is not None:
+        geometry.update(refs)
+
     if normals is not None:
         geometry["normals"] = flatten_array(normals, dtype=np.float32)
     if vertex_colors is not None:
@@ -1055,6 +2265,50 @@ def CustomPrimitive(
     # We use "CustomPrimitive" as the JS component type, which acts as a pass-through
     # factory that returns the config with the correct 'type' field.
     return SceneComponent("CustomPrimitive", data)
+
+
+# =============================================================================
+# Legend
+# =============================================================================
+
+
+class Legend(Plot.LayoutItem):
+    """A standalone colormap legend, usable anywhere in a layout.
+
+    Scenes render legends automatically for components with ``color_by``;
+    this class renders the same legend UI outside a scene (e.g. next to a
+    plot, or in a layout row).
+
+    Example:
+        >>> scene | Legend(cmap="viridis", domain=(0, 2.5), label="Cu %")
+    """
+
+    def __init__(
+        self,
+        cmap: str = "viridis",
+        domain: Optional[Sequence[float]] = None,
+        label: Optional[str] = None,
+        categories: Optional[Sequence[str]] = None,
+    ):
+        """Initialize the legend.
+
+        Args:
+            cmap: Colormap name (continuous ramp or categorical palette).
+            domain: (min, max) the colors span (continuous maps only).
+            label: What the colors encode (legend title).
+            categories: Display names for categorical codes 0..K-1.
+        """
+        super().__init__()
+        self.spec = colormaps.colormap_metadata(
+            cmap,
+            domain=domain,
+            label=label,
+            categories=list(categories) if categories is not None else None,
+        )
+
+    def for_json(self) -> Any:
+        """Convert to JSON representation for JavaScript."""
+        return [Plot.JSRef("scene3d.Legend"), {"spec": self.spec}]
 
 
 # =============================================================================
@@ -1266,6 +2520,9 @@ __all__ = [
     "Mesh",
     "CustomPrimitive",
     "deco",
+    # Colormaps & legends
+    "ColorBy",
+    "Legend",
     # Hover props
     "HoverProps",
     # Drag constraints

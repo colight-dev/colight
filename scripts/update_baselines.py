@@ -19,16 +19,17 @@ import shutil
 import os
 from pathlib import Path
 
-# Change to colight package directory and add to Python path
-colight_dir = Path(__file__).parent.parent / "packages" / "colight"
-os.chdir(colight_dir)
-sys.path.insert(0, str(colight_dir))
+# Resolve paths from the repository root, matching how the visual tests run.
+repo_root = Path(__file__).parent.parent
+os.chdir(repo_root)
+sys.path.insert(0, str(repo_root / "packages" / "colight"))
 
 from tests.visual.test_visual_regression import (  # pyright: ignore
     create_comprehensive_plot,
     chrome_available,
+    get_test_paths,
 )
-from tests.visual.utils import save_baseline, get_test_paths  # pyright: ignore
+from tests.visual.utils import save_baseline  # pyright: ignore
 
 
 def update_baselines():
@@ -41,7 +42,7 @@ def update_baselines():
     print("🔄 Updating visual test baselines...")
 
     # Create output directory
-    output_dir = Path("./scratch/baseline_update/")
+    output_dir = Path("./packages/colight/test-artifacts/baseline_update/")
     output_dir.mkdir(exist_ok=True, parents=True)
 
     updated_baselines = []

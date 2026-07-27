@@ -10,17 +10,20 @@ import { BaseComponentConfig } from "../types";
 import {
   definePrimitive,
   attr,
-  ProcessedSchema,
-  packID,
-  acopy,
+  processSchema,
+  instanceInputsWGSL,
+  filterCollapseWGSL,
+  rigidGroupTransformFn,
+  type AttributeDef,
   createVertexBufferLayout,
   cameraStruct,
+  clipPlanesStruct,
   groupTransformStruct,
+  filterParamsStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
   pickingVSOut,
-  pickingFragCode,
   quaternionShaderFunctions,
 } from "./define";
 import { createEllipsoidAxes } from "../geometry";
@@ -53,11 +56,53 @@ export interface EllipsoidAxesComponentConfig extends BaseComponentConfig {
  * - tube offset (vec3) - offset from centerline to vertex
  * - normal (vec3) - vertex normal
  */
+/**
+ * Per-instance attribute schema. The framework attributes (transformIndex /
+ * filterValue / filterIndex) are auto-injected by processSchema.
+ */
+const AXES_ATTRIBUTES: Record<string, AttributeDef> = {
+  position: attr.vec3("centers"),
+  size: attr.vec3("half_sizes", [0.5, 0.5, 0.5]),
+  rotation: attr.quat("quaternions"), // default: identity [1,0,0,0] in wxyz
+  color: attr.vec3("colors", [0.5, 0.5, 0.5]),
+  alpha: attr.f32("alphas", 1.0),
+};
+
+// The ring geometry layout is three locations wide (centerline, tube offset,
+// normal), so instance attributes start at 3.
+const INSTANCE_START_LOCATION = 3;
+
+const schema = processSchema(AXES_ATTRIBUTES, INSTANCE_START_LOCATION);
+
+/**
+ * Shared vertex-shader body.
+ *
+ * EllipsoidAxes keeps its ring semantics — the centerline is scaled by the
+ * ellipsoid's (possibly non-uniform) half extents, while the tube cross-section
+ * offset takes a single uniform scale so the tube stays circular — but the
+ * group transform now composes via the shared rigidGroupFrame, like every
+ * other primitive.
+ */
+const ringTransformBody = /*wgsl*/ `
+  let groupIdx = u32(transformIndex);
+  let _frame = rigidGroupFrame(position, size, rotation, groupIdx);
+
+  // Ring centerline: non-uniformly scaled by the effective half extents.
+  let scaledCenter = quat_rotate(_frame.quat, center * _frame.size);
+  // Tube cross-section: uniform scale (mean of the effective extents) so the
+  // tube keeps a circular profile on a non-uniform ellipsoid.
+  let uniformScale = (_frame.size.x + _frame.size.y + _frame.size.z) / 3.0;
+  let scaledOffset = quat_rotate(_frame.quat, offset * uniformScale);
+
+  let worldPos = _frame.origin + scaledCenter + scaledOffset;`;
+
 const ringVertexShader = /*wgsl*/ `
 ${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${quaternionShaderFunctions}
 ${applyGroupTransformFn}
+${rigidGroupTransformFn}
 
 struct VSOut {
   @builtin(position) position: vec4<f32>,
@@ -67,115 +112,60 @@ struct VSOut {
   @location(3) normal: vec3<f32>
 };
 
-fn computeRingPosition(
-  center: vec3<f32>,
-  offset: vec3<f32>,
-  position: vec3<f32>,
-  size: vec3<f32>,
-  quaternion: vec4<f32>,
-  groupIdx: u32
-) -> vec3<f32> {
-  // Get group transform
-  let groupT = transforms[groupIdx];
-
-  // Compose instance quaternion with group quaternion
-  let composedQuat = quat_mul(groupT.quaternion, quaternion);
-
-  // Apply non-uniform scaling to the centerline (instance scale * group scale).
-  let effectiveSize = size * groupT.scale;
-  let scaledCenter = quat_rotate(composedQuat, center * effectiveSize);
-
-  // Compute a uniform scale for the tube offset (average of effective scales).
-  let uniformScale = (effectiveSize.x + effectiveSize.y + effectiveSize.z) / 3.0;
-  let scaledOffset = quat_rotate(composedQuat, offset * uniformScale);
-
-  // Transform instance position by group transform, then add ring offset
-  let groupWorldPos = applyGroupTransform(position, groupIdx);
-  return groupWorldPos + scaledCenter + scaledOffset;
-}
-
-fn computeRingNormal(
-  offset: vec3<f32>,
-  quaternion: vec4<f32>,
-  groupIdx: u32
-) -> vec3<f32> {
-  let groupT = transforms[groupIdx];
-  let composedQuat = quat_mul(groupT.quaternion, quaternion);
-  return quat_rotate(composedQuat, normalize(offset));
-}
-
 @vertex
 fn vs_main(
   @location(0) center: vec3<f32>,    // Centerline attribute
   @location(1) offset: vec3<f32>,    // Tube offset attribute
   @location(2) inNormal: vec3<f32>,  // Precomputed normal
-  @location(3) position: vec3<f32>,  // Instance center
-  @location(4) size: vec3<f32>,      // Instance non-uniform scaling
-  @location(5) quaternion: vec4<f32>,// Instance rotation
-  @location(6) color: vec3<f32>,     // Color attribute
-  @location(7) alpha: f32,           // Alpha attribute
-  @location(8) transformIndex: f32   // Group transform index
+  // Instance attributes (schema-derived)
+  ${instanceInputsWGSL(schema, false).join(",\n  ")}
 ) -> VSOut {
-  let groupIdx = u32(transformIndex);
-  let worldPos = computeRingPosition(center, offset, position, size, quaternion, groupIdx);
-  let worldNormal = computeRingNormal(offset, quaternion, groupIdx);
+${filterCollapseWGSL.test}
+${ringTransformBody}
+
+  // The tube's outward normal is its (normalized) cross-section offset,
+  // rotated through the same composed quaternion the position uses.
+  let worldNormal = quat_rotate(_frame.quat, normalize(offset));
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.color = color;
   out.alpha = alpha;
   out.worldPos = worldPos;
-  out.normal = worldNormal;
+  out.normal = worldNormal;${filterCollapseWGSL.collapse}
   return out;
 }`;
 
 const ringPickingVertexShader = /*wgsl*/ `
 ${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${quaternionShaderFunctions}
 ${pickingVSOut}
 ${applyGroupTransformFn}
-
-fn computeRingPositionPicking(
-  center: vec3<f32>,
-  offset: vec3<f32>,
-  position: vec3<f32>,
-  size: vec3<f32>,
-  quaternion: vec4<f32>,
-  groupIdx: u32
-) -> vec3<f32> {
-  let groupT = transforms[groupIdx];
-  let composedQuat = quat_mul(groupT.quaternion, quaternion);
-  let effectiveSize = size * groupT.scale;
-  let scaledCenter = quat_rotate(composedQuat, center * effectiveSize);
-  let uniformScale = (effectiveSize.x + effectiveSize.y + effectiveSize.z) / 3.0;
-  let scaledOffset = quat_rotate(composedQuat, offset * uniformScale);
-  let groupWorldPos = applyGroupTransform(position, groupIdx);
-  return groupWorldPos + scaledCenter + scaledOffset;
-}
+${rigidGroupTransformFn}
 
 @vertex
 fn vs_main(
   @location(0) center: vec3<f32>,
   @location(1) offset: vec3<f32>,
   @location(2) inNormal: vec3<f32>,
-  @location(3) position: vec3<f32>,
-  @location(4) size: vec3<f32>,
-  @location(5) quaternion: vec4<f32>,
-  @location(6) pickID: f32,
-  @location(7) transformIndex: f32
+  // Instance attributes (schema-derived, pickID last)
+  ${instanceInputsWGSL(schema, true).join(",\n  ")}
 ) -> VSOut {
-  let groupIdx = u32(transformIndex);
-  let worldPos = computeRingPositionPicking(center, offset, position, size, quaternion, groupIdx);
+${filterCollapseWGSL.test}
+${ringTransformBody}
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;${filterCollapseWGSL.collapse}
   return out;
 }`;
 
 const ringFragmentShader = /*wgsl*/ `
 ${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 
@@ -186,6 +176,7 @@ fn fs_main(
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let litColor = calculateLighting(color, normal, worldPos);
   return vec4<f32>(litColor, alpha);
 }`;
@@ -204,157 +195,6 @@ const RING_GEOMETRY_LAYOUT = createVertexBufferLayout(
   "vertex",
 );
 
-/** Ring instance layout: position(3) + size(3) + quat(4) + color(3) + alpha(1) + transformIndex(1) = 15 */
-const RING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [3, "float32x3"], // instance center position
-    [4, "float32x3"], // instance size
-    [5, "float32x4"], // instance quaternion
-    [6, "float32x3"], // instance color
-    [7, "float32"], // instance alpha
-    [8, "float32"], // transform index for group transforms
-  ],
-  "instance",
-);
-
-/** Ring picking instance layout: position(3) + size(3) + quat(4) + pickID(1) + transformIndex(1) = 12 */
-const RING_PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [3, "float32x3"], // position
-    [4, "float32x3"], // size
-    [5, "float32x4"], // quaternion
-    [6, "float32"], // pickID
-    [7, "float32"], // transform index for group transforms
-  ],
-  "instance",
-);
-
-// =============================================================================
-// Custom Fill Functions
-// =============================================================================
-
-function fillRenderGeometry(
-  schema: ProcessedSchema,
-  constants: Record<string, unknown>,
-  elem: EllipsoidAxesComponentConfig,
-  elemIndex: number,
-  out: Float32Array,
-  outIndex: number,
-): void {
-  const floatsPerInstance = 15; // 14 + transformIndex
-  const outOffset = outIndex * floatsPerInstance;
-
-  // Position
-  acopy(elem.centers, elemIndex * 3, out, outOffset, 3);
-
-  // Half sizes
-  if (constants.half_size) {
-    acopy(constants.half_size as ArrayLike<number>, 0, out, outOffset + 3, 3);
-  } else if (elem.half_sizes) {
-    acopy(elem.half_sizes, elemIndex * 3, out, outOffset + 3, 3);
-  } else {
-    out[outOffset + 3] = 0.5;
-    out[outOffset + 4] = 0.5;
-    out[outOffset + 5] = 0.5;
-  }
-
-  // Quaternion (input is wxyz order, output to shader is xyzw)
-  if (constants.quaternion) {
-    const q = constants.quaternion as number[];
-    out[outOffset + 6] = q[1]; // x from input[1]
-    out[outOffset + 7] = q[2]; // y from input[2]
-    out[outOffset + 8] = q[3]; // z from input[3]
-    out[outOffset + 9] = q[0]; // w from input[0]
-  } else if (elem.quaternions) {
-    const base = elemIndex * 4;
-    out[outOffset + 6] = elem.quaternions[base + 1]; // x
-    out[outOffset + 7] = elem.quaternions[base + 2]; // y
-    out[outOffset + 8] = elem.quaternions[base + 3]; // z
-    out[outOffset + 9] = elem.quaternions[base + 0]; // w
-  } else {
-    // Identity quaternion in xyzw: [0, 0, 0, 1]
-    out[outOffset + 6] = 0;
-    out[outOffset + 7] = 0;
-    out[outOffset + 8] = 0;
-    out[outOffset + 9] = 1;
-  }
-
-  // Color
-  if (constants.color) {
-    const c = constants.color as number[];
-    out[outOffset + 10] = c[0];
-    out[outOffset + 11] = c[1];
-    out[outOffset + 12] = c[2];
-  } else if (elem.colors) {
-    acopy(elem.colors, elemIndex * 3, out, outOffset + 10, 3);
-  } else {
-    out[outOffset + 10] = 0.5;
-    out[outOffset + 11] = 0.5;
-    out[outOffset + 12] = 0.5;
-  }
-
-  // Alpha
-  out[outOffset + 13] =
-    (constants.alpha as number) ?? elem.alphas?.[elemIndex] ?? 1.0;
-
-  // Transform index (for GPU group transforms)
-  out[outOffset + 14] = (elem as any)._transformIndex ?? 0;
-}
-
-function fillPickingGeometry(
-  schema: ProcessedSchema,
-  constants: Record<string, unknown>,
-  elem: EllipsoidAxesComponentConfig,
-  elemIndex: number,
-  out: Float32Array,
-  outIndex: number,
-  baseID: number,
-): void {
-  const floatsPerPicking = 12; // 11 + transformIndex
-  const outOffset = outIndex * floatsPerPicking;
-
-  // Position
-  acopy(elem.centers, elemIndex * 3, out, outOffset, 3);
-
-  // Half sizes
-  if (constants.half_size) {
-    acopy(constants.half_size as ArrayLike<number>, 0, out, outOffset + 3, 3);
-  } else if (elem.half_sizes) {
-    acopy(elem.half_sizes, elemIndex * 3, out, outOffset + 3, 3);
-  } else {
-    out[outOffset + 3] = 0.5;
-    out[outOffset + 4] = 0.5;
-    out[outOffset + 5] = 0.5;
-  }
-
-  // Quaternion (input is wxyz order, output to shader is xyzw)
-  if (constants.quaternion) {
-    const q = constants.quaternion as number[];
-    out[outOffset + 6] = q[1]; // x from input[1]
-    out[outOffset + 7] = q[2]; // y from input[2]
-    out[outOffset + 8] = q[3]; // z from input[3]
-    out[outOffset + 9] = q[0]; // w from input[0]
-  } else if (elem.quaternions) {
-    const base = elemIndex * 4;
-    out[outOffset + 6] = elem.quaternions[base + 1]; // x
-    out[outOffset + 7] = elem.quaternions[base + 2]; // y
-    out[outOffset + 8] = elem.quaternions[base + 3]; // z
-    out[outOffset + 9] = elem.quaternions[base + 0]; // w
-  } else {
-    // Identity quaternion in xyzw: [0, 0, 0, 1]
-    out[outOffset + 6] = 0;
-    out[outOffset + 7] = 0;
-    out[outOffset + 8] = 0;
-    out[outOffset + 9] = 1;
-  }
-
-  // Pick ID - same for all 3 rings of this ellipsoid
-  out[outOffset + 10] = packID(baseID + elemIndex);
-
-  // Transform index (for GPU group transforms)
-  out[outOffset + 11] = (elem as any)._transformIndex ?? 0;
-}
-
 // =============================================================================
 // Primitive Definition
 // =============================================================================
@@ -362,14 +202,10 @@ function fillPickingGeometry(
 export const ellipsoidAxesSpec = definePrimitive<EllipsoidAxesComponentConfig>({
   name: "EllipsoidAxes",
 
-  // Schema used for constants computation (even though fill is custom)
-  attributes: {
-    position: attr.vec3("centers"),
-    size: attr.vec3("half_sizes", [0.5, 0.5, 0.5]),
-    rotation: attr.quat("quaternions"), // default: identity [1,0,0,0] in wxyz
-    color: attr.vec3("colors", [0.5, 0.5, 0.5]),
-    alpha: attr.f32("alphas", 1.0),
-  },
+  // Carried through from Ellipsoid coercion (fill_mode: "MajorWireframe")
+  extraProps: ["fill_mode"],
+
+  attributes: AXES_ATTRIBUTES,
 
   // 3 rings per ellipsoid
   instancesPerElement: 3,
@@ -380,22 +216,18 @@ export const ellipsoidAxesSpec = definePrimitive<EllipsoidAxesComponentConfig>({
     create: () => createEllipsoidAxes(1.0, 0.05, 32, 16),
   },
 
-  // Custom layouts for the ring vertex format
+  // Custom geometry layout (3 locations); instance layout and fill are
+  // schema-derived from AXES_ATTRIBUTES + INSTANCE_START_LOCATION.
   geometryLayout: RING_GEOMETRY_LAYOUT,
-  renderInstanceLayout: RING_INSTANCE_LAYOUT,
-  pickingInstanceLayout: RING_PICKING_INSTANCE_LAYOUT,
+  instanceStartLocation: INSTANCE_START_LOCATION,
 
-  // Custom shaders for ring transform
+  // Custom shaders for the ring transform. Group transform and filter
+  // collapse come from the shared helpers.
   vertexShader: ringVertexShader,
   pickingVertexShader: ringPickingVertexShader,
   fragmentShader: ringFragmentShader,
 
-  // Not used but matches schema
-  transform: "rigid",
+  transform: "rigid", // Not used (custom shaders), but required
   shading: "lit",
   cullMode: "back",
-
-  // Custom fill functions
-  fillRenderGeometry,
-  fillPickingGeometry,
 });

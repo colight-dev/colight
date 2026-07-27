@@ -20,6 +20,22 @@ export {
 // Helper types (for ImageProjection, CameraFrustum)
 export type { CameraIntrinsics, CameraExtrinsics } from "./helpers";
 
+// Named annotation callouts
+export {
+  resolveAnnotations,
+  resolveAnchorWorld,
+  annotationsForInstance,
+  isInstanceAnchor,
+  DEFAULT_ANNOTATION_COLOR,
+} from "./annotations";
+export type {
+  Annotation,
+  Annotations,
+  AnnotationAnchor,
+  AnnotationStyle,
+  ResolvedAnnotation,
+} from "./annotations";
+
 // Camera
 export { DEFAULT_CAMERA } from "./camera3d";
 export type { CameraParams, CameraState } from "./camera3d";

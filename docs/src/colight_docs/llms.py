@@ -26,11 +26,13 @@
 # ## Library Context
 # Colight is a library for interactive data visuals in python using a declarative API. It features a flexible layout system and transparently exposes Observable Plot. It offers state management between python and the javascript view environment.
 #
+# `colight.scene3d` renders declarative 3D scenes with WebGPU. Primitives: `PointCloud`, `Ellipsoid`, `Cuboid`, `LineBeams`, `LineSegments`, `Mesh` (triangle geometry with optional normals/vertex colors/UVs/texture), `ImagePlane`, `ImageProjection`, `CameraFrustum`, `GridHelper`, and `Group` (hierarchical position/quaternion/scale transforms over children). Components combine with `+` (optionally with a props dict, e.g. `{"defaultCamera": {...}}`) and compose with Plot layout items via `|` and `&`. Instances support `decorations=[deco(indices, color=..., alpha=..., scale=...)]`, automatic `hover_props` (color/alpha/scale/outline), `onHover`/`onClick` picking callbacks, and drag interactions via `on_drag` with `drag_constraint` (`drag_axis`, `drag_plane`, or the `DRAG_*` constants). `TranslateGizmo(position, on_drag=...)` provides a ready-made translation manipulator (prototype API). Instanced primitives accept `color_by={"values": arr, "cmap": "viridis", "domain": (lo, hi), "label": "..."}` to colormap scalar values (continuous: viridis/magma/plasma/coolwarm/greys; categorical: tab10/okabe_ito with `categories=[...]`) — a legend is rendered automatically (position via `"legend": "bottom-left"`, hide with `"legend": False`) and the mapping is reported by `colight inspect`/`screenshot --json`; `scene3d.Legend(cmap=..., domain=..., label=...)` renders a standalone legend in layouts. `Mesh` geometry updates with stable topology (same vertex count/index shape/vertex format) rewrite the existing GPU buffers instead of rebuilding pipelines, so streaming new `positions` per frame (deformation, simulation output) is efficient and leak-free, with auto-computed lit normals tracking position changes; `geometry_key` names geometry identity explicitly (stable key = same geometry/reused buffers, changed key = clean rebuild, distinct geometries need distinct keys), and updates must ship fresh arrays — in-place mutation of the same array object is not observed. `Mesh` also accepts per-vertex weighted transform references — `transform_refs=["a", "b"]` (names of `Group`s), `transform_indices` (N, K) and `transform_weights` (N, K), K up to 8 — which position each vertex by a weighted combination of those Groups' composed transforms instead of rigidly by one; this expresses continuous deformation driven by a coarse control structure (a bending tube, a fault-dragged surface, a linkage). When present the blend REPLACES the mesh's own group transform; all referenced transforms apply to the same vertex coordinates, so author vertices in one frame and express a rotation about a pivot as translate→rotate→translate-back (nested `Group`s compose it). Weights are normalized per row, normals follow the blended rotation, picking sees the deformed surface, a name with no matching `Group` is a loud compile error, and animating a referenced `Group`'s transform costs no geometry upload at all.
+#
 # Layout components (Row, Column, Grid) allow flexible arrangement of elements and can be composed using & (Row) and | (Column) operators. HTML (via React) can be created using "hiccup in python", and tailwind css classes are supported.
 #
 # There is a "state" api across both Python and JavaScript. In Python one sets initial state by including `Plot.State({key: value})` as a layout item (can be anywhere), and `Plot.onChange({key: callback})` to invoke functions when state changes. These onChange Callbacks receive (widget, event) arguments where event contains `"value"`. In Python one reads state via `widget.key`, resets via `widget.key = foo`, set multiple values via `widget.update({key: value})` or pass `widget.update` any number of `[key, operation, payload]` lists where operation can be "append", "concat", "setAt", or "reset". In JavaScript one reads state via `$state.key`, write via `$state.key = foo`, and updates via `$state.update({key: value})` or pass $state.update any number of operations as in python, eg. `$state.update(["foo", "append", 1], ["bar", "concat", [1, 2]], ["baz", "setAt", [index, value]])`.
 #
-# The `Plot.Slider` component not only shows a slider but can also cycle a state variable through a range of values at a specified fps, eg. `Plot.Slider(key, init, [0, 10], fps=3)` will cycle `key` from 0-10 inclusive starting at `init`. `fps="ref"` is also valid and uses requestAnimationFrame instead of a numeric interval. Range can be list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n). Thus if one wants to show a series of 'frames' one can do `Plot.Slider("frame", range=len(frames))` to cycle through all the valid indexes of `frames`.
+# The `Plot.Slider` component not only shows a slider but can also cycle a state variable through a range of values at a specified fps, eg. `Plot.Slider(key, init, [0, 10], fps=3)` will cycle `key` from 0-10 inclusive starting at `init`. `fps="ref"` is also valid and uses requestAnimationFrame instead of a numeric interval. Range can be list of two values, `[from, until]` (inclusive), to be traversed by `step`. Or a single value `n` which becomes `[from, n-1]`, aligned with python's range(n). Thus if one wants to show a series of 'frames' one can do `Plot.Slider("frame", range=len(frames))` to cycle through all the valid indexes of `frames`. `Plot.channel(parameter, values, at=None, rule="linear")` declares a prop as a table of sampled `values` (shape (N, ...), shipped once as one array) indexed by the `$state` key `parameter` at coordinates `at`, resampled in the browser with `rule` of `"nearest"`/`"step"`/`"linear"`/`"qlerp"` (normalized quaternion lerp for (N, 4) xyzw rows) — unlike an opaque `Plot.js` expression it works in a standalone `.colight` and `colight inspect` reports the parameter, domain, rule and driven prop; it fixes per-frame cost, not wire size (a dense pose table still ships in full).
 # <examples>
 # %%
 # <example title="Clickable Box Counter">
@@ -987,8 +989,8 @@ sizes = 0.01 + 0.02 * np.sin(t)
     | Scene(
         PointCloud(
             centers,
-            colors,
-            sizes,
+            colors=colors,
+            sizes=sizes,
             onHover=Plot.js("(i) => $state.update({hover_point: i})"),
             decorations=[
                 {
@@ -1026,7 +1028,7 @@ def generate_ellipsoid_frames(n_frames=60):
         np.array([[-0.5, 0, 0], [0.5, 0, 0]])[np.newaxis, :, :], n_frames, axis=0
     )  # Centers frames
     t = np.linspace(0, 2 * np.pi, n_frames)  # Time array
-    radii_frames = np.stack(
+    half_size_frames = np.stack(
         [
             np.stack(
                 [
@@ -1047,18 +1049,18 @@ def generate_ellipsoid_frames(n_frames=60):
         ],
         axis=1,
     )  # Radii frames
-    return centers_frames, radii_frames
+    return centers_frames, half_size_frames
 
 
 # Generate animation frames
-centers, radii = generate_ellipsoid_frames()
+centers, half_sizes = generate_ellipsoid_frames()
 
 # Create colors (gradient from red to blue)
 colors = np.stack([np.linspace(1, 0, 10), np.zeros(10), np.linspace(0, 1, 10)], axis=1)
 
 ellipsoids = Ellipsoid(
     centers=Plot.js("$state.centers[$state.frame]"),
-    radii=Plot.js("$state.radii[$state.frame]"),
+    half_sizes=Plot.js("$state.half_sizes[$state.frame]"),
     colors=Plot.js("$state.colors"),
 )
 
@@ -1072,7 +1074,9 @@ camera = {
         {
             "frame": 0,
             "centers": centers.reshape(60, -1),  # Flatten to (n_frames, n_ellipsoids*3)
-            "radii": radii.reshape(60, -1),  # Flatten to (n_frames, n_ellipsoids*3)
+            "half_sizes": half_sizes.reshape(
+                60, -1
+            ),  # Flatten to (n_frames, n_ellipsoids*3)
             "colors": colors.flatten(),  # Flatten to (n_ellipsoids*3,)
             "camera": {
                 "position": [1, 1, 0],  # Closer camera position

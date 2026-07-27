@@ -2,13 +2,27 @@
 
 import contextlib
 import io
+import os
 import sys
+import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from colight.inspect import inspect
 
 from .model import Block, Document
+
+# Root of the installed colight package: frames originating here are
+# internal plumbing (executor exec/eval, model compile, ...) and are dropped
+# from structured errors shown to users.
+_COLIGHT_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _is_internal_frame(frame_file: str, filename: str) -> bool:
+    """True for frames inside the colight package (except the user's file)."""
+    if frame_file == filename:
+        return False
+    return os.path.abspath(frame_file).startswith(_COLIGHT_PACKAGE_ROOT + os.sep)
 
 
 @dataclass
@@ -18,9 +32,54 @@ class ExecutionResult:
     value: Any = None
     output: str = ""
     error: Optional[str] = None
+    error_info: Optional[Dict[str, Any]] = None
     colight_bytes: Optional[bytes] = None
     cache_hit: bool = False
     content_changed: bool = False
+
+
+def structured_error(exc: BaseException, filename: str) -> Dict[str, Any]:
+    """Build a structured, machine-readable error description.
+
+    The traceback is trimmed to user frames: frames originating inside the
+    colight package (executor exec/eval plumbing, ``compile_once``, ...) are
+    dropped, keeping genuine user/document frames.
+
+    Args:
+        exc: The exception that was raised.
+        filename: The file being executed (used to flag user frames).
+
+    Returns:
+        Dict with ``type``, ``message`` and ``frames`` (list of dicts with
+        ``file``, ``line``, ``in`` and ``code`` keys).
+    """
+    frames: List[Dict[str, Any]] = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        if _is_internal_frame(frame.filename, filename):
+            continue
+        frames.append(
+            {
+                "file": frame.filename,
+                "line": frame.lineno,
+                "in": frame.name,
+                "code": (frame.line or "").strip() or None,
+            }
+        )
+    info: Dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+        "frames": frames,
+    }
+    if isinstance(exc, SyntaxError) and exc.lineno is not None:
+        info["frames"] = frames + [
+            {
+                "file": exc.filename or filename,
+                "line": exc.lineno,
+                "in": "<module>",
+                "code": (exc.text or "").strip() or None,
+            }
+        ]
+    return info
 
 
 class BlockExecutor:
@@ -165,16 +224,14 @@ except ImportError:
                 # Capture output
                 result.output = stdout_capture.getvalue()
 
-            except Exception:
-                # Capture error with better formatting
-                import traceback
-
+            except Exception as exc:
                 # Get the raw traceback
                 tb = traceback.format_exc()
 
                 # If we have a real filename (not <string>), the traceback will
                 # already show correct line numbers due to our padding in compile_once
                 result.error = tb
+                result.error_info = structured_error(exc, filename)
 
                 # Also capture any stderr output
                 stderr_output = stderr_capture.getvalue()

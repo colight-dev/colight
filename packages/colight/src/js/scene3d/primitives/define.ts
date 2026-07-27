@@ -8,6 +8,7 @@
 
 import {
   BaseComponentConfig,
+  BASE_COMPONENT_PROPS,
   PrimitiveSpec,
   PipelineCacheEntry,
   GeometryResource,
@@ -34,6 +35,8 @@ export {
   createVertexBufferLayout,
   cameraStruct,
   groupTransformStruct,
+  filterParamsStruct,
+  clipPlanesStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
@@ -245,6 +248,13 @@ export interface PrimitiveDefinition<Config extends BaseComponentConfig> {
   coerce?: (props: Record<string, any>) => Record<string, any>;
 
   /**
+   * Additional accepted prop names beyond the attribute schema and the
+   * shared BaseComponentConfig props (e.g. "fill_mode" for Ellipsoid).
+   * Used to build the spec's `knownProps` set for unknown-key warnings.
+   */
+  extraProps?: string[];
+
+  /**
    * Attribute schema defining instance data.
    * Order matters - this determines buffer layout.
    * Standard attributes (color, alpha) should come last.
@@ -354,14 +364,33 @@ export interface PrimitiveDefinition<Config extends BaseComponentConfig> {
   geometryLayout?: VertexBufferLayout;
 
   /**
+   * Shader location of the first instance attribute. Default 2, matching the
+   * default geometry layout (position at 0, normal at 1). Primitives with a
+   * wider `geometryLayout` must pass the number of geometry locations so the
+   * schema-derived instance layout starts after them.
+   *
+   * Prefer this over hand-writing `renderInstanceLayout` /
+   * `pickingInstanceLayout`: the schema then remains the single source of
+   * truth for offsets, strides and shader locations.
+   */
+  instanceStartLocation?: number;
+
+  /**
    * Custom render instance buffer layout.
    * If provided, bypasses auto-generated layout from schema.
+   *
+   * Avoid: a hand-written layout must be kept in sync by hand with the
+   * schema's `floatsPerInstance` (which sizes the CPU-side fill buffer) and
+   * with the auto-injected framework attributes. Use `instanceStartLocation`
+   * instead unless the instance record genuinely cannot be expressed as a
+   * schema.
    */
   renderInstanceLayout?: VertexBufferLayout;
 
   /**
    * Custom picking instance buffer layout.
    * If provided, bypasses auto-generated layout from schema.
+   * See the caveat on `renderInstanceLayout`.
    */
   pickingInstanceLayout?: VertexBufferLayout;
 
@@ -408,6 +437,13 @@ export interface ProcessedSchema {
   /** All attributes in order */
   attributes: ProcessedAttr[];
 
+  /**
+   * Shader location of the first instance attribute. Instance attributes
+   * occupy `[instanceStartLocation, instanceStartLocation + n)`; pickID (in
+   * the picking pass) sits immediately after the last picking attribute.
+   */
+  instanceStartLocation: number;
+
   /** Attributes for render pass (all) */
   renderAttributes: ProcessedAttr[];
 
@@ -433,11 +469,35 @@ export interface ProcessedSchema {
   pickingLayout: VertexBufferLayout;
 }
 
-function processSchema(
+/**
+ * Turns an attribute schema into instance-buffer offsets, strides and WebGPU
+ * vertex layouts, auto-injecting the framework attributes every primitive gets
+ * (see the comment inside).
+ *
+ * Exported so primitives with hand-written shaders can derive their layouts,
+ * strides and shader input declarations from the SAME schema the generated
+ * path uses — there is exactly one place that decides what an instance record
+ * looks like. Hand-written shaders should pair this with
+ * `instanceInputsWGSL` / `filterCollapseWGSL` rather than hardcoding
+ * locations, strides or offsets.
+ *
+ * @param attributes Primitive-specific attributes, in buffer order.
+ * @param instanceStartLocation Shader location of the first instance
+ *   attribute. Defaults to 2 (position + normal geometry attributes at 0/1);
+ *   primitives with wider geometry layouts pass their own.
+ */
+export function processSchema(
   attributes: Record<string, AttributeDef>,
+  instanceStartLocation: number = 2,
 ): ProcessedSchema {
-  // Auto-inject transformIndex for GPU group transforms
-  // This is added to every primitive for consistency
+  // Auto-inject transformIndex for GPU group transforms and filterIndex for
+  // per-instance filtering. Both are added to every primitive for consistency.
+  //
+  // - transformIndex looks up the group world transform in the transforms buffer.
+  // - filterValue is the per-instance scalar the threshold predicate tests. It is
+  //   uploaded once as instance data; the min/max thresholds live in a small
+  //   filterParams storage buffer indexed by filterIndex, so a threshold change
+  //   (e.g. a $state slider) rewrites only that tiny buffer, never instance data.
   const augmentedAttributes: Record<string, AttributeDef> = {
     ...attributes,
     transformIndex: {
@@ -445,6 +505,21 @@ function processSchema(
       source: "_transformIndex",
       default: 0,
       picking: true, // Need same transform for picking geometry
+    },
+    filterValue: {
+      type: "f32",
+      // Per-instance scalar array on the component (set by the compiler from
+      // the user's filter_by.values). NaN default => "no filter value"
+      // sentinel; ignored when the component's filterParams slot is inactive.
+      source: "_filterValues",
+      default: Number.NaN,
+      picking: true, // Filtered-out instances must be unpickable too
+    },
+    filterIndex: {
+      type: "f32",
+      source: "_filterIndex",
+      default: 0,
+      picking: true, // Same filter thresholds for picking geometry
     },
   };
 
@@ -495,14 +570,23 @@ function processSchema(
   // Add pickID at the end of picking buffer
   const floatsPerPicking = pickingOffset + 1; // +1 for pickID
 
-  // Build WebGPU buffer layouts
-  // Geometry buffer is slot 0 (handled separately), instance buffer is slot 1
-  // So instance attributes start at location 2
-  const renderLayout = buildBufferLayout(attrList, 2, "instance");
-  const pickingLayout = buildPickingBufferLayout(pickingAttrs, 2, "instance");
+  // Build WebGPU buffer layouts. The geometry buffer is slot 0 (handled
+  // separately) and the instance buffer is slot 1; instance shader locations
+  // start after the geometry attributes (2 by default: position + normal).
+  const renderLayout = buildBufferLayout(
+    attrList,
+    instanceStartLocation,
+    "instance",
+  );
+  const pickingLayout = buildPickingBufferLayout(
+    pickingAttrs,
+    instanceStartLocation,
+    "instance",
+  );
 
   return {
     attributes: attrList,
+    instanceStartLocation,
     renderAttributes: attrList,
     pickingAttributes: pickingAttrs,
     floatsPerInstance: renderOffset,
@@ -581,11 +665,234 @@ import { quaternionShaderFunctions } from "../quaternion";
 import {
   cameraStruct,
   groupTransformStruct,
+  filterParamsStruct,
+  clipPlanesStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
   pickingFragCode,
 } from "../shaders";
+
+/**
+ * WGSL `@location(...) name: type` declarations for a primitive's instance
+ * attributes, derived from the processed schema — including the auto-injected
+ * `transformIndex` / `filterValue` / `filterIndex` and, for the picking pass,
+ * the trailing `pickID`.
+ *
+ * This is the single source of truth for instance shader locations. Both the
+ * generated vertex shaders and the hand-written ones call it, so a schema
+ * change (e.g. a new framework attribute) cannot silently desynchronise a
+ * hand-written shader from the buffer layout that feeds it.
+ *
+ * Hand-written shaders must therefore name their instance inputs after the
+ * schema attribute names.
+ *
+ * @param schema Processed schema (from `processSchema`).
+ * @param forPicking Emit the picking attribute set (no color/alpha, + pickID).
+ */
+export function instanceInputsWGSL(
+  schema: ProcessedSchema,
+  forPicking: boolean,
+): string[] {
+  const attrs = forPicking ? schema.pickingAttributes : schema.renderAttributes;
+  const start = schema.instanceStartLocation;
+  const inputs = attrs.map(
+    (attr, i) =>
+      `@location(${start + i}) ${attr.name}: ${ATTRIBUTE_WGSL_TYPES[attr.def.type]}`,
+  );
+  if (forPicking) {
+    inputs.push(`@location(${start + attrs.length}) pickID: f32`);
+  }
+  return inputs;
+}
+
+/**
+ * Per-instance filter collapse, shared by the generated and hand-written
+ * vertex shaders.
+ *
+ * `test` computes `_filterPass` from the instance's `filterValue` against its
+ * component's thresholds (looked up in the `filterParams` storage buffer by
+ * `filterIndex`). `collapse` then sends a failing instance to a degenerate
+ * clip position, which the rasterizer discards.
+ *
+ * Instance data is untouched when only the thresholds change, so a `$state`
+ * threshold sweep rewrites just the tiny filterParams buffer. Apply BOTH parts
+ * in the render and picking passes so filtered-out instances are also
+ * unpickable.
+ *
+ * Requires `filterParamsStruct` in the shader preamble, and the shader's
+ * instance inputs to include `filterValue` / `filterIndex` (which
+ * `instanceInputsWGSL` emits).
+ */
+export const filterCollapseWGSL = {
+  /** Place at the top of the vertex function body; declares `_filterPass`. */
+  test: /*wgsl*/ `
+  // Per-instance filter collapse
+  let _fp = filterParams[u32(filterIndex)];
+  var _filterPass = true;
+  if (_fp.isActive > 0.5) {
+    let _fv = filterValue;
+    _filterPass = (_fv == _fv) && (_fv >= _fp.minVal) && (_fv <= _fp.maxVal);
+  }`,
+  // A zero clip position (w=0, all components 0) is degenerate: the
+  // perspective divide discards it and it produces no fragments. Using a
+  // literal 0/0 division instead would be a WGSL const-eval error, so we
+  // assign the zero vector directly.
+  /** Place after `out.position` is assigned, before `return out`. */
+  collapse: /*wgsl*/ `
+  if (!_filterPass) {
+    out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }`,
+} as const;
+
+/**
+ * Group-transform composition for the "rigid with per-instance rotation" case:
+ * the instance's local frame is rotated by `groupQuat * instanceQuat`, scaled
+ * by the group's scale, and its origin is carried through the group's full
+ * TRS. Every primitive that places oriented geometry at an instance centre
+ * composes the group this way; keeping it in one WGSL function means the
+ * generated path and the hand-written shaders cannot disagree about it.
+ *
+ * Normals are rotated by the SAME composed quaternion (see
+ * `rigidGroupNormal`), matching `applyGroupTransformNormal`.
+ *
+ * Requires `groupTransformStruct`, `quaternionShaderFunctions` and
+ * `applyGroupTransformFn` in the shader preamble.
+ */
+export const rigidGroupTransformFn = /*wgsl*/ `
+struct RigidGroupFrame {
+  // groupQuat * instanceQuat — rotates local geometry AND normals.
+  quat: vec4<f32>,
+  // Instance size premultiplied by the group's (possibly non-uniform) scale.
+  size: vec3<f32>,
+  // Instance origin carried through the group's full TRS.
+  origin: vec3<f32>,
+};
+
+fn rigidGroupFrame(
+  center: vec3<f32>,
+  size: vec3<f32>,
+  instanceQuat: vec4<f32>,
+  groupIdx: u32
+) -> RigidGroupFrame {
+  let groupT = transforms[groupIdx];
+  var f: RigidGroupFrame;
+  f.quat = quat_mul(groupT.quaternion, instanceQuat);
+  f.size = size * groupT.scale;
+  f.origin = applyGroupTransform(center, groupIdx);
+  return f;
+}
+
+// World-space position of a local-space point in a rigid group frame.
+fn rigidGroupPosition(f: RigidGroupFrame, localPos: vec3<f32>) -> vec3<f32> {
+  return f.origin + quat_rotate(f.quat, localPos * f.size);
+}
+
+// World-space normal, inverse-scaled then rotated by the composed quaternion.
+fn rigidGroupNormal(f: RigidGroupFrame, localNormal: vec3<f32>) -> vec3<f32> {
+  return quat_rotate(f.quat, normalize(localNormal / f.size));
+}`;
+
+/**
+ * Per-vertex WEIGHTED TRANSFORM REFERENCES (D2).
+ *
+ * The rigid case above places a whole component with ONE palette entry. This
+ * is the same palette indexed per VERTEX with weights: a vertex is positioned
+ * by a weighted combination of up to K palette entries rather than rigidly by
+ * one. That is what makes continuous deformation driven by a coarse control
+ * structure expressible — a bending tube, a fault-dragged surface, a linkage.
+ *
+ * SEMANTICS — read this before using it. When a mesh declares transform
+ * references, the blend REPLACES the component's own group transform entirely.
+ * The referenced palette entries are already composed through Group nesting at
+ * flatten time, so a mesh may sit anywhere in the hierarchy but only the
+ * entries it references move its vertices. There is no double application.
+ *
+ * Position is the standard linear blend of the referenced TRS transforms.
+ * Normals are rotated by each referenced quaternion, blended with the same
+ * weights, then renormalized — normalized-lerp rather than slerp, whose
+ * rotation error is ~0.01° at the sample spacing control structures use.
+ *
+ * Requires `groupTransformStruct`, `quaternionShaderFunctions` and the
+ * `vertexTransformRefs` storage buffer (see `blendBufferBindingWGSL`) in the
+ * shader preamble.
+ */
+export const blendedGroupTransformFn = /*wgsl*/ `
+struct BlendedFrame {
+  // World-space position of the vertex under the weighted blend.
+  position: vec3<f32>,
+  // Blended, renormalized rotation for the vertex's normal.
+  quat: vec4<f32>,
+};
+
+fn blendedFrame(localPos: vec3<f32>, vertexIndex: u32) -> BlendedFrame {
+  var pos = vec3<f32>(0.0, 0.0, 0.0);
+  var q = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  // The first reference's quaternion fixes the hemisphere: quaternions q and
+  // -q are the same rotation, so blending them raw can cancel. Every later
+  // term is flipped onto the same side before it is added.
+  var ref0 = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+  let base = vertexIndex * TRANSFORM_REF_COUNT;
+  for (var k = 0u; k < TRANSFORM_REF_COUNT; k = k + 1u) {
+    let e = vertexTransformRefs[base + k];
+    let w = e.weight;
+    let t = transforms[u32(e.index)];
+    pos = pos + w * (quat_rotate(t.quaternion, localPos * t.scale) + t.position);
+    var tq = t.quaternion;
+    if (k == 0u) {
+      ref0 = tq;
+    } else if (dot(tq, ref0) < 0.0) {
+      tq = -tq;
+    }
+    q = q + w * tq;
+  }
+  var out: BlendedFrame;
+  out.position = pos;
+  let qlen = length(q);
+  if (qlen < 1e-8) {
+    out.quat = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+  } else {
+    out.quat = q / qlen;
+  }
+  return out;
+}
+
+fn blendedNormal(f: BlendedFrame, localNormal: vec3<f32>) -> vec3<f32> {
+  return normalize(quat_rotate(f.quat, localNormal));
+}`;
+
+/**
+ * WGSL declarations for the per-vertex transform-reference storage buffer.
+ *
+ * The references live in a storage buffer indexed by `vertex_index` (vertex
+ * pulling), NOT in the interleaved vertex buffer. That keeps the vertex buffer
+ * untouched when only weights change, avoids a vertex-format variant per K,
+ * and leaves variable-K per vertex reachable later.
+ *
+ * `index` is an ABSOLUTE palette index, resolved from the mesh's
+ * `transform_refs` names at compile time. `weight` is that reference's share
+ * of the vertex; weights are normalized to sum to 1 before they ship.
+ *
+ * @param k Fixed number of references per vertex (1..8).
+ * @param group Bind group the buffer occupies.
+ * @param binding Binding number within that group.
+ */
+export function blendBufferBindingWGSL(
+  k: number,
+  group: number,
+  binding: number,
+): string {
+  return /*wgsl*/ `
+const TRANSFORM_REF_COUNT: u32 = ${k}u;
+
+struct VertexTransformRef {
+  index: f32,
+  weight: f32,
+};
+
+@group(${group}) @binding(${binding}) var<storage, read> vertexTransformRefs: array<VertexTransformRef>;
+`;
+}
 
 function generateVertexShader(
   def: PrimitiveDefinition<any>,
@@ -598,23 +905,17 @@ function generateVertexShader(
   const inputs: string[] = [
     "@location(0) localPos: vec3<f32>",
     "@location(1) normal: vec3<f32>",
+    ...instanceInputsWGSL(schema, forPicking),
   ];
 
-  for (let i = 0; i < attrs.length; i++) {
-    const attr = attrs[i];
-    const wgslType = ATTRIBUTE_WGSL_TYPES[attr.def.type];
-    inputs.push(`@location(${2 + i}) ${attr.name}: ${wgslType}`);
-  }
-
-  if (forPicking) {
-    inputs.push(`@location(${2 + attrs.length}) pickID: f32`);
-  }
-
-  // Build VSOut struct
+  // Build VSOut struct. The picking VSOut carries worldPos (location 1) so the
+  // picking fragment shader can apply scene clip planes (discard behind a
+  // section), keeping pick-at / pick-where truthful for sectioned views.
   const vsOut = forPicking
     ? `struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
 };`
     : `struct VSOut {
   @builtin(position) position: vec4<f32>,
@@ -627,18 +928,22 @@ function generateVertexShader(
   // Generate transform code based on transform type
   const transformCode = generateTransformCode(def.transform, attrs);
 
+  const filterCollapseCode = filterCollapseWGSL.test;
+  const filterCollapsePosition = filterCollapseWGSL.collapse;
+
   // Build return statement
   const returnStmt = forPicking
     ? `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;${filterCollapsePosition}
   return out;`
     : `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.color = color;
   out.alpha = alpha;
   out.worldPos = worldPos;
-  out.normal = worldNormal;
+  out.normal = worldNormal;${filterCollapsePosition}
   return out;`;
 
   // Include quaternion functions - always needed for group transforms
@@ -646,14 +951,17 @@ function generateVertexShader(
 
   return `${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${vsOut}
 ${quaternionCode}
 ${applyGroupTransformFn}
+${rigidGroupTransformFn}
 
 @vertex
 fn vs_main(
   ${inputs.join(",\n  ")}
 ) -> VSOut {
+${filterCollapseCode}
 ${transformCode}
   ${returnStmt}
 }`;
@@ -691,29 +999,21 @@ function generateTransformCode(
   let worldPos = instancePos;
   let worldNormal = normalize(camera.cameraPos - worldPos);`;
 
-    case "rigid":
-      if (hasRotation) {
-        return `  // Rigid transform with rotation
+    case "rigid": {
+      // Both variants go through the shared rigidGroupFrame helper — the
+      // no-rotation case is the identity-quaternion instance of the same
+      // composition. Hand-written shaders call the same helper.
+      const instanceQuat = hasRotation
+        ? "rotation"
+        : "vec4<f32>(0.0, 0.0, 0.0, 1.0)";
+      return `  // Rigid transform${hasRotation ? " with rotation" : ""}
   ${groupTransformCode}
-  let effectiveSize = size * groupT.scale;
-  let scaledLocal = localPos * effectiveSize;
-  let composedQuat = quat_mul(groupT.quaternion, rotation);
-  let rotatedPos = quat_rotate(composedQuat, scaledLocal);
-  let instancePos = applyGroupTransform(position, groupIdx) + rotatedPos;
-  let worldPos = instancePos;
-  let invScaledNorm = normalize(normal / effectiveSize);
-  let worldNormal = quat_rotate(composedQuat, invScaledNorm);`;
-      } else {
-        return `  // Rigid transform without rotation
-  ${groupTransformCode}
-  let effectiveSize = size * groupT.scale;
-  let scaledLocal = localPos * effectiveSize;
-  let rotatedLocal = quat_rotate(groupT.quaternion, scaledLocal);
-  let instancePos = applyGroupTransform(position, groupIdx);
-  let worldPos = instancePos + rotatedLocal;
-  let invScaledNorm = normalize(normal / effectiveSize);
-  let worldNormal = quat_rotate(groupT.quaternion, invScaledNorm);`;
-      }
+  let _frame = rigidGroupFrame(position, size, ${instanceQuat}, groupIdx);
+  let effectiveSize = _frame.size;
+  let composedQuat = _frame.quat;
+  let worldPos = rigidGroupPosition(_frame, localPos);
+  let worldNormal = rigidGroupNormal(_frame, normal);`;
+    }
 
     case "beam":
       return `  // Beam transform - orient along start->end
@@ -788,6 +1088,7 @@ function generateFragmentShader(
 
   if (isLit) {
     return `${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 
@@ -798,17 +1099,21 @@ fn fs_main(
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let litColor = calculateLighting(color, normal, worldPos);
   return vec4<f32>(litColor, alpha);
 }`;
   } else {
-    return `@fragment
+    return `${clipPlanesStruct}
+
+@fragment
 fn fs_main(
   @location(0) color: vec3<f32>,
   @location(1) alpha: f32,
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   return vec4<f32>(color, alpha);
 }`;
   }
@@ -1192,8 +1497,10 @@ function createApplyDecorationScale(
 export function definePrimitive<Config extends BaseComponentConfig>(
   def: PrimitiveDefinition<Config>,
 ): PrimitiveSpec<Config> {
-  // Process the attribute schema
-  const schema = processSchema(def.attributes);
+  // Process the attribute schema. Primitives with hand-written shaders call
+  // processSchema themselves with the same arguments to derive their shader
+  // input declarations — same inputs, same schema, one seam.
+  const schema = processSchema(def.attributes, def.instanceStartLocation ?? 2);
 
   // Generate or use custom shaders
   const renderVertexShader =
@@ -1283,6 +1590,19 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     }
   }
 
+  // Complete set of accepted prop names: attribute sources (plural) and
+  // their singular forms, shared base props, and primitive-specific extras.
+  // The compiler warns about props outside this set instead of silently
+  // dropping them.
+  const knownProps = new Set<string>(BASE_COMPONENT_PROPS);
+  for (const attr of schema.attributes) {
+    knownProps.add(attr.def.source);
+    knownProps.add(attr.constKey);
+  }
+  for (const extra of def.extraProps ?? []) {
+    knownProps.add(extra);
+  }
+
   const arrayFieldSet = new Set<string>();
   for (const attr of schema.attributes) {
     arrayFieldSet.add(attr.def.source);
@@ -1298,6 +1618,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
   const spec: PrimitiveSpec<Config> = {
     type: def.name,
     coerce: def.coerce,
+    knownProps,
     instancesPerElement: def.instancesPerElement ?? 1,
 
     // Defaults for computeConstants compatibility
@@ -1309,6 +1630,9 @@ export function definePrimitive<Config extends BaseComponentConfig>(
 
     floatsPerInstance: schema.floatsPerInstance,
     floatsPerPicking: schema.floatsPerPicking,
+
+    renderInstanceLayout: def.renderInstanceLayout ?? schema.renderLayout,
+    pickingInstanceLayout: def.pickingInstanceLayout ?? schema.pickingLayout,
 
     colorOffset: schema.colorOffset,
     alphaOffset: schema.alphaOffset,
@@ -1329,7 +1653,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     ): GPURenderPipeline {
       const format = navigator.gpu.getPreferredCanvasFormat();
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
-      const instanceLayout = def.renderInstanceLayout ?? schema.renderLayout;
+      const instanceLayout = spec.renderInstanceLayout;
       const vertexEntryPoint = def.vertexEntryPoint ?? "vs_main";
       const pipelineBindGroupLayout = def.bindGroupLayouts
         ? def.bindGroupLayouts(device, bindGroupLayout)
@@ -1361,7 +1685,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       cache: Map<string, PipelineCacheEntry>,
     ): GPURenderPipeline {
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
-      const instanceLayout = def.pickingInstanceLayout ?? schema.pickingLayout;
+      const instanceLayout = spec.pickingInstanceLayout;
       const vertexEntryPoint = def.pickingVertexEntryPoint ?? "vs_main";
       const pipelineBindGroupLayout = def.bindGroupLayouts
         ? def.bindGroupLayouts(device, bindGroupLayout)
@@ -1394,7 +1718,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
     ): GPURenderPipeline {
       const format = navigator.gpu.getPreferredCanvasFormat();
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
-      const instanceLayout = def.renderInstanceLayout ?? schema.renderLayout;
+      const instanceLayout = spec.renderInstanceLayout;
       const vertexEntryPoint = def.vertexEntryPoint ?? "vs_main";
       const pipelineBindGroupLayout = def.bindGroupLayouts
         ? def.bindGroupLayouts(device, bindGroupLayout)
@@ -1426,7 +1750,7 @@ export function definePrimitive<Config extends BaseComponentConfig>(
       cache: Map<string, PipelineCacheEntry>,
     ): GPURenderPipeline {
       const geometryLayout = def.geometryLayout ?? GEOMETRY_LAYOUT;
-      const instanceLayout = def.pickingInstanceLayout ?? schema.pickingLayout;
+      const instanceLayout = spec.pickingInstanceLayout;
       const vertexEntryPoint = def.pickingVertexEntryPoint ?? "vs_main";
       const pipelineBindGroupLayout = def.bindGroupLayouts
         ? def.bindGroupLayouts(device, bindGroupLayout)
@@ -1460,6 +1784,13 @@ export function definePrimitive<Config extends BaseComponentConfig>(
         vertexStrideFloats,
       );
     },
+
+    buildGeometryData(): GeometryData {
+      return createGeometry(def.geometry);
+    },
+
+    geometryStrideFloats:
+      (def.geometryLayout ?? GEOMETRY_LAYOUT).arrayStride / 4,
   };
 
   return spec;

@@ -15,14 +15,28 @@ from colight.plot import js
 (
     Plot.State(
         {
-            "num_particles": 500000,
+            "num_particles": 100000,
             "alpha": 1.0,
             "frame": 0,
             "point_size": 0.003,
-            # Pre-generate frames using JavaScript
+            # Pre-generate frames using JavaScript.
+            #
+            # `n` is the per-frame particle budget, precomputed `num_frames`
+            # times up front. Two separate costs scale with it:
+            #
+            #  - Load: n * num_frames points to generate and hold resident.
+            #    The original 1M x 30 was ~5s of generation and ~343MB.
+            #  - Per animation frame: the `frame` slider below runs at
+            #    fps="raf", so every tick re-slices `n` centers and re-uploads
+            #    them. Each render registers a pending update with the ready
+            #    tracker, and if a tick's upload cannot finish before the next
+            #    one starts, the pending count never returns to zero and the
+            #    page never reports itself loaded -- headless capture then
+            #    fails on the load timeout rather than rendering slowly.
+            #    100k keeps a raf tick comfortably ahead of the next one.
             "frames": js(
                 """
-                const n = 1000000;
+                const n = 100000;
                 const num_frames = 30;
                 const frames = [];  // Use regular array to store Float32Arrays
 
@@ -39,32 +53,28 @@ from colight.plot import js
                     const frameData = new Float32Array(n * 3);
                     let idx = 0;
 
-                    // Generate points more uniformly through the volume
+                    // Generate points uniformly through the volume
                     for (let i = 0; i < n; i++) {
-                        // Use cube rejection method to fill the heart volume
                         let x, y, z;
-                        do {
-                            // Generate points in parametric space with volume filling
-                            const u = Math.random() * 2 * Math.PI;
-                            const v = Math.random() * Math.PI;
-                            const r = Math.pow(Math.random(), 1/3); // Cube root for volume filling
+                        // Generate points in parametric space with volume filling
+                        const u = Math.random() * 2 * Math.PI;
+                        const v = Math.random() * Math.PI;
+                        const r = Math.cbrt(Math.random()); // Cube root for volume filling
 
-                            // Heart shape parametric equations with radial scaling
-                            x = 16 * Math.pow(Math.sin(u), 3) * r;
-                            y = (13 * Math.cos(u) - 5 * Math.cos(2*u) - 2 * Math.cos(3*u) - Math.cos(4*u)) * r;
-                            z = 8 * Math.sin(v) * r;
+                        // Heart shape parametric equations with radial scaling
+                        x = 16 * Math.pow(Math.sin(u), 3) * r;
+                        y = (13 * Math.cos(u) - 5 * Math.cos(2*u) - 2 * Math.cos(3*u) - Math.cos(4*u)) * r;
+                        z = 8 * Math.sin(v) * r;
 
-                            // Add subtle jitter for more natural look
-                            const rx = (Math.random() - 0.5) * jitter * 0.5;
-                            const ry = (Math.random() - 0.5) * jitter * 0.5;
-                            const rz = (Math.random() - 0.5) * jitter * 0.5;
+                        // Add subtle jitter for more natural look
+                        const rx = (Math.random() - 0.5) * jitter * 0.5;
+                        const ry = (Math.random() - 0.5) * jitter * 0.5;
+                        const rz = (Math.random() - 0.5) * jitter * 0.5;
 
-                            // Scale and animate
-                            x = (x * scale + rx) * (1 + 0.1 * Math.sin(t + u));
-                            y = (y * scale + ry) * (1 + 0.1 * Math.sin(t + v));
-                            z = (z * scale + rz) * (1 + 0.1 * Math.cos(t + u));
-
-                        } while (Math.random() > 0.8); // Rejection sampling for denser core
+                        // Scale and animate
+                        x = (x * scale + rx) * (1 + 0.1 * Math.sin(t + u));
+                        y = (y * scale + ry) * (1 + 0.1 * Math.sin(t + v));
+                        z = (z * scale + rz) * (1 + 0.1 * Math.cos(t + u));
 
                         frameData[idx++] = x;
                         frameData[idx++] = y;
@@ -78,10 +88,11 @@ from colight.plot import js
             """,
                 expression=False,
             ),
-            # Pre-generate colors (these don't change per frame)
+            # Pre-generate colors (these don't change per frame).
+            # Must cover the same per-frame budget as `frames` above.
             "colors": js(
                 """
-                const n = 1000000;
+                const n = 100000;
                 const colors = new Float32Array(n * 3);
 
                 for (let i = 0; i < n; i++) {
@@ -109,7 +120,9 @@ from colight.plot import js
                 {
                     "type": "range",
                     "min": 100,
-                    "max": 1000000,
+                    # Bounded by the per-frame budget generated above: slicing
+                    # past it would hand the scene a short/undefined array.
+                    "max": 100000,
                     "step": 1000,
                     "value": js("$state.num_particles"),
                     "onChange": js(

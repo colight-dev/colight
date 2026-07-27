@@ -9,11 +9,17 @@ import { BaseComponentConfig } from "../types";
 import {
   definePrimitive,
   attr,
+  processSchema,
+  instanceInputsWGSL,
+  filterCollapseWGSL,
+  rigidGroupTransformFn,
+  type AttributeDef,
   cameraStruct,
+  clipPlanesStruct,
   groupTransformStruct,
+  filterParamsStruct,
   applyGroupTransformFn,
   pickingVSOut,
-  pickingFragCode,
   quaternionShaderFunctions,
   coerceFloat32Fields,
 } from "./define";
@@ -126,56 +132,71 @@ export function coerceImagePlane(
 // Shaders
 // =============================================================================
 
+/**
+ * Per-instance attribute schema. The framework attributes (transformIndex /
+ * filterValue / filterIndex) are auto-injected by processSchema.
+ */
+const IMAGE_PLANE_ATTRIBUTES: Record<string, AttributeDef> = {
+  position: attr.vec3("centers"),
+  rotation: attr.quat("quaternions"),
+  size: attr.vec2("sizes", [1, 1]),
+  color: attr.vec3("colors", [1, 1, 1]),
+  alpha: attr.f32("alphas", 1.0),
+};
+
+// Quad geometry: position at 0, normal at 1 — the framework default.
+const schema = processSchema(IMAGE_PLANE_ATTRIBUTES);
+
+/**
+ * Shared vertex-shader body.
+ *
+ * The plane's `size` is a vec2 (width, height); it is lifted to a vec3 with
+ * z = 1 so the shared rigidGroupFrame composes the group transform exactly as
+ * it does for every other primitive, while the quad stays flat in its own
+ * local Z.
+ */
+const imagePlaneTransformBody = /*wgsl*/ `
+  let groupIdx = u32(transformIndex);
+  let _frame = rigidGroupFrame(
+    position, vec3<f32>(size.x, size.y, 1.0), rotation, groupIdx);
+  let worldPos = rigidGroupPosition(_frame, localPos);`;
+
 const imagePlaneVertCode = /*wgsl*/ `
 ${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${quaternionShaderFunctions}
 ${applyGroupTransformFn}
+${rigidGroupTransformFn}
 
 struct VSOut {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) color: vec3<f32>,
   @location(2) alpha: f32,
+  @location(3) worldPos: vec3<f32>,
 };
 
 @vertex
 fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
-  @location(2) center: vec3<f32>,
-  @location(3) rotation: vec4<f32>,
-  @location(4) size: vec2<f32>,
-  @location(5) color: vec3<f32>,
-  @location(6) alpha: f32,
-  @location(7) transformIndex: f32,
+  ${instanceInputsWGSL(schema, false).join(",\n  ")}
 ) -> VSOut {
-  // Get group transform
-  let groupIdx = u32(transformIndex);
-  let groupT = transforms[groupIdx];
-
-  // Compose instance rotation with group rotation
-  let composedQuat = quat_mul(groupT.quaternion, rotation);
-
-  // Apply group scale per-axis to respect non-uniform scaling
-  let effectiveSize = size * vec2<f32>(groupT.scale.x, groupT.scale.y);
-
-  let scaledLocal = vec3<f32>(localPos.x * effectiveSize.x, localPos.y * effectiveSize.y, localPos.z);
-  let rotatedLocal = quat_rotate(composedQuat, scaledLocal);
-
-  // Transform center by group transform, then add local offset
-  let groupWorldPos = applyGroupTransform(center, groupIdx);
-  let worldPos = groupWorldPos + rotatedLocal;
+${filterCollapseWGSL.test}
+${imagePlaneTransformBody}
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.uv = vec2<f32>(localPos.x + 0.5, 0.5 - localPos.y);
   out.color = color;
   out.alpha = alpha;
+  out.worldPos = worldPos;${filterCollapseWGSL.collapse}
   return out;
 }`;
 
 const imagePlaneFragCode = /*wgsl*/ `
+${clipPlanesStruct}
 @group(1) @binding(0) var imageSampler: sampler;
 @group(1) @binding(1) var imageTexture: texture_2d<f32>;
 
@@ -183,8 +204,10 @@ const imagePlaneFragCode = /*wgsl*/ `
 fn fs_main(
   @location(0) uv: vec2<f32>,
   @location(1) color: vec3<f32>,
-  @location(2) alpha: f32
+  @location(2) alpha: f32,
+  @location(3) worldPos: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let tex = textureSample(imageTexture, imageSampler, uv);
   return vec4<f32>(tex.rgb * color, tex.a * alpha);
 }`;
@@ -192,41 +215,25 @@ fn fs_main(
 const imagePlanePickingVertCode = /*wgsl*/ `
 ${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${pickingVSOut}
 ${quaternionShaderFunctions}
 ${applyGroupTransformFn}
+${rigidGroupTransformFn}
 
 @vertex
 fn vs_main(
   @location(0) localPos: vec3<f32>,
   @location(1) normal: vec3<f32>,
-  @location(2) center: vec3<f32>,
-  @location(3) rotation: vec4<f32>,
-  @location(4) size: vec2<f32>,
-  // Order matches processSchema convention: transformIndex before pickID
-  @location(5) transformIndex: f32,
-  @location(6) pickID: f32
+  ${instanceInputsWGSL(schema, true).join(",\n  ")}
 ) -> VSOut {
-  // Get group transform
-  let groupIdx = u32(transformIndex);
-  let groupT = transforms[groupIdx];
-
-  // Compose instance rotation with group rotation
-  let composedQuat = quat_mul(groupT.quaternion, rotation);
-
-  // Apply group scale per-axis to respect non-uniform scaling
-  let effectiveSize = size * vec2<f32>(groupT.scale.x, groupT.scale.y);
-
-  let scaledLocal = vec3<f32>(localPos.x * effectiveSize.x, localPos.y * effectiveSize.y, localPos.z);
-  let rotatedLocal = quat_rotate(composedQuat, scaledLocal);
-
-  // Transform center by group transform, then add local offset
-  let groupWorldPos = applyGroupTransform(center, groupIdx);
-  let worldPos = groupWorldPos + rotatedLocal;
+${filterCollapseWGSL.test}
+${imagePlaneTransformBody}
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;${filterCollapseWGSL.collapse}
   return out;
 }`;
 
@@ -280,13 +287,9 @@ export const imagePlaneSpec = definePrimitive<ImagePlaneComponentConfig>({
 
   coerce: coerceImagePlane,
 
-  attributes: {
-    position: attr.vec3("centers"),
-    rotation: attr.quat("quaternions"),
-    size: attr.vec2("sizes", [1, 1]),
-    color: attr.vec3("colors", [1, 1, 1]),
-    alpha: attr.f32("alphas", 1.0),
-  },
+  extraProps: ["image", "imageKey", "position", "width", "height", "opacity"],
+
+  attributes: IMAGE_PLANE_ATTRIBUTES,
 
   geometry: { type: "quad" },
   transform: "rigid",

@@ -243,3 +243,75 @@ export const createBuffers = (
     indexFormat,
   };
 };
+
+/**
+ * Write new geometry contents into an existing GeometryResource (D1b).
+ *
+ * The grow-only reuse pattern already used for the instance and transform
+ * buffers, applied to geometry: reuse `vb`/`ib` when the new bytes fit, and
+ * when they do not, allocate a larger buffer and DESTROY the one it replaces.
+ * Nothing here reallocates on a same-size write, so a deformation of stable
+ * topology settles at zero net allocation.
+ *
+ * Note on layout: vertices are interleaved (`interleaveVertexData`), so a
+ * positions-only change still rewrites the whole interleaved vertex buffer.
+ * That is one `writeBuffer` of already-resident bytes and no pipeline churn -
+ * acceptable. De-interleaving positions would only be worth it if measurement
+ * ever showed the upload dominating; it does not today.
+ *
+ * The resource is mutated in place so every RenderObject already holding it
+ * keeps pointing at the right buffers when they were reused. Callers must
+ * refresh RenderObjects that cached `vb`/`ib`/counts if `grew` is true.
+ *
+ * @returns Whether a buffer had to be reallocated (and the old one destroyed).
+ */
+export const updateBuffers = (
+  device: GPUDevice,
+  resource: GeometryResource,
+  { vertexData, indexData }: GeometryData,
+  vertexStrideFloats = 6,
+): { grew: boolean } => {
+  let grew = false;
+
+  const vertexSize = align4(vertexData.byteLength);
+  if (resource.vb.size < vertexSize) {
+    resource.vb.destroy();
+    resource.vb = device.createBuffer({
+      size: vertexSize,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    grew = true;
+  }
+  writeBufferPadded(device, resource.vb, vertexData, vertexSize);
+  resource.vertexCount = vertexData.length / vertexStrideFloats;
+
+  if (indexData && indexData.length > 0) {
+    const indexSize = align4(indexData.byteLength);
+    if (!resource.ib || resource.ib.size < indexSize) {
+      if (resource.ib) resource.ib.destroy();
+      resource.ib = device.createBuffer({
+        size: indexSize,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+      });
+      grew = true;
+    }
+    writeBufferPadded(device, resource.ib, indexData, indexSize);
+    resource.indexCount = indexData.length;
+    resource.indexFormat =
+      indexData instanceof Uint32Array ? "uint32" : "uint16";
+  } else if (resource.ib) {
+    // Geometry lost its index buffer: release it rather than orphaning it.
+    resource.ib.destroy();
+    resource.ib = null;
+    resource.indexCount = 0;
+    resource.indexFormat = undefined;
+  }
+
+  return { grew };
+};
+
+/** Release both GPU buffers held by a geometry resource. Idempotent per buffer. */
+export const destroyGeometryResource = (resource: GeometryResource) => {
+  resource.vb.destroy();
+  if (resource.ib) resource.ib.destroy();
+};

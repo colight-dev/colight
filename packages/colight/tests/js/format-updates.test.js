@@ -2,22 +2,24 @@ import { describe, it, expect } from "vitest";
 import { parseColightData } from "../../src/js/format.js";
 
 describe("Colight Format Updates", () => {
-  // Helper to create a .colight entry
+  // Helper to create a .colight entry (format spec version 2)
   function createEntry(jsonData) {
     const encoder = new TextEncoder();
     const HEADER_SIZE = 96;
     const jsonBytes = encoder.encode(JSON.stringify(jsonData));
     const jsonLength = jsonBytes.length;
-    const binaryOffset = HEADER_SIZE + jsonLength;
+    // binary_offset = align8(json end); with no buffers this is also the
+    // (8-aligned) entry size.
+    const binaryOffset = (HEADER_SIZE + jsonLength + 7) & ~7;
 
-    const header = new Uint8Array(HEADER_SIZE);
-    const view = new DataView(header.buffer);
+    const result = new Uint8Array(binaryOffset);
+    const view = new DataView(result.buffer);
 
     // Magic bytes
-    header.set(encoder.encode("COLIGHT\0"), 0);
+    result.set(encoder.encode("COLIGHT\0"), 0);
 
     // Version
-    view.setBigUint64(8, 1n, true);
+    view.setBigUint64(8, 2n, true);
 
     // JSON offset and length
     view.setBigUint64(16, BigInt(HEADER_SIZE), true);
@@ -30,10 +32,7 @@ describe("Colight Format Updates", () => {
     // Number of buffers
     view.setBigUint64(48, 0n, true);
 
-    // Combine header and JSON
-    const result = new Uint8Array(header.length + jsonLength);
-    result.set(header, 0);
-    result.set(jsonBytes, header.length);
+    result.set(jsonBytes, HEADER_SIZE);
 
     return result;
   }

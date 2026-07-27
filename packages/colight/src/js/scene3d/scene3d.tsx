@@ -17,7 +17,9 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import { SceneImpl } from "./impl3d";
+import { SceneImpl, defaultPrimitiveRegistry } from "./impl3d";
+import { ClipPlane, planesExcludeBounds } from "./clipPlanes";
+import { computeSelectionBounds, unionBounds, Bounds3 } from "./pick-snapshot";
 import {
   ComponentConfig,
   PointCloudComponentConfig,
@@ -47,8 +49,12 @@ import {
 import { GroupConfig, GroupRegistry } from "./groups";
 import { GPUTransform } from "./gpu-transforms";
 import { compileScene, RawComponent } from "./compiler";
-import { CameraParams, DEFAULT_CAMERA } from "./camera3d";
+import { Selections } from "./selections";
+import { Annotations } from "./annotations";
+import { AnnotationsOverlay } from "./annotationsOverlay";
+import { CameraParams, DEFAULT_CAMERA, createCameraState } from "./camera3d";
 import { useContainerWidth } from "../utils";
+import { probeStage, PROBE_STAGES } from "../probe";
 import { FPSCounter, useFPSCounter } from "./fps";
 import { tw } from "../utils";
 import { ReadyState, NOOP_READY_STATE, PickInfo } from "./types";
@@ -66,8 +72,21 @@ import {
   CameraExtrinsics,
 } from "./helpers";
 
+import {
+  Legend,
+  SceneLegends,
+  collectLegendEntries,
+  ColorByMeta,
+  LegendPosition,
+} from "./legend";
+
 // Re-export helpers for external use
 export { GridHelper, CameraFrustum, ImageProjection };
+
+// Re-export legend components (Legend is the standalone layout component,
+// reachable from Python as scene3d.Legend)
+export { Legend, SceneLegends };
+export type { ColorByMeta, LegendPosition };
 export type {
   GridHelperProps,
   CameraFrustumProps,
@@ -193,9 +212,11 @@ export function LineSegments(
 /** Mesh - renders custom geometry using inline vertex/index data. */
 export function Mesh(props: MeshProps): InlineMeshComponentConfig {
   const { center, centers, ...rest } = props;
+  // A plain world-space mesh needs no instancing; default to a single
+  // instance at the origin so callers don't have to pass center={[0,0,0]}.
   return {
     ...rest,
-    centers: centers ?? (center ? [center] : undefined),
+    centers: centers ?? [center ?? [0, 0, 0]],
     type: "Mesh",
   } as InlineMeshComponentConfig;
 }
@@ -317,6 +338,25 @@ interface SceneProps {
   readyState?: ReadyState;
   /** Optional map of custom primitive specifications or mesh definitions */
   primitiveSpecs?: PrimitiveSpecMap;
+  /** World-space offset subtracted from positions in Python (see
+   * Scene(origin=...)). Positions arrive pre-shifted; this value is metadata
+   * only — the agent pick API adds it back so dereferenced positions are in
+   * the caller's original coordinate space. It does NOT affect rendering. */
+  origin?: [number, number, number];
+  /** RGB clear color [r,g,b] (0-1) for the WebGPU render pass behind the
+   * geometry. Defaults to opaque black. */
+  background?: [number, number, number];
+  /** Named selections resident in $state.selections (name -> {component,
+   * source, style}). Resolved to per-instance decorations + addressability. */
+  selections?: Selections;
+  /** Named annotation callouts resident in $state.annotations (name ->
+   * {text, anchor, style}). Rendered as a DOM overlay (marker + leader +
+   * label) projected by the current camera. */
+  annotations?: Annotations;
+  /** Scene-level section / clipping planes. Each `{normal, offset}` keeps the
+   * half-space `dot(worldPos, normal) <= offset`; planes intersect. Offsets may
+   * be $state-driven for a section-sweep slider. Max 8. */
+  clipPlanes?: ClipPlane[];
 }
 
 interface DevMenuProps {
@@ -377,6 +417,16 @@ interface SceneLayersProps {
   layers: any[];
   primitiveSpecs?: PrimitiveSpecMap;
   readyState?: ReadyState;
+  /** World-space offset positions were pre-shifted by (Scene origin). */
+  origin?: [number, number, number];
+  /** RGB clear color [r,g,b] (0-1) behind the geometry. */
+  background?: [number, number, number];
+  /** Named selections resident in $state.selections. */
+  selections?: Selections;
+  /** Named annotation callouts resident in $state.annotations. */
+  annotations?: Annotations;
+  /** Scene-level section / clipping planes. */
+  clipPlanes?: ClipPlane[];
 }
 
 /**
@@ -504,6 +554,11 @@ export function Scene(props: SceneLayersProps | SceneProps) {
         layers={props.layers}
         primitiveSpecs={props.primitiveSpecs}
         readyState={props.readyState}
+        origin={props.origin}
+        background={props.background}
+        selections={props.selections}
+        annotations={props.annotations}
+        clipPlanes={props.clipPlanes}
       />
     );
   }
@@ -521,6 +576,11 @@ function SceneFromLayers({
   layers,
   primitiveSpecs,
   readyState,
+  origin,
+  background,
+  selections,
+  annotations,
+  clipPlanes,
 }: SceneLayersProps) {
   // Collect layers and extract scene props
   // Note: No filtering here - the compiler in SceneInner handles helper expansion
@@ -546,6 +606,11 @@ function SceneFromLayers({
       components={components}
       primitiveSpecs={mergedPrimitiveSpecs}
       {...sceneProps}
+      origin={origin ?? sceneProps.origin}
+      background={background ?? sceneProps.background}
+      selections={selections ?? sceneProps.selections}
+      annotations={annotations ?? sceneProps.annotations}
+      clipPlanes={clipPlanes ?? sceneProps.clipPlanes}
       readyState={readyState}
     />
   );
@@ -594,6 +659,11 @@ function SceneInner({
   controls = [],
   readyState = NOOP_READY_STATE,
   primitiveSpecs,
+  origin,
+  background,
+  selections: selectionsProp,
+  annotations,
+  clipPlanes,
 }: SceneProps) {
   const [containerRef, measuredWidth] = useContainerWidth(1);
   const internalCameraRef = useRef({
@@ -601,6 +671,14 @@ function SceneInner({
     ...defaultCamera,
     ...camera,
   });
+
+  // Live camera params, mirrored into state so the annotation overlay
+  // re-projects anchors on every camera change (orbit/pan/zoom/frame). The
+  // controlled `camera` prop wins when present; otherwise it tracks the
+  // internal camera as it moves.
+  const [liveCamera, setLiveCamera] = useState<CameraParams>(
+    () => ({ ...DEFAULT_CAMERA, ...defaultCamera, ...camera }) as CameraParams,
+  );
 
   // Memoize ready callback
   const onReady = useMemo(
@@ -613,8 +691,12 @@ function SceneInner({
   const {
     components,
     primitiveSpecs: mergedSpecs,
+    specContentsKey,
     groupRegistry,
     transforms,
+    filterParams,
+    filters,
+    selections,
   } = useMemo(() => {
     // Collect raw components from children or prop
     const rawComponents = componentsProp
@@ -622,15 +704,68 @@ function SceneInner({
       : (collectComponentsFromChildren(children) as RawComponent[]);
 
     // Run through unified compilation pipeline
-    return compileScene(rawComponents, primitiveSpecs);
-  }, [children, componentsProp, primitiveSpecs]);
+    return probeStage(PROBE_STAGES.compile, () =>
+      compileScene(rawComponents, primitiveSpecs, selectionsProp),
+    );
+  }, [children, componentsProp, primitiveSpecs, selectionsProp]);
+
+  // Colormap legends: components carrying a color_by spec get a DOM
+  // overlay legend docked over the canvas (indices match the compiled
+  // components array used by picking/coverage).
+  const legendEntries = useMemo(
+    () => collectLegendEntries(components as any[]),
+    [components],
+  );
+
+  // "Section excludes entire scene": true when the active clip planes discard
+  // every corner of the scene's world-space bounds (nothing renders). Surfaced
+  // in the clip-planes DOM marker so `screenshot --json` can warn — this is the
+  // section-view analogue of the camera-frustum / mostly-background warnings.
+  const clipExcludesScene = useMemo(() => {
+    if (!clipPlanes || clipPlanes.length === 0) return false;
+    let bounds: Bounds3 | null = null;
+    for (const comp of components) {
+      const spec =
+        mergedSpecs?.[comp.type] ??
+        (defaultPrimitiveRegistry as any)[comp.type];
+      if (!spec) continue;
+      bounds = unionBounds(
+        bounds,
+        computeSelectionBounds(comp as any, spec, transforms),
+      );
+    }
+    if (!bounds) return false;
+    return planesExcludeBounds(clipPlanes, bounds.min, bounds.max);
+  }, [clipPlanes, components, mergedSpecs, transforms]);
 
   const cameraChangeCallback = useCallback(
     (cam: CameraParams) => {
       internalCameraRef.current = cam;
+      setLiveCamera(cam);
       onCameraChange?.(cam);
     },
     [onCameraChange],
+  );
+
+  // When the camera is controlled from outside (the `camera` prop), the
+  // interactive callback above never fires; keep the overlay in sync with the
+  // controlled value directly.
+  useEffect(() => {
+    if (camera) setLiveCamera(camera);
+  }, [camera]);
+
+  // Resolved annotation callouts for this render: the overlay projects them
+  // with the live camera, and a hidden marker mirrors them for screenshot
+  // --json / inspect. Only computed when annotations are actually present.
+  const annotationCamera = useMemo(
+    () => createCameraState(liveCamera),
+    [liveCamera],
+  );
+  const specFor = useCallback(
+    (component: ComponentConfig) =>
+      (mergedSpecs && mergedSpecs[component.type]) ||
+      (defaultPrimitiveRegistry as any)[component.type],
+    [mergedSpecs],
   );
 
   const dimensions = useMemo(
@@ -694,6 +829,9 @@ function SceneInner({
           <SceneImpl
             components={components}
             transforms={transforms}
+            filterParams={filterParams}
+            selections={selections}
+            annotations={annotations}
             containerWidth={dimensions.width}
             containerHeight={dimensions.height}
             style={dimensions.style}
@@ -706,8 +844,76 @@ function SceneInner({
             onClick={onClick}
             readyState={readyState}
             primitiveSpecs={mergedSpecs}
+            specContentsKey={specContentsKey}
             groupRegistry={groupRegistry}
+            origin={origin}
+            background={background}
+            clipPlanes={clipPlanes}
           />
+          <SceneLegends entries={legendEntries} />
+          {annotations && Object.keys(annotations).length > 0 && (
+            // Named annotation callouts: a DOM overlay (marker + leader +
+            // label) projected by the live camera, captured by the same
+            // full-page screenshot path as the legend. It also emits a hidden
+            // data-colight-annotations marker so screenshot --json can report
+            // each callout's resolved world + projected screen position.
+            <AnnotationsOverlay
+              annotations={annotations}
+              components={components}
+              specFor={specFor}
+              transforms={transforms}
+              camera={annotationCamera}
+              rect={{
+                left: 0,
+                top: 0,
+                width: dimensions.width,
+                height: dimensions.height,
+              }}
+              origin={origin}
+            />
+          )}
+          {filters.length > 0 && (
+            // Hidden marker carrying the scene's active per-instance filters
+            // (resolved min/max) so `colight screenshot --json` can report what
+            // the view is filtered by, mirroring the legend DOM marker.
+            <div
+              data-colight-filters={JSON.stringify(filters)}
+              style={{ display: "none" }}
+            />
+          )}
+          {selections.length > 0 && (
+            // Hidden marker carrying the scene's named selections (name,
+            // component, count, predicate) so screenshot --json / inspect can
+            // report the shared referents present in the view.
+            <div
+              data-colight-selections={JSON.stringify(
+                selections.map((s) => ({
+                  name: s.name,
+                  component: s.component,
+                  type: s.type,
+                  count: s.count,
+                  predicate: s.predicate,
+                })),
+              )}
+              style={{ display: "none" }}
+            />
+          )}
+          {clipPlanes && clipPlanes.length > 0 && (
+            // Hidden marker carrying the scene's active section / clipping
+            // planes (normal + resolved offset) so `colight screenshot --json`
+            // can report that the view is sectioned, mirroring the filters
+            // marker. Offsets are the live (state-resolved) values.
+            <div
+              data-colight-clip-planes={JSON.stringify({
+                planes: clipPlanes.map((p) => ({
+                  normal: p.normal,
+                  offset: p.offset,
+                })),
+                excludesScene: clipExcludesScene,
+              })}
+              style={{ display: "none" }}
+            />
+          )}
           {showFps && <FPSCounter fpsRef={fpsDisplayRef} />}
           <DevMenu
             showFps={showFps}

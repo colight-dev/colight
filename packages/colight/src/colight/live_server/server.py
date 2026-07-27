@@ -2,7 +2,6 @@
 
 import asyncio
 import base64
-import fnmatch
 import itertools
 import json
 import logging
@@ -21,7 +20,7 @@ from werkzeug.wrappers import Request, Response
 
 from .client_registry import ClientRegistry
 from colight.runtime.file_graph import FileDependencyGraph
-from .file_resolver import FileResolver, find_files
+from .file_resolver import FileResolver, find_files, matches_patterns
 from colight.runtime.incremental_executor import IncrementalExecutor
 from colight.publish.json_api import JsonDocumentGenerator, build_file_tree_json
 from .live_widgets import LiveWidgetManager
@@ -125,7 +124,7 @@ class ApiMiddleware:
                         visual_store=self.visual_store,
                         incremental_executor=self.incremental_executor,
                     )
-                    json_content = generator.generate_json(source_file, None)
+                    json_content = generator.generate_json(source_file)
                     doc = json.loads(json_content)
 
                     response = Response(
@@ -332,18 +331,55 @@ class LiveServer:
 
         return resolved
 
-    def _run_http_server(self):
-        """Run the HTTP server in a separate thread."""
-        try:
-            app = self._create_app()
-            self._http_server = make_server(self.host, self.http_port, app)
-            print(f"HTTP server thread started on {self.host}:{self.http_port}")
-            self._http_server.serve_forever()
-        except Exception as e:
-            print(f"ERROR in HTTP server thread: {e}")
-            import traceback
+    async def _bind_servers(self):
+        """Bind the HTTP and WebSocket servers.
 
-            traceback.print_exc()
+        Binds in the calling (main) thread so that bind failures (e.g. port
+        already in use) raise immediately instead of being swallowed in a
+        background thread while the process keeps running half-alive.
+
+        If http_port is 0, picks a free adjacent (http, http + 1) port pair,
+        since clients derive the WebSocket port as HTTP port + 1. Updates
+        self.http_port / self.ws_port with the resolved ports.
+
+        Returns:
+            Tuple of (http_server, ws_server); http_server is also stored on
+            self._http_server.
+        """
+        app = self._create_app()
+
+        if self.http_port == 0:
+            last_error: Optional[OSError] = None
+            for _ in range(20):
+                http_server = make_server(self.host, 0, app)
+                try:
+                    ws_server = await websockets.serve(
+                        self._websocket_handler,
+                        self.host,
+                        http_server.server_port + 1,
+                    )
+                except OSError as e:
+                    last_error = e
+                    http_server.server_close()
+                    continue
+                self._http_server = http_server
+                self.http_port = http_server.server_port
+                self.ws_port = http_server.server_port + 1
+                return http_server, ws_server
+            raise OSError(
+                f"Could not find a free adjacent (http, http+1) port pair: {last_error}"
+            )
+
+        http_server = make_server(self.host, self.http_port, app)
+        try:
+            ws_server = await websockets.serve(
+                self._websocket_handler, self.host, self.ws_port
+            )
+        except OSError:
+            http_server.server_close()
+            raise
+        self._http_server = http_server
+        return http_server, ws_server
 
     async def _websocket_handler(self, websocket):
         """Handle WebSocket connections."""
@@ -1099,52 +1135,37 @@ class LiveServer:
 
     def _matches_patterns(self, file_path: pathlib.Path) -> bool:
         """Check if file matches include/ignore patterns."""
-        file_str = str(file_path)
-
-        # Get combined ignore patterns
-        combined_ignore = merge_ignore_patterns(self.ignore)
-
-        # First check ignore patterns - check all parts of the path
-        for part in file_path.parts:
-            for pattern in combined_ignore:
-                if fnmatch.fnmatch(part, pattern):
-                    return False
-
-        # Also check the full path against ignore patterns
-        for pattern in combined_ignore:
-            if fnmatch.fnmatch(file_str, pattern) or fnmatch.fnmatch(
-                file_path.name, pattern
-            ):
-                return False
-
-        # Check include patterns
-        matches_include = any(
-            fnmatch.fnmatch(file_str, pattern)
-            or fnmatch.fnmatch(file_path.name, pattern)
-            for pattern in self.include
+        return matches_patterns(
+            file_path,
+            self.include,
+            merge_ignore_patterns(self.ignore),
+            base_path=self.input_path,
         )
-
-        return matches_include
 
     async def serve(self):
         """Start the server."""
-        # Start HTTP server in background thread
-        self._http_thread = threading.Thread(target=self._run_http_server, daemon=True)
+        # Bind both servers (resolves ephemeral ports when http_port == 0)
+        http_server, ws_server = await self._bind_servers()
+
+        # Serve HTTP requests in a background thread
+        self._http_thread = threading.Thread(
+            target=http_server.serve_forever, daemon=True
+        )
         self._http_thread.start()
 
-        # Start WebSocket server
-        ws_server = await websockets.serve(
-            self._websocket_handler, self.host, self.ws_port
-        )
-
+        # Both servers are listening now; announce the resolved ports.
+        # flush=True so tooling reading our pipes sees this promptly.
         if self.eval_mode:
-            print("Colight eval server running")
-            print(f"  HTTP: http://{self.host}:{self.http_port}")
-            print(f"  WebSocket: ws://{self.host}:{self.ws_port}")
+            print("Colight eval server running", flush=True)
+            print(f"  HTTP: http://{self.host}:{self.http_port}", flush=True)
+            print(f"  WebSocket: ws://{self.host}:{self.ws_port}", flush=True)
         else:
-            print(f"LiveServer running at http://{self.host}:{self.http_port}")
-            print(f"WebSocket server at ws://{self.host}:{self.ws_port}")
-            print("Building files on-demand...")
+            print(
+                f"LiveServer running at http://{self.host}:{self.http_port}",
+                flush=True,
+            )
+            print(f"WebSocket server at ws://{self.host}:{self.ws_port}", flush=True)
+            print("Building files on-demand...", flush=True)
 
         # Open browser if requested (not in eval mode)
         if self.open_url and not self.eval_mode:
@@ -1182,6 +1203,7 @@ class LiveServer:
             await ws_server.wait_closed()
             if self._http_server:
                 self._http_server.shutdown()
+                self._http_server.server_close()
 
     def stop(self):
         """Stop the server."""

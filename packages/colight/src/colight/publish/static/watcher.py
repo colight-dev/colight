@@ -110,7 +110,9 @@ def watch_and_build(
 
         # Filter files based on include/ignore patterns
         matching_changes = {
-            f for f in changed_files if matches_patterns(f, include, ignore)
+            f
+            for f in changed_files
+            if matches_patterns(f, include, ignore, base_path=input_path)
         }
 
         if matching_changes:
@@ -305,7 +307,9 @@ def watch_build_and_serve(
 
             # Filter files based on include/ignore patterns
             matching_changes = {
-                f for f in changed_files if matches_patterns(f, include, ignore)
+                f
+                for f in changed_files
+                if matches_patterns(f, include, ignore, base_path=input_path)
             }
 
             if matching_changes:

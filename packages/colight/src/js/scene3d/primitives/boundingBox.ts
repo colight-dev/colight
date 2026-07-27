@@ -10,14 +10,20 @@ import { BaseComponentConfig } from "../types";
 import {
   definePrimitive,
   attr,
-  ProcessedSchema,
-  packID,
+  processSchema,
+  instanceInputsWGSL,
+  filterCollapseWGSL,
+  rigidGroupTransformFn,
+  type AttributeDef,
   createVertexBufferLayout,
   cameraStruct,
+  clipPlanesStruct,
+  groupTransformStruct,
+  filterParamsStruct,
+  applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
   pickingVSOut,
-  pickingFragCode,
   quaternionShaderFunctions,
   resolveSingular,
   expandScalar,
@@ -297,9 +303,61 @@ const GEOMETRY_LAYOUT = createVertexBufferLayout(
   "vertex",
 );
 
+/**
+ * Per-instance attribute schema. The framework attributes (transformIndex /
+ * filterValue / filterIndex) are auto-injected by processSchema.
+ */
+const BOX_ATTRIBUTES: Record<string, AttributeDef> = {
+  center: attr.vec3("centers"),
+  halfSize: attr.vec3("half_sizes", [0.5, 0.5, 0.5]),
+  edgeSize: attr.f32("sizes", 0.02),
+  rotation: attr.quat("quaternions"),
+  color: attr.vec3("colors", [0.5, 0.5, 0.5]),
+  alpha: attr.f32("alphas", 1.0),
+};
+
+// The wireframe geometry layout is four locations wide (corner position,
+// normal, beam offset, inset), so instance attributes start at 4.
+const INSTANCE_START_LOCATION = 4;
+
+const schema = processSchema(BOX_ATTRIBUTES, INSTANCE_START_LOCATION);
+
+/**
+ * Shared vertex-shader body.
+ *
+ * BoundingBox keeps its own line-expansion semantics — a corner is scaled by
+ * halfSize, pushed out by the beam cross-section offset, and pulled in or out
+ * along the edge by the inset, all scaled by edgeSize — but the group
+ * transform now composes exactly as it does for every other primitive, via
+ * rigidGroupFrame. `rigidGroupPosition` applies `_frame.size` (halfSize *
+ * group scale), so the corner is passed in unscaled and the beam thickness is
+ * scaled separately: the wire stays a constant thickness in local space
+ * rather than stretching with a non-uniform box.
+ */
+const boxTransformBody = /*wgsl*/ `
+  let groupIdx = u32(transformIndex);
+  let _groupT = transforms[groupIdx];
+  let _frame = rigidGroupFrame(center, halfSize, rotation, groupIdx);
+
+  // Corner scaled by the (group-scaled) half extents...
+  let scaledCorner = cornerPos * _frame.size;
+  // ...then the beam cross-section and inset, which are edge-thickness sized
+  // and must not inherit the box's non-uniform extents. Wire thickness takes
+  // the group's mean scale, matching how the generated "billboard"/"beam"
+  // transforms scale a scalar size.
+  let thickness = edgeSize
+    * (_groupT.scale.x + _groupT.scale.y + _groupT.scale.z) / 3.0;
+  let localPos = scaledCorner + beamOffset * thickness + inset * thickness;
+
+  let worldPos = _frame.origin + quat_rotate(_frame.quat, localPos);`;
+
 const vertexShader = /*wgsl*/ `
 ${cameraStruct}
+${groupTransformStruct}
+${filterParamsStruct}
 ${quaternionShaderFunctions}
+${applyGroupTransformFn}
+${rigidGroupTransformFn}
 
 struct VSOut {
   @builtin(position) position: vec4<f32>,
@@ -316,38 +374,29 @@ fn vs_main(
   @location(1) localNormal: vec3<f32>,  // Normal direction
   @location(2) beamOffset: vec3<f32>,   // Beam cross-section offset direction
   @location(3) inset: vec3<f32>,        // Inset direction for this vertex
-  // Instance attributes
-  @location(4) center: vec3<f32>,       // Box center
-  @location(5) halfSize: vec3<f32>,     // Box half-extents
-  @location(6) edgeSize: f32,           // Edge thickness
-  @location(7) quaternion: vec4<f32>,   // Box rotation (xyzw)
-  @location(8) color: vec3<f32>,
-  @location(9) alpha: f32
+  // Instance attributes (schema-derived)
+  ${instanceInputsWGSL(schema, false).join(",\n  ")}
 ) -> VSOut {
-  // Scale corner by halfSize, offset by edgeSize, apply inset
-  let scaledCorner = cornerPos * halfSize;
-  let scaledOffset = beamOffset * edgeSize;
-  let scaledInset = inset * edgeSize;
-  let localPos = scaledCorner + scaledOffset + scaledInset;
+${filterCollapseWGSL.test}
+${boxTransformBody}
 
-  // Rotate by quaternion and translate to center
-  let rotatedPos = quat_rotate(quaternion, localPos);
-  let worldPos = center + rotatedPos;
-
-  // Transform normal
-  let worldNormal = quat_rotate(quaternion, localNormal);
+  // Normal rotates through the composed quaternion, like every other
+  // primitive. It is a direction on the beam cross-section, not on the box
+  // surface, so it is not inverse-scaled by the box extents.
+  let worldNormal = quat_rotate(_frame.quat, localNormal);
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.color = color;
   out.alpha = alpha;
   out.worldPos = worldPos;
-  out.normal = worldNormal;
+  out.normal = worldNormal;${filterCollapseWGSL.collapse}
   return out;
 }`;
 
 const fragmentShader = /*wgsl*/ `
 ${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 
@@ -358,13 +407,18 @@ fn fs_main(
   @location(2) worldPos: vec3<f32>,
   @location(3) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   let litColor = calculateLighting(color, normal, worldPos);
   return vec4<f32>(litColor, alpha);
 }`;
 
 const pickingVertexShader = /*wgsl*/ `
 ${cameraStruct}
+${groupTransformStruct}
+${filterParamsStruct}
 ${quaternionShaderFunctions}
+${applyGroupTransformFn}
+${rigidGroupTransformFn}
 ${pickingVSOut}
 
 @vertex
@@ -374,207 +428,18 @@ fn vs_main(
   @location(1) localNormal: vec3<f32>,
   @location(2) beamOffset: vec3<f32>,
   @location(3) inset: vec3<f32>,
-  // Instance attributes
-  @location(4) center: vec3<f32>,
-  @location(5) halfSize: vec3<f32>,
-  @location(6) edgeSize: f32,
-  @location(7) quaternion: vec4<f32>,
-  @location(8) pickID: f32
+  // Instance attributes (schema-derived, pickID last)
+  ${instanceInputsWGSL(schema, true).join(",\n  ")}
 ) -> VSOut {
-  let scaledCorner = cornerPos * halfSize;
-  let scaledOffset = beamOffset * edgeSize;
-  let scaledInset = inset * edgeSize;
-  let localPos = scaledCorner + scaledOffset + scaledInset;
-
-  let rotatedPos = quat_rotate(quaternion, localPos);
-  let worldPos = center + rotatedPos;
+${filterCollapseWGSL.test}
+${boxTransformBody}
 
   var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;${filterCollapseWGSL.collapse}
   return out;
 }`;
-
-// =============================================================================
-// Custom Buffer Layouts
-// =============================================================================
-
-const RENDER_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [4, "float32x3"], // center
-    [5, "float32x3"], // halfSize
-    [6, "float32"], // edgeSize
-    [7, "float32x4"], // quaternion
-    [8, "float32x3"], // color
-    [9, "float32"], // alpha
-  ],
-  "instance",
-);
-
-const PICKING_INSTANCE_LAYOUT = createVertexBufferLayout(
-  [
-    [4, "float32x3"], // center
-    [5, "float32x3"], // halfSize
-    [6, "float32"], // edgeSize
-    [7, "float32x4"], // quaternion
-    [8, "float32"], // pickID
-  ],
-  "instance",
-);
-
-// =============================================================================
-// Fill Functions
-// =============================================================================
-
-// Render: center(3) + halfSize(3) + edgeSize(1) + quat(4) + color(3) + alpha(1) = 15 floats
-const FLOATS_PER_RENDER = 15;
-// Picking: center(3) + halfSize(3) + edgeSize(1) + quat(4) + pickID(1) = 12 floats
-const FLOATS_PER_PICKING = 12;
-
-function fillRenderGeometry(
-  schema: ProcessedSchema,
-  constants: Record<string, unknown>,
-  elem: BoundingBoxComponentConfig,
-  elemIndex: number,
-  out: Float32Array,
-  outIndex: number,
-): void {
-  const o = outIndex * FLOATS_PER_RENDER;
-
-  // Center
-  out[o + 0] = elem.centers[elemIndex * 3 + 0];
-  out[o + 1] = elem.centers[elemIndex * 3 + 1];
-  out[o + 2] = elem.centers[elemIndex * 3 + 2];
-
-  // Half size
-  if (constants.half_size !== undefined) {
-    const hs = constants.half_size;
-    if (typeof hs === "number") {
-      out[o + 3] = hs;
-      out[o + 4] = hs;
-      out[o + 5] = hs;
-    } else {
-      const arr = hs as number[];
-      out[o + 3] = arr[0];
-      out[o + 4] = arr[1];
-      out[o + 5] = arr[2];
-    }
-  } else if (elem.half_sizes) {
-    out[o + 3] = elem.half_sizes[elemIndex * 3 + 0];
-    out[o + 4] = elem.half_sizes[elemIndex * 3 + 1];
-    out[o + 5] = elem.half_sizes[elemIndex * 3 + 2];
-  } else {
-    out[o + 3] = 0.5;
-    out[o + 4] = 0.5;
-    out[o + 5] = 0.5;
-  }
-
-  // Edge size
-  out[o + 6] = (constants.size as number) ?? elem.sizes?.[elemIndex] ?? 0.02;
-
-  // Quaternion (input wxyz -> output xyzw for shader)
-  if (constants.quaternion !== undefined) {
-    const q = constants.quaternion as number[];
-    out[o + 7] = q[1]; // x
-    out[o + 8] = q[2]; // y
-    out[o + 9] = q[3]; // z
-    out[o + 10] = q[0]; // w
-  } else if (elem.quaternions) {
-    out[o + 7] = elem.quaternions[elemIndex * 4 + 1]; // x
-    out[o + 8] = elem.quaternions[elemIndex * 4 + 2]; // y
-    out[o + 9] = elem.quaternions[elemIndex * 4 + 3]; // z
-    out[o + 10] = elem.quaternions[elemIndex * 4 + 0]; // w
-  } else {
-    out[o + 7] = 0; // x
-    out[o + 8] = 0; // y
-    out[o + 9] = 0; // z
-    out[o + 10] = 1; // w (identity)
-  }
-
-  // Color
-  if (constants.color) {
-    const c = constants.color as number[];
-    out[o + 11] = c[0];
-    out[o + 12] = c[1];
-    out[o + 13] = c[2];
-  } else if (elem.colors) {
-    out[o + 11] = elem.colors[elemIndex * 3 + 0];
-    out[o + 12] = elem.colors[elemIndex * 3 + 1];
-    out[o + 13] = elem.colors[elemIndex * 3 + 2];
-  } else {
-    out[o + 11] = 0.5;
-    out[o + 12] = 0.5;
-    out[o + 13] = 0.5;
-  }
-
-  // Alpha
-  out[o + 14] = (constants.alpha as number) ?? elem.alphas?.[elemIndex] ?? 1.0;
-}
-
-function fillPickingGeometry(
-  schema: ProcessedSchema,
-  constants: Record<string, unknown>,
-  elem: BoundingBoxComponentConfig,
-  elemIndex: number,
-  out: Float32Array,
-  outIndex: number,
-  baseID: number,
-): void {
-  const o = outIndex * FLOATS_PER_PICKING;
-
-  // Center
-  out[o + 0] = elem.centers[elemIndex * 3 + 0];
-  out[o + 1] = elem.centers[elemIndex * 3 + 1];
-  out[o + 2] = elem.centers[elemIndex * 3 + 2];
-
-  // Half size
-  if (constants.half_size !== undefined) {
-    const hs = constants.half_size;
-    if (typeof hs === "number") {
-      out[o + 3] = hs;
-      out[o + 4] = hs;
-      out[o + 5] = hs;
-    } else {
-      const arr = hs as number[];
-      out[o + 3] = arr[0];
-      out[o + 4] = arr[1];
-      out[o + 5] = arr[2];
-    }
-  } else if (elem.half_sizes) {
-    out[o + 3] = elem.half_sizes[elemIndex * 3 + 0];
-    out[o + 4] = elem.half_sizes[elemIndex * 3 + 1];
-    out[o + 5] = elem.half_sizes[elemIndex * 3 + 2];
-  } else {
-    out[o + 3] = 0.5;
-    out[o + 4] = 0.5;
-    out[o + 5] = 0.5;
-  }
-
-  // Edge size
-  out[o + 6] = (constants.size as number) ?? elem.sizes?.[elemIndex] ?? 0.02;
-
-  // Quaternion (input wxyz -> output xyzw for shader)
-  if (constants.quaternion !== undefined) {
-    const q = constants.quaternion as number[];
-    out[o + 7] = q[1];
-    out[o + 8] = q[2];
-    out[o + 9] = q[3];
-    out[o + 10] = q[0];
-  } else if (elem.quaternions) {
-    out[o + 7] = elem.quaternions[elemIndex * 4 + 1];
-    out[o + 8] = elem.quaternions[elemIndex * 4 + 2];
-    out[o + 9] = elem.quaternions[elemIndex * 4 + 3];
-    out[o + 10] = elem.quaternions[elemIndex * 4 + 0];
-  } else {
-    out[o + 7] = 0;
-    out[o + 8] = 0;
-    out[o + 9] = 0;
-    out[o + 10] = 1;
-  }
-
-  // Pick ID
-  out[o + 11] = packID(baseID + elemIndex);
-}
 
 // =============================================================================
 // Helper Functions
@@ -603,33 +468,25 @@ export const boundingBoxSpec = definePrimitive<BoundingBoxComponentConfig>({
 
   coerce: coerceBoundingBox,
 
-  attributes: {
-    center: attr.vec3("centers"),
-    halfSize: attr.vec3("half_sizes", [0.5, 0.5, 0.5]),
-    edgeSize: attr.f32("sizes", 0.02),
-    rotation: attr.quat("quaternions"),
-    color: attr.vec3("colors", [0.5, 0.5, 0.5]),
-    alpha: attr.f32("alphas", 1.0),
-  },
+  attributes: BOX_ATTRIBUTES,
 
   geometry: { type: "custom", create: createWireframeBoxGeometry },
 
-  // Custom layouts
+  // Custom geometry layout (4 locations); instance layout and fill are
+  // schema-derived from BOX_ATTRIBUTES + INSTANCE_START_LOCATION.
   geometryLayout: GEOMETRY_LAYOUT,
-  renderInstanceLayout: RENDER_INSTANCE_LAYOUT,
-  pickingInstanceLayout: PICKING_INSTANCE_LAYOUT,
+  instanceStartLocation: INSTANCE_START_LOCATION,
 
-  // Custom shaders for wireframe box transform
+  // Custom shaders for the wireframe line expansion. Group transform and
+  // filter collapse come from the shared helpers.
   vertexShader,
   fragmentShader,
   pickingVertexShader,
 
-  transform: "rigid", // Not used, but required
+  transform: "rigid", // Not used (custom shaders), but required
   shading: "lit",
   cullMode: "back",
 
   getElementCount,
   getCenters,
-  fillRenderGeometry,
-  fillPickingGeometry,
 });

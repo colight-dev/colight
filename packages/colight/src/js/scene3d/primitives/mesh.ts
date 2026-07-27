@@ -13,9 +13,18 @@ import {
 import {
   definePrimitive,
   attr,
-  createVertexBufferLayout,
+  processSchema,
+  instanceInputsWGSL,
+  filterCollapseWGSL,
+  rigidGroupTransformFn,
+  blendedGroupTransformFn,
+  blendBufferBindingWGSL,
+  type ProcessedSchema,
+  type AttributeDef,
   cameraStruct,
+  clipPlanesStruct,
   groupTransformStruct,
+  filterParamsStruct,
   applyGroupTransformFn,
   lightingConstants,
   lightingCalc,
@@ -52,6 +61,49 @@ export interface VertexFormat {
   hasColors: boolean;
   colorComponents: 3 | 4;
   hasUVs: boolean;
+}
+
+/** Maximum references per vertex. Beyond this a weight field wants D1, not D2. */
+export const MAX_TRANSFORM_REFS_PER_VERTEX = 8;
+
+/**
+ * The primitive-local bind group. Group 0 holds the shared scene bindings
+ * (camera, transforms palette, filter params, clip planes); group 1 is
+ * whatever an individual primitive needs on top — a sampler + texture for
+ * ImagePlane and textured meshes, or a blended mesh's per-vertex
+ * transform-reference buffer. Reusing it means D2 adds no bind-group slot to
+ * the shared layout, at the cost of the two being mutually exclusive for now
+ * (defineMesh rejects that pairing loudly rather than dropping one).
+ */
+export const PRIMITIVE_BIND_GROUP = 1;
+
+/** Binding of the transform-reference buffer within the primitive group. */
+export const BLEND_BINDING = 0;
+
+/** Floats per per-vertex reference in the storage buffer: [paletteIndex, weight]. */
+export const FLOATS_PER_TRANSFORM_REF = 2;
+
+const blendBindGroupLayoutCache = new WeakMap<GPUDevice, GPUBindGroupLayout>();
+
+/**
+ * Bind-group layout for group 1 of a mesh whose vertices blend transform
+ * references. Cached per device so a pipeline rebuild reuses the same layout.
+ */
+export function getBlendBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+  const cached = blendBindGroupLayoutCache.get(device);
+  if (cached) return cached;
+
+  const layout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: BLEND_BINDING,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: "read-only-storage" },
+      },
+    ],
+  });
+  blendBindGroupLayoutCache.set(device, layout);
+  return layout;
 }
 
 /**
@@ -309,13 +361,20 @@ export interface MeshComponentConfig extends BaseComponentConfig {
 
 /**
  * Get a unique key for a vertex format (for caching).
+ *
+ * `transformRefCount` is part of the key because a blended mesh has a
+ * different shader, a different pipeline layout (it binds a storage buffer at
+ * group 1) and a different K baked into its WGSL. A blended and a rigid mesh
+ * of otherwise identical format must never share a pipeline-cache entry.
  */
 export function getFormatKey(
   format: VertexFormat,
   shading: "lit" | "unlit",
   hasTexture = false,
+  transformRefCount = 0,
 ): string {
-  return `${format.hasNormals ? "N" : ""}${format.hasColors ? `C${format.colorComponents}` : ""}${format.hasUVs ? "U" : ""}${hasTexture ? "T" : ""}_${shading}`;
+  const blend = transformRefCount > 0 ? `B${transformRefCount}` : "";
+  return `${format.hasNormals ? "N" : ""}${format.hasColors ? `C${format.colorComponents}` : ""}${format.hasUVs ? "U" : ""}${hasTexture ? "T" : ""}${blend}_${shading}`;
 }
 
 /**
@@ -385,53 +444,35 @@ function buildGeometryLayout(format: VertexFormat): VertexBufferLayout {
 }
 
 /**
- * Build instance buffer layout for render pass.
- * Instance attributes: position(vec3), size(vec3), rotation(vec4), color(vec3), alpha(f32), transformIndex(f32)
+ * Per-instance attribute schema shared by every mesh primitive. The framework
+ * attributes (transformIndex / filterValue / filterIndex) are auto-injected by
+ * processSchema, so this list must NOT restate them.
  */
-function buildRenderInstanceLayout(startLocation: number): VertexBufferLayout {
-  let loc = startLocation;
-  return {
-    arrayStride: (3 + 3 + 4 + 3 + 1 + 1) * 4, // 15 floats * 4 bytes
-    stepMode: "instance",
-    attributes: [
-      { shaderLocation: loc++, offset: 0, format: "float32x3" }, // position
-      { shaderLocation: loc++, offset: 12, format: "float32x3" }, // size
-      { shaderLocation: loc++, offset: 24, format: "float32x4" }, // rotation
-      { shaderLocation: loc++, offset: 40, format: "float32x3" }, // color
-      { shaderLocation: loc++, offset: 52, format: "float32" }, // alpha
-      { shaderLocation: loc++, offset: 56, format: "float32" }, // transformIndex
-    ],
-  };
-}
-
-/**
- * Build instance buffer layout for picking pass.
- * Picking attributes: position(vec3), size(vec3), rotation(vec4), transformIndex(f32), pickID(f32)
- * Note: Order matches processSchema convention (transformIndex before pickID)
- */
-function buildPickingInstanceLayout(startLocation: number): VertexBufferLayout {
-  let loc = startLocation;
-  return {
-    arrayStride: (3 + 3 + 4 + 1 + 1) * 4, // 12 floats * 4 bytes
-    stepMode: "instance",
-    attributes: [
-      { shaderLocation: loc++, offset: 0, format: "float32x3" }, // position
-      { shaderLocation: loc++, offset: 12, format: "float32x3" }, // size
-      { shaderLocation: loc++, offset: 24, format: "float32x4" }, // rotation
-      { shaderLocation: loc++, offset: 40, format: "float32" }, // transformIndex
-      { shaderLocation: loc++, offset: 44, format: "float32" }, // pickID
-    ],
-  };
-}
+const MESH_ATTRIBUTES: Record<string, AttributeDef> = {
+  position: attr.vec3("centers"),
+  size: attr.vec3("scales", [1, 1, 1]),
+  rotation: attr.quat("quaternions"),
+  color: attr.vec3("colors", [0.5, 0.5, 0.5]),
+  alpha: attr.f32("alphas", 1.0),
+};
 
 /**
  * Generate vertex shader for a specific vertex format.
+ *
+ * Instance inputs are derived from the shared schema via `instanceInputsWGSL`,
+ * so the declared locations, the instance buffer layout and the CPU-side fill
+ * stride all come from one place. Group-transform composition and the filter
+ * collapse likewise come from the shared helpers rather than being restated
+ * here.
  */
 function generateMeshVertexShader(
   format: VertexFormat,
+  schema: ProcessedSchema,
   forPicking: boolean,
   hasTexture = false,
+  transformRefCount = 0,
 ): string {
+  const blended = transformRefCount > 0;
   // Build vertex inputs from geometry buffer
   const geoInputs: string[] = ["@location(0) localPos: vec3<f32>"];
   let geoLoc = 1;
@@ -443,31 +484,21 @@ function generateMeshVertexShader(
   }
   if (format.hasUVs) geoInputs.push(`@location(${geoLoc++}) uv: vec2<f32>`);
 
-  // Instance inputs start after geometry inputs
-  const instInputs: string[] = [
-    `@location(${geoLoc}) position: vec3<f32>`,
-    `@location(${geoLoc + 1}) size: vec3<f32>`,
-    `@location(${geoLoc + 2}) rotation: vec4<f32>`,
-  ];
-
-  if (forPicking) {
-    // Order matches processSchema convention: transformIndex before pickID
-    instInputs.push(`@location(${geoLoc + 3}) transformIndex: f32`);
-    instInputs.push(`@location(${geoLoc + 4}) pickID: f32`);
-  } else {
-    instInputs.push(`@location(${geoLoc + 3}) instanceColor: vec3<f32>`);
-    instInputs.push(`@location(${geoLoc + 4}) alpha: f32`);
-    instInputs.push(`@location(${geoLoc + 5}) transformIndex: f32`);
-  }
-
-  const allInputs = [...geoInputs, ...instInputs].join(",\n  ");
+  const allInputs = [
+    // Vertex pulling: the blend reads its references from a storage buffer
+    // indexed by vertex_index, so no vertex attribute is added for them.
+    ...(blended ? ["@builtin(vertex_index) vertexIndex: u32"] : []),
+    ...geoInputs,
+    ...instanceInputsWGSL(schema, forPicking),
+  ].join(",\n  ");
 
   // VSOut struct - include UV when textured (not for picking)
   let vsOut: string;
   if (forPicking) {
     vsOut = `struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) pickID: f32
+  @location(0) pickID: f32,
+  @location(1) worldPos: vec3<f32>
 };`;
   } else if (hasTexture) {
     vsOut = `struct VSOut {
@@ -488,34 +519,38 @@ function generateMeshVertexShader(
 };`;
   }
 
-  // Color computation
+  // Color computation. `color` is the per-instance color attribute (schema
+  // name); vertex colors, when present, modulate it.
   let colorComputation = "";
   if (!forPicking) {
     if (format.hasColors) {
       // Multiply vertex color by instance color
       colorComputation =
         format.colorComponents === 4
-          ? "let finalColor = vertexColor.rgb * instanceColor;\n  let finalAlpha = vertexColor.a * alpha;"
-          : "let finalColor = vertexColor * instanceColor;\n  let finalAlpha = alpha;";
+          ? "let finalColor = vertexColor.rgb * color;\n  let finalAlpha = vertexColor.a * alpha;"
+          : "let finalColor = vertexColor * color;\n  let finalAlpha = alpha;";
     } else {
-      colorComputation =
-        "let finalColor = instanceColor;\n  let finalAlpha = alpha;";
+      colorComputation = "let finalColor = color;\n  let finalAlpha = alpha;";
     }
   }
 
-  // Normal handling (with group transform support)
-  // Note: composedQuat is already declared in main body, just reference it here
+  // Normal handling: rotated by the same composed rotation the position uses
+  // — the rigid frame's quaternion, or the blended one — matching the
+  // generated path.
   const normalComputation = format.hasNormals
-    ? `let invScaledNorm = normalize(normal / effectiveSize);
-  let worldNormal = quat_rotate(composedQuat, invScaledNorm);`
+    ? blended
+      ? `let worldNormal = blendedNormal(_frame, normal);`
+      : `let worldNormal = rigidGroupNormal(_frame, normal);`
     : "let worldNormal = vec3<f32>(0.0, 1.0, 0.0);"; // Default up normal for unlit
 
   // Return statement
+  const collapse = filterCollapseWGSL.collapse;
   let returnStmt: string;
   if (forPicking) {
     returnStmt = `var out: VSOut;
   out.position = camera.mvp * vec4<f32>(worldPos, 1.0);
   out.pickID = pickID;
+  out.worldPos = worldPos;${collapse}
   return out;`;
   } else if (hasTexture) {
     returnStmt = `var out: VSOut;
@@ -524,7 +559,7 @@ function generateMeshVertexShader(
   out.alpha = finalAlpha;
   out.worldPos = worldPos;
   out.normal = worldNormal;
-  out.texCoord = uv;
+  out.texCoord = uv;${collapse}
   return out;`;
   } else {
     returnStmt = `var out: VSOut;
@@ -532,37 +567,45 @@ function generateMeshVertexShader(
   out.color = finalColor;
   out.alpha = finalAlpha;
   out.worldPos = worldPos;
-  out.normal = worldNormal;
+  out.normal = worldNormal;${collapse}
   return out;`;
   }
 
+  // Position/frame. The blended variant REPLACES the component's own group
+  // transform: the referenced palette entries are already composed through
+  // Group nesting, so applying `transformIndex` as well would apply an
+  // ancestor twice. `transformIndex` is still an instance input (the schema is
+  // shared) — it is simply not read here.
+  const transformBody = blended
+    ? `  // Per-vertex weighted transform references (D2). This REPLACES the
+  // component's own group transform — see blendedGroupTransformFn.
+  let _frame = blendedFrame(localPos, vertexIndex);
+  let worldPos = _frame.position;`
+    : `  // Rigid transform with rotation, composed with the group transform.
+  let groupIdx = u32(transformIndex);
+  let _frame = rigidGroupFrame(position, size, rotation, groupIdx);
+  let worldPos = rigidGroupPosition(_frame, localPos);`;
+
+  const transformFns = blended
+    ? `${blendBufferBindingWGSL(transformRefCount, PRIMITIVE_BIND_GROUP, BLEND_BINDING)}
+${blendedGroupTransformFn}`
+    : `${applyGroupTransformFn}
+${rigidGroupTransformFn}`;
+
   return `${cameraStruct}
 ${groupTransformStruct}
+${filterParamsStruct}
 ${vsOut}
 ${quaternionShaderFunctions}
-${applyGroupTransformFn}
+${transformFns}
 
 @vertex
 fn vs_main(
   ${allInputs}
 ) -> VSOut {
-  // Get group transform
-  let groupIdx = u32(transformIndex);
-  let groupT = transforms[groupIdx];
+${filterCollapseWGSL.test}
 
-  // Compose instance rotation with group rotation
-  let composedQuat = quat_mul(groupT.quaternion, rotation);
-
-  // Apply group scale to instance size
-  let effectiveSize = size * groupT.scale;
-
-  // Rigid transform with rotation and group transform
-  let scaledLocal = localPos * effectiveSize;
-  let rotatedPos = quat_rotate(composedQuat, scaledLocal);
-
-  // Transform instance position by group, then add local offset
-  let groupWorldPos = applyGroupTransform(position, groupIdx);
-  let worldPos = groupWorldPos + rotatedPos;
+${transformBody}
 
   ${normalComputation}
   ${colorComputation}
@@ -606,6 +649,7 @@ function generateMeshFragmentShader(
   let baseAlpha = alpha;`;
 
     return `${cameraStruct}
+${clipPlanesStruct}
 ${lightingConstants}
 ${lightingCalc}
 ${textureBindings}
@@ -613,6 +657,7 @@ ${textureBindings}
 fn fs_main(
   ${fragInputs}
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   ${colorCalc}
   let litColor = calculateLighting(baseColor, normal, worldPos);
   return vec4<f32>(litColor, baseAlpha);
@@ -623,11 +668,13 @@ fn fs_main(
   return vec4<f32>(tex.rgb * color, tex.a * alpha);`
       : `return vec4<f32>(color, alpha);`;
 
-    return `${textureBindings}
+    return `${clipPlanesStruct}
+${textureBindings}
 @fragment
 fn fs_main(
   ${fragInputs}
 ) -> @location(0) vec4<f32> {
+  applyClipPlanes(worldPos);
   ${colorCalc}
 }`;
   }
@@ -644,6 +691,14 @@ export interface MeshOptions {
   cullMode?: GPUCullMode;
   /** Whether this mesh uses a texture (requires UVs in geometry) */
   hasTexture?: boolean;
+  /**
+   * References per vertex (K) when this mesh's vertices are positioned by a
+   * weighted combination of transform-palette entries rather than rigidly by
+   * the component's own group transform. 0 (default) = rigid. 1..8 selects the
+   * blended shader variant, which reads its references from a storage buffer
+   * bound at group 1 and IGNORES the component's own group transform.
+   */
+  transformRefCount?: number;
 }
 
 /**
@@ -661,6 +716,26 @@ export function defineMesh(
 ) {
   const shading = options.shading ?? "lit";
   const hasTexture = options.hasTexture ?? false;
+  const transformRefCount = options.transformRefCount ?? 0;
+  if (
+    transformRefCount < 0 ||
+    transformRefCount > MAX_TRANSFORM_REFS_PER_VERTEX ||
+    !Number.isInteger(transformRefCount)
+  ) {
+    throw new Error(
+      `scene3d: Mesh transformRefCount must be an integer in 0..${MAX_TRANSFORM_REFS_PER_VERTEX}, got ${transformRefCount}`,
+    );
+  }
+  if (transformRefCount > 0 && hasTexture) {
+    // Both want bind group 1. Combining them is mechanical (one layout holding
+    // sampler + texture + the reference buffer, and a bind group built from
+    // both resources) but nothing needs it yet, so it fails loudly rather than
+    // silently dropping one.
+    throw new Error(
+      "scene3d: a Mesh cannot combine a texture with per-vertex transform " +
+        "references yet — they claim the same bind group.",
+    );
+  }
 
   // Process geometry to determine format
   const getProcessed =
@@ -705,25 +780,37 @@ export function defineMesh(
   };
 
   const geometryLayout = buildGeometryLayout(format);
+  // Mesh geometry layouts are variable-width (position, optional normal /
+  // vertex color / uv), so instance attributes start after however many
+  // geometry locations this format uses. The schema then derives the instance
+  // layout, stride and shader locations from that one number.
   const instanceStartLocation = countGeometryLocations(format);
-  const renderInstanceLayout = buildRenderInstanceLayout(instanceStartLocation);
-  const pickingInstanceLayout = buildPickingInstanceLayout(
-    instanceStartLocation,
+  const schema = processSchema(MESH_ATTRIBUTES, instanceStartLocation);
+  const vertexShader = generateMeshVertexShader(
+    format,
+    schema,
+    false,
+    hasTexture,
+    transformRefCount,
   );
-  const vertexShader = generateMeshVertexShader(format, false, hasTexture);
-  const pickingVertexShader = generateMeshVertexShader(format, true, false);
+  // The picking pass applies the IDENTICAL blend. Without it, pick-at on a
+  // deformed region would test the mesh's rest pose and miss.
+  const pickingVertexShader = generateMeshVertexShader(
+    format,
+    schema,
+    true,
+    false,
+    transformRefCount,
+  );
   const fragmentShader = generateMeshFragmentShader(shading, hasTexture);
 
   const spec = definePrimitive<MeshComponentConfig>({
     name,
 
-    attributes: {
-      position: attr.vec3("centers"),
-      size: attr.vec3("scales", [1, 1, 1]),
-      rotation: attr.quat("quaternions"),
-      color: attr.vec3("colors", [0.5, 0.5, 0.5]),
-      alpha: attr.f32("alphas", 1.0),
-    },
+    extraProps: ["texture", "textureKey"],
+
+    attributes: MESH_ATTRIBUTES,
+    instanceStartLocation,
 
     geometry: {
       type: "custom",
@@ -737,8 +824,6 @@ export function defineMesh(
     },
 
     geometryLayout,
-    renderInstanceLayout,
-    pickingInstanceLayout,
     vertexShader,
     pickingVertexShader,
     fragmentShader,
@@ -746,11 +831,44 @@ export function defineMesh(
     transform: "rigid",
     shading,
     cullMode: options.cullMode ?? "back",
-    // Textured meshes need an additional bind group for the texture
-    bindGroupLayouts: hasTexture
-      ? (device, baseLayout) => [baseLayout, getImageBindGroupLayout(device)]
-      : undefined,
+    // Group 1 carries whatever this mesh variant needs beyond the shared
+    // scene bindings: a texture, per-vertex transform references, or both.
+    bindGroupLayouts:
+      transformRefCount > 0
+        ? (device, baseLayout) => [baseLayout, getBlendBindGroupLayout(device)]
+        : hasTexture
+          ? (device, baseLayout) => [
+              baseLayout,
+              getImageBindGroupLayout(device),
+            ]
+          : undefined,
   });
+
+  // Published on the spec so the renderer knows to build and bind a
+  // per-vertex transform-reference buffer for this mesh (and how wide it is).
+  if (transformRefCount > 0) {
+    (spec as any).transformRefCount = transformRefCount;
+  }
+
+  // Local-space bounding box of the mesh geometry, so scene bounds / camera
+  // auto-fit can account for the vertex extent (a mesh is one instance at its
+  // center, but its geometry can span the whole scene — the per-instance
+  // radius heuristic would miss it entirely).
+  const positions = sampleGeo.positions;
+  if (positions && positions.length >= 3) {
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i + 2 < positions.length; i += 3) {
+      for (let a = 0; a < 3; a++) {
+        const v = positions[i + a] as number;
+        if (v < min[a]) min[a] = v;
+        if (v > max[a]) max[a] = v;
+      }
+    }
+    if (Number.isFinite(min[0])) {
+      (spec as any).localBounds = { min, max };
+    }
+  }
 
   // Textured meshes batch by texture (like ImagePlane)
   if (hasTexture) {
@@ -791,13 +909,7 @@ export function defineMeshRaw(
   return definePrimitive<MeshComponentConfig>({
     name,
 
-    attributes: {
-      position: attr.vec3("centers"),
-      size: attr.vec3("scales", [1, 1, 1]),
-      rotation: attr.quat("quaternions"),
-      color: attr.vec3("colors", [0.5, 0.5, 0.5]),
-      alpha: attr.f32("alphas", 1.0),
-    },
+    attributes: MESH_ATTRIBUTES,
 
     geometry: {
       type: "custom",

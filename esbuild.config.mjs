@@ -6,6 +6,7 @@ const watch = args.includes('--watch');
 
 const DIST_DIR = 'packages/colight/src/colight/js-dist'
 const NPM_DIST_DIR = 'packages/colight-scene3d/dist'
+const FORMAT_DIST_DIR = 'packages/colight-format/dist'
 
 // Common options for all builds
 const commonOptions = {
@@ -73,6 +74,22 @@ const scene3dESM = {
   plugins: [],
 };
 
+// `@colight/format` — plain ESM so a Node producer can `import` it without a
+// TypeScript toolchain. Compiled file-by-file rather than bundled, so the two
+// entry points share one module instance: the writer identifies payload values
+// with `instanceof`, which would break across duplicated copies of the classes.
+const formatESM = {
+  ...commonOptions,
+  bundle: false,
+  format: 'esm',
+  platform: 'neutral',
+  minify: false,
+  entryPoints: ['packages/colight-format/src/*.ts'],
+  outdir: FORMAT_DIST_DIR,
+  outfile: undefined,
+  plugins: [],
+};
+
 // VSCode Output Panel (IIFE for webview)
 const vscodePanelConfig = {
   ...commonOptions,
@@ -92,6 +109,7 @@ const configs = [
   embedConfigESM,
   liveConfig,
   scene3dESM,
+  formatESM,
   vscodePanelConfig,
 ]
 
@@ -128,7 +146,7 @@ async function runBuild() {
       console.log('Build completed successfully');
       console.log('Output files:');
       configs.forEach(config => {
-        console.log(' - ' + config.outfile);
+        console.log(' - ' + (config.outfile ?? config.outdir + '/'));
       });
     }
   } catch (error) {

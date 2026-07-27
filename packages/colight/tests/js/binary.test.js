@@ -32,6 +32,18 @@ describe("binary.js", () => {
       expect(Array.from(result)).toEqual([1, 2, 3, 4]);
     });
 
+    it("should evaluate 1D bool array as Uint8Array of 0/1", () => {
+      const data = new Uint8Array([1, 0, 1, 1]).buffer;
+      const node = {
+        data: new DataView(data),
+        dtype: "bool",
+        shape: [4],
+      };
+      const result = evaluateNdarray(node);
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(Array.from(result)).toEqual([1, 0, 1, 1]);
+    });
+
     it("should evaluate 1D uint8 array", () => {
       const data = new Uint8Array([1, 2, 3, 4]).buffer;
       const node = {
@@ -44,15 +56,20 @@ describe("binary.js", () => {
       expect(Array.from(result)).toEqual([1, 2, 3, 4]);
     });
 
-    it("should handle unknown dtype by defaulting to Float64Array", () => {
+    it("should throw loudly on an unknown dtype", () => {
       const data = new Float64Array([1, 2]).buffer;
       const node = {
         data: new DataView(data),
-        dtype: "unknown",
+        dtype: "float16",
         shape: [2],
       };
-      const result = evaluateNdarray(node);
-      expect(result).toBeInstanceOf(Float64Array);
+      expect(() => evaluateNdarray(node)).toThrow(
+        'Unknown ndarray dtype: "float16"',
+      );
+      // Big-endian dtype strings are unknown too (files are little-endian).
+      expect(() => evaluateNdarray({ ...node, dtype: ">f4" })).toThrow(
+        'Unknown ndarray dtype: ">f4"',
+      );
     });
   });
 

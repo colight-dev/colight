@@ -1,0 +1,756 @@
+"""Structural inspection of visuals with sanity warnings — no rendering.
+
+Parses ``.colight`` artifacts (or evaluates a ``.py`` file and inspects the
+visuals it produces) and reports component structure, per-array schema, state
+keys and callbacks, plus warnings that catch "why is my scene blank" class
+problems: empty arrays, NaN/Inf values, near-zero alphas, degenerate bounds
+and mismatched per-instance attribute lengths.
+"""
+
+import pathlib
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from . import summaries, targets
+from .structure import ArrayRecord, ComponentRecord, WalkState, collect_structure
+
+# Per-instance attribute names and the number of scalars per instance when
+# the array is flat (scene3d convention).
+PER_INSTANCE_COMPONENTS = {
+    "centers": 3,
+    "positions": 3,
+    "colors": 3,
+    "half_sizes": 3,
+    "half_size": 3,
+    "quaternions": 4,
+    "alphas": 1,
+    "sizes": 1,
+    "scales": 1,
+}
+
+ALPHA_KEYS = {"alpha", "alphas", "opacity", "fill_opacity", "fillOpacity"}
+BOUNDS_KEYS = {"centers", "positions", "points", "x", "y", "z"}
+
+
+def _implied_instance_count(record: ArrayRecord) -> Optional[int]:
+    """Number of instances implied by a per-instance attribute array.
+
+    Arrays under a component's ``geometry`` sub-object (a Mesh's per-vertex
+    positions/normals/colors/uvs) are geometry, NOT per-instance attributes,
+    so they are excluded — otherwise a single-instance mesh's 33k vertex
+    ``positions`` would be compared against its 1-element ``centers`` and
+    falsely flagged as a length mismatch.
+    """
+    if record.key not in PER_INSTANCE_COMPONENTS:
+        return None
+    if ".geometry." in record.path or record.path.endswith(".geometry"):
+        return None
+    divisor = PER_INSTANCE_COMPONENTS[record.key]
+    shape = record.shape
+    if not shape:
+        return None
+    if len(shape) > 1:
+        return shape[0]
+    if divisor > 1 and shape[0] % divisor == 0:
+        return shape[0] // divisor
+    return shape[0]
+
+
+def _array_warnings(record: ArrayRecord) -> List[Dict[str, str]]:
+    warnings: List[Dict[str, str]] = []
+    values = record.values
+    size = int(np.prod(record.shape)) if record.shape else 0
+    if size == 0:
+        warnings.append(
+            {
+                "code": "empty-array",
+                "path": record.path,
+                "message": f"array is empty (shape {record.shape})",
+            }
+        )
+        return warnings
+    if values is None or not np.issubdtype(values.dtype, np.number):
+        return warnings
+    if np.issubdtype(values.dtype, np.floating):
+        nan_count = int(np.isnan(values).sum())
+        inf_count = int(np.isinf(values).sum())
+        if nan_count:
+            warnings.append(
+                {
+                    "code": "nan-values",
+                    "path": record.path,
+                    "message": f"{nan_count}/{values.size} values are NaN",
+                }
+            )
+        if inf_count:
+            warnings.append(
+                {
+                    "code": "inf-values",
+                    "path": record.path,
+                    "message": f"{inf_count}/{values.size} values are Inf",
+                }
+            )
+    if record.key in ALPHA_KEYS:
+        finite = values[np.isfinite(values)]
+        if finite.size and float(np.max(finite)) <= 1e-6:
+            warnings.append(
+                {
+                    "code": "alphas-zero",
+                    "path": record.path,
+                    "message": "all alpha/opacity values are ~0 (invisible)",
+                }
+            )
+    if record.key in BOUNDS_KEYS and values.size > 1:
+        divisor = PER_INSTANCE_COMPONENTS.get(record.key or "", 1)
+        points = values
+        if points.ndim == 1 and divisor > 1 and points.size % divisor == 0:
+            points = points.reshape(-1, divisor)
+        if points.ndim == 1:
+            points = points.reshape(-1, 1)
+        if points.shape[0] > 1:
+            finite_rows = points[np.all(np.isfinite(points), axis=1)]
+            if finite_rows.shape[0] > 1:
+                extents = np.max(finite_rows, axis=0) - np.min(finite_rows, axis=0)
+                if bool(np.all(extents == 0)):
+                    warnings.append(
+                        {
+                            "code": "degenerate-bounds",
+                            "path": record.path,
+                            "message": (
+                                f"{points.shape[0]} points but zero extent "
+                                "on every axis (all points identical)"
+                            ),
+                        }
+                    )
+    return warnings
+
+
+def _component_warnings(component: ComponentRecord) -> List[Dict[str, str]]:
+    counts: Dict[str, int] = {}
+    for record in component.arrays:
+        implied = _implied_instance_count(record)
+        if implied is not None and record.key is not None:
+            counts[record.key] = implied
+    if len(set(counts.values())) > 1:
+        detail = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        return [
+            {
+                "code": "length-mismatch",
+                "path": component.display_path,
+                "message": f"per-instance attributes imply different counts: {detail}",
+            }
+        ]
+    return []
+
+
+# Position-typed array keys whose values define the scene's world-space
+# extent (packed as flat xyz, or xyzi for LineBeams ``points``). Mesh
+# ``geometry.positions`` are deliberately excluded: with a Scene origin they
+# stay unshifted while instance centers are shifted, so mixing them would put
+# the bounds in two coordinate spaces. Instance centers approximate mesh
+# placement (best-effort; the frustum warning need not be pixel-exact).
+_POSITION_KEYS = {"centers": 3, "starts": 3, "ends": 3, "points": 4}
+
+
+def _scene_point_bounds(state: WalkState) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """World-space (min, max) over all position arrays, or None if absent."""
+    lo = np.full(3, np.inf)
+    hi = np.full(3, -np.inf)
+    seen = False
+    for record in state.arrays:
+        stride = _POSITION_KEYS.get(record.key or "")
+        if stride is None or record.values is None:
+            continue
+        pts = np.asarray(record.values, dtype=np.float64)
+        if pts.ndim == 1:
+            if pts.size % stride:
+                continue
+            pts = pts.reshape(-1, stride)
+        if pts.ndim != 2 or pts.shape[1] < 3:
+            continue
+        xyz = pts[:, 0:3]
+        xyz = xyz[np.all(np.isfinite(xyz), axis=1)]
+        if not xyz.size:
+            continue
+        seen = True
+        lo = np.minimum(lo, xyz.min(axis=0))
+        hi = np.maximum(hi, xyz.max(axis=0))
+    return (lo, hi) if seen else None
+
+
+def _find_cameras(node: Any) -> List[Dict[str, Any]]:
+    """Collect explicit camera dicts (with near/far/position) in a payload."""
+    cameras: List[Dict[str, Any]] = []
+
+    def visit(n: Any) -> None:
+        if isinstance(n, dict):
+            if (
+                "near" in n
+                and "far" in n
+                and "position" in n
+                and isinstance(n.get("position"), (list, tuple))
+            ):
+                cameras.append(n)
+            for v in n.values():
+                visit(v)
+        elif isinstance(n, list):
+            for item in n:
+                visit(item)
+
+    visit(node)
+    return cameras
+
+
+def _clip_plane_warnings(
+    state: WalkState, data: Dict[str, Any]
+) -> List[Dict[str, str]]:
+    """Warn when section / clipping planes exclude the entire scene bounds.
+
+    Fires only for numeric offsets (a ``$state``-driven sweep is checked at
+    render time via ``screenshot --json``). Positions and offsets are both in
+    the origin-shifted space, so the comparison is direct.
+    """
+    planes = _find_clip_planes(data)
+    if not planes:
+        return []
+    bounds = _scene_point_bounds(state)
+    if bounds is None:
+        return []
+    lo, hi = bounds
+    corners = np.array(
+        [
+            [
+                lo[0] if not xi else hi[0],
+                lo[1] if not yi else hi[1],
+                lo[2] if not zi else hi[2],
+            ]
+            for xi in (0, 1)
+            for yi in (0, 1)
+            for zi in (0, 1)
+        ],
+        dtype=np.float64,
+    )
+    for plane in planes:
+        offset = plane.get("offset")
+        normal = plane.get("normal")
+        if not isinstance(offset, (int, float)) or isinstance(offset, bool):
+            continue
+        if not isinstance(normal, (list, tuple)) or len(normal) != 3:
+            continue
+        n = np.asarray(normal, dtype=np.float64)
+        # Every corner clipped (dot(corner, n) - offset > 0) => nothing renders.
+        if np.all(corners @ n - float(offset) > 0):
+            return [
+                {
+                    "code": "section-excludes-scene",
+                    "message": (
+                        "clip_planes exclude the entire scene bounds — "
+                        "nothing renders; widen the section offset"
+                    ),
+                }
+            ]
+    return []
+
+
+def _camera_frustum_warnings(
+    state: WalkState, data: Dict[str, Any]
+) -> List[Dict[str, str]]:
+    """Warn when an explicit camera's near/far can't contain the scene.
+
+    Catches the "3 km scene under unit-scale near/far renders pure black"
+    class of bug at the data layer, before rendering. Only fires when the
+    scene declares an explicit camera; auto-fit scenes derive near/far from
+    the extent and are always consistent.
+    """
+    bounds = _scene_point_bounds(state)
+    if bounds is None:
+        return []
+    lo, hi = bounds
+    center = (lo + hi) / 2.0
+    radius = float(np.linalg.norm(hi - lo) / 2.0)
+    if radius <= 0.0:
+        return []
+
+    warnings: List[Dict[str, str]] = []
+    for cam in _find_cameras(data):
+        try:
+            near = float(cam["near"])
+            far = float(cam["far"])
+            position = np.asarray(cam["position"], dtype=np.float64)
+        except (TypeError, ValueError, KeyError):
+            continue
+        if position.shape != (3,) or not (np.isfinite(near) and np.isfinite(far)):
+            continue
+        distance = float(np.linalg.norm(position - center))
+        # Whole scene beyond the far plane, or entirely in front of near:
+        # the geometry is outside the frustum and the frame renders black.
+        if distance - radius > far:
+            warnings.append(
+                {
+                    "code": "camera-frustum",
+                    "path": "camera",
+                    "message": (
+                        f"scene (radius {radius:.1f} at distance {distance:.1f}) "
+                        f"lies beyond the camera far plane ({far:g}); it will "
+                        "render as empty background — increase far"
+                    ),
+                }
+            )
+        elif distance + radius < near:
+            warnings.append(
+                {
+                    "code": "camera-frustum",
+                    "path": "camera",
+                    "message": (
+                        f"scene (radius {radius:.1f} at distance {distance:.1f}) "
+                        f"lies in front of the camera near plane ({near:g}); it "
+                        "will render as empty background — decrease near"
+                    ),
+                }
+            )
+        elif far < 2.0 * radius:
+            warnings.append(
+                {
+                    "code": "camera-frustum",
+                    "path": "camera",
+                    "message": (
+                        f"camera far plane ({far:g}) is smaller than the scene "
+                        f"diameter ({2.0 * radius:.1f}); parts of the scene will "
+                        "be clipped — increase far"
+                    ),
+                }
+            )
+    return warnings
+
+
+def structure_warnings(
+    state: WalkState, data: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, str]]:
+    """Sanity warnings for an already-collected walk state.
+
+    Args:
+        state: The populated walk state.
+        data: The visual's JSON envelope; when given, adds camera-frustum
+            warnings (explicit camera vs scene extent).
+    """
+    warnings: List[Dict[str, str]] = []
+    for record in state.arrays:
+        warnings.extend(_array_warnings(record))
+    for component in state.components:
+        warnings.extend(_component_warnings(component))
+    if data is not None:
+        warnings.extend(_camera_frustum_warnings(state, data))
+        warnings.extend(_clip_plane_warnings(state, data))
+    return warnings
+
+
+def legend_payload(
+    color_by: Dict[str, Any], component: Optional[str] = None
+) -> Dict[str, Any]:
+    """Machine-readable legend entry for a component's ``color_by`` spec.
+
+    Lean on purpose (no color tables): agents read what the colors encode —
+    ``{"component"?, "label"?, "cmap", "domain"?, "categorical",
+    "categories"?}``.
+    """
+    entry: Dict[str, Any] = {}
+    if component is not None:
+        entry["component"] = component
+    if "label" in color_by:
+        entry["label"] = color_by["label"]
+    entry["cmap"] = color_by.get("cmap")
+    if "domain" in color_by:
+        entry["domain"] = color_by["domain"]
+    entry["categorical"] = bool(color_by.get("categorical"))
+    if "categories" in color_by:
+        entry["categories"] = color_by["categories"]
+    if "fallback" in color_by:
+        entry["fallback"] = color_by["fallback"]
+    return entry
+
+
+def filter_payload(
+    filter_by: Dict[str, Any], component: Optional[str] = None
+) -> Dict[str, Any]:
+    """Machine-readable entry for a component's active ``filter_by``.
+
+    Reports what the view is filtered by so agents know instances may be
+    hidden: ``{"component"?, "label"?, "min", "max"}``. ``min``/``max`` are the
+    inclusive thresholds; a value that is a ``$state`` reference (unresolved
+    ``JSCall``/``JSRef`` dict) is reported as ``None`` (unbounded/dynamic).
+    """
+    entry: Dict[str, Any] = {}
+    if component is not None:
+        entry["component"] = component
+    if "label" in filter_by:
+        entry["label"] = filter_by["label"]
+
+    def _num(v: Any) -> Optional[float]:
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    entry["min"] = _num(filter_by.get("min"))
+    entry["max"] = _num(filter_by.get("max"))
+    return entry
+
+
+def _find_clip_planes(node: Any) -> List[Dict[str, Any]]:
+    """Collect scene-level ``clipPlanes`` arrays anywhere in a payload.
+
+    Scene(clip_planes=...) serializes to a ``clipPlanes`` prop on the scene3d
+    node. Returned as a flat list of ``{"normal", "offset"}`` (offsets that are
+    unresolved ``$state`` refs stay as their serialized dict — reported as a
+    ``state_key`` below).
+    """
+    planes: List[Dict[str, Any]] = []
+
+    def visit(n: Any) -> None:
+        if isinstance(n, dict):
+            cp = n.get("clipPlanes")
+            if isinstance(cp, list):
+                planes.extend(p for p in cp if isinstance(p, dict))
+            for v in n.values():
+                visit(v)
+        elif isinstance(n, list):
+            for item in n:
+                visit(item)
+
+    visit(node)
+    return planes
+
+
+def _js_source_repr(value: Any) -> Optional[str]:
+    """The raw JS source of a serialized ``Plot.js`` expression, else None."""
+    if isinstance(value, dict) and value.get("__type__") == "js_source":
+        src = value.get("value")
+        return src if isinstance(src, str) else None
+    return None
+
+
+def clip_plane_payload(plane: Dict[str, Any]) -> Dict[str, Any]:
+    """Machine-readable entry for one section / clipping plane.
+
+    ``{"normal": [nx,ny,nz], "offset"?, "state_key"?}``: a numeric offset is
+    reported directly; an offset driven by ``$state`` (a serialized ``Plot.js``
+    expression) is reported as ``state_key`` (its JS source) with ``offset``
+    omitted, so an agent knows the section is state-driven.
+    """
+    entry: Dict[str, Any] = {"normal": plane.get("normal")}
+    offset = plane.get("offset")
+    if isinstance(offset, (int, float)) and not isinstance(offset, bool):
+        entry["offset"] = offset
+    else:
+        state_key = _js_source_repr(offset)
+        if state_key is not None:
+            entry["state_key"] = state_key
+    return entry
+
+
+def selections_payload(state_selections: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Machine-readable entries for named selections in ``$state.selections``.
+
+    Each entry is ``{"name", "component", "count"|"predicate"}``: an explicit
+    instance list reports its ``count``; a threshold predicate reports
+    ``predicate: {"min"?, "max"?, "values_ref"?}`` (the count is data-dependent
+    and resolved on the client). Selections are shared named referents — a human
+    click and an agent predicate converge on the same object, and it survives
+    into ``.colight`` artifacts as state.
+    """
+    entries: List[Dict[str, Any]] = []
+    for name, spec in state_selections.items():
+        if not isinstance(spec, dict):
+            continue
+        entry: Dict[str, Any] = {"name": name, "component": spec.get("component")}
+        source = spec.get("source") or {}
+        if isinstance(source.get("instances"), list):
+            entry["count"] = len(source["instances"])
+        else:
+            predicate: Dict[str, Any] = {}
+            for key in ("min", "max", "values_ref"):
+                if source.get(key) is not None and not isinstance(
+                    source.get(key), dict
+                ):
+                    predicate[key] = source[key]
+            entry["predicate"] = predicate
+        entries.append(entry)
+    return entries
+
+
+def annotations_payload(state_annotations: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Machine-readable entries for annotation callouts in ``$state.annotations``.
+
+    Each entry is ``{"name", "text", "anchor"}`` where ``anchor`` is either
+    ``{"position": [x, y, z]}`` (world coords, as given) or
+    ``{"component", "instance"}``. Annotations are shared named referents that
+    survive into ``.colight`` artifacts as state; the resolved world position and
+    projected screen position are added by the renderer-backed
+    ``screenshot --json`` / ``pick-at`` path (they need the live camera).
+    """
+    entries: List[Dict[str, Any]] = []
+    for name, spec in state_annotations.items():
+        if not isinstance(spec, dict):
+            continue
+        entry: Dict[str, Any] = {"name": name, "text": spec.get("text")}
+        anchor = spec.get("anchor")
+        if isinstance(anchor, dict):
+            entry["anchor"] = anchor
+        entries.append(entry)
+    return entries
+
+
+# Scene3d walker labels that are containers, not drawable primitives: a Scene
+# is the canvas and a Group is flattened away at compile time (see
+# js/scene3d/groups.ts ``flattenGroupsInternal``). Excluding them turns the
+# walker's component list into the sequence of drawable leaves, which is the
+# order the compiled scene indexes.
+_SCENE_CONTAINERS = {"scene3d.Scene", "scene3d.Group"}
+
+
+def component_declarations(state: WalkState) -> List[Dict[str, Any]]:
+    """Declarative facts each component carries, keyed by component path.
+
+    One entry per component that declares anything discoverable — the
+    parameters an agent can sweep and the encodings it should read the
+    pixels against:
+
+    ``{"path", "label", "filter_by"?, "color_by"?, "color_channels"?,
+    "channels"?}`` where ``path`` is the walker's stable unique path
+    (``ast[1].layers[0]/scene3d.PointCloud``) and ``label`` the component
+    type. Components declaring nothing are omitted.
+
+    This is the single source of the declarative section: ``colight inspect``
+    and ``colight screenshot --json`` both report it from the same walk, using
+    the same :func:`legend_payload` / :func:`filter_payload` summaries.
+    """
+    entries: List[Dict[str, Any]] = []
+    for component in state.components:
+        entry: Dict[str, Any] = {
+            "path": component.display_path,
+            "label": component.path,
+        }
+        declared = False
+        if component.filter_by is not None:
+            entry["filter_by"] = filter_payload(component.filter_by)
+            declared = True
+        if component.color_by is not None:
+            entry["color_by"] = legend_payload(component.color_by)
+            declared = True
+        if component.color_channels is not None:
+            entry["color_channels"] = component.color_channels
+            declared = True
+        if component.channels:
+            entry["channels"] = list(component.channels)
+            declared = True
+        if declared:
+            entries.append(entry)
+    return entries
+
+
+def align_declarations_to_coverage(
+    state: WalkState,
+    declarations: List[Dict[str, Any]],
+    coverage: Optional[Dict[str, Any]],
+) -> None:
+    """Add a ``component`` coverage index to declarations, when unambiguous.
+
+    ``coverage``'s ``components`` are indexed by *compiled* order: helpers are
+    expanded, invalid types dropped and Groups flattened before indices are
+    assigned, and only components that produced a render object appear. The
+    payload walker sees the pre-compile tree, so the two lists agree only in
+    the simple case. Rather than guess, the index is attached only when the
+    walker's drawable-leaf sequence and coverage's components are the same
+    length and coverage occupies exactly indices ``0..n-1`` in order; otherwise
+    ``component`` is omitted and ``path`` remains the join key.
+
+    Mutates ``declarations`` in place.
+    """
+    if not coverage:
+        return
+    covered = coverage.get("components")
+    if not isinstance(covered, list) or not covered:
+        return
+    if [entry.get("component") for entry in covered] != list(range(len(covered))):
+        return
+    leaves = [
+        component.display_path
+        for component in state.components
+        if component.path.startswith("scene3d.")
+        and component.path not in _SCENE_CONTAINERS
+    ]
+    if len(leaves) != len(covered):
+        return
+    index_of = {path: i for i, path in enumerate(leaves)}
+    for entry in declarations:
+        index = index_of.get(entry["path"])
+        if index is not None:
+            entry["component"] = index
+
+
+def declarations_payload(
+    data: Dict[str, Any],
+    buffers: List[bytes],
+    coverage: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Declarative facts for a visual's payload (the ``declarations`` section).
+
+    Args:
+        data: The visual's JSON envelope (``ast``, ``state``, ...).
+        buffers: The visual's binary buffers.
+        coverage: A ``screenshot --json`` coverage payload; when its component
+            indices map unambiguously onto the walk, each entry also carries
+            its ``component`` index (see :func:`align_declarations_to_coverage`).
+
+    Returns:
+        The declaration entries (empty when nothing is declared).
+    """
+    state = collect_structure(data, buffers)
+    declarations = component_declarations(state)
+    align_declarations_to_coverage(state, declarations, coverage)
+    return declarations
+
+
+def inspect_visual_data(
+    data: Dict[str, Any], buffers: List[bytes]
+) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+    """Inspect a visual's JSON payload + buffers.
+
+    Args:
+        data: The visual's JSON envelope (``ast``, ``state``, ...).
+        buffers: The visual's binary buffers.
+
+    Returns:
+        Tuple of (structure payload, warnings list).
+    """
+    state = collect_structure(data, buffers)
+
+    component_counts: Dict[str, int] = {}
+    component_instances: Dict[str, Optional[int]] = {}
+    for component in state.components:
+        component_counts[component.path] = component_counts.get(component.path, 0) + 1
+        implied = None
+        for record in component.arrays:
+            implied = _implied_instance_count(record)
+            if implied is not None:
+                break
+        if component.path not in component_instances or implied is not None:
+            component_instances[component.path] = implied
+
+    arrays_out: List[Dict[str, Any]] = []
+    for record in state.arrays:
+        item: Dict[str, Any] = {
+            "path": record.path,
+            "dtype": record.dtype,
+            "shape": record.shape,
+        }
+        if record.values is not None:
+            item.update(summaries.array_stats(record.values))
+        arrays_out.append(item)
+    warnings = structure_warnings(state, data)
+
+    state_dict = data.get("state") or {}
+    listeners = data.get("listeners") or {}
+    py_listeners = data.get("py_listeners") or {}
+
+    payload = {
+        "components": [
+            {
+                "path": path,
+                "count": count,
+                "instances": component_instances.get(path),
+            }
+            for path, count in component_counts.items()
+        ],
+        "arrays": arrays_out,
+        "state_keys": list(state_dict.keys()),
+        "synced_keys": list(data.get("syncedKeys") or []),
+        "listeners": list(listeners.keys()),
+        "py_listeners": list(py_listeners.keys()),
+        "buffers": {
+            "count": len(buffers),
+            "total_bytes": sum(len(b) for b in buffers),
+        },
+    }
+    legends = [
+        legend_payload(component.color_by, component=component.path)
+        for component in state.components
+        if component.color_by is not None
+    ]
+    if legends:
+        payload["legends"] = legends
+    filters = [
+        filter_payload(component.filter_by, component=component.path)
+        for component in state.components
+        if component.filter_by is not None
+    ]
+    if filters:
+        payload["filters"] = filters
+    channels = [
+        {"component": component.path, **component.color_channels}
+        for component in state.components
+        if component.color_channels is not None
+    ]
+    if channels:
+        payload["color_channels"] = channels
+    parameterized = [
+        {"component": component.path, **entry}
+        for component in state.components
+        for entry in component.channels
+    ]
+    if parameterized:
+        payload["channels"] = parameterized
+    declarations = component_declarations(state)
+    if declarations:
+        payload["declarations"] = declarations
+    clip_planes = [clip_plane_payload(p) for p in _find_clip_planes(data)]
+    if clip_planes:
+        payload["clip_planes"] = clip_planes
+    state_selections = state_dict.get("selections")
+    if isinstance(state_selections, dict) and state_selections:
+        selections = selections_payload(state_selections)
+        if selections:
+            payload["selections"] = selections
+    state_annotations = state_dict.get("annotations")
+    if isinstance(state_annotations, dict) and state_annotations:
+        annotations = annotations_payload(state_annotations)
+        if annotations:
+            payload["annotations"] = annotations
+    return payload, warnings
+
+
+def inspect_target(file_path: pathlib.Path) -> Dict[str, Any]:
+    """Inspect a target (``.colight`` or ``.py``), one payload per kind.
+
+    Raises:
+        ValueError: Unsupported target or empty ``.colight`` file.
+    """
+    loaded = targets.load_target(file_path)
+    if loaded.kind == "colight":
+        visual = loaded.visuals[0]
+        payload, warnings = inspect_visual_data(visual["data"], visual["buffers"])
+        return {
+            "file": str(file_path),
+            "kind": "colight",
+            "updates": loaded.updates,
+            "visual": payload,
+            "warnings": warnings,
+        }
+
+    visuals: List[Dict[str, Any]] = []
+    for item in loaded.visuals:
+        payload, warnings = inspect_visual_data(item["data"], item["buffers"])
+        visuals.append(
+            {
+                "block": item["block"],
+                "lines": item["lines"],
+                "visual": payload,
+                "warnings": warnings,
+            }
+        )
+    out: Dict[str, Any] = {
+        "file": str(file_path.resolve()),
+        "kind": "py",
+        "visuals": visuals,
+    }
+    if loaded.errors:
+        out["errors"] = loaded.errors
+    return out

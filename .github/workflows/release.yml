@@ -3,8 +3,6 @@ name: Release
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
     tags:
       - "v*" # colight (Python + @colight/core npm)
       - "scene3d-v*" # @colight/scene3d npm
@@ -29,7 +27,7 @@ jobs:
           fi
 
   # Main colight package (PyPI + @colight/core npm)
-  # Runs on: main branch push, v* tags
+  # Runs on: v* tags, or manual workflow_dispatch (publishes a -dev version)
   release-colight:
     needs: check
     if: |

@@ -82,6 +82,9 @@ const dtypeMap = {
   uint16: Uint16Array,
   uint32: Uint32Array,
   uint64: BigUint64Array,
+  // NumPy boolean arrays arrive as one byte per element (format.md §3.3);
+  // they decode as 0/1 bytes, which is how every consumer reads flags.
+  bool: Uint8Array,
   uint8clamped: Uint8ClampedArray,
   bigint64: BigInt64Array,
   biguint64: BigUint64Array,
@@ -114,10 +117,16 @@ export function inferDtype(value) {
  */
 export function evaluateNdarray(node) {
   const { data, dtype, shape } = node;
-  const ArrayConstructor = dtypeMap[dtype] || Float64Array;
+  const ArrayConstructor = dtypeMap[dtype];
+  if (!ArrayConstructor) {
+    throw new Error(
+      `Unknown ndarray dtype: ${JSON.stringify(dtype)}. Supported dtypes: ${Object.keys(dtypeMap).join(", ")}`,
+    );
+  }
 
-  // Create typed array directly from the DataView's buffer
-  // Our format guarantees 8-byte alignment for all buffers
+  // Create typed array directly from the DataView's buffer.
+  // The format guarantees 8-byte alignment for every buffer in every entry,
+  // so this zero-copy view is always valid.
   const flatArray = new ArrayConstructor(
     data.buffer,
     data.byteOffset,

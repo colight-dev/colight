@@ -3,11 +3,13 @@
 # Scene3D builds on the same data and composition paradigms as Colight Plot but adds support for WebGPU–powered 3D primitives.
 #
 # %%
+import colight.plot as Plot
 from colight.scene3d import (
     Cuboid,
     Ellipsoid,
     LineBeams,
     PointCloud,
+    Scene,
     deco,
 )
 import numpy as np
@@ -71,9 +73,58 @@ scene_pc = point_cloud + {
 scene_pc
 
 # %% [markdown]
+# ## Camera auto-fit, scene origin, and background
+#
+# **Auto-fit.** When you don't provide a camera, the scene fits its own
+# world-space bounds on first render (deriving `near`/`far` from the scene
+# extent). A far-from-unit-scale scene — a 3 km deposit, a UTM tile — frames
+# correctly out of the box instead of rendering as empty background under the
+# default unit-scale camera. An explicit `"defaultCamera"` (as above) still
+# wins, and auto-fit is deterministic: the same scene yields the same camera,
+# so `colight screenshot --check` stays byte-identical.
+#
+# **`Scene(origin=[x, y, z])`.** For scenes whose coordinates are far from the
+# origin (e.g. UTM eastings ~445,000 m, which exceed float32 GPU precision),
+# pass an `origin`. Every position-typed attribute (`centers`, `starts`,
+# `ends`, `points`, and mesh geometry) is shifted by `-origin` at
+# serialization, so the GPU sees small, float32-safe coordinates. World-space
+# meshes are additionally re-centered — their geometry centroid is folded into
+# the instance center — so large vertex arrays never reach the GPU buffers.
+# The offset travels as scene metadata: `colight pick-at` / `pick-where` add it
+# back, so reported positions stay in your original coordinate space.
+#
+# ```python
+# scene3d.Scene(
+#     topo.mesh(color=[0.82, 0.76, 0.65]),
+#     drillholes.line_segments(color=[0.75, 0.75, 0.78]),
+#     origin=[445500.0, 493500.0, 2942.0],  # UTM midpoint
+# )
+# ```
+#
+# **`Scene(background=[r, g, b])`.** Sets the WebGPU clear color (each channel
+# 0–1) behind the geometry; it defaults to opaque black. This is the canvas
+# clear color — DOM overlays drawn over the canvas (legends, FPS) keep their
+# own styling.
+
+# %% [markdown]
 # ## Other Primitives
 #
-# Scene3D supports several primitive types: PointCloud, Ellipsoid, Cuboid, LineBeams, and BoundingBox.
+# Scene3D provides these primitives:
+#
+# - `PointCloud` — instanced points (squares oriented to face the camera)
+# - `Ellipsoid` — spheres/ellipsoids, solid or `fill_mode="MajorWireframe"`
+# - `Cuboid` — boxes with optional per-instance orientation quaternions
+# - `LineBeams` — connected beam segments (points sharing an `i` value form a polyline)
+# - `LineSegments` — independent segments given `starts` and `ends` arrays
+# - `Mesh` — arbitrary triangle meshes with optional normals, per-vertex colors, UVs, and textures
+# - `ImagePlane` — a textured quad displaying an image (numpy array or PIL image)
+# - `ImageProjection` — an image plane positioned in space from camera intrinsics/extrinsics
+# - `CameraFrustum` — wireframe camera frustum from intrinsics/extrinsics
+# - `GridHelper` — a reference grid of line segments
+# - `Group` — hierarchical transform (position/quaternion/scale) applied to child components
+# - `CustomPrimitive` — instances of a custom mesh type defined elsewhere in the scene
+#
+# The examples below overlay several of them in one scene.
 
 # %%
 
@@ -191,7 +242,6 @@ beams = LineBeams(
 # The `deco()` function takes an array of indices to decorate and the desired appearance properties.
 
 # %%
-import colight.plot as Plot
 from colight.scene3d import PointCloud
 import numpy as np
 
@@ -202,7 +252,7 @@ cloud = PointCloud(
     color=[0.5, 0.5, 0.5],  # Default gray color
     size=0.05,  # Default size
     decorations=[
-        # Make points 0-9 red, 3x size size
+        # Make points 0-9 red, 3x size
         deco(np.arange(10), color=[1.0, 0.0, 0.0], scale=3.0),
         # Make points 10-19 semi-transparent blue, 10x size
         deco(np.arange(10, 20), color=[0.0, 0.0, 1.0], alpha=0.5, scale=10.0),
@@ -210,6 +260,221 @@ cloud = PointCloud(
 )
 
 cloud
+
+# %% [markdown]
+
+# ## Coloring by data (`color_by`, categorical, `color_channels`)
+#
+# Every instanced primitive (and the line helpers) accepts `color_by` — a
+# colormap spec `{values, cmap, domain, label}` that maps per-instance scalar
+# `values` through a colormap (`colight.colormaps`, pure numpy) into
+# per-instance colors, and attaches a legend the scene renders and
+# `colight inspect` / `screenshot --json` report. `pick-at` dereferences the
+# rendered color for the picked instance.
+#
+# **Categorical.** Pass `categories` as a table of `{value, label, color?}` for
+# the id-maps idiom (lithology/vein codes → labels, e.g. `0 = "not logged"`).
+# Colors are auto-assigned from a colorblind-reasonable palette when omitted;
+# any value matching no category (and `NaN`) lands in a `fallback` slot
+# (default mid-grey, override with `fallback={"label": ..., "color": ...}`).
+# The legend renders discrete swatches, and its machine-readable form carries
+# `categories: [{value, label, color}]` so an agent maps colors → meaning.
+#
+# ```python
+# Cuboid(centers, color_by={
+#     "values": litho_codes,
+#     "categories": [
+#         {"value": 0, "label": "not logged", "color": [0.5, 0.5, 0.5]},
+#         {"value": 1, "label": "Dacite"},   # color auto-assigned
+#         {"value": 2, "label": "Andesite"},
+#     ],
+#     "label": "Lithology",
+# })
+# ```
+#
+# **Switchable channels (`color_channels`).** ParaView's color-by dropdown is
+# *the* viewing UI for block models and drillholes. `color_channels` makes that
+# switch **client-side**: declare several named channels (each a `color_by`-
+# shaped spec), and an `active_channel` (a literal name or a
+# `Plot.js("$state.color_channel")` reference). Every channel's raw `values`
+# ship **once**; Python also ships, per channel, a compact colorizer (a
+# 256-entry RGB LUT for continuous, or the resolved category table for
+# categorical) so the browser recolors the active channel — no re-export, no
+# server round-trip. A switch is a discrete event that re-uploads only the
+# colors buffer; geometry is never rebuilt. The legend follows the active
+# channel, and `pick-at` reports the **full data row** for the picked instance:
+# `channels: {"CU_pct": 0.83, "AG_ppm": 12.4, "Lithology": "Dacite"}`
+# (categorical channels reported as their label). `color_by` and
+# `color_channels` are mutually exclusive.
+#
+# ```python
+# Cuboid(centers, color_channels={
+#     "CU_pct":    {"values": cu, "cmap": "viridis", "domain": (0, 2), "label": "Cu %"},
+#     "AG_ppm":    {"values": ag, "cmap": "magma",   "domain": (0, 80)},
+#     "Lithology": {"values": litho, "categories": [...]},
+# }, active_channel=Plot.js("$state.color_channel"))
+# ```
+
+# %% [markdown]
+# ## Filtering instances (`filter_by`)
+#
+# `filter_by` hides instances whose per-instance scalar `values` fall outside a
+# `[min, max]` threshold. It works on every instanced primitive — from
+# `PointCloud` and `Cuboid` through `Mesh` and `ImagePlane`. The essential property:
+# `values` uploads **once** as instance data, while `min`/`max` live in a small
+# per-component uniform — so `min`/`max` may be `Plot.js("$state.cutoff")`
+# state references and a slider re-thresholds the scene client-side without
+# re-uploading the (potentially large) instance data. `NaN` values are always
+# hidden.
+#
+# Filtered-out instances are collapsed in the vertex shader and are also
+# **unpickable**, so `pick-at` / `pick-where` / coverage report the visible
+# instances honestly. `colight inspect` and `screenshot --json` report the
+# active filters as `{component, label?, min, max}`.
+
+# %%
+from colight.scene3d import Cuboid
+
+_grades = np.array([0.1, 0.4, 0.6, 0.9], dtype=np.float32)
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.2, 0.6, 0.9],
+            # Only cells at/above the slider cutoff stay visible.
+            filter_by={
+                "values": _grades,
+                "min": Plot.js("$state.cutoff"),
+                "label": "grade",
+            },
+        )
+    )
+    | Plot.Slider("cutoff", init=0.0, range=[0.0, 1.0], step=0.05, label="cutoff")
+    | Plot.initialState({"cutoff": 0.0})
+)
+
+# %% [markdown]
+# ## Section / clipping planes (`Scene(clip_planes=...)`)
+#
+# `clip_planes` slices the **whole scene** with one or more half-space planes so
+# interior structure becomes visible — the section view a geologist reads a
+# block model or drillhole set through. Unlike `filter_by` (a per-instance mask),
+# a clip plane cuts *through* geometry per-fragment, so it exposes the inside of
+# solid shells. Each plane keeps the half-space `dot(p, normal) <= offset`;
+# multiple planes intersect. Give a plane as `{"normal": n, "offset": d}` or the
+# anchored `{"normal": n, "point": [x, y, z]}` form (the point is converted to an
+# offset, respecting `Scene(origin=...)` — prefer it for geographic scenes).
+#
+# The plane offset lives in a scene-level uniform, so `offset` (or a `point`
+# component) may be a `Plot.js("$state...")` reference and a slider sweeps the
+# section client-side with no re-upload. Clipping applies in the **pick pass**
+# too: `pick-at` on the exposed cut face reports the interior instance behind the
+# section, not the outer shell. `inspect` / `screenshot --json` report the active
+# `clip_planes` (`{normal, offset}` or `{normal, state_key}`), and both warn with
+# `section-excludes-scene` if the planes clip away the entire scene. Up to 8
+# planes; v1 does not cap/fill the cut surface (hollow shells show on the
+# section).
+
+# %%
+_section_centers = np.array(
+    [[x, y, z] for x in (-2, 0, 2) for y in (-2, 0, 2) for z in (-2, 0, 2)],
+    dtype=np.float32,
+)
+(
+    Scene(
+        Cuboid(centers=_section_centers, half_size=0.4, color=[0.2, 0.6, 0.9]),
+        # Keep everything below the sweeping plane (northing <= section_y).
+        clip_planes=[{"normal": [0, 1, 0], "offset": Plot.js("$state.section_y")}],
+    )
+    | Plot.Slider("section_y", init=0.0, range=[-3.0, 3.0], step=0.5, label="section")
+    | Plot.initialState({"section_y": 0.0})
+    | {
+        "defaultCamera": {
+            "position": [8, 8, 8],
+            "target": [0, 0, 0],
+            "up": [0, 1, 0],
+            "fov": 45,
+        }
+    }
+)
+
+# %% [markdown]
+
+# ## Named selections (`Selection`)
+#
+# A **selection** is the same per-instance mask as a filter, but *named* and
+# consumed differently: it highlights its instances (via the decoration system)
+# and becomes a **shared referent** that both a human (clicking) and an agent
+# (predicates, `pick-where --selection NAME`, `screenshot --frame NAME`) can
+# name in conversation. Selections live in `$state.selections`, so they sync
+# Python↔JS and persist into `.colight` artifacts.
+#
+# Build a selection with `scene3d.Selection(name, component, ...)` — either an
+# explicit `instances=[...]` list or a threshold predicate
+# (`values`/`values_ref` + `min`/`max`) — and seed it into state with
+# `scene3d.select(...)`. `scene3d.toggle_selection(name, component)` is an
+# `on_click` handler that adds/removes the picked instance, so human clicks and
+# agent predicates converge on the same named object.
+
+# %%
+from colight import scene3d
+
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.3, 0.3, 0.6],
+            on_click=scene3d.toggle_selection("picked", 0),
+        )
+    )
+    | scene3d.select(scene3d.Selection("picked", 0, instances=[1, 3]))
+)
+
+# %% [markdown]
+
+# ## Annotation callouts (`Annotation`)
+#
+# An **annotation** is a named text callout anchored in the scene's data space:
+# a marker dot at the anchor, a thin leader line, and a text label. It renders as
+# a DOM overlay (like the legend), so it is captured in screenshots. Anchor it
+# either to a world `position=[x, y, z]` (origin-aware, like a clip-plane
+# `point`) or to a component instance (`component=C, instance=I`, resolved to that
+# instance's center on the client so it tracks the geometry).
+#
+# Like selections, annotations live in `$state.annotations` — build them with
+# `scene3d.Annotation(name, text, ...)` and seed them with `scene3d.annotate(...)`
+# — so they sync Python↔JS and persist into `.colight` artifacts, and the name is
+# a shared referent. They are machine-legible: `inspect` reports each callout's
+# `{name, text, anchor}`; `screenshot --json` adds the resolved world position and
+# the projected screen position (in `pick-at` pixel space) with a `visible` flag;
+# and `pick-at` reports instance-anchored callouts as each hit's `annotations`.
+
+# %%
+from colight import scene3d
+
+(
+    Scene(
+        Cuboid(
+            centers=[[-3, 0, 0], [-1, 0, 0], [1, 0, 0], [3, 0, 0]],
+            half_size=0.5,
+            color=[0.3, 0.3, 0.6],
+        )
+    )
+    | scene3d.annotate(
+        scene3d.Annotation("shoot", "high-grade shoot", component=0, instance=1),
+        scene3d.Annotation("origin", "survey datum", position=[0, 0, 0]),
+    )
+    | {
+        "defaultCamera": {
+            "position": [0, 0, 12],
+            "target": [0, 0, 0],
+            "up": [0, 1, 0],
+            "fov": 45,
+        }
+    }
+)
 
 # %% [markdown]
 
@@ -250,3 +515,136 @@ cuboid_centers = np.array(
         ],
     )
 )
+
+# %% [markdown]
+
+# ## Meshes and Groups
+#
+# `Mesh` renders arbitrary triangle geometry (with optional normals, per-vertex
+# colors, UVs, and textures), and `Group` applies a transform — `position`,
+# `quaternion`, `scale` — to a list of child components, which may include
+# nested groups. Groups can also bubble up events from their children
+# (`on_hover`, `on_click`, `on_drag`) and apply `hover_props` or
+# `child_defaults`/`child_overrides` to all children at once.
+
+# %%
+from colight.scene3d import Group, GridHelper, Mesh
+
+triangle = Mesh(
+    positions=[[0, 0, 0], [1, 0, 0], [0.5, 1, 0]],
+    indices=[0, 1, 2],
+    center=[0, 0, 0],
+    color=[1, 0.5, 0],
+)
+
+(
+    Group(
+        [triangle, Cuboid(center=[1.2, 0.5, 0], half_size=0.2, color=[0, 0.7, 1])],
+        position=[0, 0, 0.5],
+        scale=0.8,
+        name="assembly",
+    )
+    + GridHelper(size=4, divisions=8)
+    + {
+        "defaultCamera": {
+            "position": [2.5, 2.5, 2.5],
+            "target": [0.5, 0.5, 0.5],
+            "up": [0, 0, 1],
+        }
+    }
+)
+
+# %% [markdown]
+
+# ### Updating mesh geometry
+#
+# Mesh geometry updates are cheap when topology is stable: as long as a mesh
+# keeps the same structure (vertex count, index shape, vertex format), an
+# update writes the new vertex data into the existing GPU buffers instead of
+# rebuilding shaders and pipelines — buffers grow only when the data doesn't
+# fit. Continuously streaming new `positions` (a deforming surface, simulation
+# output, per-frame state) is therefore efficient and does not leak GPU memory,
+# and auto-computed lit normals track position changes. Topology changes
+# rebuild the geometry automatically.
+#
+# `geometry_key` names a geometry's identity explicitly: a stable key means
+# "this is the same geometry across updates" (buffers are kept and rewritten),
+# while a changed key forces a clean rebuild. Give distinct geometries distinct
+# keys — two components sharing a key declare themselves the same geometry and
+# share GPU buffers. Updates must ship fresh arrays (Python-driven updates
+# always do); a caller that mutates an array in place must bump `geometry_key`.
+
+# %% [markdown]
+
+# ### Per-vertex weighted transform references
+#
+# A `Mesh` can position each vertex by a weighted combination of named `Group`
+# transforms instead of rigidly by one. Three props, supplied together (or not
+# at all):
+#
+# - `transform_refs` — a list of `Group` **names**; local slot `s` means that
+#   named Group's composed transform. A named Group may be childless (a pure
+#   named transform), and a name with no matching Group is a loud compile
+#   error, never a silent identity.
+# - `transform_indices` — `(N, K)` integers, per-vertex slots into
+#   `transform_refs`, with `1 <= K <= 8`.
+# - `transform_weights` — `(N, K)` floats; rows are normalized to sum to 1.
+#
+# When present, the blend REPLACES the mesh's own component-level group
+# transform: positions blend linearly over the referenced transforms, normals
+# rotate through the renormalized blended rotation, and picking sees the
+# deformed surface. Weight-only edits rewrite a small storage buffer — never
+# the vertex buffer — and driving a referenced Group's transform (via
+# `Plot.channel` or `$state`) animates the deformation with zero geometry
+# re-upload.
+#
+# The authoring rule: all referenced transforms apply to the **same** vertex
+# coordinates, so author vertices in one frame; a rotation about a pivot is
+# expressed as translate → rotate → translate-back, which nested Groups
+# compose.
+#
+# ```python
+# Group(
+#     name="base",
+#     children=[
+#         Mesh(
+#             positions=tube_vertices,  # authored once, in the base frame
+#             indices=tube_faces,
+#             transform_refs=["base", "elbow"],
+#             transform_indices=np.tile([0, 1], (n_vertices, 1)),
+#             transform_weights=np.stack([1 - ramp, ramp], axis=1),
+#         ),
+#         Group(name="elbow", position=[0, 0, 2], quaternion=bend),
+#     ],
+# )
+# ```
+#
+# A bending tube and a fault-dragged geological surface are worked through in
+# `examples/src/notebooks/scene3d/tentacle_bend.py` and
+# `examples/src/notebooks/scene3d/fault_drag.py`.
+
+# %% [markdown]
+
+# ## Hover and Drag Interactions
+#
+# Every primitive accepts interaction props:
+#
+# - `hover_props`: appearance applied automatically while an instance is hovered
+#   — `color`, `alpha`, `scale`, or `outline` (with `outline_color` /
+#   `outline_width`) for an outline overlay, with no state management required.
+# - `on_hover` / `on_click`: callbacks receiving the picked instance. Rich pick
+#   info (instance index, world position, component and group names) is
+#   available to click and drag handlers.
+# - `on_drag`, `on_drag_start`, `on_drag_end` with a `drag_constraint`:
+#   `drag_axis(direction, origin)` and `drag_plane(normal, origin)` build
+#   constraints, and the constants `DRAG_AXIS_X/Y/Z`, `DRAG_PLANE_XY/XZ/YZ`,
+#   `DRAG_SURFACE`, `DRAG_SCREEN`, and `DRAG_FREE` cover common cases.
+# - `picking_scale`: enlarges the picking hit area of thin geometry.
+# - `layer="overlay"`: renders a component in front of the scene, always
+#   visible — useful for handles and manipulators.
+#
+# `TranslateGizmo(position, on_drag=...)` composes these into a ready-made
+# translation gizmo with axis arrows, plane handles, and a center sphere
+# (prototype; API may change). See the `drag.py`, `gizmo.py`, `mesh.py`, and
+# `image_plane.py` notebooks in `examples/src/notebooks/` for full
+# interactive examples.

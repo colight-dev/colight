@@ -8,6 +8,45 @@ function resolveReference(path, obj) {
   return path.split(".").reduce((acc, key) => acc[key], obj);
 }
 
+/**
+ * Call-vs-construct dispatch for resolved api references.
+ *
+ * A registered entry is invoked with `new` only if it is a genuine ES class.
+ * The obvious test — `fn.prototype?.constructor === fn` — is true of EVERY
+ * plain `function` declaration, and the api namespace is overwhelmingly plain
+ * functions (all of scene3d's constructors, plus most of d3 and Plot). Under
+ * that test the evaluator constructed ~710 of 822 registered entries. It went
+ * unnoticed because `new fn()` yields fn's return value whenever that value is
+ * an object; any entry returning a primitive, null or undefined silently
+ * produced `{}` instead.
+ *
+ * Class-ness is read off `Function.prototype.toString`, which is reliable here:
+ * `class` syntax survives the build (esbuild bundles without a `target`, and
+ * tsconfig targets ES2020), and minified anonymous classes still stringify as
+ * `class{...}`. It must be `toString` rather than an explicit mark because the
+ * constructible entries are not all ours — `d3.Delaunay`, `d3.InternMap`,
+ * `Plot.Mark` and the other Plot mark classes come from third-party namespaces
+ * that no api-assembly step can stamp without drifting from upstream.
+ *
+ * `toString` is comparatively expensive and `evaluate` is the client's hottest
+ * path (the whole AST is re-evaluated on every `$state` change), so results are
+ * memoized per function identity.
+ */
+const isClassCache = new WeakMap();
+
+export function isClassConstructor(fn) {
+  const cached = isClassCache.get(fn);
+  if (cached !== undefined) return cached;
+  let result = false;
+  try {
+    result = /^\s*class[\s{]/.test(Function.prototype.toString.call(fn));
+  } catch {
+    result = false;
+  }
+  isClassCache.set(fn, result);
+  return result;
+}
+
 // colight is on window so that ESM scripts can access it
 window.colight.api = api;
 window.d3 = api.d3;
@@ -147,11 +186,9 @@ export function evaluate(node, $state, experimental, buffers) {
       const args = fn.macro
         ? [$state, ...node.args]
         : evaluate(node.args, $state, experimental, buffers);
-      if (fn.prototype?.constructor === fn) {
-        return new fn(...args);
-      } else {
-        return fn(...args);
-      }
+      // Classes get constructed; plain functions get called and their return
+      // value passed through untouched (see isClassConstructor).
+      return isClassConstructor(fn) ? new fn(...args) : fn(...args);
     case "js_ref":
       return resolveReference(node.path, api);
     case "js_source":
@@ -273,16 +310,29 @@ export function collectBuffers(data) {
 export function replaceBuffers(data, buffers) {
   function traverse(value) {
     if (value && typeof value === "object") {
+      // Only descend into plain objects and arrays. DataViews, typed arrays
+      // and other host objects are data leaves — copying them field-by-field
+      // (Object.entries) would silently turn them into {} and drop the bytes.
+      if (Array.isArray(value)) {
+        return value.map(traverse);
+      }
+      if (value.constructor !== Object) {
+        return value;
+      }
       if (
         value.__type__ === "ndarray" &&
         value.__buffer_index__ !== undefined
       ) {
-        value.data = buffers[value.__buffer_index__];
-        delete value.__buffer_index__;
-        return value;
-      }
-      if (Array.isArray(value)) {
-        return value.map(traverse);
+        // Resolve into a CLONE, not the shared parsed node: an update entry's
+        // envelope may be handed to replaceBuffers more than once (e.g. a
+        // TimelineScrubber that re-derives ops on every scrub position).
+        // Mutating the original would delete __buffer_index__ and strand
+        // later re-resolutions.
+        return {
+          ...value,
+          data: buffers[value.__buffer_index__],
+          __buffer_index__: undefined,
+        };
       }
       const result = {};
       for (const [key, val] of Object.entries(value)) {
