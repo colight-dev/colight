@@ -1,11 +1,14 @@
-site_name: GenStudio
-site_url: https://studio.gen.dev
-repo_url: https://github.com/probcomp/genstudio
-repo_name: probcomp/genstudio
-edit_uri: tree/docs/docs/
+site_name: Colight
+site_url: https://colight.dev
+repo_url: https://github.com/colight-dev/colight
+repo_name: colight-dev/colight
+docs_dir: docs/src/colight_docs
+watch:
+  - mkdocs.yml
+  - docs/src/colight_docs
 theme:
   name: material
-  custom_dir: docs/overrides
+  custom_dir: docs/src/colight_docs/overrides
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil-box
@@ -25,22 +28,30 @@ nav:
   - Essential Reading: essential-reading.py
   - Scene3d: scene3d.py
   - The Basics:
-    - Layouts: system-guide/layouts.py
-    - State: system-guide/state.py
-    - HTML with Hiccup: system-guide/html-with-hiccup.py
-    - Color: learn-more/color.py
-    - JS Imports: system-guide/js-imports.py
-    - Interactivity & Animation:
-      - Sliders: interactivity/sliders.py
-      - Animating Frames: interactivity/frames.py
-      - Mouse events: interactivity/events.py
-      - Conditional Rendering: learn-more/cond.py
-      - Tailing data: interactivity/tail.py
+      - Layouts: system-guide/layouts.py
+      - State: system-guide/state.py
+      - HTML with Hiccup: system-guide/html-with-hiccup.py
+      - Color: learn-more/color.py
+      - JS Imports: system-guide/js-imports.py
+      - Interactivity & Animation:
+          - Sliders: interactivity/sliders.py
+          - Animating Frames: interactivity/frames.py
+          - Mouse events: interactivity/events.py
+          - Conditional Rendering: learn-more/cond.py
+          - Tailing data: interactivity/tail.py
+  - Export:
+      - Save to File: export/save_to_file.py
+      - Images and Video: export/images_and_video.py
   - Advanced:
-    - Python Event Loops: learn-more/python-event-loop.py
-    - Compare with Observable Plot: learn-more/vs-observable.py
-    - Export Images/Video/HTML: learn-more/export.py
-    - Plot Options: learn-more/plot-options.py
+      - Python Event Loops: learn-more/python-event-loop.py
+      - Compare with Observable Plot: learn-more/vs-observable.py
+      - Plot Options: learn-more/plot-options.py
+  - CLI: learn-more/cli.py
+  - API:
+      - Core: api/core.md
+      - Plot: api/plot.md
+      - Plot Extras: api/plot-extras.md
+      - Scene3D: api/scene3d.md
   - Examples:
       - Draw Density: examples/draw-density.py
       - Live Editing Source Code: examples/live-edit-source.py
@@ -51,10 +62,7 @@ nav:
       - Highlighting Code: examples/bylight.py
       - Rendering LaTeX: examples/katex.py
       - Render Pixel Data: examples/pixels.py
-  - API Docs:
-    - Plot: api/plot.md
-    - Scene3D: api/scene3d.md
-  - How Do I...: learn-more/how-do-i.py
+  - Cookbook: learn-more/cookbook.py
 
   - Changelog: CHANGELOG.md
 markdown_extensions:
@@ -65,34 +73,34 @@ markdown_extensions:
   - md_in_html
 plugins:
   - search
-  - genstudio.docs.plugin:
+  - colight.mkdocs.api_plugin:
       modules:
-        - module: genstudio.plot
+        - module: colight.core
+          output: api/core.md
+        - module: colight.plot
           output: api/plot.md
-        - module: genstudio.scene3d
+        - module: colight.plot_extras
+          output: api/plot-extras.md
+        - module: colight.scene3d
           output: api/scene3d.md
-  - mkdocs-jupyter:
+  - colight.mkdocs.site_plugin:
+      verbose: false
+      format: markdown
       include: ["*.py"]
-      ignore: ["llms.py"]
-      execute: true
-      allow_errors: false
-      kernel_name: genstudio
-      include_requirejs: true
-      include_source: True
-      remove_tag_config:
-        remove_cell_tags:
-          - hide
-        remove_input_tags:
-          - hide_source
-        remove_all_outputs_tags:
-          - hide_output
+      ignore: ["llms.py", "data.py", "__init__.py"]
+      file_options:
+        "*.py":
+          pragma: "hide_statements"
 extra_css:
   - stylesheets/custom.css
   - stylesheets/bylight.css
 extra_javascript:
-  - js/bylight.js
+  - js/dist/embed.js
+  - js/init.js
   - js/scroll-fix.js
   - js/command-k.js
 hooks:
-  - src/genstudio/scripts/css_modifier.py
-  - src/genstudio/scripts/tailwind_builder.py
+  - packages/colight/src/colight/scripts/mkdocs_hooks.py
+# Temporarily disabled hooks due to path issues
+# - packages/colight/src/colight/scripts/css_modifier.py
+

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scene3D Picking Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    #scene-container {
+      width: 800px;
+      height: 600px;
+    }
+    #debug {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      max-width: 400px;
+    }
+    #debug pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div id="scene-container"></div>
+  <div id="debug">
+    <h3>Pick Info</h3>
+    <pre id="pick-info">Click on the cube to see pick info</pre>
+  </div>
+
+  <script type="module">
+    // Import directly from the built scene3d module
+    import { Scene, DEFAULT_CAMERA } from '/dist/scene3d.mjs';
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+    import React, { useState, useCallback } from 'https://esm.sh/react@18';
+
+    // Store last pick info for testing
+    window.lastPickInfo = null;
+    window.pickHistory = [];
+
+    function updateDebug(info) {
+      window.lastPickInfo = info;
+      window.pickHistory.push(info);
+      document.getElementById('pick-info').textContent = JSON.stringify(info, (k, v) => {
+        if (v instanceof Float32Array) return Array.from(v);
+        if (typeof v === 'number') return Math.round(v * 10000) / 10000;
+        return v;
+      }, 2);
+    }
+
+    function TestScene() {
+      const [camera, setCamera] = useState({
+        position: [3, 3, 3],
+        target: [0, 0, 0],
+        up: [0, 0, 1],
+        fov: 45,
+        near: 0.01,
+        far: 100,
+      });
+
+      const handleClickDetail = useCallback((info) => {
+        console.log('Pick', info);
+        updateDebug(info);
+      }, []);
+
+      const handleHoverDetail = useCallback((info) => {
+        if (info) {
+          updateDebug(info);
+        }
+      }, []);
+
+      // Test scene: axis-aligned cube at origin
+      const components = [
+        {
+          type: 'Cuboid',
+          centers: new Float32Array([0, 0, 0]),
+          half_size: [1, 1, 1],
+          color: [0.2, 0.6, 1.0],
+          alpha: 1.0,
+          onClickDetail: handleClickDetail,
+          onHoverDetail: handleHoverDetail,
+        }
+      ];
+
+      return React.createElement(Scene, {
+        components,
+        defaultCamera: camera,
+        onCameraChange: setCamera,
+      });
+    }
+
+    // Mount the scene
+    const container = document.getElementById('scene-container');
+    const root = createRoot(container);
+    root.render(React.createElement(TestScene));
+
+    // Expose test functions
+    window.getLastPickInfo = () => window.lastPickInfo;
+    window.getPickHistory = () => window.pickHistory;
+    window.clearPickHistory = () => { window.pickHistory = []; };
+
+    // Signal that the page is ready
+    window.sceneReady = new Promise((resolve) => {
+      // Wait for canvas to appear
+      const checkCanvas = setInterval(() => {
+        const canvas = container.querySelector('canvas');
+        if (canvas) {
+          clearInterval(checkCanvas);
+          // Give WebGPU time to initialize
+          setTimeout(resolve, 500);
+        }
+      }, 100);
+    });
+  </script>
+</body>
+</html>

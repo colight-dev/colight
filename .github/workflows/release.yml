@@ -6,7 +6,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   check:
@@ -40,44 +40,46 @@ jobs:
         with:
           python-version: 3.11.5
 
-      - name: Install dependencies with Yarn
-        run: yarn install --frozen-lockfile --production=false
+      - uses: astral-sh/setup-uv@v4
+
+      - run: uv sync --group dev
+
+      - run: yarn install --frozen-lockfile --production=false
 
       - name: build the javascript bundle
         run: |
           yarn build
-          # Force Git to track the build file temporarily
-          git add -f src/genstudio/js/widget_build.js
-
-      - name: Install and configure Poetry
-        uses: snok/install-poetry@v1
-
+          # Force Git to track the build files temporarily
+          cp -r packages/colight/src/colight/js-dist dist/
+          git add -f dist
+      - name: Setup Node.js for npm publishing
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
       - name: Set version components
         id: versions
         run: |
           # Handle different version scenarios
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             # Dev version for main pushes without tag
-            BASE_VERSION=$(poetry version -s)
+            BASE_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('packages/colight/pyproject.toml', 'rb'))['project']['version'])")
             DEV_VERSION=$(date +'%Y%m%d%H%M')
             PYTHON_VERSION="${BASE_VERSION}.dev${DEV_VERSION}"
             NPM_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
-            poetry version ${PYTHON_VERSION}
+            uv run python scripts/update_version.py "${PYTHON_VERSION}"
           elif [[ "${{ github.ref }}" =~ ^refs/tags/v.*\.alpha ]]; then
             # Alpha release from tag
             PYTHON_VERSION=${GITHUB_REF#refs/tags/v}
             NPM_VERSION=$(echo ${PYTHON_VERSION} | sed 's/\.alpha/-alpha./')
           else
             # Regular release from tag
-            PYTHON_VERSION=$(poetry version -s)
+            PYTHON_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('packages/colight/pyproject.toml', 'rb'))['project']['version'])")
             NPM_VERSION=$PYTHON_VERSION
           fi
 
           echo "PYTHON_VERSION=${PYTHON_VERSION}" >> $GITHUB_OUTPUT
           echo "NPM_VERSION=${NPM_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Install deps
-        run: poetry install --without dev
 
       - name: Update version query params in widget.py
         run: |
@@ -86,41 +88,31 @@ jobs:
 
       - name: Update widget URL and build Python package
         run: |
-          NPM_BASE="https://cdn.jsdelivr.net/npm/@probcomp/genstudio@${{ steps.versions.outputs.NPM_VERSION }}/dist"
-          JSDELIVR_JS_URL="${NPM_BASE}/widget_build.js"
+          NPM_BASE="https://cdn.jsdelivr.net/npm/@colight/core@${{ steps.versions.outputs.NPM_VERSION }}"
+          JSDELIVR_JS_URL="${NPM_BASE}/widget.mjs"
           JSDELIVR_CSS_URL="${NPM_BASE}/widget.css"
 
           # Update both URLs in the source
-          sed -i "s|CDN_SCRIPT_URL = None|CDN_SCRIPT_URL = \"${JSDELIVR_JS_URL}\"|" src/genstudio/env.py
-          sed -i "s|CDN_CSS_URL = None|CDN_CSS_URL = \"${JSDELIVR_CSS_URL}\"|" src/genstudio/env.py
+          sed -i "s|VERSIONED_CDN_DIST_URL = None|VERSIONED_CDN_DIST_URL = \"${JSDELIVR_JS_URL}\"|" packages/colight/src/colight/env.py
 
-          poetry build
-
-          git checkout src/genstudio/util.py
+          cd packages/colight && uv build --out-dir dist
+          cd ../colight-prose && uv build --out-dir dist
 
       - name: Deploy to PyPI
         run: |
           echo "=== Checking build artifacts ==="
-          ls -la dist/
-          echo "=== Publishing to PyPI ==="
-          poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
-          poetry publish
-
-      - name: Setup Node.js for npm publishing
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          registry-url: 'https://registry.npmjs.org'
+          ls -la packages/colight/dist/
+          ls -la packages/colight-prose/dist/
+          echo "=== Publishing colight to PyPI ==="
+          uv publish packages/colight/dist/* --token ${{ secrets.PYPI_TOKEN }}
+          echo "=== Publishing colight-prose to PyPI ==="
+          uv publish packages/colight-prose/dist/* --token ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish to npm
         run: |
+          ls -la dist/
           npm version ${{ steps.versions.outputs.NPM_VERSION }} --no-git-tag-version
-
-          # Copy both files to npm dist directory
-          mkdir -p dist
-          cp src/genstudio/js/widget_build.js dist/
-          cp src/genstudio/widget.css dist/
-
+          cp packages/colight/src/widget.css dist/
           echo "Publishing npm package version ${{ steps.versions.outputs.NPM_VERSION }}"
           npm publish --access public
         env:
@@ -137,4 +129,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           bodyFile: release_notes.md
-          artifacts: "dist/*"
+          artifacts: "dist/*,packages/colight/dist/*,packages/colight-prose/dist/*"

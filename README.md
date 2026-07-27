@@ -1,11 +1,10 @@
-[![PyPI version](https://badge.fury.io/py/genstudio.svg)](https://badge.fury.io/py/genstudio)
+[![PyPI version](https://badge.fury.io/py/colight.svg)](https://badge.fury.io/py/colight)
 
-# Gen Studio
-_Visualization tools for GenJAX._
+# Colight: declarative, reactive visuals in Python
 
------
+---
 
-`genstudio.plot` provides a composable way to create interactive plots using [Observable Plot](https://observablehq.com/plot/).
+`colight.plot` provides a composable way to create interactive plots using [Observable Plot](https://observablehq.com/plot/).
 
 Key features:
 
@@ -15,8 +14,38 @@ Key features:
 - HTML mode which persists plots across kernel restart/shutdown, and a Widget mode which supports Python<>JavaScript interactivity
 - Terse layout syntax for organizing plots into rows and columns
 - Hiccup implementation for interspersing arbitrary HTML
+- Export visualizations as HTML or as `.colight` files for embedding in websites
 
-For detailed usage instructions and examples, refer to the [Gen Studio User Guide](https://studio.gen.dev).
+For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
+
+## CLI
+
+Use the CLI to turn a `.py` file into a document or run a live-updating view.
+
+Install:
+
+```bash
+pip install colight
+# or
+uv tool install colight
+```
+
+Examples:
+
+```bash
+# Live incremental execution + live reload
+colight live path/to/notebook.py
+
+# Publish a file once
+colight publish path/to/notebook.py --format html --output build/
+
+# Publish + watch + serve
+colight publish path/to/notebook.py --serve
+
+# Render a .colight file to an image or video
+colight render path/to/plot.colight --out plot.png
+colight render path/to/plot.colight updates.colight --out plot.mp4
+```
 
 ## Development
 
@@ -25,6 +54,7 @@ Run `yarn watch` to compile the JavaScript bundle.
 ### CI Workflows
 
 The project has several CI workflows:
+
 - **Tests**: Runs JavaScript and Python unit tests
 - **WebGPU Screenshots**: Tests 3D WebGPU rendering capabilities by capturing screenshots in headless Chrome
 - **Docs**: Builds and deploys documentation

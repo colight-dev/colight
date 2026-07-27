@@ -1,26 +1,33 @@
 {
-  "name": "@probcomp/genstudio",
+  "name": "@colight/core",
   "version": "0.1.0",
   "main": "index.js",
-  "repository": "git@github.com:probcomp/genstudio.git",
-  "author": "Matthew Huebert <mhuebert@gmail.com>",
-  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/colight-dev/colight.git"
+  },
+  "author": "Matthew Huebert <me@matt.is>",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
     "@webgpu/types": "^0.1.53",
     "canvas": "^3.1.0",
     "esbuild": "^0.21.5",
-    "esbuild-css-modules-plugin": "^3.1.2",
+    "esbuild-css-modules-plugin": "^3.1.5",
     "jsdom": "^25.0.0",
+    "mock-socket": "^9.3.1",
     "npm-run-all": "^4.1.5",
-    "pyright": "^1.1.367",
+    "pyright": "^1.1.402",
     "vitest": "^2.0.5"
   },
   "dependencies": {
     "@anywidget/react": "^0.0.7",
+    "@mui/base": "5.0.0-beta.61",
     "@observablehq/plot": "^0.6.16",
     "@tailwindcss/typography": "^0.5.15",
+    "@tanstack/react-query": "^5.82.0",
+    "@tanstack/react-router": "^1.125.6",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react-hooks": "^8.0.1",
     "@twind/core": "^1.1.3",
@@ -30,33 +37,48 @@
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "bylight": "^1.0.5",
+    "concurrently": "^9.2.0",
     "d3": "^7.9.0",
     "esbuild-plugin-import-map": "^2.1.0",
+    "fuse.js": "^7.1.0",
     "gl-matrix": "^3.4.3",
+    "htl": "^0.3.1",
     "katex": "^0.16.11",
     "markdown-it": "^14.1.0",
     "mobx": "^6.13.1",
     "mobx-react-lite": "^4.0.7",
+    "node-fetch": "^3.3.2",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "tailwindcss": "^3.4.14"
+    "react-router-dom": "^7.6.3",
+    "tailwindcss": "^3.4.14",
+    "websocket-ts": "^2.2.1"
   },
   "scripts": {
-    "release": "poetry run python scripts/release.py $*",
-    "alpha": "poetry run python scripts/release.py --alpha",
+    "release": "uv run python scripts/release.py $*",
+    "alpha": "uv run python scripts/release.py --alpha",
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
-    "watch:docs": "poetry run mkdocs serve",
-    "build:docs": "poetry run mkdocs build",
-    "test:js": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
-    "test:py": "poetry run pytest tests/python/ --ignore=tests/python/test_screenshots.py",
-    "test": "npm-run-all test:js test:py"
+    "docs:watch": "yarn build && uv run python -m mkdocs serve",
+    "docs:build": "yarn build && uv run python -m mkdocs build",
+    "test:js": "yarn build && yarn vitest run",
+    "test:js-watch": "node --experimental-vm-modules node_modules/vitest/vitest.mjs",
+    "test:py": "uv run python -m pytest packages --ignore=packages/colight/tests/visual -x",
+    "test:visual": "uv run python -m pytest packages/colight/tests/visual",
+    "test:images": "uv run python -m pytest packages/colight/tests/test_screenshots.py",
+    "test:site": "uv run python -m pytest packages/colight-prose/tests",
+    "test": "npm-run-all test:py test:js",
+    "pyright": "uv run pyright",
+    "watch-examples": "uv run python -m colight_cli watch packages/colight-prose/tests/examples",
+    "cli": "uv run python -m colight_cli ",
+    "live": "yarn cli live .",
+    "worktree": "sh -c 'git worktree add ../$1 && code ../$1 --new-window' -- "
   },
   "files": [
-    "dist/widget_build.js",
-    "dist/widget.css"
+    "dist"
   ],
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

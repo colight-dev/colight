@@ -1,0 +1,43 @@
+name: Visual Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  visual-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: NcStudios/VulkanCI@v1.0
+      - uses: browser-actions/setup-chrome@v1
+        with:
+          install-dependencies: true
+      - run: chrome --version
+
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install -g yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Install deps
+        run: uv sync --group dev
+
+      - name: Run Visual Regression Tests
+        run: uv run pytest packages/colight/tests/visual/ -v
+
+      - name: Upload visual test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-test-results
+          path: |
+            packages/colight/tests/visual/baselines
+            packages/colight/test-artifacts/visual
