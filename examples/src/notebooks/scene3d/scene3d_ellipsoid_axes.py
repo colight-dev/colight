@@ -11,7 +11,9 @@ Ellipsoid(
     quaternions=np.array(
         [[0.866, 0, 0.5, 0], [0.707, 0.707, 0, 0], [0.5, 0.5, 0.5, 0.5]]
     ),
-    onHover=js("(i) => $state.update({hover_axes1: typeof i === 'number' ? [i] : []})"),
+    on_hover=js(
+        "(i) => $state.update({hover_axes1: typeof i === 'number' ? [i] : []})"
+    ),
     decorations=[
         deco([2], color=[1, 0, 0]),
         deco(
@@ -30,7 +32,9 @@ Ellipsoid(
     quaternions=np.array(
         [[0.866, 0, 0.5, 0], [0.707, 0.707, 0, 0], [0.5, 0.5, 0.5, 0.5]]
     ),
-    onHover=js("(i) => $state.update({hover_axes1: typeof i === 'number' ? [i] : []})"),
+    on_hover=js(
+        "(i) => $state.update({hover_axes1: typeof i === 'number' ? [i] : []})"
+    ),
     decorations=[
         deco([2], color=[1, 0, 0]),
         deco(
@@ -93,7 +97,7 @@ Ellipsoid(
                 [0.383, 0.924, 0, 0],  # About 110° rotation
             ]
         ),
-        onHover=js(
+        on_hover=js(
             "(i) => $state.update({hover_axes2: typeof i === 'number' ? [i] : []})"
         ),
         decorations=[

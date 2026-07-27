@@ -51,7 +51,7 @@ def create_demo_scene():
             centers,
             colors,
             sizes,
-            onHover=Plot.js("(i) => $state.update({hover_point: i})"),
+            on_hover=Plot.js("(i) => $state.update({hover_point: i})"),
             decorations=[
                 {
                     "indexes": Plot.js(

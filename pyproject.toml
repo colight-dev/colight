@@ -64,4 +64,5 @@ reportCallIssue = false
 lint.ignore = [ "E402", "F841", "E712"]
 
 [tool.pytest.ini_options]
+addopts = []
 markers = [ "asyncio: mark test as asyncio",]

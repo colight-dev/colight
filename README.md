@@ -18,6 +18,16 @@ Key features:
 
 For detailed usage instructions and examples, refer to the [Colight User Guide](https://colight.dev).
 
+## Packages
+
+Colight is a monorepo. Alongside the `colight` Python package, it publishes the 3D renderer as a standalone, framework-agnostic npm package that can be used on its own:
+
+- **[`@colight/scene3d`](https://www.npmjs.com/package/@colight/scene3d)** — the Scene3D WebGPU renderer (points, ellipsoids, cuboids, meshes, line beams, and more), usable without the rest of Colight:
+
+  ```bash
+  npm install @colight/scene3d
+  ```
+
 ## CLI
 
 Use the CLI to turn a `.py` file into a document or run a live-updating view.

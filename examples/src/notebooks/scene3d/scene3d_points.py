@@ -198,10 +198,10 @@ def scene(controlled, point_size, xyz, rgb, scale, select_region=False):
             colors=rgb,
             scales=scale,
             alpha=Plot.js("$state.alpha ? 0.5 : null"),
-            onHover=js("""(i) => {
+            on_hover=js("""(i) => {
                  $state.update({hovered: i})
                 }"""),
-            onClick=js(
+            on_click=js(
                 """(i) => $state.update({"selected_region_i": i})"""
                 if select_region
                 else """(i) => {
