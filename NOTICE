@@ -2,8 +2,8 @@ Colight
 Copyright 2025-2026 Matthew Huebert
 
 This project is derived from GenStudio (https://github.com/probcomp/genstudio),
-Copyright © MIT Probabilistic Computing Project contributors, licensed under the
-Apache License 2.0. Substantially modified since March 2025.
+Copyright © the GenStudio authors, licensed under the Apache License 2.0.
+Substantially modified since March 2025.
 
 The Scene3D subsystem includes contributions Copyright © 2025–2026
 GenWeb Corporation ("GenWeb"), contributed under the Apache License 2.0.
